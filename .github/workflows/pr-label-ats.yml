@@ -15,6 +15,7 @@ on:
       - labeled
       - unlabeled
       - synchronize
+  merge_group:
 
 permissions:
   pull-requests: read
