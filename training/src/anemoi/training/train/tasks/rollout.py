@@ -82,6 +82,25 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
+    def _get_input(self, batch: torch.Tensor) -> torch.Tensor:
+        """Get input tensor shape for diffusion model."""
+        x = batch[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.data.input.full,
+        ]  # (bs, multi_step, ens, latlon, nvar)
+        msg = f"Batch length not sufficient for requested multi_step length!, {batch.shape[1]} !>= {self.multi_step}"
+        assert batch.shape[1] >= self.multi_step, msg
+        LOGGER.debug("SHAPE: x.shape = %s", list(x.shape))
+        return x
+
+    def _get_target(self, batch: torch.Tensor, rollout_step: int) -> torch.Tensor:
+        """Get target tensor shape for diffusion model."""
+        y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
+        LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
+        return y
+
     def _advance_input(
         self,
         x: torch.Tensor,
