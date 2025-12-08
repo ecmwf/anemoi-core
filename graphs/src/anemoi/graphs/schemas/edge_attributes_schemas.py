@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from anemoi.graphs.schemas.normalise import ImplementedNormalisationSchema
 from anemoi.utils.schemas import BaseModel
 
 
@@ -28,7 +29,7 @@ class ImplementedEdgeAttributeSchema(str, Enum):
 class BaseEdgeAttributeSchema(BaseModel):
     target_: ImplementedEdgeAttributeSchema = Field(..., alias="_target_")
     "Edge attribute builder object from anemoi.graphs.edges.attributes"
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-std")
+    norm: ImplementedNormalisationSchema = Field(example="unit-std")
     "Normalisation method applied to the edge attribute."
 
 
@@ -38,7 +39,7 @@ class EdgeAttributeFromNodeSchema(BaseModel):
         "anemoi.graphs.edges.attributes.AttributeFromTargetNode",
     ] = Field(..., alias="_target_")
     "Edge attributes from node attribute"
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-std")
+    norm: ImplementedNormalisationSchema = Field(example="unit-std")
     "Normalisation method applied to the edge attribute."
 
 
@@ -46,9 +47,7 @@ class DirectionalHarmonicsSchema(BaseModel):
     target_: Literal["anemoi.graphs.edges.attributes.DirectionalHarmonics"] = Field(..., alias="_target_")
     "Directional harmonics from edge directions"
     order: int = Field(default=3, description="Maximum order of harmonics to compute")
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] | None = Field(
-        default=None, description="Normalization method"
-    )
+    norm: ImplementedNormalisationSchema | None = Field(default=None, description="Normalization method")
     dtype: str = Field(default="float32", description="Data type for computations")
 
 
