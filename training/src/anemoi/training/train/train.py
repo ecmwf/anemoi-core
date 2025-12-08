@@ -227,7 +227,13 @@ class AnemoiTrainer:
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                # Here, weights_only refers to pytorch security loading only
+                model = model_task.load_from_checkpoint(
+                    self.last_checkpoint,
+                    weights_only=False,
+                    **kwargs,
+                    strict=False,
+                )
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
@@ -527,7 +533,8 @@ class AnemoiTrainer:
         trainer.fit(
             self.model,
             datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
+            ckpt_path=None if self.load_weights_only else self.last_checkpoint,
+            weights_only=False,
         )
 
         if self.config.diagnostics.print_memory_summary:
