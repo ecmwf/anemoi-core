@@ -64,14 +64,12 @@
 
 import numpy as np
 import torch
-
 from torch import Tensor
 from torch.nn import Module
 
 
 def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
-    r"""
-    Helper routine which returns the Legendre-Gauss nodes and weights
+    r"""Helper routine which returns the Legendre-Gauss nodes and weights
     on the interval [a, b].
     """
 
@@ -83,8 +81,7 @@ def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarra
 
 
 def clenshaw_curtiss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
-    r"""
-    Computation of the Clenshaw-Curtis quadrature nodes and weights.
+    r"""Computation of the Clenshaw-Curtis quadrature nodes and weights.
 
     This implementation follows
     [1] Joerg Waldvogel, Fast Construction of the Fejer and Clenshaw-Curtis Quadrature Rules; BIT Numerical Mathematics, Vol. 43, No. 1, pp. 001-018.
@@ -104,12 +101,12 @@ def clenshaw_curtiss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndar
         m = n1 - l
 
         v = np.concatenate([2 / N / (N - 2), 1 / N[-1:], np.zeros(m)])
-        v = 0 - v[:-1] - v[-1: 0: -1]
+        v = 0 - v[:-1] - v[-1:0:-1]
 
         g0 = (-1) * np.ones(n1)
         g0[l] = g0[l] + n1
         g0[m] = g0[m] + n1
-        g = g0 / (n1 ** 2 - 1 + (n1 % 2))
+        g = g0 / (n1**2 - 1 + (n1 % 2))
         wcc = np.fft.ifft(v + g).real
         wcc = np.concatenate((wcc, wcc[:1]))
 
@@ -128,8 +125,7 @@ def legpoly(
     inverse: bool = False,
     csphase: bool = True,
 ) -> np.ndarray:
-    r"""
-    Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
+    r"""Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
     The resulting tensor has shape (mmax, lmax, len(x)). The Condon-Shortley Phase (-1)^m
     can be turned off optionally.
 
@@ -142,9 +138,9 @@ def legpoly(
     # Compute the tensor P^m_n:
     nmax = max(mmax, lmax)
     vdm = np.zeros((nmax, nmax, len(x)), dtype=np.float64)
-        
-    norm_factor = 1. if norm == "ortho" else np.sqrt(4 * np.pi)
-    norm_factor = 1. / norm_factor if inverse else norm_factor
+
+    norm_factor = 1.0 if norm == "ortho" else np.sqrt(4 * np.pi)
+    norm_factor = 1.0 / norm_factor if inverse else norm_factor
 
     # Initial values to start the recursion
     vdm[0, 0, :] = norm_factor / np.sqrt(4 * np.pi)
@@ -158,7 +154,7 @@ def legpoly(
     for l in range(2, nmax):
         for m in range(0, l - 1):
             vdm[m, l, :] = (
-                + x * np.sqrt((2 * l - 1) / (l - m) * (2 * l + 1) / (l + m)) * vdm[m, l - 1, :]
+                +x * np.sqrt((2 * l - 1) / (l - m) * (2 * l + 1) / (l + m)) * vdm[m, l - 1, :]
                 - np.sqrt((l + m - 1) / (l - m) * (2 * l + 1) / (2 * l - 3) * (l - m - 1) / (l + m)) * vdm[m, l - 2, :]
             )
 
@@ -186,8 +182,7 @@ def precompute_legpoly(
     inverse: bool = False,
     csphase: bool = True,
 ) -> np.ndarray:
-    r"""
-    Computes the values of (-1)^m c^l_m P^l_m(\cos \theta) at the positions specified by t (theta).
+    r"""Computes the values of (-1)^m c^l_m P^l_m(\cos \theta) at the positions specified by t (theta).
     The resulting tensor has shape (mmax, lmax, len(x)). The Condon-Shortley Phase (-1)^m
     can be turned off optionally.
 
@@ -225,9 +220,9 @@ class CartesianRealSHT(Module):
         pct = torch.from_numpy(pct)
 
         weights = torch.from_numpy(w)
-        weights = torch.einsum('mlk, k -> mlk', pct, weights)
+        weights = torch.einsum("mlk, k -> mlk", pct, weights)
 
-        self.register_buffer('weights', weights, persistent=False)
+        self.register_buffer("weights", weights, persistent=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
@@ -240,8 +235,8 @@ class CartesianRealSHT(Module):
         out_shape[-2] = self.mmax
         xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
 
-        xout[..., 0] = torch.einsum('...km, mlk -> ...lm', x[..., :self.mmax, 0], self.weights.to(x.dtype))
-        xout[..., 1] = torch.einsum('...km, mlk -> ...lm', x[..., :self.mmax, 1], self.weights.to(x.dtype))
+        xout[..., 0] = torch.einsum("...km, mlk -> ...lm", x[..., : self.mmax, 0], self.weights.to(x.dtype))
+        xout[..., 1] = torch.einsum("...km, mlk -> ...lm", x[..., : self.mmax, 1], self.weights.to(x.dtype))
         x = torch.view_as_complex(xout)
 
         return x
@@ -281,7 +276,7 @@ class CartesianInverseRealSHT(Module):
         x[..., 0].imag = 0.0
         if (self.nlon % 2 == 0) and (self.nlon // 2 < self.mmax):
             x[..., self.nlon // 2].imag = 0.0
-        
+
         x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
 
         return x
@@ -305,7 +300,7 @@ class OctahedralRealSHT(Module):
         self.nlat = nlat
         self.nlon = [4 * (i + 1) + 16 for i in range(nlat // 2)]
         self.nlon = self.nlon + self.nlon[::-1]
-        
+
         self.slon = [0] + list(np.cumsum(self.nlon))[:-1]
         self.rlon = [nlat + 8 - nlon // 2 for nlon in self.nlon]
 
@@ -318,31 +313,28 @@ class OctahedralRealSHT(Module):
         pct = torch.from_numpy(pct)
 
         weight = torch.from_numpy(weight)
-        weight = torch.einsum('mlk, k -> mlk', pct, weight)
+        weight = torch.einsum("mlk, k -> mlk", pct, weight)
 
-        self.register_buffer('weight', weight, persistent=False)
+        self.register_buffer("weight", weight, persistent=False)
 
     def spectral_folding(self, x: Tensor) -> Tensor:
 
         raise NotImplementedError
-    
+
     def no_spectral_folding(self, x: Tensor) -> Tensor:
 
         return x
-    
+
     def rfft(self, x: Tensor) -> Tensor:
 
         return torch.fft.rfft(
             input=self.folding(x),
             norm="forward",
         )
-    
+
     def rfft_rings(self, x: Tensor) -> Tensor:
 
-        rfft = [
-            self.rfft(x[..., slon: slon + nlon])
-            for slon, nlon in zip(self.slon, self.nlon)
-        ]
+        rfft = [self.rfft(x[..., slon : slon + nlon]) for slon, nlon in zip(self.slon, self.nlon)]
 
         rfft = [
             torch.cat([x, torch.zeros((*x.shape[:-1], rlon), device=x.device)], dim=-1)
@@ -359,8 +351,8 @@ class OctahedralRealSHT(Module):
         x = 2.0 * torch.pi * self.rfft_rings(x)
         x = torch.view_as_real(x)
 
-        rl = torch.einsum('...km, mlk -> ...lm', x[..., :self.mmax, 0], self.weight.to(x.dtype))
-        im = torch.einsum('...km, mlk -> ...lm', x[..., :self.mmax, 1], self.weight.to(x.dtype))
+        rl = torch.einsum("...km, mlk -> ...lm", x[..., : self.mmax, 0], self.weight.to(x.dtype))
+        im = torch.einsum("...km, mlk -> ...lm", x[..., : self.mmax, 1], self.weight.to(x.dtype))
 
         x = torch.stack((rl, im), -1)
         x = torch.view_as_complex(x)
@@ -396,15 +388,15 @@ class OctahedralInverseRealSHT(Module):
         pct = torch.from_numpy(pct)
 
         self.register_buffer("pct", pct, persistent=False)
-    
+
     def spectral_folding(self, x: Tensor, nlon: int) -> Tensor:
 
         raise NotImplementedError
-    
+
     def no_spectral_folding(self, x: Tensor, nlon: int) -> Tensor:
 
         return x
-    
+
     def irfft(self, x: Tensor, nlon: int) -> Tensor:
 
         return torch.fft.irfft(
@@ -412,13 +404,10 @@ class OctahedralInverseRealSHT(Module):
             n=nlon,
             norm="forward",
         )
-    
+
     def irfft_rings(self, x: Tensor) -> Tensor:
 
-        irfft = [
-            self.irfft(x[..., t, :], nlon)
-            for t, nlon in enumerate(self.nlon)
-        ]
+        irfft = [self.irfft(x[..., t, :], nlon) for t, nlon in enumerate(self.nlon)]
 
         return torch.cat(
             tensors=irfft,
@@ -444,15 +433,15 @@ def healpix_latitude_theta(nside: int) -> np.ndarray:
     t = np.arange(0, 4 * nside - 1).astype(np.float64)
 
     z = np.zeros_like(t)
-    z[t < nside - 1] = 1 - (t[t < nside - 1] + 1) ** 2 / (3 * nside ** 2)
+    z[t < nside - 1] = 1 - (t[t < nside - 1] + 1) ** 2 / (3 * nside**2)
 
-    z[(t >= nside - 1) & (t <= 3 * nside - 1)] = 4 / 3 - 2 * (
-        t[(t >= nside - 1) & (t <= 3 * nside - 1)] + 1
-    ) / (3 * nside)
+    z[(t >= nside - 1) & (t <= 3 * nside - 1)] = 4 / 3 - 2 * (t[(t >= nside - 1) & (t <= 3 * nside - 1)] + 1) / (
+        3 * nside
+    )
 
     z[(t > 3 * nside - 1) & (t <= 4 * nside - 2)] = (
         4 * nside - 1 - t[(t > 3 * nside - 1) & (t <= 4 * nside - 2)]
-    ) ** 2 / (3 * nside ** 2) - 1
+    ) ** 2 / (3 * nside**2) - 1
 
     return np.arccos(z)
 
@@ -490,7 +479,7 @@ def healpix_nlon_ring(t: int, nside: int) -> int:
 
 
 def healpix_longitude_offset(mmax: int, nside: int) -> np.ndarray:
-    
+
     t = np.arange(0, 4 * nside - 1)
 
     offsets = healpix_rings_offset(t, nside)
@@ -529,11 +518,11 @@ class HEALPixInverseRealSHT(Module):
 
         self.register_buffer("pct", pct, persistent=False)
         self.register_buffer("offset", offset, persistent=False)
-    
+
     def spectral_folding(self, x: Tensor, nlon: int) -> Tensor:
 
         raise NotImplementedError
-    
+
     def no_spectral_folding(self, x: Tensor, nlon: int) -> Tensor:
 
         return x
@@ -545,13 +534,10 @@ class HEALPixInverseRealSHT(Module):
             n=nlon,
             norm="forward",
         )
-    
+
     def irfft_rings(self, x: Tensor) -> Tensor:
 
-        irfft = [
-            self.irfft(x[..., t, :], nlon)
-            for t, nlon in enumerate(self.nlon)
-        ]
+        irfft = [self.irfft(x[..., t, :], nlon) for t, nlon in enumerate(self.nlon)]
 
         return torch.cat(
             tensors=irfft,
