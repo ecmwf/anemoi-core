@@ -101,11 +101,6 @@ class MultiScaleEdges(BaseEdgeBuilder):
                 f"Some scale resolutions may be ignored because they are greater than the resolution of the nodes ({max(source_nodes['_resolutions'])})."
             )
 
-        if scale_resolutions is not None and max(self.scale_resolutions) < max(source_nodes["_resolutions"]):
-            LOGGER.warning(
-                f"A significant amount of nodes will not be connected because the maximum scale resolution ({max(self.scale_resolutions)}) is less than the node refinement level ({max(source_nodes['_resolutions'])})."
-            )
-
         # Add edges
         source_nodes = edge_builder_cls().add_edges(source_nodes, self.x_hops, scale_resolutions=scale_resolutions)
         adjmat = nx.to_scipy_sparse_array(source_nodes["_nx_graph"], format="coo")
