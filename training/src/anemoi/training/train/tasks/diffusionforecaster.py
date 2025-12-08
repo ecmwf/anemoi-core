@@ -152,6 +152,7 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
         eps = torch.randn_like(y)
         y_noised = y + sigma * eps
 
+
         # unconditional forward
         y_pred = self(
             x=None,            # <-- C’est ici que x devient inconditionnel
