@@ -1,0 +1,67 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- datamodule: single
+- hardware: example
+- graph: limited_area
+- model: graphtransformer_diffusion
+- training: diffusion
+- _self_
+
+
+# set to true to switch on config validation
+config_validation: True
+diagnostics:
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: "none"
+    wandb:
+      enabled: False
+      entity: "none"
+data:
+    diagnostic: []
+    forcing:
+      - cos_latitude
+      - sin_latitude
+      - insolation
+    normalizer:
+      std: null
+      max: null
+      none: ${data.forcing}
+dataloader:
+    dataset:
+        cutout:
+          - dataset: /home/users/u101957/code/anemoi-mf/quickstart/locally/datasets/titan-arome.zarr
+          - dataset: /home/users/u101957/code/anemoi-mf/quickstart/locally/datasets/titan-arpege.zarr
+        adjust: all
+        min_distance_km: 0
+    grid_indices:
+        _target_: anemoi.training.data.grid_indices.MaskedGrid
+        nodes_name: data
+        node_attribute_name: indices_connected_nodes
+    training:
+        start: "2023-05-21"
+        end: "2023-05-24"
+    validation:
+        start: "2023-05-20"
+        end: "2023-05-21"
+    test:
+        start: "2023-05-20"
+        end: "2023-05-21"
+model:
+  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
+  
+hardware:
+  paths:
+    data: /home/users/u101957/code/anemoi-mf/quickstart/locally/datasets
+    output: /home/users/u101957/code/anemoi-core/training/src/anemoi/training/outputs/
+  files:
+    dataset: titan-arome.zarr
+    forcing_dataset: titan-arpege.zarr
+    graph: null
+  num_gpus_per_node: 4
+training:
+  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
+  max_epochs: 3
