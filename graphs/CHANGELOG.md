@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.2...graphs-0.8.0) (2025-12-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **edges:** Edge feature revision #643 ([#727](https://github.com/ecmwf/anemoi-core/issues/727))
+
+### Features
+
+* **edges:** Edge feature revision ([#643](https://github.com/ecmwf/anemoi-core/issues/643)) ([720f4d8](https://github.com/ecmwf/anemoi-core/commit/720f4d8938f0b71425788940547cca23dd1345be))
+* **edges:** Edge feature revision [#643](https://github.com/ecmwf/anemoi-core/issues/643) ([#727](https://github.com/ecmwf/anemoi-core/issues/727)) ([d1372cf](https://github.com/ecmwf/anemoi-core/commit/d1372cfd89cb1052fd1e9da2a9a90c785ec9ddd9))
+* **graphs:** Support for multi-scale connections with HEALPix hidden grid ([#691](https://github.com/ecmwf/anemoi-core/issues/691)) ([1450787](https://github.com/ecmwf/anemoi-core/commit/1450787d9f5fd15271472244ccf154a75665d7e9))
+
+
+### Bug Fixes
+
+* Revert "feat(edges): Edge feature revision" ([#726](https://github.com/ecmwf/anemoi-core/issues/726)) ([db1f940](https://github.com/ecmwf/anemoi-core/commit/db1f94005894f58b82d97f5e57252e3e943dc50c))
+* Sparse export ([#686](https://github.com/ecmwf/anemoi-core/issues/686)) ([969b787](https://github.com/ecmwf/anemoi-core/commit/969b787409dcdd3e347fd96b7ffc2fa6ce153ae3))
+* Target docs ([#704](https://github.com/ecmwf/anemoi-core/issues/704)) ([200101e](https://github.com/ecmwf/anemoi-core/commit/200101e539f24c208c9167bad3a86052152b634e))
+
 ## [0.7.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.1...graphs-0.7.2) (2025-11-17)
 
 
