@@ -618,7 +618,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_t1 : torch.Tensor
             The state at time t1 with full input variables.
         x_t0 : torch.Tensor
-            The state at time t0 with full input variables.
+            The state at time t0 with prognostic input variables.
         pre_processors_state : callable
             Function to pre-process the state variables.
         pre_processors_tendencies : callable
@@ -635,24 +635,14 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
 
         if input_post_processor is not None:
-            x_t1 = input_post_processor(
-                x_t1[..., self.data_indices.data.output.full],
-                in_place=False,
-                data_index=self.data_indices.data.output.full,
-            )
-            x_t0 = input_post_processor(
-                x_t0[..., self.data_indices.data.output.full],
-                in_place=False,
-                data_index=self.data_indices.data.output.full,
-            )
-        else:
-            x_t1 = x_t1[..., self.data_indices.data.output.full]
-            x_t0 = x_t0[..., self.data_indices.data.output.full]
+            x_t1 = input_post_processor(x_t1, in_place=False, data_index=self.data_indices.data.output.full)
+            x_t0 = input_post_processor(x_t0, in_place=False, data_index=self.data_indices.data.output.prognostic)
 
-        tendency = pre_processors_tendencies(
-            x_t1 - x_t0,
+        tendency = x_t1
+        tendency[..., self.data_indices.model.output.prognostic] = pre_processors_tendencies(
+            x_t1[..., self.data_indices.model.output.prognostic] - x_t0,
             in_place=False,
-            data_index=self.data_indices.data.output.full,
+            data_index=self.data_indices.data.output.prognostic,
         )
         # diagnostic variables are taken from x_t1, normalised as full fields:
         tendency[..., self.data_indices.model.output.diagnostic] = pre_processors_state(
@@ -676,7 +666,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         Parameters
         ----------
         state_inp : torch.Tensor
-            The normalized input state tensor with full input variables.
+            The normalized input state tensor with prognostic input variables.
         tendency : torch.Tensor
             The normalized tendency tensor output from model.
         post_processors_state : callable
@@ -702,7 +692,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
 
         state_outp[..., self.data_indices.model.output.prognostic] += post_processors_state(
-            state_inp[..., self.data_indices.model.input.prognostic],
+            state_inp,
             in_place=False,
             data_index=self.data_indices.data.input.prognostic,
         )
@@ -817,7 +807,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         torch.Tensor
             Truncated tensor with same shape as input
         """
-        x_skip = einops.rearrange(x, "bs ens latlon nvar -> bs 1 ens latlon nvar")
-        x_skip = self.residual(x_skip, grid_shard_shapes, model_comm_group)
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
         # x_skip.shape: (bs, ens, latlon, nvar)
-        return x_skip
+        return x_skip[..., self.data_indices.model.input.prognostic]
