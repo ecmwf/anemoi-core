@@ -48,6 +48,7 @@ processor:
   qk_norm: True # Transformer and GraphTransformer only
   cpu_offload: ${model.cpu_offload}
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  edge_pre_mlp: False
   layer_kernels:
     LayerNorm:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
@@ -79,6 +80,8 @@ encoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  edge_pre_mlp: False
+
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -93,6 +96,8 @@ decoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  edge_pre_mlp: False
+
 
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
