@@ -39,6 +39,8 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
         Dictionary mapping variable names to their scaling values. If max_variables is specified,
         only the top N variables plus 'total_sum' will be included.
     """
+    # TODO(frazane,anaprietonem): handle special cases more gracefully
+    # https://github.com/ecmwf/anemoi-core/pull/723#discussion_r2597831922
     if isinstance(loss, CombinedLoss):
         variable_scaling = {}
         for sub_loss in loss.losses:
