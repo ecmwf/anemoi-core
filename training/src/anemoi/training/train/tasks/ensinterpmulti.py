@@ -1,4 +1,4 @@
-#yes# (C) Copyright 2024 Anemoi contributors.
+# yes# (C) Copyright 2024 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -215,7 +215,7 @@ class GraphEnsInterpMulti(BaseGraphModule):
 
         # New code for ensemble interpolator: (no rollout loop, instead loops through interp targets)
         batch = self.model.pre_processors(batch[0], in_place=not validation_mode)  # don't use EDA for interpolator
-        x = torch.cat([batch] * self.nens_per_device, dim=2) 
+        x = torch.cat([batch] * self.nens_per_device, dim=2)
 
         # Scalers which are delayed need to be initialized after the pre-processors
         if self.is_first_step:
@@ -228,9 +228,8 @@ class GraphEnsInterpMulti(BaseGraphModule):
             self.data_indices.data.input.full,
         ]  # (bs, time, ens, latlon, nvar)
 
-
-        y_pred = self(x_bound) # has shape (bs, time, ens, latlon, nvar)
-        y = batch[:, itemgetter(*self.interp_times)(self.imap)][:,:, 0, :, self.data_indices.data.output.full]
+        y_pred = self(x_bound)  # has shape (bs, time, ens, latlon, nvar)
+        y = batch[:, itemgetter(*self.interp_times)(self.imap)][:, :, 0, :, self.data_indices.data.output.full]
         for interp_step in self.interp_times:
             y_pred_step = y_pred[:, interp_step - 1, ...]  # (bs, ens, latlon, nvar)
             y_step = y[:, interp_step - 1, ...]  # (bs, latlon, nvar)

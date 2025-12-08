@@ -229,7 +229,7 @@ class GraphEnsInterp(BaseGraphModule):
         # New code for ensemble interpolator: (no rollout loop, instead loops through interp targets)
 
         batch = self.model.pre_processors(batch[0], in_place=not validation_mode)  # don't use EDA for interpolator
-        x = torch.cat([batch] * self.nens_per_device, dim=2) 
+        x = torch.cat([batch] * self.nens_per_device, dim=2)
 
         # Scalers which are delayed need to be initialized after the pre-processors
         if self.is_first_step:
