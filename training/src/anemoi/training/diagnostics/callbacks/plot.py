@@ -885,12 +885,13 @@ class PlotLoss(BasePerBatchPlotCallback):
 
         for rollout_step in range(rollout):
             y_hat = outputs[1][rollout_step]
-            y_true = batch[
+            y_true = batch[0][
                 :,
                 pl_module.multi_step + rollout_step,
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
+            y_true = y_true[:, 0, ...]
             loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
