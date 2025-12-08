@@ -485,20 +485,12 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
+        Activation = layer_kernels.Activation
         self.lin_key = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_query = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_value = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
-
-        # Optional edge preprocessing MLP
-        if edge_pre_mlp:
-            self.edge_pre_mlp = nn.Sequential(
-                Linear(edge_dim, edge_dim),
-                layer_kernels.Activation(),
-            )
-        else:
-            self.edge_pre_mlp = nn.Identity()
 
         self.projection = Linear(out_channels, out_channels)
 
@@ -510,9 +502,18 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
         self.node_dst_mlp = nn.Sequential(
             Linear(out_channels, hidden_dim),
-            layer_kernels.Activation(),
+            Activation(),
             Linear(hidden_dim, out_channels),
         )
+
+        # Optional edge preprocessing MLP
+        if edge_pre_mlp:
+            self.edge_pre_mlp = nn.Sequential(
+                Linear(edge_dim, edge_dim),
+                Activation(),
+            )
+        else:
+            self.edge_pre_mlp = nn.Identity()
 
         self.graph_attention_backend = graph_attention_backend
         assert self.graph_attention_backend in [
