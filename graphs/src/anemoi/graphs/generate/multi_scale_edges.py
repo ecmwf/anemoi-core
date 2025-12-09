@@ -38,7 +38,8 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
             # Compute the multiscale edges directly and store them in the node storage
             multiscale_edges = tri_icosahedron.add_edges_hop_1(
                 nodes_coords_rad=nodes["x"],
-                resolutions=scale_resolutions,
+                node_resolutions=nodes["_resolutions"],
+                edge_resolutions=scale_resolutions,
                 node_ordering=nodes["_node_ordering"],
                 area_mask_builder=nodes.get("_area_mask_builder", None),
             )
@@ -86,7 +87,8 @@ class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
             # Compute the multiscale edges directly and store them in the node storage
             multiscale_edges = tri_icosahedron.add_edges_hop_1(
                 nodes_coords_rad=nodes["x"],
-                resolutions=scale_resolutions,
+                node_resolutions=nodes["_resolutions"],
+                edge_resolutions=scale_resolutions,
                 node_ordering=nodes["_node_ordering"],
                 area_mask_builder=all_points_mask_builder,
             )
