@@ -25,7 +25,9 @@ if TYPE_CHECKING:
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
+    
 
+from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDecUnconditional
 LOGGER = logging.getLogger(__name__)
 
 class GraphUnconditionalDiffusionForecaster(GraphForecaster):
@@ -56,26 +58,34 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
         )
 
         self.rho = config.model.model.diffusion.rho
+        self.model.model = AnemoiDiffusionModelEncProcDecUnconditional(
+            model_config=config.model.model,   # passer le config complet, PAS .diffusion
+            data_indices=data_indices.data,    # indices de données comme attendu
+            statistics=statistics,             # statistiques comme d’habitude
+            graph_data=graph_data,             # ton HeteroData
+            truncation_data=None               # mettre None si inutilisé
+        ) #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
+    
+        # self.model.model = AnemoiDiffusionModelEncProcDecUnconditional(
+        #     model_config=config.model.model.diffusion,
+        #     data_indices=data_indices.data,
+        #     statistics=statistics,
+        #     graph_data=graph_data,
+        #     truncation_data=None, #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
+
+        # )
 
     # -------------------------------------------------------------------------
-    # FORWARD — ignore totalement x
+    # FORWARD : identical to conditional version
     # -------------------------------------------------------------------------
-    def forward(
-        self,
-        x: torch.Tensor | None,        # Ignored
-        y_noised: torch.Tensor,
-        sigma: torch.Tensor
-    ) -> torch.Tensor:
-
-        # Dummy tensor pour remplacer x (attendu par le backbone)
-        if x is None:
-            x = torch.zeros(
-                y_noised.shape[0],   # batch
-                1,                   # fake multi_step (pas utilisé)
-                *y_noised.shape[1:], # (ens, latlon, vars)
-                device=y_noised.device,
-                dtype=y_noised.dtype
-            )
+    def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+        print(x.shape, 'JE SUIS SHAPE X')#,self.model.model.fwd_with_preconditioning(
+        #     x,
+        #     y_noised,
+        #     sigma,
+        #     model_comm_group=self.model_comm_group,
+        #     grid_shard_shapes=self.grid_shard_shapes,
+        # ))
 
         return self.model.model.fwd_with_preconditioning(
             x,
@@ -84,45 +94,10 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
         )
-    def _compute_loss(
-        self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        weights: torch.Tensor,
-        grid_shard_slice: slice | None = None,
-        **_kwargs,
-    ) -> torch.Tensor:
-        """Compute the diffusion loss with noise weighting.
 
-        Parameters
-        ----------
-        y_pred : torch.Tensor
-            Predicted values
-        y : torch.Tensor
-            Target values
-        grid_shard_slice : slice | None
-            Grid shard slice for distributed training
-        weights : torch.Tensor
-            Noise weights for diffusion loss computation
-        **_kwargs
-            Additional arguments
 
-        Returns
-        -------
-        torch.Tensor
-            Computed loss with noise weighting applied
-        """
-        return self.loss(
-            y_pred,
-            y,
-            weights=weights,
-            grid_shard_slice=grid_shard_slice,
-            group=self.model_comm_group,
-        )
     # -------------------------------------------------------------------------
-    # ROLLOUT — En inconditionnel il n’y a *pas* de rollout multi-step
-    #           On doit juste produire un seul y_pred à partir de y_noised
-    #           Anemoi a besoin que cette méthode existe.
+    # UNCONDITIONAL ROLLOUT — NO MULTISTEP
     # -------------------------------------------------------------------------
     def rollout_step(
         self,
@@ -131,16 +106,26 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
         validation_mode: bool = False,
     ):
         """
-        Unconditional diffusion: no rollout.
-        A single prediction from noisy target.
+        Unconditional diffusion:
+        - No history, no temporal conditioning
+        - No rollout loop
+        - Single-step prediction from noisy target
         """
+        nvars_input = len(self.data_indices.data.input.full)
+        # Ground-truth output (only the target step, no multistep)
+        y = batch[:, 0, ..., self.data_indices.data.output.full]
+        x = torch.zeros(
+            (y.shape[0], 1, *y.shape[1:-1], nvars_input),
+            device=y.device,
+            dtype=y.dtype,
+        )
 
-        # y_gt (target) : comme d’habitude dans Anemoi → step self.multi_step
-        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
 
-        # sample noise level
+
+        # Sample noise level
+        print('je suis sigma', (x.shape[0],) + (1,) * (x.ndim - 2))
         sigma, noise_weights = self._get_noise_level(
-            shape=y.shape,
+            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
@@ -148,30 +133,47 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
             device=y.device,
         )
 
-        # add noise
+        # Add noise
         eps = torch.randn_like(y)
+        # y_noised = self._noise_target(y, sigma)
+
         y_noised = y + sigma * eps
 
+        # ---------------------------------------------------------------------
+        # Create unconditional dummy x
+        # ---------------------------------------------------------------------
+        # Shape expected by fwd:
+        #   (batch, multi_step, ens, nodes, n_input_vars)
 
-        # unconditional forward
-        y_pred = self(
-            x=None,            # <-- C’est ici que x devient inconditionnel
-            y_noised=y_noised,
-            sigma=sigma,
-        )
 
-        # compute loss (eps-prediction)
-        loss = ((y_pred - eps) ** 2 * noise_weights).mean()
+        # Forward pass
+        print('SHAPES',x.shape,y_noised.shape,sigma.shape,(y + sigma * eps).shape)
+        y_pred = self(x, y_noised, sigma)
+            # Use checkpoint for compute_loss_metrics
+        loss, metrics_next = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
+                rollout,
+                validation_mode,
+                weights=noise_weights,
+                use_reentrant=False,
+            )
 
-        metrics = {}  # no rollout metrics in unconditional mode
+        x = self.advance_input(x, y_pred, batch, rollout)
+        
+        yield loss, metrics_next, y_pred
+        # # Diffusion loss (eps prediction)
+        # loss = ((y_pred - eps) ** 2 * noise_weights).mean()
 
-        yield loss, metrics, y_pred
+        # metrics = {}  # No rollout metrics in unconditional mode
+
+        # yield loss, metrics, y_pred
 
     # -------------------------------------------------------------------------
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-        """Add noise to the state."""
         return x + torch.randn_like(x) * sigma
-    
+
     def _get_noise_level(
         self,
         shape,
@@ -186,6 +188,7 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
                  + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))) ** rho
         weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
         return sigma, weight
+
 
 class GraphDiffusionForecaster(GraphForecaster):
     """Graph neural network forecaster for diffusion."""
@@ -217,7 +220,13 @@ class GraphDiffusionForecaster(GraphForecaster):
         self.rho = config.model.model.diffusion.rho
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-        print('JE SUIS X DANS GRAPHDIFFUSIONFORECASTER', x.shape,x)
+        print(x.shape, 'JE SUIS SHAPE X',(self.model.model.fwd_with_preconditioning(
+            x,
+            y_noised,
+            sigma,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )).shape)
         return self.model.model.fwd_with_preconditioning(
             x,
             y_noised,
@@ -305,6 +314,8 @@ class GraphDiffusionForecaster(GraphForecaster):
         for rollout_step in range(rollout or self.rollout):
 
             # get noise level and associated loss weights
+            print('je suis sigma', (x.shape[0],) + (1,) * (x.ndim - 2))
+
             sigma, noise_weights = self._get_noise_level(
                 shape=(x.shape[0],) + (1,) * (x.ndim - 2),
                 sigma_max=self.model.model.sigma_max,
@@ -319,6 +330,8 @@ class GraphDiffusionForecaster(GraphForecaster):
             y_noised = self._noise_target(y, sigma)
 
             # prediction, fwd_with_preconditioning
+            print('SHAPES',x.shape,y_noised.shape,sigma.shape)
+
             y_pred = self(
                 x,
                 y_noised,

@@ -1,0 +1,79 @@
+defaults:
+- data: zarr #to change to our own config
+- dataloader: native_grid #to change to our own config
+- diagnostics: evaluation
+- datamodule: single
+- hardware: example
+- graph: existing_graph
+- model: graphtransformer_diffusion
+- training: diffusion
+- _self_
+
+# set to true to switch on config validation
+config_validation: False
+diagnostics:
+  log:
+    mlflow:
+      enabled: false
+      offline: True
+      experiment_name: 'my_experiment_name_test_jav'
+      project_name: 'my_project_name_jav'
+      run_name: 'my_run_name_jav'
+      tracking_uri: 'none'
+      authentication: True
+      terminal: False
+    wandb:
+      enabled: False
+      entity: "none"
+data:
+    diagnostic: []
+    forcing:
+      - cos_latitude
+      - sin_latitude
+      - insolation
+    normalizer:
+      std: null
+      max: null
+      none: ${data.forcing}
+dataloader:
+    dataset:
+        - dataset: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
+    grid_indices:
+        _target_: anemoi.training.data.grid_indices.MaskedGrid
+        nodes_name: data
+        node_attribute_name: indices_connected_nodes
+    training:
+        start: "2020-05-21"
+        end: "2020-06-24"
+        select: ['10u','10v', '2t','cos_latitude', 'insolation', 'r_500', 'r_850', 'sin_latitude', 't_500', 't_850', 'u_500', 'u_850', 'v_500', 'v_850', 'z_500', 'z_850', 'sp', 'tp']
+    validation:
+        start: "2023-06-20"
+        end: "2023-09-21"
+        select: ['10u','10v', '2t','cos_latitude', 'insolation', 'r_500', 'r_850', 'sin_latitude', 't_500', 't_850', 'u_500', 'u_850', 'v_500', 'v_850', 'z_500', 'z_850', 'sp', 'tp']
+    test:
+        start: "2023-09-22"
+        end: "2025-05-21"
+        select: ['10u','10v', '2t','cos_latitude', 'insolation', 'r_500', 'r_850', 'sin_latitude', 't_500', 't_850', 'u_500', 'u_850', 'v_500', 'v_850', 'z_500', 'z_850', 'sp', 'tp']
+# ['10u','10v', '2t','cos_latitude', 'insolation', 'r_500', 'r_850', 'sin_latitude', 't_500', 't_850', 'u_500', 'u_850', 'v_500', 'v_850', 'z_500', 'z_850']
+    batch_size:
+      training: 1
+      validation: 1
+      test: 1
+model:
+  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
+#   output_mask:
+#     _target_: anemoi.training.utils.masks.Boolean1DMask
+#     nodes_name: ${graph.data}
+#     attribute_name: cutout_mask
+hardware:
+  paths:
+    data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
+    output: /home/users/u101957/code/anemoi-core/training/src/anemoi/training/config/outputs_incond/
+  files:
+    dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
+    graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
+  num_gpus_per_node: 4
+  num_gpus_per_model: 2
+training:
+  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
+  max_epochs: 2

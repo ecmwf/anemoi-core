@@ -15,22 +15,20 @@ load_puv
 # Debugging
 export ANEMOI_BASE_SEED=277
 export HYDRA_FULL_ERROR=1
-export CUDA_LAUNCH_BLOCKING=1
-export TORCH_CUDA_DSA=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+# export CUDA_LAUNCH_BLOCKING=1
+# export TORCH_CUDA_DSA=1
+# export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-echo "Running on nodes: $SLURM_NODELIST"
+# echo "Running on nodes: $SLURM_NODELIST"
 
 
 # === TRAINING CONFIG ===
-CONFIG_NAME="diffusion_test_incond"
-CONFIG_PATH="/home/users/u101957/code/anemoi-core/training/src/anemoi/training/config/"
+# CONFIG_NAME="diffusion_test_incond"
+# CONFIG_PATH="/home/users/u101957/code/anemoi-core/training/src/anemoi/training/config/"
 # OUTPUT_DIR="/home/users/u101957/code/anemoi-core/training/src/anemoi/training/config/output/diffusion_test_incond/"
 
 
 # === LAUNCH TRAINING ===
-srun puv run anemoi-training train \
-
-
+srun puv run anemoi-training train --config-name=diffusion_incond.yaml \
 
 echo "Script execution completed: Successful run"

@@ -47,7 +47,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     ) -> None:
 
         model_config_local = DotDict(model_config)
-        print('je suis config', model_config_local,'NUM_CHANNELS',self.num_channels)
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
         self.noise_cond_dim = diffusion_config.noise_cond_dim
@@ -119,7 +118,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
-            print('JE SUIS DANS ASSEMBLE INPUT 1')
 
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
@@ -127,7 +125,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
-        print('JE SUIS DANS ASSEMBLE INPUT')
 
         x_data_latent = torch.cat(
             (
@@ -270,10 +267,14 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         grid_shard_shapes: Optional[list] = None,
     ) -> torch.Tensor:
         """Forward pass with pre-conditioning of EDM diffusion model."""
+        print('JE PASSE PAR LA 1')
+
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )  # calls forward ...
+        print('JE PASSE PAR LA 2')
+
         D_x = c_skip * y_noised + c_out * pred
 
         return D_x
@@ -546,6 +547,146 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             model_comm_group,
             grid_shard_shapes=grid_shard_shapes,
         )
+        
+class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec):
+    """
+    Diffusion model version inconditionnelle (no temporal/history conditioning).
+    """
+
+    def __init__(
+        self,
+        *,
+        model_config: DotDict,
+        data_indices: dict,
+        statistics: dict,
+        graph_data: HeteroData,
+    ) -> None:
+        # Hérite du constructeur parent
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+        )
+
+    # -------------------------------------------------------------------------
+    # Forward inconditionnel
+    # -------------------------------------------------------------------------
+    def forward(
+        self,
+        x: torch.Tensor,
+        y_noised: torch.Tensor,
+        sigma: torch.Tensor,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Forward pass inconditionnel :
+        - x : dummy input (souvent zéro)
+        - y_noised : target bruité
+        - sigma : niveau de bruit
+        """
+
+        batch_size = x.shape[0]
+        in_out_sharded = grid_shard_shapes is not None
+
+        # -------------------------------------------------------------------------
+        # Vérification sharding (comme dans le conditionnel)
+        # -------------------------------------------------------------------------
+        self._assert_valid_sharding(batch_size, 1, in_out_sharded, model_comm_group)
+
+        # -------------------------------------------------------------------------
+        # Noise conditioning (identique au conditionnel)
+        # -------------------------------------------------------------------------
+        c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
+        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
+        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
+
+        c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
+        c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
+
+        fwd_mapper_kwargs = {"cond": (c_data, c_hidden)}
+        processor_kwargs = {"cond": c_hidden}
+        bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
+
+        # -------------------------------------------------------------------------
+        # Assemblage des entrées
+        # -------------------------------------------------------------------------
+        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
+            x, y_noised, batch_size=batch_size, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group
+        )
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+
+        # -------------------------------------------------------------------------
+        # Encodeur
+        # -------------------------------------------------------------------------
+        x_data_latent, x_latent = self.encoder(
+            (x_data_latent, x_hidden_latent),
+            batch_size=batch_size,
+            shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=in_out_sharded,
+            x_dst_is_sharded=False,
+            keep_x_dst_sharded=True,
+            **fwd_mapper_kwargs,
+        )
+
+        # -------------------------------------------------------------------------
+        # Processeur
+        # -------------------------------------------------------------------------
+        x_latent_proc = self.processor(
+            x=x_latent,
+            batch_size=batch_size,
+            shard_shapes=shard_shapes_hidden,
+            model_comm_group=model_comm_group,
+            **processor_kwargs,
+        )
+        x_latent_proc = x_latent_proc + x_latent  # skip connection
+
+        # -------------------------------------------------------------------------
+        # Décodeur
+        # -------------------------------------------------------------------------
+        x_out = self.decoder(
+            (x_latent_proc, x_data_latent),
+            batch_size=batch_size,
+            shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=True,
+            x_dst_is_sharded=in_out_sharded,
+            keep_x_dst_sharded=in_out_sharded,
+            **bwd_mapper_kwargs,
+        )
+
+        # -------------------------------------------------------------------------
+        # Réarrangement final
+        # -------------------------------------------------------------------------
+        x_out = self._assemble_output(x_out, x_skip, batch_size=batch_size, ensemble_size=x.shape[2], dtype=x.dtype)
+
+        return x_out
+
+    # -------------------------------------------------------------------------
+    # fwd_with_preconditioning : appelé par la diffusion
+    # -------------------------------------------------------------------------
+    def fwd_with_preconditioning(
+        self,
+        x: torch.Tensor,
+        y_noised: torch.Tensor,
+        sigma: torch.Tensor,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
+    ) -> torch.Tensor:
+        """
+        Forward pass avec préconditionnement EDM diffusion.
+        Identique au parent mais pour usage inconditionnel.
+        """
+        c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
+        pred = self(
+            x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
+        )
+        D_x = c_skip * y_noised + c_out * pred
+        return D_x
 
 
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
