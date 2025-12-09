@@ -38,8 +38,6 @@ class MultiScaleEdges(BaseEdgeBuilder):
         Defines the refinement levels at which edges are computed. If an integer is provided, edges are computed for all
         levels up to and including that level. For instance, `scale_resolutions=4` includes edges at levels 0 through 4,
         whereas `scale_resolutions=[4]` only includes edges at level 4.
-    new_method: bool, optional
-        Use the new edge building strategy for x_hops=1. Default is False
 
     Methods
     -------
@@ -61,7 +59,6 @@ class MultiScaleEdges(BaseEdgeBuilder):
         target_name: str,
         x_hops: int,
         scale_resolutions: int | list[int] | None = None,
-        new_method: bool = False,
         **kwargs,
     ):
         super().__init__(source_name, target_name)
@@ -77,7 +74,6 @@ class MultiScaleEdges(BaseEdgeBuilder):
             scale_resolutions is None or min(scale_resolutions) >= 0
         ), "The scale_resolutions argument only supports non-negative integers."
         self.scale_resolutions = scale_resolutions
-        self.new_method = new_method
 
     @staticmethod
     def get_edge_builder_class(node_type: str) -> type[BaseIcosahedronEdgeStrategy]:
@@ -107,9 +103,11 @@ class MultiScaleEdges(BaseEdgeBuilder):
 
         # Add edges
         source_nodes = edge_builder_cls().add_edges(
-            source_nodes, self.x_hops, scale_resolutions=scale_resolutions, new_method=self.new_method
+            source_nodes,
+            self.x_hops,
+            scale_resolutions=scale_resolutions,
         )
-        if self.new_method:
+        if "_multiscale_edges" in source_nodes:
             # If the new method is used, the edges are already computed and stored in the node storage
             edge_index = source_nodes["_multiscale_edges"]
         else:

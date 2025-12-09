@@ -28,15 +28,18 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for TriNodes and LimitedAreaTriNodes."""
 
     def add_edges(
-        self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int], new_method: bool = False
+        self,
+        nodes: NodeStorage,
+        x_hops: int,
+        scale_resolutions: list[int],
     ) -> NodeStorage:
         from anemoi.graphs.generate import tri_icosahedron
 
-        if new_method:
-            assert x_hops == 1, "New strategy currently only supports x_hops=1."
-            LOGGER.info("Using new strategy for x_hops=1 multiscale-edge building.")
+        if x_hops == 1:
+            LOGGER.debug("Using tri-mesh only strategy for x_hops=1 multiscale-edge building.")
             # Compute the multiscale edges directly and store them in the node storage
-            multiscale_edges = tri_icosahedron.add_edges_hop_1(
+            # No need of the networkx graph
+            multiscale_edges = tri_icosahedron.add_1_hop_edges(
                 nodes_coords_rad=nodes["x"],
                 node_resolutions=nodes["_resolutions"],
                 edge_resolutions=scale_resolutions,
@@ -45,7 +48,7 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
             )
             nodes["_multiscale_edges"] = multiscale_edges
         else:
-            LOGGER.info("Using existing strategy for multiscale-edge building.")
+            LOGGER.info("Using networkx strategy for multiscale-edge building.")
             nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
                 nodes["_nx_graph"],
                 resolutions=scale_resolutions,
@@ -81,11 +84,11 @@ class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
         all_points_mask_builder = KNNAreaMaskBuilder("all_nodes", 1.0)
         all_points_mask_builder.fit_coords(nodes.x.numpy())
 
-        if new_method:
-            assert x_hops == 1, "New strategy currently only supports x_hops=1."
-            LOGGER.info("Using new strategy for x_hops=1 multiscale-edge building.")
+        if x_hops == 1:
+            LOGGER.debug("Using tri-mesh only strategy for x_hops=1 multiscale-edge building.")
             # Compute the multiscale edges directly and store them in the node storage
-            multiscale_edges = tri_icosahedron.add_edges_hop_1(
+            # No need of the networkx graph
+            multiscale_edges = tri_icosahedron.add_1_hop_edges(
                 nodes_coords_rad=nodes["x"],
                 node_resolutions=nodes["_resolutions"],
                 edge_resolutions=scale_resolutions,
