@@ -13,48 +13,37 @@ LOGGER = logging.getLogger(__name__)
 complex_dtype_map = {torch.float16: torch.complex32, torch.float32: torch.complex64, torch.float64: torch.complex128}
 
 
-class EcTransOctahedralSHT:
+class EcTransOctahedralSHT(torch.nn.Module):
     def __init__(self, truncation: int, dtype, filepath=None) -> None:
         self.truncation = truncation
         self.n_lat_nh = truncation + 1
-        self.dtype = dtype
-        self.n_lon_for_each_lat_nh = np.array([20 + 4 * i for i in range(self.n_lat_nh)])
+
+        self.n_grid_points = 2 * int(sum(self.n_lon_for_each_lat_nh))
         self.highest_zonal_wavenumber_per_lat_nh = None
-        self.n_points = 2 * int(sum(self.n_lon_for_each_lat_nh))
-        self.latitude_indices = list(range(self.n_lat_nh)) + list(range(self.n_lat_nh - 1, -1, -1))
-        self.lons_per_lat = [20 + 4 * i for i in range(truncation + 1)]
-        self.lons_per_lat += self.lons_per_lat[::-1]
-        self.cumsum_indices = [0] + np.cumsum(self.lons_per_lat).tolist()
+        lons_per_lat = [20 + 4 * i for i in range(truncation + 1)]
+        lons_per_lat = lons_per_lat + lons_per_lat[::-1]
+        # Needed to access the corresponding grid points from the 1D input fields
+        self.cumsum_indices = [0] + np.cumsum(lons_per_lat).tolist()
 
-        self.gaussian_weights = None
-        self.symmetric = []
-        self.antisymmetric = []
+        self.dtype = dtype
+        symmetric, antisymmetric, gaussian_weights = self._get_polynomials_and_weights(filepath)
 
-        self._get_polynomials_and_weights(filepath)
+        # Normalise polynomials
+        symmetric *= gaussian_weights.view(1, 1, -1)
+        antisymmetric *= gaussian_weights.view(1, 1, -1)
 
-        self.symmetric *= self.gaussian_weights.view(1, 1, -1)
-        self.antisymmetric *= self.gaussian_weights.view(1, 1, -1)
+        self.register_buffer("symmetric", symmetric, persistent=False)
+        self.register_buffer("antisymmetric", antisymmetric, persistent=False)
 
+        # Padding required to pad up the maximin wavenumber of the rfft output
         padding = [self.highest_zonal_wavenumber_per_lat_nh[-1] - m for m in self.highest_zonal_wavenumber_per_lat_nh]
         self.padding = padding + padding[::-1]
 
         self.highest_zonal_wavenumber_per_lat_nh = torch.from_numpy(self.highest_zonal_wavenumber_per_lat_nh)
 
-    def _allocate_arrays_for_polynomials(self) -> None:
-        # Allocate arrays for storing Legendre polynomials, antisymmetric and symmetric
-        n_values_symm = sum(
-            [self.n_lats_per_wavenumber[m] * (self.truncation - m + 3) // 2 for m in range(self.truncation + 1)]
-        )
-        legpol_symm = np.zeros(n_values_symm, dtype=polytype)
-        n_values_anti = sum(
-            [self.n_lats_per_wavenumber[m] * (self.truncation - m + 2) // 2 for m in range(self.truncation + 1)]
-        )
-        legpol_anti = np.zeros(n_values_anti, dtype=polytype)
-        return legpol_symm, legpol_anti
-
     @cached_property
     def n_lats_per_wavenumber(self) -> list[int]:
-        # Calculate latitudes involved in Legendre transform for each zonal wavenumber m, based on nmen
+        # Calculate latitudes involved in Legendre transform for each zonal wavenumber m
         assert self.highest_zonal_wavenumber_per_lat_nh is not None
 
         n_lats_per_wavenumber = np.zeros(self.truncation + 1, dtype=np.int32)
@@ -64,10 +53,6 @@ class EcTransOctahedralSHT:
             ].shape[0]
         return n_lats_per_wavenumber
 
-    @cached_property
-    def poly_size(self) -> int:
-        return sum(self.truncation + 2 - im for im in range(self.truncation + 1))
-
     def gererate(self):
         # Fetch relevant arrays from ecTrans
         # Note that all of these arrays (including the input points-per-latitude array) are
@@ -75,11 +60,13 @@ class EcTransOctahedralSHT:
 
         import ectrans4py
 
+        poly_size = sum(self.truncation + 2 - im for im in range(self.truncation + 1))
+
         (highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials) = ectrans4py.get_legendre_assets(
             2 * self.n_lat_nh,
             self.truncation,
             2 * self.n_lat_nh,
-            self.poly_size,
+            poly_size,
             np.concat((self.n_lon_for_each_lat_nh, self.n_lon_for_each_lat_nh[::-1])),
             1,
         )
@@ -104,7 +91,22 @@ class EcTransOctahedralSHT:
             loaded_assets["legendre_polynomials"],
         )
 
-    def _get_polynomials_and_weights(self, filepath=None) -> None:
+    def _get_polynomials_and_weights(self, filepath: Path | str = None) -> list[torch.Tensor]:
+        """Provides associated Legendre polynomials.
+
+        Either loads precomputed polynomials and normalisation from disk or generates them via ectrans4py. Note
+        that the latter requires ectrans to be installed in your environment.
+
+        Parameters
+        ----------
+        filepath : Path, optional
+            Path to polynomials, by default None
+
+        Returns
+        -------
+        list[torch.Tensor]
+            Returns symmetric and antisymmetric polynomials and normalisation
+        """
 
         if filepath and filepath.exists():
             self.highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials = self.load_from_disk(
@@ -122,9 +124,11 @@ class EcTransOctahedralSHT:
         self.highest_zonal_wavenumber_per_lat_nh = self.highest_zonal_wavenumber_per_lat[: self.n_lat_nh]
 
         gaussian_weights = gaussian_weights[: self.n_lat_nh]
-        self.gaussian_weights = torch.from_numpy(gaussian_weights).to(self.dtype)
 
         # Read Legendre polynomials, looping over each zonal wavenumber m
+        # We separate symmetric from antisymmetric polynomials to reduce computational cost
+
+        symmetric, antisymmetric = [], []
         m_off_symm, m_off_anti = 0, 0
         off_symm, off_anti = 0, 0
         for m in range(self.truncation + 1):
@@ -155,7 +159,7 @@ class EcTransOctahedralSHT:
             if i_s == 1:
                 symm_matrix[offset, :] = 0
 
-            self.symmetric.append(torch.from_numpy(symm_matrix))
+            symmetric.append(torch.from_numpy(symm_matrix))
 
             off_symm += max_total_wavenumber_symm * n_lats
 
@@ -175,7 +179,7 @@ class EcTransOctahedralSHT:
             if i_a == 1:
                 anti_matrix[offset, :] = 0
 
-            self.antisymmetric.append(torch.from_numpy(anti_matrix))
+            antisymmetric.append(torch.from_numpy(anti_matrix))
 
             off_anti += max_total_wavenumber_anti * n_lats
 
@@ -187,10 +191,28 @@ class EcTransOctahedralSHT:
                 m_off_symm += (n_total_values - 1) * self.n_lat_nh
                 m_off_anti += (n_total_values + 1) * self.n_lat_nh
 
-        self.symmetric = torch.stack(self.symmetric)[:, 1:, :].to(complex_dtype_map[self.dtype])
-        self.antisymmetric = torch.stack(self.antisymmetric).to(complex_dtype_map[self.dtype])
+        symmetric = torch.stack(symmetric)[:, 1:, :].to(complex_dtype_map[self.dtype])
+        antisymmetric = torch.stack(antisymmetric).to(complex_dtype_map[self.dtype])
+        gaussian_weights = torch.from_numpy(gaussian_weights).to(self.dtype)
 
-    def longitudinal_rfft(self, x: torch.Tensor):
+        return symmetric, antisymmetric, gaussian_weights
+
+    def longitudinal_rfft(self, x: torch.Tensor) -> torch.Tensor:
+        """Performs rfft along the longitude.
+
+        Cuts off the result at the highest zonal wavenumber to avoid aliasing effects. Padds up
+        to the highest possible wavenumber to put in matrix form.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [bs, ens, grid, vars]
+
+        Returns
+        -------
+        torch.Tensor
+            intermediate state after Fourier transform
+        """
         four_out = []
         for i in range(2 * self.truncation + 2):
 
@@ -205,25 +227,39 @@ class EcTransOctahedralSHT:
 
         return torch.stack(four_out, dim=2)
 
-    def legendre_quadrature(self, x: torch.Tensor):
+    def legendre(self, x: torch.Tensor) -> torch.Tensor:
+        """Performs legendre transform.
+
+        Uses the symmetry of the legendre polynomials by adding and substructing the southern hemisphere
+        from the northern hemisphere for symmetric and antisymmetric part, respectively.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            fourier-transformed field
+
+        Returns
+        -------
+        torch.Tensor
+            spectrum
+        """
+        # Add/substract southern hemisphere from northern hemisphere
         fourier_sh_flipped = torch.flip(x[:, :, self.n_lat_nh :, :, :], dims=[2])
         fourier_norm_sym = x[:, :, : self.n_lat_nh, :, :] + fourier_sh_flipped
         fourier_norm_anti = x[:, :, : self.n_lat_nh, :, :] - fourier_sh_flipped
 
         [bs, ens, _, mmax, nvars] = fourier_norm_sym.shape
 
+        # Compute symmetric and antisymmetric component
         spectrum = torch.empty(bs, ens, self.truncation + 1, mmax, nvars, dtype=x.dtype, device=x.device)
-        spectrum[:, :, 1::2, :, :] = torch.einsum(
-            "mnijk,jli->mnljk", fourier_norm_sym, self.symmetric.to(device=x.device)
-        )  # noqa: F841
+        spectrum[:, :, 1::2, :, :] = torch.einsum("mnijk,jli->mnljk", fourier_norm_sym, self.symmetric)  # noqa: F841
         spectrum[:, :, 0::2, :, :] = torch.einsum(
-            "mnijk,jli->mnljk", fourier_norm_anti, self.antisymmetric.to(device=x.device)
+            "mnijk,jli->mnljk", fourier_norm_anti, self.antisymmetric
         )  # noqa: F841
 
         return spectrum
 
-    def __call__(self, x: torch.Tensor):
-
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         x_fourier = self.longitudinal_rfft(x)
-        spectrum = self.legendre_quadrature(x_fourier)
+        spectrum = self.legendre(x_fourier)
         return spectrum
