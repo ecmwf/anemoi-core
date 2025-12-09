@@ -213,10 +213,10 @@ class EcTransOctahedralSHT:
         [bs, ens, _, mmax, nvars] = fourier_norm_sym.shape
 
         spectrum = torch.empty(bs, ens, self.truncation + 1, mmax, nvars, dtype=x.dtype, device=x.device)
-        spectrum[:, :, 0::2, :, :] = torch.einsum(
+        spectrum[:, :, 1::2, :, :] = torch.einsum(
             "mnijk,jli->mnljk", fourier_norm_sym, self.symmetric.to(device=x.device)
         )  # noqa: F841
-        spectrum[:, :, 1::2, :, :] = torch.einsum(
+        spectrum[:, :, 0::2, :, :] = torch.einsum(
             "mnijk,jli->mnljk", fourier_norm_anti, self.antisymmetric.to(device=x.device)
         )  # noqa: F841
 
