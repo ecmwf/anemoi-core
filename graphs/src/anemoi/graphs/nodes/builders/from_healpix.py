@@ -46,6 +46,7 @@ class HEALPixNodes(BaseNodeBuilder):
         """Initialize the HEALPixNodes builder."""
         self.resolution = resolution
         super().__init__(name)
+        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"resolution"}
 
         assert isinstance(resolution, int), "Resolution must be an integer."
         assert resolution > 0, "Resolution must be positive."
@@ -80,10 +81,8 @@ class LimitedAreaHEALPixNodes(HEALPixNodes):
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
     ) -> None:
-
-        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
-
         super().__init__(resolution, name)
+        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)

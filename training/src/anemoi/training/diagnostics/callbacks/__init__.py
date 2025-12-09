@@ -62,7 +62,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         return []
 
     checkpoint_settings = {
-        "dirpath": config.hardware.paths.checkpoints,
+        "dirpath": config.system.output.checkpoints.root,
         "verbose": False,
         # save weights, optimizer states, LR-schedule states, hyperparameters etc.
         # https://pytorch-lightning.readthedocs.io/en/stable/common/checkpointing_basic.html#contents-of-a-checkpoint
@@ -84,7 +84,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         else:
             target = key
         ckpt_frequency_save_dict[target] = (
-            config.hardware.files.checkpoint[key],
+            config.system.output.checkpoints[key],
             frequency,
             n_saved,
         )

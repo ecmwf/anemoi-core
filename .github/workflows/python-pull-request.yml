@@ -9,6 +9,7 @@ on:
   schedule:
     - cron: "9 2 * * 0" # at 9:02 on sunday
   workflow_dispatch:
+  merge_group:
 
 env:
   UV_SYSTEM_PYTHON: 1
