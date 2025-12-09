@@ -189,7 +189,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
 
-            y = self._get_target(batch, rollout_step)
+            y = self._get_target(batch, rollout_step)[:, :, 0, ...] # remove ens dim
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 
             loss, metrics_next, y_pred_ens_group = checkpoint(
