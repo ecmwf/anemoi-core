@@ -149,7 +149,7 @@ If your model instance still does not fit in memory, you can shard the
 model over multiple GPUs.
 
 .. code::
-   
+
    system:
       hardware:
          num_gpus_per_model: 2

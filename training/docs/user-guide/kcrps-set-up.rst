@@ -37,9 +37,9 @@ training:
       -  :class:`AnemoiDatasetsDataModule`
       -  :class:`AnemoiEnsDatasetsDataModule`
 
-****************************
+**************************
  Changes in System config
-****************************
+**************************
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml

@@ -49,9 +49,9 @@ These config files are YAML files, which can be easily read and
 modified.
 
 They are split across files based on topic. For example, the system
-config includes the sections related to hardware specification, inputs (such as datasets used for training)
-and outputs (where to store logs, plots, checkpoints, etc.). The model config is in the model
-folder.
+config includes the sections related to hardware specification, inputs
+(such as datasets used for training) and outputs (where to store logs,
+plots, checkpoints, etc.). The model config is in the model folder.
 
 You will need to specify the location of your anemoi dataset in the
 system input section. These contain ``???`` as placeholders.
@@ -81,11 +81,13 @@ The following missing config options which must be overridden by users:
    specify its filename here. Otherwise, a new graph will be constructed
    on the fly and written to the filename given.
 
-For datsets you can either pass an absolute path or a relative path (excluding the file format (ex: .zarr)).
-This functionality requires to have the settings.toml correctly configured (!TODO add link)
+For datsets you can either pass an absolute path or a relative path
+(excluding the file format (ex: .zarr)). This functionality requires to
+have the settings.toml correctly configured (!TODO add link)
 
-Root can be left empty (if set to Null or '') then the current working directory will be used.
-Output paths for checkpoints, logs, profiler outputs and plots are built using the root path as base.
+Root can be left empty (if set to Null or '') then the current working
+directory will be used. Output paths for checkpoints, logs, profiler
+outputs and plots are built using the root path as base.
 
 *********************************
  Validation of the Configuration

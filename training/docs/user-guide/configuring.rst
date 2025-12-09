@@ -32,8 +32,8 @@ These are group configs for each section. The options after the defaults
 are then used to override the configs, by assigning new features and
 keywords.
 
-You can also find these defaults in other configs, like the
-``system``, which implements:
+You can also find these defaults in other configs, like the ``system``,
+which implements:
 
 .. code:: yaml
 

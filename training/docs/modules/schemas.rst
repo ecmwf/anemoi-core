@@ -41,9 +41,9 @@ files,
    :no-undoc-members:
    :show-inheritance:
 
-**********
+********
  System
-**********
+********
 
 .. automodule:: anemoi.training.schemas.system
    :members:
