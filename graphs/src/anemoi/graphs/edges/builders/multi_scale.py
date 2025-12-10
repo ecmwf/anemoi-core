@@ -68,7 +68,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
         self.x_hops = x_hops
         if isinstance(scale_resolutions, int):
             assert scale_resolutions >= 0, "The scale_resolutions argument only supports non-negative integers."
-            scale_resolutions = list(range(0, scale_resolutions + 1))
+            scale_resolutions = list(range(1, scale_resolutions + 1))
         assert not isinstance(scale_resolutions, str), "The scale_resolutions argument is not valid."
         assert (
             scale_resolutions is None or min(scale_resolutions) >= 0
