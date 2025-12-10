@@ -485,20 +485,19 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         loss = self._compute_loss(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
+        if y_pred_state is not None and y_state is not None:
+            # Prepare states for metrics computation
+            y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
+                y_pred_state,
+                y_state,
+                validation_mode,
+            )
+        else:
+            y_pred_state_full, y_state_full = y_pred_full, y_full
+
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-
-            if y_pred_state is not None and y_state is not None:
-                # Prepare states for metrics computation
-                y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
-                    y_pred_state,
-                    y_state,
-                    validation_mode,
-                )
-            else:
-                y_pred_state_full, y_state_full = y_pred_full, y_full
-
             metrics_next = self._compute_metrics(
                 y_pred_state_full,
                 y_state_full,
@@ -506,7 +505,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
 
-        return loss, metrics_next, y_pred_state_full if validation_mode else None
+        return loss, metrics_next, y_pred_state_full
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
