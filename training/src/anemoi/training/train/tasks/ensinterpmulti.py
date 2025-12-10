@@ -253,7 +253,7 @@ class GraphEnsInterpMulti(BaseGraphModule):
             y_pred_agg = agg_type(y_pred, dim=1)  # (bs, ens, latlon, nvar)
             y_agg = agg_type(y, dim=1)  # (bs, latlon, nvar)
             if agg_op in ["max", "min"]:
-                y_pred_agg = y_pred_agg[0] # discard indices
+                y_pred_agg = y_pred_agg[0]  # discard indices
                 y_agg = y_agg[0]
             loss_next, metrics_next, y_pred_ens_group = self.loss_step(
                 y_pred_agg,
