@@ -13,6 +13,7 @@ dataloader:
 diagnostics:
   plot:
     callbacks: []
+    asynchronous: False # Whether to plot asynchronously
   log:
     wandb:
       enabled: False

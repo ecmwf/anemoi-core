@@ -57,6 +57,7 @@ class KernelCRPS(BaseLoss):
             The point-wise kernel CRPS, shape (batch_size, 1, latlon).
         """
         ens_size = preds.shape[-1]
+        print(ens_size)
         mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
 
         assert ens_size > 1, "Ensemble size must be greater than 1."
