@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.0...graphs-0.8.1) (2025-12-08)
+
+
+### Bug Fixes
+
+* **graphs,multi-scale:** Set default scale_resolutions from 1 ([#733](https://github.com/ecmwf/anemoi-core/issues/733)) ([e621fc9](https://github.com/ecmwf/anemoi-core/commit/e621fc93115688e2a3666596c67f482137fd3171))
+* **graphs:** Allow scale_resolutions to be 0 in MultiScaleEdges ([#731](https://github.com/ecmwf/anemoi-core/issues/731)) ([11af322](https://github.com/ecmwf/anemoi-core/commit/11af3223163fedcec6ffb2d4a96b5388c7ba126b))
+
 ## [0.8.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.2...graphs-0.8.0) (2025-12-05)
 
 
