@@ -74,6 +74,8 @@ class GraphEnsInterpMulti(BaseGraphModule):
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
 
+        self.aggregate_outputs = config.training.get("aggregate_outputs", [])
+
         self.rollout = 1
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
@@ -238,37 +240,71 @@ class GraphEnsInterpMulti(BaseGraphModule):
             y_step = y[:, interp_step - 1, ...]  # (bs, latlon, nvar)
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss_next, y_pred_ens_group = checkpoint(
-                self.gather_and_compute_loss,
+            loss_next, metrics_next, y_pred_ens_group = self.loss_step(
                 y_pred_step,
                 y_step,
-                self.loss,
-                self.ens_comm_subgroup_size,
-                self.ens_comm_subgroup,
-                self.model_comm_group,
-                validation_mode,
-                use_reentrant=False,
+                validation_mode=validation_mode,
+                val_index=interp_step - 1,
             )
-            if not validation_mode:
-                y_pred_ens_group = []
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred_ens_group,
-                    y_step,
-                    interp_step - 1,
-                    grid_shard_slice=self.grid_shard_slice,
-                )
+            loss += loss_next
+            metrics.update(metrics_next)
+            y_preds.append(y_pred_ens_group)
 
+        for agg_op in self.aggregate_outputs:
+            agg_type = getattr(torch, agg_op)
+            y_pred_agg = agg_type(y_pred, dim=1)  # (bs, ens, latlon, nvar)
+            y_agg = agg_type(y, dim=1)  # (bs, latlon, nvar)
+            if agg_op in ["max", "min"]:
+                y_pred_agg = y_pred_agg[0] # discard indices
+                y_agg = y_agg[0]
+            loss_next, metrics_next, y_pred_ens_group = self.loss_step(
+                y_pred_agg,
+                y_agg,
+                validation_mode=validation_mode,
+                val_index=len(self.interp_times) + self.aggregate_outputs.index(agg_op),
+            )
             loss += loss_next
             metrics.update(metrics_next)
             y_preds.append(y_pred_ens_group)
 
         _ens_ic = x_bound if validation_mode else None
 
-        loss *= 1.0 / len(self.interp_times)
+        loss *= 1.0 / (len(self.interp_times) + len(self.aggregate_outputs))
         return loss, metrics, y_preds, _ens_ic
+
+    def loss_step(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        validation_mode: bool = False,
+        val_index: int = 0,
+    ) -> tuple:
+        """Compute loss for a single step."""
+        loss_next, y_pred_ens_group = checkpoint(
+            self.gather_and_compute_loss,
+            y_pred,
+            y,
+            self.loss,
+            self.ens_comm_subgroup_size,
+            self.ens_comm_subgroup,
+            self.model_comm_group,
+            validation_mode,
+            use_reentrant=False,
+        )
+        if not validation_mode:
+            y_pred_ens_group = None
+
+        metrics_next = {}
+        if validation_mode:
+            metrics_next = self.calculate_val_metrics(
+                y_pred_ens_group,
+                y,
+                val_index,
+                grid_shard_slice=self.grid_shard_slice,
+            )
+
+        return loss_next, metrics_next, y_pred_ens_group
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         batch[0] = super().allgather_batch(batch[0])
