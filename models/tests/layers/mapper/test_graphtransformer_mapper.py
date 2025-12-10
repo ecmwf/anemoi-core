@@ -39,6 +39,7 @@ class MapperConfig:
     layer_kernels: field(default_factory=DotDict) = None
     shard_strategy: str = "edges"
     graph_attention_backend: str = "pyg"
+    edge_pre_mlp: bool = False
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
