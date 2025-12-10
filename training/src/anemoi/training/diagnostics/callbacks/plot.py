@@ -981,7 +981,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         if self.latlons is None:
             self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = self.latlons.cpu().numpy()
+            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
 
         input_tensor = (
             batch[
