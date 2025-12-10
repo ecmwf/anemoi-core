@@ -143,9 +143,11 @@ class AnemoiModelInterface(torch.nn.Module):
             "batch": batch,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
-            "multi_step": self.multi_step,
             "model_comm_group": model_comm_group,
         }
+
+        if "multi_step" not in kwargs:
+            predict_kwargs["multi_step"] = self.multi_step
 
         # Add tendency processors if they exist
         if hasattr(self, "pre_processors_tendencies"):
