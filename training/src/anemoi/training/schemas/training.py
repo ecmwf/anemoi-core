@@ -39,16 +39,42 @@ class GradientClip(BaseModel):
     "The gradient clipping algorithm to use"
 
 
-class SWA(BaseModel):
-    """Stochastic weight averaging configuration.
+class WeightAveragingSchema(BaseModel):
+    """Weight averaging configuration (SWA or EMA).
 
+    Uses Hydra instantiate pattern with _target_ to specify the callback class.
     See https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
+
+    Example:
+        weight_averaging:
+          _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+          decay: 0.999
+          update_starting_at_step: 1000
     """
 
-    enabled: bool = Field(example=False)
-    "Enable stochastic weight averaging."
-    lr: NonNegativeFloat = Field(example=1.0e-4)
-    "Learning rate for SWA."
+    target_: Literal[
+        "pytorch_lightning.callbacks.EMAWeightAveraging",
+        "pytorch_lightning.callbacks.StochasticWeightAveraging",
+    ] = Field(..., alias="_target_")
+    "Target callback class for weight averaging. Either EMAWeightAveraging or StochasticWeightAveraging."
+    # EMA specific
+    decay: NonNegativeFloat | None = Field(default=None)
+    "EMA decay rate (only used for EMAWeightAveraging)."
+    update_every_n_steps: PositiveInt = Field(default=1)
+    "Update every n steps (only used for EMAWeightAveraging)."
+    update_starting_at_step: PositiveInt | None = Field(default=None)
+    "Update starting at step (only used for EMAWeightAveraging)."
+    update_starting_at_epoch: PositiveInt | None = Field(default=None)
+    "Update starting at epoch (only used for EMAWeightAveraging)."
+    # SWA specific
+    swa_lrs: NonNegativeFloat | list[NonNegativeFloat] = Field(default=0.8)
+    "SWA learning rate (only used for StochasticWeightAveraging)."
+    swa_epoch_start: NonNegativeFloat = Field(default=0.8)
+    "SWA epoch start (only used for StochasticWeightAveraging)."
+    annealing_epochs: PositiveInt = Field(default=10)
+    "Annealing epochs (only used for StochasticWeightAveraging)."
+    annealing_strategy: Literal["cos", "linear"] = Field(default="cos")
+    "Annealing strategy (only used for StochasticWeightAveraging)."
 
 
 class Rollout(BaseModel):
@@ -334,8 +360,8 @@ class BaseTrainingSchema(BaseModel):
     "Config for gradient clipping."
     strategy: StrategySchemas
     "Strategy to use."
-    swa: SWA = Field(default_factory=SWA)
-    "Config for stochastic weight averaging."
+    weight_averaging: WeightAveragingSchema | None = Field(default=None)
+    "Config for weight averaging (SWA or EMA). Set to null to disable."
     training_loss: LossSchemas
     "Training loss configuration."
     loss_gradient_scaling: bool = False
