@@ -524,7 +524,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="diffusion")
+@hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 
