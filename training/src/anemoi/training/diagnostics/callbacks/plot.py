@@ -445,7 +445,7 @@ class LongRolloutPlots(BasePlotCallback):
         }
         if self.latlons is None:
             self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = self.latlons.cpu().numpy()
+            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
 
         assert batch.shape[1] >= self.max_rollout + pl_module.multi_step, (
             "Batch length not sufficient for requested validation rollout length! "
