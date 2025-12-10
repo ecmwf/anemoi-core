@@ -47,7 +47,13 @@ class GraphCreator:
             for node_name, node_cfg in cfg.nodes.items():
                 node_builder_cfg = node_cfg.node_builder
                 attributes_cfg = node_cfg.get("attributes")
-                node = instantiate(node_builder_cfg, name=node_name, attributes=attributes_cfg)
+                
+                attributes = []
+                if attributes_cfg:
+                    for attr_name, attr_cfg in attributes_cfg.items():
+                        attributes.append(instantiate(attr_cfg, name=attr_name))
+
+                node = instantiate(node_builder_cfg, name=node_name, attributes=attributes)
                 _nodes.append(node)
 
         _edges = []
@@ -59,6 +65,11 @@ class GraphCreator:
                 target_mask_attr_name = edge_cfg.get("target_mask_attr_name")
                 attributes_cfg = edge_cfg.get("attributes")
                 
+                attributes = []
+                if attributes_cfg:
+                    for attr_name, attr_cfg in attributes_cfg.items():
+                         attributes.append(instantiate(attr_cfg, name=attr_name))
+
                 # Each edge can have multiple edge builders
                 edge_builders_list = []
                 for builder_cfg in edge_cfg.edge_builders:
@@ -68,7 +79,7 @@ class GraphCreator:
                         target_name=target_name,
                         source_mask_attr_name=source_mask_attr_name,
                         target_mask_attr_name=target_mask_attr_name,
-                        attributes=attributes_cfg, # Pass attributes to each builder
+                        attributes=attributes, # Pass attributes to each builder
                     )
                     edge_builders_list.append(edge_builder)
                 _edges.extend(edge_builders_list)

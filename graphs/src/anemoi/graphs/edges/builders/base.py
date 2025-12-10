@@ -45,13 +45,13 @@ class BaseEdgeBuilder(ABC):
         target_name: str,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
-        **attributes: Any,
+        attributes: list | None = None,
     ):
         self.source_name = source_name
         self.target_name = target_name
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
-        self.attributes = attributes
+        self.attributes = attributes or []
         self.device = get_distributed_device()
 
     @property
@@ -100,26 +100,26 @@ class BaseEdgeBuilder(ABC):
         graph[self.name].edge_type = edge_type
         return graph
 
-    def register_attributes(self, graph: HeteroData, attributes: dict[str, Any] | None = None) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, attributes: list | None = None) -> HeteroData:
         """Register attributes in the edges of the graph specified.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the attributes.
-        attributes : dict[str, Any]
-            Dictionary of instantiated attribute objects.
+        attributes : list
+            List of instantiated attribute objects.
 
         Returns
         -------
         HeteroData
             The graph with the registered attributes.
         """
-        attributes = attributes or {}
+        attributes = attributes or []
 
-        for attr_name, attr_obj in attributes.items():
+        for attr_obj in attributes:
             edge_index = graph[self.name].edge_index
-            graph[self.name][attr_name] = attr_obj(
+            graph[self.name][attr_obj.name] = attr_obj(
                 x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
             )
         return graph

@@ -27,7 +27,8 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
 
     norm_by_group: bool = False
 
-    def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
+    def __init__(self, name: str, norm: str | None = None, dtype: str = "float32") -> None:
+        self.name = name
         self.norm = norm
         self.dtype = getattr(torch, dtype)
         self.device = get_distributed_device()
@@ -70,5 +71,5 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
 class BooleanBaseNodeAttribute(BaseNodeAttribute, ABC):
     """Base class for boolean node attributes."""
 
-    def __init__(self) -> None:
-        super().__init__(norm=None, dtype="bool")
+    def __init__(self, name: str) -> None:
+        super().__init__(name, norm=None, dtype="bool")

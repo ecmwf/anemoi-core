@@ -39,10 +39,12 @@ class BaseNodeBuilder(ABC):
     """
 
     hidden_attributes: set[str] = set()
+    _init_attributes: list = None
 
-    def __init__(self, name: str, **attributes: Any) -> None:
+    def __init__(self, name: str, attributes: list | None = None) -> None:
         self.name = name
-        self.attributes = attributes
+        self.attributes = attributes or []
+        self._init_attributes = list()
         self.area_mask_builder = None
 
     def register_nodes(self, graph: HeteroData) -> HeteroData:
@@ -69,15 +71,15 @@ class BaseNodeBuilder(ABC):
 
         return graph
 
-    def register_attributes(self, graph: HeteroData, attributes: dict[str, Any] | None = None) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, attributes: list | None = None) -> HeteroData:
         """Register attributes in the nodes of the graph specified.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the attributes.
-        attributes : dict[str, Any]
-            Dictionary of instantiated attribute objects.
+        attributes : list
+            List of instantiated attribute objects.
 
         Returns
         -------
@@ -87,10 +89,10 @@ class BaseNodeBuilder(ABC):
         for hidden_attr in self.hidden_attributes:
             graph[self.name][f"_{hidden_attr}"] = getattr(self, hidden_attr)
 
-        attributes = attributes or {}
+        attributes = attributes or []
 
-        for attr_name, attr_obj in attributes.items():
-            graph[self.name][attr_name] = attr_obj.compute(graph, self.name)
+        for attr_obj in attributes:
+            graph[self.name][attr_obj.name] = attr_obj.compute(graph, self.name)
 
         return graph
 
