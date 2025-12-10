@@ -1,4 +1,4 @@
-#yes# (C) Copyright 2024 Anemoi contributors.
+# yes# (C) Copyright 2024 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -216,9 +216,8 @@ class GraphEnsInterpMulti(BaseGraphModule):
         y_preds = []
 
         # New code for ensemble interpolator: (no rollout loop, instead loops through interp targets)
-
         batch = self.model.pre_processors(batch[0], in_place=not validation_mode)  # don't use EDA for interpolator
-        x = self.ensemble_ic_generator(batch, None)  # no EDA for interpolator
+        x = torch.cat([batch] * self.nens_per_device, dim=2)
 
         # Scalers which are delayed need to be initialized after the pre-processors
         if self.is_first_step:
@@ -226,15 +225,13 @@ class GraphEnsInterpMulti(BaseGraphModule):
             self.is_first_step = False
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
-        x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
+        x_bound = x[:, itemgetter(*self.boundary_times)(self.imap)][
             ...,
             self.data_indices.data.input.full,
         ]  # (bs, time, ens, latlon, nvar)
 
-
-        y_pred = self(x_bound) # has shape (bs, time, ens, latlon, nvar)
-        y = batch[:, itemgetter(*self.interp_times)(self.imap)][:,:, 0, :, self.data_indices.data.output.full]
-
+        y_pred = self(x_bound)  # has shape (bs, time, ens, latlon, nvar)
+        y = batch[:, itemgetter(*self.interp_times)(self.imap)][:, :, 0, :, self.data_indices.data.output.full]
         for interp_step in self.interp_times:
             y_pred_step = y_pred[:, interp_step - 1, ...]  # (bs, ens, latlon, nvar)
             y_step = y[:, interp_step - 1, ...]  # (bs, latlon, nvar)
@@ -256,7 +253,7 @@ class GraphEnsInterpMulti(BaseGraphModule):
             y_pred_agg = agg_type(y_pred, dim=1)  # (bs, ens, latlon, nvar)
             y_agg = agg_type(y, dim=1)  # (bs, latlon, nvar)
             if agg_op in ["max", "min"]:
-                y_pred_agg = y_pred_agg[0] # discard indices
+                y_pred_agg = y_pred_agg[0]  # discard indices
                 y_agg = y_agg[0]
             loss_next, metrics_next, y_pred_ens_group = self.loss_step(
                 y_pred_agg,

@@ -61,10 +61,7 @@ class AnemoiModelEncProcDecEnsInterpMulti(AnemoiModelEncProcDec):
         self.grid_skip = model_config.model.grid_skip
 
     def _calculate_input_dim(self, model_config):
-        return (
-            self.input_times * self.num_input_channels
-            + self.node_attributes.attr_ndims[self._graph_name_data]
-        )
+        return self.input_times * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_channels = len(data_indices.model.input)
@@ -111,7 +108,9 @@ class AnemoiModelEncProcDecEnsInterpMulti(AnemoiModelEncProcDec):
                 x_skip[..., self._internal_input_idx],
                 "(batch ensemble) grid var -> batch ensemble grid var",
                 batch=batch_size,
-            ).to(dtype=dtype)[:, None, ...]  # add time dimension
+            ).to(dtype=dtype)[
+                :, None, ...
+            ]  # add time dimension
 
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
@@ -145,9 +144,7 @@ class AnemoiModelEncProcDecEnsInterpMulti(AnemoiModelEncProcDec):
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
-        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x, bse, grid_shard_shapes, model_comm_group
-        )
+        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(x, bse, grid_shard_shapes, model_comm_group)
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=bse)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
