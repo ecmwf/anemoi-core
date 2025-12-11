@@ -171,8 +171,12 @@ def add_1_hop_edges(
 
     # Map the edges to the node ordering
     #  - Calculate the total (unmasked) number of nodes
-    unmasked_nodes = cartesian_to_latlon_rad(trimesh.creation.icosphere(subdivisions=max(node_resolutions), radius=1.0).vertices)
-    assert np.all((nodes_coords_rad.numpy() - unmasked_nodes[node_ordering]) == 0), "Node coordates do not match coordinates used for multi-scale edge building"
+    unmasked_nodes = cartesian_to_latlon_rad(
+        trimesh.creation.icosphere(subdivisions=max(node_resolutions), radius=1.0).vertices
+    )
+    assert np.all(
+        (nodes_coords_rad.numpy() - unmasked_nodes[node_ordering]) == 0
+    ), "Node coordates do not match coordinates used for multi-scale edge building"
     LOGGER.debug("unmasked_nodes shape[0]: %d", unmasked_nodes.shape[0])
     if area_mask_builder is not None:
         # Take care of the edges with start- or end-point outside the mask
