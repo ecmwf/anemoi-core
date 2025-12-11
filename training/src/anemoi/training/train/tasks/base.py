@@ -358,11 +358,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
             },
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Forward method.
+
+        This method calls the model's forward method with the appropriate
+        communication group and sharding information.
+        """
         return self.model(
             x,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
+            **kwargs,
         )
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
@@ -521,9 +527,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int = 0,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
 
@@ -533,8 +539,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
-        rollout_step : int
-            Current rollout step
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
 
@@ -555,11 +559,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
         validation_mode: bool = False,
         dataset_name: str | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
@@ -568,9 +571,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
-        rollout_step : int
-            Current rollout step
-        validation_mode : bool
+        step : int, optional
+            Current step
+        validation_mode : bool, optional
             Whether to compute validation metrics
         **kwargs
             Additional arguments to pass to loss computation
@@ -599,9 +602,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(y_pred_full, y_full, rollout_step, grid_shard_slice, dataset_name)
+            metrics_next = self._compute_metrics(y_pred_full, y_full, grid_shard_slice, dataset_name, **kwargs)
 
-        return loss, metrics_next
+        return loss, metrics_next, y_pred_full
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -753,9 +756,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int = 0,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        step: int | None = None,
+        **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
 
@@ -765,8 +769,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted ensemble
         y: torch.Tensor
             Ground truth (target).
-        rollout_step: int
-            Rollout step
+        step: int, optional
+            Step number
 
         Returns
         -------
@@ -784,14 +788,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_postprocessed = post_processor(y, in_place=False)
         y_pred_postprocessed = post_processor(y_pred, in_place=False)
 
+        suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
+                metrics[f"{metric_name}_metric{suffix}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
-            for mkey, indices in val_metric_ranges.items():
-                metric_step_name = f"{metric_name}_metric/{mkey}/{rollout_step + 1}"
+            for mkey, indices in self.val_metric_ranges.items():
+                metric_step_name = f"{metric_name}_metric/{mkey}{suffix}"
                 if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
@@ -812,7 +817,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         del batch_idx
 
-        train_loss, _, _ = self._step(batch)
+        train_loss, *_ = self._step(batch)
 
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
@@ -830,23 +835,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return train_loss
 
-    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
-        """Step the learning rate scheduler by Pytorch Lightning.
-
-        Parameters
-        ----------
-        scheduler : CosineLRScheduler
-            Learning rate scheduler object.
-        metric : Any
-            Metric object for e.g. ReduceLRonPlateau. Default is None.
-
-        """
-        del metric
-        scheduler.step(epoch=self.trainer.global_step)
-
-    def on_train_epoch_end(self) -> None:
-        pass
-
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
         """Calculate the loss over a validation batch using the training loss function.
 
@@ -861,7 +849,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         del batch_idx
 
         with torch.no_grad():
-            val_loss, metrics, y_preds = self._step(batch, validation_mode=True)
+            val_loss, metrics, *args = self._step(batch, validation_mode=True)
 
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
@@ -892,7 +880,24 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 sync_dist=True,
             )
 
-        return val_loss, y_preds
+        return val_loss, *args
+
+    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
+        """Step the learning rate scheduler by Pytorch Lightning.
+
+        Parameters
+        ----------
+        scheduler : CosineLRScheduler
+            Learning rate scheduler object.
+        metric : Any
+            Metric object for e.g. ReduceLRonPlateau. Default is None.
+
+        """
+        del metric
+        scheduler.step(epoch=self.trainer.global_step)
+
+    def on_train_epoch_end(self) -> None:
+        pass
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
