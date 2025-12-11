@@ -213,7 +213,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                step=rollout_step,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
@@ -225,14 +224,11 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 metrics_next = self.calculate_val_metrics(
                     y_pred_ens_group,
                     y,
-                    rollout_step,
                     self.grid_shard_slice,
+                    rollout_step,
                 )
-            mloss = self.loss.mloss if hasattr(self.loss, "mloss") else None
 
-            yield loss, mloss, metrics_next, y_pred_ens_group if validation_mode else [], (
-                x if validation_mode else None
-            )
+            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], (x if validation_mode else None)
 
     def _step(
         self,
@@ -242,23 +238,12 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         """Training / validation step."""
         LOGGER.debug("SHAPES: batch.shape = %s", list(batch.shape))
 
-        loss = torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
-
-        if self.loss.name == "MultiscaleLossWrapper":
-
-            LOGGER.debug("Using multiscale loss with %d scales", self.loss.num_scales)
-
-            mloss = [
-                torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
-                for _ in range(self.loss.num_scales)
-            ]
-        else:
-            mloss = None
+        loss = torch.zeros(self.loss.num_scales, dtype=batch[0].dtype, device=self.device, requires_grad=False)
 
         metrics = {}
         y_preds = []
 
-        for loss_next, mloss_next, metrics_next, y_preds_next, _ens_ic in self._rollout_step(
+        for loss_next, metrics_next, y_preds_next, _ens_ic in self._rollout_step(
             batch,
             rollout=self.rollout,
             validation_mode=validation_mode,
@@ -267,14 +252,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
-            if mloss is not None:
-                for i in range(len(mloss)):
-                    mloss[i] += mloss_next[i]
-
-        if mloss is not None:
-            for i in range(len(mloss)):
-                mloss[i] *= 1.0 / self.rollout
-
         loss *= 1.0 / self.rollout
 
-        return loss, mloss, metrics, y_preds, _ens_ic
+        return loss, metrics, y_preds, _ens_ic

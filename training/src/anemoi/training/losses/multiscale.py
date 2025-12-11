@@ -222,6 +222,4 @@ class MultiscaleLossWrapper(BaseLoss):
             )
 
         weighted_losses = [w * loss_val for w, loss_val in zip(self.weights, loss_inc, strict=True)]
-        loss = torch.stack(weighted_losses).sum()
-        self.mloss = [x.detach() for x in weighted_losses]
-        return loss
+        return torch.stack(weighted_losses)
