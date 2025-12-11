@@ -51,8 +51,10 @@ dataloader:
         start: "2023-05-20"
         end: "2023-05-21"
 model:
-  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
-  
+  output_mask:
+    _target_: anemoi.training.utils.masks.Boolean1DMask
+    nodes_name: ${graph.data}
+    attribute_name: cutout_mask
 hardware:
   paths:
     data: /home/users/u101957/code/anemoi-mf/quickstart/locally/datasets
@@ -63,5 +65,4 @@ hardware:
     graph: null
   num_gpus_per_node: 4
 training:
-  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
   max_epochs: 3

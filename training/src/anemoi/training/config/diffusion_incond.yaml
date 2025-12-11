@@ -5,7 +5,7 @@ defaults:
 - datamodule: single
 - hardware: example
 - graph: existing_graph
-- model: graphtransformer_diffusion
+- model: graphtransformer_diffusionuncond
 - training: diffusion
 - _self_
 
@@ -59,12 +59,7 @@ dataloader:
       training: 1
       validation: 1
       test: 1
-model:
-  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
-#   output_mask:
-#     _target_: anemoi.training.utils.masks.Boolean1DMask
-#     nodes_name: ${graph.data}
-#     attribute_name: cutout_mask
+
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
@@ -75,5 +70,4 @@ hardware:
   num_gpus_per_node: 4
   num_gpus_per_model: 2
 training:
-  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
   max_epochs: 2

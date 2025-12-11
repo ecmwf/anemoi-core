@@ -50,6 +50,9 @@ class DefinedModels(str, Enum):
     ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec"
     )
+    ANEMOI_UNCOND_DIFFUSION_MODEL_ENC_PROC_DEC = (
+        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDecUnconditional"
+    )
     ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionModelEncProcDec"
     ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC = (
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec"

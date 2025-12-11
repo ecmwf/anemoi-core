@@ -58,28 +58,28 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
         )
 
         self.rho = config.model.model.diffusion.rho
-        self.model.model = AnemoiDiffusionModelEncProcDecUnconditional(
-            model_config=config.model.model,   # passer le config complet, PAS .diffusion
-            data_indices=data_indices.data,    # indices de données comme attendu
-            statistics=statistics,             # statistiques comme d’habitude
-            graph_data=graph_data,             # ton HeteroData
-            truncation_data=None               # mettre None si inutilisé
-        ) #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
-    
         # self.model.model = AnemoiDiffusionModelEncProcDecUnconditional(
-        #     model_config=config.model.model.diffusion,
-        #     data_indices=data_indices.data,
-        #     statistics=statistics,
-        #     graph_data=graph_data,
-        #     truncation_data=None, #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
+        #     model_config=config.model.model,   # passer le config complet, PAS .diffusion
+        #     data_indices=data_indices.data,    # indices de données comme attendu
+        #     statistics=statistics,             # statistiques comme d’habitude
+        #     graph_data=graph_data,             # ton HeteroData
+        #     truncation_data=None               # mettre None si inutilisé
+        # ) #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
+    
+        self.model.model = AnemoiDiffusionModelEncProcDecUnconditional(
+            model_config=config.model.model.diffusion,
+            data_indices=data_indices.data,
+            statistics=statistics,
+            graph_data=graph_data,
+            truncation_data=None, #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
 
-        # )
+        )
 
     # -------------------------------------------------------------------------
     # FORWARD : identical to conditional version
     # -------------------------------------------------------------------------
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-        print(x.shape, 'JE SUIS SHAPE X')#,self.model.model.fwd_with_preconditioning(
+        # print(x.shape, 'JE SUIS SHAPE X')#,self.model.model.fwd_with_preconditioning(
         #     x,
         #     y_noised,
         #     sigma,
@@ -123,7 +123,7 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
 
 
         # Sample noise level
-        print('je suis sigma', (x.shape[0],) + (1,) * (x.ndim - 2))
+        # print('je suis sigma', (x.shape[0],) + (1,) * (x.ndim - 2))
         sigma, noise_weights = self._get_noise_level(
             shape=(x.shape[0],) + (1,) * (x.ndim - 2),
             sigma_max=self.model.model.sigma_max,
@@ -147,7 +147,7 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
 
 
         # Forward pass
-        print('SHAPES',x.shape,y_noised.shape,sigma.shape,(y + sigma * eps).shape)
+        # print('SHAPES',x.shape,y_noised.shape,sigma.shape,(y + sigma * eps).shape)
         y_pred = self(x, y_noised, sigma)
             # Use checkpoint for compute_loss_metrics
         loss, metrics_next = checkpoint(
@@ -220,13 +220,13 @@ class GraphDiffusionForecaster(GraphForecaster):
         self.rho = config.model.model.diffusion.rho
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-        print(x.shape, 'JE SUIS SHAPE X',(self.model.model.fwd_with_preconditioning(
-            x,
-            y_noised,
-            sigma,
-            model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
-        )).shape)
+        # print(x.shape, 'JE SUIS SHAPE X',(self.model.model.fwd_with_preconditioning(
+        #     x,
+        #     y_noised,
+        #     sigma,
+        #     model_comm_group=self.model_comm_group,
+        #     grid_shard_shapes=self.grid_shard_shapes,
+        # )).shape)
         return self.model.model.fwd_with_preconditioning(
             x,
             y_noised,
@@ -314,7 +314,7 @@ class GraphDiffusionForecaster(GraphForecaster):
         for rollout_step in range(rollout or self.rollout):
 
             # get noise level and associated loss weights
-            print('je suis sigma', (x.shape[0],) + (1,) * (x.ndim - 2))
+            # print('je suis sigma', (x.shape[0],) + (1,) * (x.ndim - 2))
 
             sigma, noise_weights = self._get_noise_level(
                 shape=(x.shape[0],) + (1,) * (x.ndim - 2),
@@ -330,7 +330,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             y_noised = self._noise_target(y, sigma)
 
             # prediction, fwd_with_preconditioning
-            print('SHAPES',x.shape,y_noised.shape,sigma.shape)
+            # print('SHAPES',x.shape,y_noised.shape,sigma.shape)
 
             y_pred = self(
                 x,

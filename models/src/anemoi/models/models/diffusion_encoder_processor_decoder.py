@@ -551,7 +551,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec):
     """
     Diffusion model version inconditionnelle (no temporal/history conditioning).
-    """
+    """     
 
     def __init__(
         self,
@@ -560,6 +560,8 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        truncation_data: dict,
+
     ) -> None:
         # Hérite du constructeur parent
         super().__init__(
@@ -567,6 +569,8 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
+            truncation_data=truncation_data,
+
         )
 
     # -------------------------------------------------------------------------
@@ -614,7 +618,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         # Assemblage des entrées
         # -------------------------------------------------------------------------
         x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x, y_noised, batch_size=batch_size, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group
+            x, y_noised, batch_size, grid_shard_shapes, model_comm_group
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
