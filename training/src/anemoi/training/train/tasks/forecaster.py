@@ -223,4 +223,3 @@ class GraphForecaster(BaseRolloutGraphModule):
             loss = total_loss
 
             yield loss, metrics_next, y_pred
-
