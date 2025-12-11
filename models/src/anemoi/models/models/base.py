@@ -134,7 +134,10 @@ class BaseGraphModel(nn.Module):
             self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return self.multi_step * self.num_input_channels[dataset_name] + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+        return (
+            self.multi_step * self.num_input_channels[dataset_name]
+            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+        )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
