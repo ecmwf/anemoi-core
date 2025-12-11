@@ -219,6 +219,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
+    combined = "anemoi.training.losses.combined.CombinedLoss"
 
 
 class BaseLossSchema(BaseModel):
@@ -249,7 +250,6 @@ class HuberLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     losses: list[BaseLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
@@ -257,14 +257,14 @@ class CombinedLossSchema(BaseLossSchema):
 
     @field_validator("losses", mode="before")
     @classmethod
-    def add_empty_scalars(cls, losses: Any) -> Any:
-        """Add empty scalars to loss functions, as scalars can be set at top level."""
+    def add_empty_scalers(cls, losses: Any) -> Any:
+        """Add empty scalers to loss functions, as scalers can be set at top level."""
         from omegaconf.omegaconf import open_dict
 
         for loss in losses:
-            if "scalars" not in loss:
+            if "scalers" not in loss:
                 with open_dict(loss):
-                    loss["scalars"] = []
+                    loss["scalers"] = []
         return losses
 
     @model_validator(mode="after")

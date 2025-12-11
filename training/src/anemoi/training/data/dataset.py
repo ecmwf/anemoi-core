@@ -54,12 +54,11 @@ class NativeGridDataset:
         label : str, optional
             label for the dataset, by default "generic"
         """
-        self.label = label
-
         self.data = data_reader
-
         self.timestep = timestep
         self.grid_indices = grid_indices
+        self.label = label
+        self.relative_date_indices = relative_date_indices  # relative index of dates to extract
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_rank = 0
@@ -81,9 +80,6 @@ class NativeGridDataset:
         self.n_samples_per_worker = 0
         self.chunk_index_range: np.ndarray | None = None
         self.shuffle = shuffle
-
-        # relative index of dates to extract
-        self.relative_date_indices = relative_date_indices
 
     @cached_property
     def statistics(self) -> dict:

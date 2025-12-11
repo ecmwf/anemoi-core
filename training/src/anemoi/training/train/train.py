@@ -24,6 +24,7 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from packaging import version
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
@@ -44,6 +45,8 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
+
+PL_VERSION = version.parse(pl.__version__)
 
 
 class AnemoiTrainer(ABC):
@@ -229,7 +232,12 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = model_task.load_from_checkpoint(
+                    self.last_checkpoint,
+                    **kwargs,
+                    strict=False,
+                    weights_only=False,  # required for Pytorch Lightning 2.6
+                )
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
@@ -469,6 +477,7 @@ class AnemoiTrainer(ABC):
             LOGGER.info("Dry run: %s", self.dry_run)
 
     def prepare_compilation(self) -> None:
+
         if hasattr(self.config.model, "compile"):
             self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
         if hasattr(self.config.training, "recompile_limit"):
@@ -482,6 +491,28 @@ class AnemoiTrainer(ABC):
             convert_to_omegaconf(self.config).training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
+
+    @cached_property
+    def fit_parameters(self) -> Any:
+        """Options to be passed to trainer.fit().
+
+        This builds up different arguments based on the version of pytorch lightning.
+        From 2.6 onwards pytorch-lightning has now exposed the weights_only flag to be
+        consistent with Pytorch's behaviour.
+        Refer to https://docs.pytorch.org/docs/stable/generated/torch.load.html for more details.
+        `weights_only` does not refer to loading the optimizer. Pytorch_lightning controls this
+        via the checkpoint connector. If a ckpt_path is passed then all states are loaded. If no ckpt_path
+        is passed and just the `load_from_checkpoint` interface is used - then optimizer states are skipped.
+        """
+        params = {}
+
+        params["model"] = self.model
+        params["datamodule"] = self.datamodule
+        params["ckpt_path"] = None if (self.load_weights_only) else self.last_checkpoint
+
+        if version.parse("2.6.0") <= PL_VERSION:
+            params["weights_only"] = False
+        return params
 
     def train(self) -> None:
         """Training entry point."""
@@ -518,11 +549,7 @@ class AnemoiTrainer(ABC):
 
         LOGGER.debug("Starting training..")
 
-        trainer.fit(
-            self.model,
-            datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
-        )
+        trainer.fit(**self.fit_parameters)
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))

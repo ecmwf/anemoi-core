@@ -11,24 +11,20 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    from collections.abc import Mapping
 
-    from torch_geometric.data import HeteroData
+    import torch
 
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphForecaster(BaseGraphModule):
+class GraphForecaster(BaseRolloutGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
 
     def __init__(
@@ -138,7 +134,7 @@ class GraphForecaster(BaseGraphModule):
         ]
         return x
 
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: dict,
         rollout: int | None = None,
@@ -228,25 +224,3 @@ class GraphForecaster(BaseGraphModule):
 
             yield loss, metrics_next, y_pred
 
-    def _step(
-        self,
-        batch: dict,
-        validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
-        batch_dtype = next(iter(batch.values())).dtype
-        loss = torch.zeros(1, dtype=batch_dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
-
-        for loss_next, metrics_next, y_preds_next in self.rollout_step(
-            batch,
-            rollout=self.rollout,
-            validation_mode=validation_mode,
-        ):
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_preds_next)
-
-        loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds
