@@ -598,11 +598,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         metrics_next = {}
         if validation_mode:
             metrics_next = self._compute_metrics(
-                y_pred_full,
-                y_full,
-                grid_shard_slice=grid_shard_slice,
-                dataset_name=dataset_name,
-                **kwargs
+                y_pred_full, y_full, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name, **kwargs,
             )
 
         return loss, metrics_next, y_pred_full

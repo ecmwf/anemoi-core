@@ -130,7 +130,6 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             )
         return x
 
-
     def _compute_metrics(
         self,
         y_pred: torch.Tensor,
@@ -157,11 +156,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             Computed metrics
         """
         return self.calculate_val_metrics(
-            y_pred,
-            y,
-            step=step,
-            grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name
+            y_pred, y, step=step, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name,
         )
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
@@ -182,7 +177,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict, list]:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype= next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
