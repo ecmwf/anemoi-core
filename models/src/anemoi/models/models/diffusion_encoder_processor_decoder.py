@@ -163,7 +163,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
         return out
 
-    def _generate_noise_conditioning(self, sigma: torch.Tensor, dataset_name: str, edge_conditioning: bool = False) -> torch.Tensor:
+    def _generate_noise_conditioning(
+        self, sigma: torch.Tensor, dataset_name: str, edge_conditioning: bool = False
+    ) -> torch.Tensor:
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
 
@@ -171,22 +173,28 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             noise_cond,
             repeat=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
         )
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden])
+        c_hidden = self._make_noise_emb(
+            noise_cond, repeat=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden]
+        )
 
         if edge_conditioning:  # this is currently not used but could be useful for edge conditioning of GNN
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)]["edge_length"].shape[0],
+                repeat=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)][
+                    "edge_length"
+                ].shape[0],
             )
             c_hidden_to_data = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)]["edge_length"].shape[0],
+                repeat=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)][
+                    "edge_length"
+                ].shape[0],
             )
             c_hidden_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]["edge_length"].shape[
-                    0
-                ],
+                repeat=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)][
+                    "edge_length"
+                ].shape[0],
             )
         else:
             c_data_to_hidden = None
@@ -206,7 +214,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     ) -> torch.Tensor:
         # Multi-dataset case
         dataset_names = list(x.keys())
-    
+
         batch_size, ensemble_size = x[dataset_names[0]].shape[0], x[dataset_names[0]].shape[2]
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
@@ -218,15 +226,18 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         for dataset_name, sig in sigma.items():
             c_data[dataset_name], c_hidden[dataset_name], _, _, _ = self._generate_noise_conditioning(sig, dataset_name)
             shape_c_data[dataset_name] = get_shard_shapes(c_data[dataset_name], 0, model_comm_group=model_comm_group)
-            shape_c_hidden[dataset_name] = get_shard_shapes(c_hidden[dataset_name], 0, model_comm_group=model_comm_group)
+            shape_c_hidden[dataset_name] = get_shard_shapes(
+                c_hidden[dataset_name], 0, model_comm_group=model_comm_group
+            )
 
             c_data[dataset_name] = shard_tensor(c_data[dataset_name], 0, shape_c_data[dataset_name], model_comm_group)
-            c_hidden[dataset_name] = shard_tensor(c_hidden[dataset_name], 0, shape_c_hidden[dataset_name], model_comm_group)
+            c_hidden[dataset_name] = shard_tensor(
+                c_hidden[dataset_name], 0, shape_c_hidden[dataset_name], model_comm_group
+            )
 
             fwd_mapper_kwargs[dataset_name] = {"cond": (c_data[dataset_name], c_hidden[dataset_name])}
             processor_kwargs[dataset_name] = {"cond": c_hidden[dataset_name]}
             bwd_mapper_kwargs[dataset_name] = {"cond": (c_hidden[dataset_name], c_data[dataset_name])}
-
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
@@ -243,7 +254,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
             x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
-            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(
+                x_hidden_latent, 0, model_comm_group=model_comm_group
+            )
 
             x_data_latent, dataset_latents[dataset_name] = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
@@ -298,7 +311,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
             c_noise,
             model_comm_group=model_comm_group,
-            grid_shard_shapes=grid_shard_shapes
+            grid_shard_shapes=grid_shard_shapes,
         )  # calls forward ...
         D_x = {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
 
@@ -309,7 +322,10 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """Compute preconditioning factors."""
         c_skip = {key: sigma_data**2 / (sigma_value**2 + sigma_data**2) for key, sigma_value in sigma.items()}
-        c_out = {key: sigma_value * sigma_data / (sigma_value**2 + sigma_data**2) ** 0.5 for key, sigma_value in sigma.items()}
+        c_out = {
+            key: sigma_value * sigma_data / (sigma_value**2 + sigma_data**2) ** 0.5
+            for key, sigma_value in sigma.items()
+        }
         c_in = {key: 1.0 / (sigma_data**2 + sigma_value**2) ** 0.5 for key, sigma_value in sigma.items()}
         c_noise = {key: sigma_value.log() / 4.0 for key, sigma_value in sigma.items()}
 
