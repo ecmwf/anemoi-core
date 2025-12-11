@@ -92,8 +92,8 @@ residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
   step: -1 # use the latest step as skip connection
 #  _target_: anemoi.models.layers.residual.TruncatedConnection
-#  truncation_up_file_path: ${hardware.paths.truncation}/${hardware.files.truncation}
-#  truncation_down_file_path:  ${hardware.paths.truncation}/${hardware.files.truncation_inv}
+#  truncation_up_file_path: ${system.input.truncation}
+#  truncation_down_file_path:  ${system.input.truncation_inv}
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
