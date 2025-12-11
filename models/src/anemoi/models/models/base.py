@@ -49,6 +49,8 @@ class BaseGraphModel(nn.Module):
             Model configuration
         data_indices : dict
             Data indices
+        statistics : dict
+            Data statistics
         graph_data : HeteroData
             Graph definition
         """
@@ -81,7 +83,9 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build residual connection
-        self.residual = instantiate(model_config.model.residual, graph=graph_data)
+        self.residual = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.residual[dataset_name] = instantiate(model_config.model.residual, graph=graph_data[dataset_name])
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -95,6 +99,8 @@ class BaseGraphModel(nn.Module):
         self.num_input_channels_prognostic = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
+        self.input_dim = {}
+        self.input_dim_latent = {}
 
         for dataset_name, dataset_indices in data_indices.items():
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
@@ -102,6 +108,14 @@ class BaseGraphModel(nn.Module):
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
+            self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
+            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
+
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        return self.multi_step * self.num_input_channels[dataset_name] + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+
+    def _calculate_input_dim_latent(self, dataset_name: str) -> int:
+        return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
@@ -177,25 +191,6 @@ class BaseGraphModel(nn.Module):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
-    @property
-    def input_dim(self) -> dict[str, int]:
-        # Multi-dataset: create dictionary for input_dim
-        input_dim = {}
-        for dataset_name in self.num_input_channels.keys():
-            input_dim[dataset_name] = (
-                self.multi_step * self.num_input_channels[dataset_name]
-                + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-            )
-        return input_dim
-
-    @property
-    def input_dim_latent(self) -> dict[str, int]:
-        # Multi-dataset: create dictionary for input_dim_latent
-        input_dim_latent = {}
-        for dataset_name in self.node_attributes.keys():
-            input_dim_latent[dataset_name] = self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
-        return input_dim_latent
-
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
@@ -238,7 +233,7 @@ class BaseGraphModel(nn.Module):
 
     def predict_step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         pre_processors: nn.Module,
         post_processors: nn.Module,
         multi_step: int,
@@ -275,11 +270,12 @@ class BaseGraphModel(nn.Module):
         """
         with torch.no_grad():
 
-            assert (
-                len(batch.shape) == 4
-            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
-            # Dimensions are
-            # batch, timesteps, grid, variables
+            for dataset_name, dataset_batch in batch.items():
+                assert (
+                    len(dataset_batch.shape) == 4
+                ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {dataset_batch.shape}!"
+                # Dimensions are
+                # batch, timesteps, grid, variables
             x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
