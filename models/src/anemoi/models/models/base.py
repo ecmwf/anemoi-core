@@ -67,7 +67,14 @@ class BaseGraphModel(nn.Module):
         self.dataset_names = list(data_indices.keys())
 
         model_config = DotDict(model_config)
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_data = (
+            model_config.graph.data
+        )  # assumed to be all the same because this is how we construct the graphs
+        self._graph_name_hidden = (
+            model_config.graph.hidden
+        )  # assumed to be all the same because this is how we construct the graphs
+        self.multi_step = model_config.training.multistep_input
+        self.num_channels = model_config.model.num_channels
 
         self.num_channels = model_config.model.num_channels
         self.latent_skip = model_config.model.model.latent_skip
@@ -88,7 +95,9 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build residual connection
-        self._build_residual(model_config.model.residual)
+        self.residual = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.residual[dataset_name] = instantiate(model_config.model.residual, graph=graph_data[dataset_name])
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -105,9 +114,7 @@ class BaseGraphModel(nn.Module):
         self._internal_output_idx = {}
         self._decoding_forcing_input_idx = {}
         self.input_dim = {}
-        self.input_dim_latent = self._calculate_input_dim_latent()
-        self.target_dim = {}
-        self.output_dim = {}
+        self.input_dim_latent = {}
 
         for dataset_name, dataset_indices in data_indices.items():
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
@@ -124,35 +131,10 @@ class BaseGraphModel(nn.Module):
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
-            self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
-            self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
+            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
-
-    def _calculate_input_dim_latent(self) -> int:
-        """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
-
-    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
-        if isinstance(hidden_nodes_name, str):
-            assert (
-                hidden_nodes_name in self._graph_data.node_types
-            ), f"Hidden nodes name '{hidden_nodes_name}' not found in graph data node types {self._graph_data.node_types}"
-        elif isinstance(hidden_nodes_name, list):
-            for hidden_name in hidden_nodes_name:
-                self._assert_hidden_nodes_name(hidden_name)
-        else:
-            raise TypeError(f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}")
-
-    def _calculate_target_dim(self, dataset_name: str) -> int:
-        # Default behaviour is to pass the same input as to the encoder.
-        # TODO: abstract different options into the base class
-        return self._calculate_input_dim(dataset_name)
-
-    def _calculate_output_dim(self, dataset_name: str) -> int:
-        return self.n_step_output * self.num_output_channels[dataset_name]
+        return self.multi_step * self.num_input_channels[dataset_name] + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
@@ -191,27 +173,6 @@ class BaseGraphModel(nn.Module):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
-    def _resolve_in_out_sharded(
-        self,
-        dataset_names: list[str],
-        grid_shard_shapes: dict[str, Optional[list]] | None,
-    ) -> dict[str, bool]:
-        in_out_sharded: dict[str, bool] = {}
-        for dataset_name in dataset_names:
-            if grid_shard_shapes is None:
-                in_out_sharded[dataset_name] = False
-            else:
-                in_out_sharded[dataset_name] = grid_shard_shapes[dataset_name] is not None
-
-        return in_out_sharded
-
-    def _get_consistent_dim(self, x: dict[str, Tensor], dim: int) -> int:
-        dim_sizes = [_x.shape[dim] for _x in x.values()]
-        # Assert all datasets have the same sizes
-        assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
-
-        return dim_sizes[0]
-
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
@@ -224,11 +185,6 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
-
-    def _build_residual(self, residual_config: DotDict) -> None:
-        self.residual = torch.nn.ModuleDict()
-        for dataset_name in self.dataset_names:
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data)
 
     @abstractmethod
     def forward(
@@ -260,9 +216,9 @@ class BaseGraphModel(nn.Module):
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
-        pre_processors: nn.ModuleDict,
-        post_processors: nn.ModuleDict,
-        n_step_input: int,
+        pre_processors: nn.Module,
+        post_processors: nn.Module,
+        multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
@@ -280,7 +236,7 @@ class BaseGraphModel(nn.Module):
             Pre-processing module
         post_processors : nn.Module,
             Post-processing module
-        n_step_input : int,
+        multi_step : int,
             Number of input timesteps
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
@@ -295,48 +251,33 @@ class BaseGraphModel(nn.Module):
             Model output (after post-processing)
         """
         with torch.no_grad():
-            dataset_names = list(batch.keys())
 
-            for dataset_name in dataset_names:
+            for dataset_name, dataset_batch in batch.items():
                 assert (
-                    len(batch[dataset_name].shape) == 4
-                ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
-                # Dimensions are: batch, timesteps, grid, variables
-
-            x = {}
-            for dataset_name in dataset_names:
-                x[dataset_name] = batch[dataset_name][
-                    :, 0:n_step_input, None, ...
-                ]  # add dummy ensemble dimension as 3rd index
+                    len(dataset_batch.shape) == 4
+                ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {dataset_batch.shape}!"
+                # Dimensions are
+                # batch, timesteps, grid, variables
+            x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
             grid_shard_shapes = None
             if model_comm_group is not None:
-                grid_shard_shapes = {}
-                for dataset_name in dataset_names:
-                    shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
-                    grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
-                    x[dataset_name] = shard_tensor(x[dataset_name], -2, shard_shapes, model_comm_group)
+                shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
+                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
+                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
 
-            for dataset_name in dataset_names:
-                x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
+            x = pre_processors(x, in_place=False)
 
             # Perform forward pass
             y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
 
             # Apply post-processing
-            for dataset_name in dataset_names:
-                y_hat[dataset_name] = post_processors[dataset_name](y_hat[dataset_name], in_place=False)
+            y_hat = post_processors(y_hat, in_place=False)
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
-                for dataset_name in dataset_names:
-                    y_hat_shard_shapes = apply_shard_shapes(y_hat[dataset_name], -2, grid_shard_shapes[dataset_name])
-                    y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
+                y_hat_shard_shapes = apply_shard_shapes(y_hat, -2, grid_shard_shapes)
+                y_hat = gather_tensor(y_hat, -2, y_hat_shard_shapes, model_comm_group)
 
         return y_hat
-
-    @abstractmethod
-    def fill_metadata(self, md_dict) -> None:
-        """To be implemented in subclasses to fill model-specific metadata."""
-        pass
