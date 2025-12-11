@@ -49,7 +49,7 @@ class TestMultiScaleEdgesTransform:
     def tri_ico_graph(self) -> HeteroData:
         """Return a HeteroData object with MultiScaleEdges."""
         graph = HeteroData()
-        graph = TriNodes(1, "test_tri_nodes").update_graph(graph, {})
+        graph = TriNodes(2, "test_tri_nodes").update_graph(graph, {})
         graph["fail_nodes"].x = [1, 2, 3]
         graph["fail_nodes"].node_type = "FailNodes"
         return graph
