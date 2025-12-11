@@ -234,8 +234,8 @@ class BaseGraphModel(nn.Module):
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
-        pre_processors: nn.Module,
-        post_processors: nn.Module,
+        pre_processors: nn.ModuleDict,
+        post_processors: nn.ModuleDict,
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
@@ -269,33 +269,40 @@ class BaseGraphModel(nn.Module):
             Model output (after post-processing)
         """
         with torch.no_grad():
+            dataset_names = list(batch.keys())
 
-            for dataset_name, dataset_batch in batch.items():
+            for dataset_name in dataset_names:
                 assert (
-                    len(dataset_batch.shape) == 4
-                ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {dataset_batch.shape}!"
-                # Dimensions are
-                # batch, timesteps, grid, variables
-            x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+                    len(batch[dataset_name].shape) == 4
+                ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
+                # Dimensions are: batch, timesteps, grid, variables
+            
+            x = {}
+            for dataset_name in dataset_names:
+                x[dataset_name] = batch[dataset_name][:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
-            grid_shard_shapes = None
+            grid_shard_shapes = {}
             if model_comm_group is not None:
-                shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
-                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+                for dataset_name in dataset_names:
+                    shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
+                    grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
+                    x[dataset_name] = shard_tensor(x[dataset_name], -2, shard_shapes, model_comm_group)
 
-            x = pre_processors(x, in_place=False)
+            for dataset_name in dataset_names:
+                x[dataset_name] = pre_processors(x[dataset_name], in_place=False)
 
             # Perform forward pass
             y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
 
             # Apply post-processing
-            y_hat = post_processors(y_hat, in_place=False)
+            for dataset_name in dataset_names:
+                y_hat[dataset_name] = post_processors(y_hat[dataset_name], in_place=False)
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
-                y_hat_shard_shapes = apply_shard_shapes(y_hat, -2, grid_shard_shapes)
-                y_hat = gather_tensor(y_hat, -2, y_hat_shard_shapes, model_comm_group)
+                for dataset_name in dataset_names:
+                    y_hat_shard_shapes = apply_shard_shapes(y_hat[dataset_name], -2, grid_shard_shapes[dataset_name])
+                    y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
 
         return y_hat
