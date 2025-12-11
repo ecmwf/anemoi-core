@@ -186,11 +186,17 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
 
         for dataset_name in batch.keys():
-            x[dataset_name] = torch.cat([x[dataset_name]] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
+            x[dataset_name] = torch.cat(
+                [x[dataset_name]] * self.nens_per_device, dim=2,
+            )  # shape == (bs, ms, nens_per_device, latlon, nvar)
             LOGGER.debug("Shapes: x.shape = %s", list(x[dataset_name].shape))
 
-            assert len(x[dataset_name].shape) == 5, f"Expected a 5-dimensional tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
-            assert (x[dataset_name].shape[1] == self.multi_step) and (x[dataset_name].shape[2] == self.nens_per_device), (
+            assert (
+                len(x[dataset_name].shape) == 5
+            ), f"Expected a 5-dimensional tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
+            assert (x[dataset_name].shape[1] == self.multi_step) and (
+                x[dataset_name].shape[2] == self.nens_per_device
+            ), (
                 "Shape mismatch in x! "
                 f"Expected ({self.multi_step}, {self.nens_per_device}), "
                 f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
