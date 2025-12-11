@@ -13,8 +13,11 @@ import pytest
 import torch
 
 from anemoi.models.layers.conv import GraphTransformerConv
-from anemoi.models.triton.gt import GraphTransformerFunction
 from anemoi.models.triton.utils import edge_index_to_csc
+from anemoi.models.triton.utils import is_triton_available
+
+if is_triton_available():
+    from anemoi.models.triton.gt import GraphTransformerFunction
 
 
 @pytest.fixture(autouse=True)
