@@ -52,10 +52,23 @@ class EnsemblePlotMixin:
             Processed batch and predictions
         """
         # For ensemble models, batch is a tuple - allgather the full batch first
-        batch = pl_module.allgather_batch(batch)
+        batch = {
+            dataset: pl_module.allgather_batch(batch[dataset], pl_module.grid_indices[dataset], pl_module.grid_dim)
+            for dataset in batch
+        }
         # Extract ensemble predictions
         loss, y_preds = output
-        y_preds = [pl_module.allgather_batch(pred) for pred in y_preds]
+        y_preds = [
+            {
+                dataset: pl_module.allgather_batch(
+                    pred[dataset],
+                    pl_module.grid_indices[dataset],
+                    pl_module.grid_dim,
+                )
+                for dataset in pred
+            }
+            for pred in y_preds
+        ]
 
         # Return batch (normalized data) and structured output like regular forecaster
         return batch, [loss, y_preds]
@@ -71,6 +84,7 @@ class EnsemblePlotMixin:
     def process(
         self,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         outputs: list,
         batch: torch.Tensor,
         output_times: tuple,
@@ -101,23 +115,28 @@ class EnsemblePlotMixin:
         # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
         # but internal ones would be on the cpu), The lines below allow to address this problem
         if self.latlons is None:
-            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
+            self.latlons = {}
+
+        if dataset_name not in self.latlons:
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][
+                pl_module.model.model._graph_name_data
+            ].x.detach()
+            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         input_tensor = (
-            batch[
+            batch[dataset_name][
                 :,
                 pl_module.multi_step - 1 : pl_module.multi_step + output_times[0] + 1,
                 ...,
-                pl_module.data_indices.data.output.full,
+                pl_module.data_indices[dataset_name].data.output.full,
             ]
             .detach()
             .cpu()
         )
-        data = self.post_processors(input_tensor)[self.sample_idx]
+        data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
-                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[
+                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
                     self.sample_idx : self.sample_idx + 1,
                     members,
                     ...,
@@ -126,8 +145,8 @@ class EnsemblePlotMixin:
             ),
         )
 
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=-2, fill_value=np.nan)
+        output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
+        data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
         data = data.numpy()
 
         return data, output_tensor
@@ -159,16 +178,22 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for post_processor in self.post_processors.processors.values():
-                if hasattr(post_processor, "nan_locations"):
-                    post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
-            self.post_processors = self.post_processors.cpu()
+            for dataset_name in self.post_processors:
+                for post_processor in self.post_processors[dataset_name].processors.values():
+                    if hasattr(post_processor, "nan_locations"):
+                        post_processor.nan_locations = pl_module.allgather_batch(
+                            post_processor.nan_locations,
+                            pl_module.grid_indices[dataset_name],
+                            pl_module.grid_dim,
+                        )
+                self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
             output_times = self._get_output_times(self.config, pl_module)
 
             self.plot(
                 trainer,
                 pl_module,
+                self.dataset_names,
                 processed_output,
                 processed_batch,
                 batch_idx,
@@ -221,6 +246,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
         members: list | None = None,
         **kwargs: Any,
     ) -> None:
@@ -235,6 +261,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             colormaps,
             per_sample,
             every_n_batches,
+            dataset_names,
             **kwargs,
         )
         self.plot_members = members
@@ -244,6 +271,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_names: list[str],
         outputs: list[torch.Tensor],  # Now expects [loss, y_preds] format
         batch: torch.Tensor,
         batch_idx: int,
@@ -254,42 +282,49 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
         logger = trainer.logger
 
-        # Build dictionary of indices and parameters to be plotted
-        diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
-        plot_parameters_dict = {
-            pl_module.data_indices.model.output.name_to_index[name]: (name, name not in diagnostics)
-            for name in self.config.diagnostics.plot.parameters
-        }
+        for dataset_name in dataset_names:
 
-        data, output_tensor = self.process(
-            pl_module,
-            outputs,
-            batch,
-            output_times=output_times,
-            members=self.plot_members,
-        )
+            # Build dictionary of indices and parameters to be plotted
+            diagnostics = (
+                []
+                if self.config.data.datasets[dataset_name].diagnostic is None
+                else self.config.data.datasets[dataset_name].diagnostic
+            )
+            plot_parameters_dict = {
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name not in diagnostics)
+                for name in self.config.diagnostics.plot.parameters
+            }
 
-        local_rank = pl_module.local_rank
-        for rollout_step in range(output_times[0]):
-            fig = plot_predicted_ensemble(
-                parameters=plot_parameters_dict,
-                n_plots_per_sample=4,
-                latlons=self.latlons,
-                clevels=self.accumulation_levels_plot,
-                y_true=data[rollout_step + 1, ...].squeeze(),
-                y_pred=output_tensor[rollout_step, ...].squeeze(),
-                datashader=self.datashader_plotting,
-                precip_and_related_fields=self.precip_and_related_fields,
-                colormaps=self.colormaps,
+            data, output_tensor = self.process(
+                pl_module,
+                dataset_name,
+                outputs,
+                batch,
+                output_times=output_times,
+                members=self.plot_members,
             )
 
-            self._output_figure(
-                logger,
-                fig,
-                epoch=epoch,
-                tag=f"pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                exp_log_tag=f"pred_val_sample_rstep{rollout_step:02d}_rank{local_rank:01d}",
-            )
+            local_rank = pl_module.local_rank
+            for rollout_step in range(output_times[0]):
+                fig = plot_predicted_ensemble(
+                    parameters=plot_parameters_dict,
+                    n_plots_per_sample=4,
+                    latlons=self.latlons[dataset_name],
+                    clevels=self.accumulation_levels_plot,
+                    y_true=data[rollout_step + 1, ...].squeeze(),
+                    y_pred=output_tensor[rollout_step, ...].squeeze(),
+                    datashader=self.datashader_plotting,
+                    precip_and_related_fields=self.precip_and_related_fields,
+                    colormaps=self.colormaps,
+                )
+
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                    exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}",
+                )
 
 
 # Overload callbacks from single forecaster by using them with the first ensemble member
@@ -305,11 +340,12 @@ class PlotLoss(_PlotLoss):
         batch: torch.Tensor,
         batch_idx: int,
     ) -> None:
+        first_member_batch = {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}
         super().on_validation_batch_end(
             trainer,
             pl_module,
             outputs,
-            batch[:, :, 0, :, :],
+            first_member_batch,
             batch_idx,
         )
 
@@ -324,9 +360,10 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         parameters: list[str],
         min_delta: float | None = None,
         every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback."""
-        _PlotSpectrum.__init__(self, config, sample_idx, parameters, min_delta, every_n_batches)
+        _PlotSpectrum.__init__(self, config, sample_idx, parameters, min_delta, every_n_batches, dataset_names)
 
 
 class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
@@ -342,6 +379,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback."""
@@ -355,6 +393,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
             colormaps,
             per_sample,
             every_n_batches,
+            dataset_names,
             **kwargs,
         )
 
@@ -368,15 +407,31 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         sample_idx: int,
         parameters: list[str],
         precip_and_related_fields: list[str] | None = None,
+        log_scale: bool = False,
         every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback."""
-        _PlotHistogram.__init__(self, config, sample_idx, parameters, precip_and_related_fields, every_n_batches)
+        _PlotHistogram.__init__(
+            self,
+            config,
+            sample_idx,
+            parameters,
+            precip_and_related_fields,
+            log_scale,
+            every_n_batches,
+            dataset_names,
+        )
 
 
 class GraphTrainableFeaturesPlot(_GraphTrainableFeaturesPlot):
     """Visualize the node & edge trainable features for ensemble models."""
 
-    def __init__(self, config: DictConfig, every_n_epochs: int | None = None) -> None:
+    def __init__(
+        self,
+        config: DictConfig,
+        dataset_names: list[str] | None = None,
+        every_n_epochs: int | None = None,
+    ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback."""
-        _GraphTrainableFeaturesPlot.__init__(self, config, every_n_epochs)
+        _GraphTrainableFeaturesPlot.__init__(self, config, dataset_names, every_n_epochs)
