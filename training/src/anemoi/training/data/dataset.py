@@ -21,7 +21,6 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.training.data.grid_indices import BaseGridIndices
-from anemoi.training.utils.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +32,6 @@ class NativeGridDataset:
         self,
         data_reader: Callable,
         grid_indices: type[BaseGridIndices],
-        relative_date_indices: list,
         timestep: str = "6h",
         label: str = "generic",
     ) -> None:
@@ -45,8 +43,6 @@ class NativeGridDataset:
             user function that opens and returns the anemoi-datasets array data
         grid_indices : Type[BaseGridIndices]
             indices of the grid to keep. Defaults to None, which keeps all spatial indices.
-        relative_date_indices: list
-            list of time indices to load from the data relative to the current sample i in __iter__
         timestep : int, optional
             the time frequency of the samples, by default '6h'
         label : str, optional
@@ -56,7 +52,6 @@ class NativeGridDataset:
         self.timestep = timestep
         self.grid_indices = grid_indices
         self.label = label
-        self.relative_date_indices = relative_date_indices  # relative index of dates to extract
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_rank = 0
@@ -92,6 +87,11 @@ class NativeGridDataset:
             return None
 
     @cached_property
+    def variables(self) -> list[str]:
+        """Return dataset variables."""
+        return self.data.variables
+
+    @cached_property
     def metadata(self) -> dict:
         """Return dataset metadata."""
         return self.data.metadata()
@@ -115,20 +115,6 @@ class NativeGridDataset:
     def resolution(self) -> str:
         """Return dataset resolution."""
         return self.data.resolution
-
-    @cached_property
-    def valid_date_indices(self) -> np.ndarray:
-        """Return valid date indices.
-
-        A date t is valid if we can sample the elements t + i
-        for every relative_date_index i.
-        """
-        return get_usable_indices(
-            self.data.missing,
-            len(self.data),
-            np.array(self.relative_date_indices, dtype=np.int64),
-            self.data.trajectory_ids,
-        )
 
     def set_comm_group_info(
         self,
@@ -209,57 +195,20 @@ class NativeGridDataset:
             self.reader_group_rank,
         )
 
-    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
-        """Called by worker_init_func on each copy of dataset.
-
-        This initialises after the worker process has been spawned.
-
-        Parameters
-        ----------
-        n_workers : int
-            Number of workers
-        worker_id : int
-            Worker ID
-        """
-        # Divide this equally across shards (one shard per group!)
-        shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
-        shard_start = self.sample_comm_group_id * shard_size
-        shard_end = (self.sample_comm_group_id + 1) * shard_size
-
-        shard_len = shard_end - shard_start
-        self.n_samples_per_worker = shard_len // n_workers
-
-        low = shard_start + worker_id * self.n_samples_per_worker
-        high = min(shard_start + (worker_id + 1) * self.n_samples_per_worker, shard_end)
-        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
-
-        LOGGER.info(
-            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
-            worker_id,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            low,
-            high,
-        )
-
-    def get_sample(self, index: int) -> torch.Tensor:
-        start = index + self.relative_date_indices[0]
-        end = index + self.relative_date_indices[-1] + 1
-        timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
+    def get_sample(self, indices: int) -> torch.Tensor:
         # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
         # data[start...] will be replaced with data[self.relative_date_indices + i]
 
         grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory
-            x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
+            x = self.data[indices, :, :, grid_shard_indices]
 
         else:
             # Load full grid in CPU memory, select grid_shard after
             # Note that anemoi-datasets currently doesn't support slicing + indexing
             # in the same operation.
-            x = self.data[start:end:timeincrement, :, :, :]
+            x = self.data[indices, :, :, :]
             x = x[..., grid_shard_indices]  # select the grid shard
 
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
@@ -277,7 +226,5 @@ class NativeGridDataset:
         tree.add(f"Dataset: {self.data}")
         tree.add(f"Timestep: {self.timestep}")
         tree.add(f"Resolution: {self.resolution}")
-        tree.add(f"Relative dates: {self.relative_date_indices}")
         tree.add(f"Num variables: {len(self.name_to_index)}")
-        tree.add(f"Num samples: {len(self.valid_date_indices)}")
         return tree

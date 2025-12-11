@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import datetime
 import os
 import random
 from functools import cached_property
@@ -21,6 +22,7 @@ from torch.utils.data import IterableDataset
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
+from anemoi.training.utils.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,10 +63,6 @@ class MultiDataset(IterableDataset):
         self.timestep = timestep
         self.dataset_names = list(data_readers.keys())
 
-        # relative_date_indices are computed in terms of data frequency
-        # data_relative_date_indices are in terms of the specific dataset
-        data_relative_date_indices = [self.timeincrement * idx for idx in relative_date_indices]
-
         # Create individual NativeGridDataset for each dataset with its own grid_indices
         self.datasets = {}
         for name, data_reader in data_readers.items():
@@ -75,13 +73,13 @@ class MultiDataset(IterableDataset):
             self.datasets[name] = NativeGridDataset(
                 data_reader=data_reader,
                 grid_indices=grid_indices[name],
-                relative_date_indices=data_relative_date_indices,
                 timestep=timestep,
                 label=f"{label}_{name}",
             )
 
-        # Use the first dataset as the primary for shared properties
-        self.primary_dataset = next(iter(self.datasets.values()))
+        # relative_date_indices are computed in terms of data frequency
+        # data_relative_date_indices are in terms of the specific dataset
+        self.data_relative_date_indices = np.array([self.timeincrement * idx for idx in relative_date_indices], dtype=np.int64)
 
         LOGGER.info(
             "MultiDataset initialized with %d datasets (%s), %d valid indices each",
@@ -121,6 +119,16 @@ class MultiDataset(IterableDataset):
     def supporting_arrays(self) -> dict[str, dict]:
         """Return combined supporting arrays from all datasets."""
         return self._collect("supporting_arrays")
+
+    @cached_property
+    def variables(self) -> dict[str, list[str]]:
+        """Return combined variables from all datasets."""
+        return self._collect("variables")
+
+    @property
+    def data(self) -> dict:
+        """Return data from all datasets as dictionary."""
+        return self._collect("data")
 
     @cached_property
     def name_to_index(self) -> dict[str, dict]:
@@ -172,34 +180,131 @@ class MultiDataset(IterableDataset):
 
     @cached_property
     def valid_date_indices(self) -> np.ndarray:
-        """Return valid date indices from all datasets."""
-        valid_date_indices = self._collect("valid_date_indices")
-        reference_indices = None
-        for name, indices in valid_date_indices.items():
-            if reference_indices is None:
-                reference_indices = indices
-            assert all(
-                indices == reference_indices,
-            ), f"Dataset '{name}' has different valid_date_indices than other datasets"
-        return reference_indices
+        """Return valid date indices.
 
-    @property
-    def data(self) -> dict:
-        """Return data from all datasets as dictionary."""
-        return self._collect("data")
+        A date t is valid if we can sample the elements t + i
+        for every relative_date_index i.
+        """
+        valid_date_indices_ref = None
+        for ds in self.datasets.values():
+            valid_date_indices = get_usable_indices(
+                ds.data.missing,
+                len(ds.data),
+                self.data_relative_date_indices,
+                ds.data.trajectory_ids,
+            )
+            if valid_date_indices_ref is None:
+                valid_date_indices_ref = valid_date_indices
+            assert np.array_equal(valid_date_indices_ref, valid_date_indices), (
+                "Datasets have different valid_date_indices, cannot synchronize samples"
+            )
+        return valid_date_indices_ref
 
-    def set_comm_group_info(self, *args, **kwargs) -> None:
-        """Set communication group information for all datasets."""
-        self._apply_to_all_datasets("set_comm_group_info", *args, **kwargs)
+    def set_comm_group_info(
+        self,
+        global_rank: int,
+        model_comm_group_id: int,
+        model_comm_group_rank: int,
+        model_comm_num_groups: int,
+        reader_group_rank: int,
+        reader_group_size: int,
+    ) -> None:
+        """Set model and reader communication group information (called by DDPGroupStrategy).
 
-    def set_ens_comm_group_info(self, *args, **kwargs) -> None:
-        """Set ensemble communication group information for all datasets."""
-        self._apply_to_all_datasets("set_ens_comm_group_info", *args, **kwargs)
+        Parameters
+        ----------
+        global_rank : int
+            Global rank
+        model_comm_group_id : int
+            Model communication group ID
+        model_comm_group_rank : int
+            Model communication group rank
+        model_comm_num_groups : int
+            Number of model communication groups
+        reader_group_rank : int
+            Reader group rank
+        reader_group_size : int
+            Reader group size
+        """
+        self.global_rank = global_rank
+        self.model_comm_group_id = model_comm_group_id
+        self.model_comm_group_rank = model_comm_group_rank
+        self.model_comm_num_groups = model_comm_num_groups
+        self.reader_group_rank = reader_group_rank
+        self.reader_group_size = reader_group_size
+
+        self.sample_comm_group_id = model_comm_group_id
+        self.sample_comm_num_groups = model_comm_num_groups
+
+        assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
+
+        LOGGER.info(
+            "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
+            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
+            global_rank,
+            model_comm_group_id,
+            model_comm_group_rank,
+            model_comm_num_groups,
+            reader_group_rank,
+        )
+
+    def set_ens_comm_group_info(
+        self,
+        ens_comm_group_id: int,
+        ens_comm_group_rank: int,
+        ens_comm_num_groups: int,
+    ) -> None:
+        """Set ensemble communication group information (called by DDPGroupStrategy).
+
+        Parameters
+        ----------
+        ens_comm_group_id : int
+            Ensemble communication group ID
+        ens_comm_group_rank : int
+            Ensemble communication group rank
+        ens_comm_num_groups : int
+            Number of ensemble communication groups
+        """
+        self.ens_comm_group_id = ens_comm_group_id
+        self.ens_comm_group_rank = ens_comm_group_rank
+        self.ens_comm_num_groups = ens_comm_num_groups
+
+        LOGGER.info(
+            "NativeGridDataset.set_group_info(): global_rank %d, ens_comm_group_id %d, "
+            "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d",
+            self.global_rank,
+            ens_comm_group_id,
+            ens_comm_group_rank,
+            ens_comm_num_groups,
+            self.reader_group_rank,
+        )
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all datasets for this worker."""
         self.worker_id = worker_id
-        self._apply_to_all_datasets("per_worker_init", n_workers, worker_id)
+        
+        # Divide this equally across shards (one shard per group!)
+        shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
+        shard_start = self.sample_comm_group_id * shard_size
+        shard_end = (self.sample_comm_group_id + 1) * shard_size
+
+        shard_len = shard_end - shard_start
+        self.n_samples_per_worker = shard_len // n_workers
+
+        low = shard_start + worker_id * self.n_samples_per_worker
+        high = min(shard_start + (worker_id + 1) * self.n_samples_per_worker, shard_end)
+        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
+
+        LOGGER.info(
+            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
+            worker_id,
+            os.getpid(),
+            self.global_rank,
+            self.model_comm_group_id,
+            low,
+            high,
+        )
+
         base_seed = get_base_seed()
 
         torch.manual_seed(base_seed)
@@ -216,7 +321,11 @@ class MultiDataset(IterableDataset):
         )
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        return {name: dataset.get_sample(index) for name, dataset in self.datasets.items()}
+        start = index + self.data_relative_date_indices[0]
+        end = index + self.data_relative_date_indices[-1] + 1
+        timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
+        steps = slice(start, end, timeincrement)
+        return {name: dataset.get_sample(steps) for name, dataset in self.datasets.items()}
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
@@ -229,16 +338,14 @@ class MultiDataset(IterableDataset):
         """
         # Get the shuffled indices from the primary dataset
         # All datasets will use the same shuffled indices for synchronization
-        chunk_index_range = self.primary_dataset.chunk_index_range
-
         if self.shuffle:
             shuffled_chunk_indices = self.rng.choice(
                 self.valid_date_indices,
                 size=len(self.valid_date_indices),
                 replace=False,
-            )[chunk_index_range]
+            )[self.chunk_index_range]
         else:
-            shuffled_chunk_indices = self.valid_date_indices[chunk_index_range]
+            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
 
         LOGGER.debug(
             "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
