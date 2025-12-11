@@ -26,6 +26,8 @@ system:
     dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6.zarr
     truncation: ${data.resolution}-o32-linear.mat.npz
     truncation_inv: o32-${data.resolution}-linear.mat.npz
+    truncation_loss_path: null
+    truncation_loss: null
   hardware:
     accelerator: auto
     num_gpus_per_ensemble: 1
