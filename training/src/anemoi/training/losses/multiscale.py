@@ -32,11 +32,11 @@ class MultiscaleLossWrapper(BaseLoss):
 
     def __init__(
         self,
-        truncation_path: Path | str,
-        filenames: list[Path | str] | None,
+        per_scale_loss: BaseLoss,
         weights: list[float],
         keep_batch_sharded: bool,
-        per_scale_loss: BaseLoss,
+        truncation_path: Path | str | None = None,
+        filenames: list[Path | str] | None = None,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
