@@ -75,7 +75,6 @@ class MultiDataset(IterableDataset):
                 data_reader=data_reader,
                 grid_indices=grid_indices[name],
                 timestep=timestep,
-                label=f"{label}_{name}",
             )
 
         # relative_date_indices are computed in terms of data frequency
@@ -88,6 +87,26 @@ class MultiDataset(IterableDataset):
             ", ".join(self.dataset_names),
             len(self.valid_date_indices),
         )
+
+        # lazy init model and reader group info, will be set by the DDPGroupStrategy:
+        self.model_comm_group_rank = 0
+        self.model_comm_num_groups = 1
+        self.model_comm_group_id = 0
+        self.global_rank = 0
+
+        self.reader_group_rank = 0
+        self.reader_group_size = 1
+
+        self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
+        self.sample_comm_group_id = 0
+
+        self.ens_comm_group_rank = 0
+        self.ens_comm_num_groups = 1
+        self.ens_comm_group_id = 0
+
+        # additional state vars (lazy init)
+        self.n_samples_per_worker = 0
+        self.chunk_index_range: np.ndarray | None = None
 
     def _collect(self, attr_name: str) -> dict:
         """Helper method to collect attributes from all datasets."""
@@ -325,8 +344,8 @@ class MultiDataset(IterableDataset):
         start = index + self.data_relative_date_indices[0]
         end = index + self.data_relative_date_indices[-1] + 1
         timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
-        steps = slice(start, end, timeincrement)
-        return {name: dataset.get_sample(steps) for name, dataset in self.datasets.items()}
+        time_steps = slice(start, end, timeincrement)
+        return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
