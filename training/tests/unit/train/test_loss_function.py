@@ -535,8 +535,6 @@ def test_multi_scale(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, t
         per_scale_loss=per_scale_loss,
         weights=[1.0],
         keep_batch_sharded=False,
-        truncation_path=None,
-        filenames=[None],
     )
 
     pred, target, loss_result = loss_inputs_multiscale
@@ -557,8 +555,6 @@ def test_multiscale_loss_eqivalent_to_per_scale_loss() -> None:
         per_scale_loss=per_scale_loss,
         weights=[1.0],
         keep_batch_sharded=False,
-        truncation_path=None,
-        filenames=[None],
     )
 
     loss = multiscale_loss(pred, target)
