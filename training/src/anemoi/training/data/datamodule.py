@@ -127,7 +127,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         rollout = max(rollout_value, val_rollout)
         multi_step = self.config.training.multistep_input
-        return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
+        return list(range(multi_step + rollout))
 
     def add_trajectory_ids(self, data_reader: Callable) -> Callable:
         """Add trajectory IDs to data reader for forecast trajectory tracking."""
@@ -153,46 +153,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
         """Initialize grid indices for spatial sharding for each dataset."""
-        reader_group_size = self.config.dataloader.read_group_size
-
         grid_indices_dict = {}
 
         # Each dataset can have its own grid indices configuration
         grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
         for dataset_name, grid_config in grid_indices_config.items():
-            grid_indices = instantiate(grid_config, reader_group_size=reader_group_size)
+            grid_indices = instantiate(grid_config, reader_group_size=self.config.dataloader.read_group_size)
             grid_indices.setup(self.graph_data[dataset_name])
             grid_indices_dict[dataset_name] = grid_indices
 
         return grid_indices_dict
-
-    @cached_property
-    def timeincrement(self) -> int:
-        """Determine the step size relative to the data frequency."""
-        try:
-            frequency = frequency_to_seconds(self.config.data.frequency)
-        except ValueError as e:
-            msg = f"Error in data frequency, {self.config.data.frequency}"
-            raise ValueError(msg) from e
-
-        try:
-            timestep = frequency_to_seconds(self.config.data.timestep)
-        except ValueError as e:
-            msg = f"Error in timestep, {self.config.data.timestep}"
-            raise ValueError(msg) from e
-
-        assert timestep % frequency == 0, (
-            f"Timestep ({self.config.data.timestep} == {timestep}) isn't a "
-            f"multiple of data frequency ({self.config.data.frequency} == {frequency})."
-        )
-
-        LOGGER.info(
-            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
-            timestep // frequency,
-            frequency,
-            timestep,
-        )
-        return timestep // frequency
 
     @cached_property
     def ds_train(self) -> MultiDataset:

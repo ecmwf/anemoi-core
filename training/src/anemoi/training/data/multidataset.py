@@ -20,6 +20,7 @@ from torch.utils.data import IterableDataset
 
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +58,12 @@ class MultiDataset(IterableDataset):
         """
         self.label = label
         self.shuffle = shuffle
+        self.timestep = timestep
         self.dataset_names = list(data_readers.keys())
+
+        # relative_date_indices are computed in terms of data frequency
+        # data_relative_date_indices are in terms of the specific dataset 
+        data_relative_date_indices = [self.timeincrement * idx for idx in relative_date_indices]
 
         # Create individual NativeGridDataset for each dataset with its own grid_indices
         self.datasets = {}
@@ -69,9 +75,8 @@ class MultiDataset(IterableDataset):
             self.datasets[name] = NativeGridDataset(
                 data_reader=data_reader,
                 grid_indices=grid_indices[name],
-                relative_date_indices=relative_date_indices,
+                relative_date_indices=data_relative_date_indices,
                 timestep=timestep,
-                shuffle=self.shuffle,  # Will be overridden in __iter__
                 label=f"{label}_{name}",
             )
 
@@ -126,6 +131,44 @@ class MultiDataset(IterableDataset):
     def resolution(self) -> dict[str, str]:
         """Return combined resolution from all datasets."""
         return self._collect("resolution")
+
+    @cached_property
+    def frequency(self) -> datetime.timedelta:
+        """Return combined frequency from all datasets."""
+        freqs = self._collect("frequency")
+        freq_ref = None
+        for name, freq in freqs.items():
+            if freq_ref is None:
+                freq_ref = freq
+            assert freq == freq_ref, f"Dataset '{name}' has different frequency than other datasets"
+        return freq_ref
+
+    @cached_property
+    def timeincrement(self) -> int:
+        try:
+            frequency = frequency_to_seconds(self.frequency)
+        except ValueError as e:
+            msg = f"Error in data frequency, {self.frequency}"
+            raise ValueError(msg) from e
+
+        try:
+            timestep = frequency_to_seconds(self.timestep)
+        except ValueError as e:
+            msg = f"Error in timestep, {self.timestep}"
+            raise ValueError(msg) from e
+
+        assert timestep % frequency == 0, (
+            f"Timestep ({self.timestep} == {timestep}) isn't a "
+            f"multiple of data frequency ({self.frequency} == {frequency})."
+        )
+
+        LOGGER.info(
+            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
+            timestep // frequency,
+            frequency,
+            timestep,
+        )
+        return timestep // frequency
 
     @cached_property
     def valid_date_indices(self) -> np.ndarray:

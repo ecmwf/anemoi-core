@@ -10,6 +10,7 @@
 
 import logging
 import os
+import datetime
 from collections.abc import Callable
 from functools import cached_property
 
@@ -34,7 +35,6 @@ class NativeGridDataset:
         grid_indices: type[BaseGridIndices],
         relative_date_indices: list,
         timestep: str = "6h",
-        shuffle: bool = True,
         label: str = "generic",
     ) -> None:
         """Initialize (part of) the dataset state.
@@ -49,8 +49,6 @@ class NativeGridDataset:
             list of time indices to load from the data relative to the current sample i in __iter__
         timestep : int, optional
             the time frequency of the samples, by default '6h'
-        shuffle : bool, optional
-            Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "generic"
         """
@@ -79,7 +77,6 @@ class NativeGridDataset:
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
         self.chunk_index_range: np.ndarray | None = None
-        self.shuffle = shuffle
 
     @cached_property
     def statistics(self) -> dict:
@@ -98,6 +95,11 @@ class NativeGridDataset:
     def metadata(self) -> dict:
         """Return dataset metadata."""
         return self.data.metadata()
+
+    @cached_property
+    def frequency(self) -> datetime.timedelta:
+        """Return dataset frequency."""
+        return self.data.frequency
 
     @cached_property
     def supporting_arrays(self) -> dict:
@@ -259,6 +261,7 @@ class NativeGridDataset:
             # in the same operation.
             x = self.data[start:end:timeincrement, :, :, :]
             x = x[..., grid_shard_indices]  # select the grid shard
+
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
 
         return torch.from_numpy(x)
