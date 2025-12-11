@@ -246,11 +246,11 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    truncation_path: str
-    filenames: list[str | None]
+    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
     weights: list[float]
     keep_batch_sharded: bool
-    internal_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
+    truncation_path: str
+    filenames: list[str | None]
 
     @field_validator("weights")
     @classmethod

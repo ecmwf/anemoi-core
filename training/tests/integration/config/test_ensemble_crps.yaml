@@ -6,7 +6,8 @@ system:
     graph: anemoi-integration-tests/training/graphs/lam-graph.pt
     truncation: null
     truncation_inv: null
-    truncation_loss_path: ["anemoi-integration-tests/training/assets/trunc_o48-o32.npz",  None]
+    truncation_loss_path: "anemoi-integration-tests/training/assets/"
+    truncation_loss: ["trunc_o48-o32.npz",  None]
 
 dataloader:
   training:
