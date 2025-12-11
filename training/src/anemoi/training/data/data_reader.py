@@ -8,9 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
+import datetime
 import logging
 import os
-import datetime
 from collections.abc import Callable
 from functools import cached_property
 
