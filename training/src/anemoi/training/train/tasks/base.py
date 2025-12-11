@@ -162,12 +162,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # Handle dictionary of graph_data
         graph_data = {name: data.to(self.device) for name, data in graph_data.items()}
+        self.dataset_names = list(graph_data.keys())
+
         # Create output_mask dictionary for each dataset
         self.output_mask = {}
-        for name, data in graph_data.items():
+        for name in self.dataset_names:
             self.output_mask[name] = instantiate(
                 config.model_dump(by_alias=True).model.output_mask,
-                graph_data=data,
+                graph_data=graph_data[name],
             )
 
         # Handle supporting_arrays merge for multi-dataset
@@ -209,7 +211,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
-        for dataset_name in graph_data:
+        for dataset_name in self.dataset_names:
             self.latlons_data[dataset_name] = graph_data[dataset_name][config.graph.data].x
 
             # Create dataset-specific metadata extractor
@@ -279,7 +281,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.grid_indices = {}
         grid_indices_configs = get_multiple_datasets_config(self.config.dataloader.grid_indices)
-        for dataset_name in graph_data:
+        for dataset_name in self.dataset_names:
             self.grid_indices[dataset_name] = instantiate(
                 grid_indices_configs[dataset_name],
                 reader_group_size=reader_group_size,
@@ -514,9 +516,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         # Handle multi-dataset case
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
-        loss_fn = self.loss[dataset_name]
 
-        return loss_fn(
+        return self.loss[dataset_name](
             y_pred,
             y,
             grid_shard_slice=grid_shard_slice,
@@ -547,15 +548,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Computed metrics
         """
-        return self.calculate_val_metrics(
-            y_pred,
-            y,
-            rollout_step,
-            grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name,
-        )
+        return self.calculate_val_metrics(y_pred, y, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name)
 
-    def compute_loss_metrics(
+    def compute_dataset_loss_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
@@ -587,8 +582,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred,
             y,
-            validation_mode,
-            dataset_name,
+            validation_mode=validation_mode,
+            dataset_name=dataset_name,
         )
 
         loss = self._compute_loss(
@@ -602,9 +597,61 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(y_pred_full, y_full, grid_shard_slice, dataset_name, **kwargs)
+            metrics_next = self._compute_metrics(
+                y_pred_full,
+                y_full,
+                grid_shard_slice=grid_shard_slice,
+                dataset_name=dataset_name,
+                **kwargs
+            )
 
         return loss, metrics_next, y_pred_full
+
+    def compute_loss_metrics(
+        self,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        validation_mode: bool = False,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """Compute loss and metrics for the given predictions and targets.
+
+        Parameters
+        ----------
+        y_pred : dict[str, torch.Tensor]
+            Predicted values
+        y : dict[str, torch.Tensor]
+            Target values
+        step : int, optional
+            Current step
+        validation_mode : bool, optional
+            Whether to compute validation metrics
+        **kwargs
+            Additional arguments to pass to loss computation
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
+            Loss, metrics dictionary (if validation_mode), and full predictions
+        """
+        # Prepare tensors for loss/metrics computation
+        total_loss, metrics_next, y_preds = None, {}, {}
+        for dataset_name in self.dataset_names:
+            dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
+                y_pred[dataset_name],
+                y[dataset_name],
+                validation_mode,
+                dataset_name,
+                **kwargs,
+            )
+
+            total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
+
+            # Prefix dataset name to metric keys
+            for metric_name, metric_value in dataset_metrics.items():
+                metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
+
+        return total_loss, metrics_next, y_preds
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -814,7 +861,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return metrics
 
-    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         del batch_idx
 
         train_loss, *_ = self._step(batch)
@@ -835,24 +882,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return train_loss
 
-    def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
         """Calculate the loss over a validation batch using the training loss function.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Validation batch
         batch_idx : int
             Batch inces
-
         """
         del batch_idx
 
         with torch.no_grad():
             val_loss, metrics, *args = self._step(batch, validation_mode=True)
-
-        # Get batch size (handle dict of tensors)
-        batch_size = next(iter(batch.values())).shape[0]
 
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
