@@ -168,7 +168,11 @@ class RolloutEvalEns(RolloutEval):
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
-            context = torch.autocast(device_type=next(iter(batch.values())).device.type, dtype=dtype) if dtype is not None else nullcontext()
+            context = (
+                torch.autocast(device_type=next(iter(batch.values())).device.type, dtype=dtype)
+                if dtype is not None
+                else nullcontext()
+            )
 
             with context:
                 self._eval(pl_module, batch)

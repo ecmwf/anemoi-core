@@ -77,12 +77,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
     def _assemble_input(
-        self,
-        x: torch.Tensor,
-        batch_size: int,
-        grid_shard_shapes = None,
-        model_comm_group = None,
-        dataset_name: str = None
+        self, x: torch.Tensor, batch_size: int, grid_shard_shapes=None, model_comm_group=None, dataset_name: str = None
     ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
@@ -117,7 +112,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch_size: int,
         ensemble_size: int,
         dtype: torch.dtype,
-        dataset_name: str
+        dataset_name: str,
     ):
         x_out = (
             einops.rearrange(
@@ -212,7 +207,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                x[dataset_name], 
+                x[dataset_name],
                 batch_size=batch_size,
                 grid_shard_shapes=grid_shard_shapes,
                 model_comm_group=model_comm_group,

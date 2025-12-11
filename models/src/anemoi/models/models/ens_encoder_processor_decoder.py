@@ -9,7 +9,6 @@
 
 
 import logging
-from math import e
 from typing import Optional
 
 import einops
@@ -67,9 +66,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         fcstep: int,
         batch_ens_size: int,
         grid_shard_shapes: dict = None,
-        model_comm_group = None,
-        dataset_name: str = None
-    ):        
+        model_comm_group=None,
+        dataset_name: str = None,
+    ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_ens_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name]
@@ -87,7 +86,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
-                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep
+                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
             ),
             dim=-1,  # feature dimension
         )
@@ -114,18 +113,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         batch_size: int,
         batch_ens_size: int,
         dtype: torch.dtype,
-        dataset_name: str = None
+        dataset_name: str = None,
     ):
         ensemble_size = batch_ens_size // batch_size
         x_out = (
-            einops.rearrange(
-                x_out,
-                "(bs e n) f -> bs e n f",
-                bs=batch_size,
-                e=ensemble_size
-            )
-            .to(dtype=dtype)
-            .clone()
+            einops.rearrange(x_out, "(bs e n) f -> bs e n f", bs=batch_size, e=ensemble_size).to(dtype=dtype).clone()
         )
 
         # residual connection (just for the prognostic variables)
@@ -196,12 +188,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                x[dataset_name], 
+                x[dataset_name],
                 fcstep=fcstep,
-                batch_ens_size=batch_ens_size, 
+                batch_ens_size=batch_ens_size,
                 grid_shard_shapes=grid_shard_shapes,
-                model_comm_group=model_comm_group, 
-                dataset_name=dataset_name
+                model_comm_group=model_comm_group,
+                dataset_name=dataset_name,
             )
             x_skip_dict[dataset_name] = x_skip
             x_data_latent_dict[dataset_name] = x_data_latent
