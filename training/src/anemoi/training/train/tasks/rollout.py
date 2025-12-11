@@ -87,30 +87,31 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         x: torch.Tensor,
         y_pred: torch.Tensor,
         batch: torch.Tensor,
-        rollout_step: int,
+        rollout_step: int = 0,
+        dataset_name: str | None = None,
     ) -> torch.Tensor:
         x = x.roll(-1, dims=1)
 
         # Get prognostic variables
-        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
+        x[:, -1, :, :, self.data_indices[dataset_name].model.input.prognostic] = y_pred[
             ...,
-            self.data_indices.model.output.prognostic,
+            self.data_indices[dataset_name].model.output.prognostic,
         ]
 
-        x[:, -1] = self.output_mask.rollout_boundary(
+        x[:, -1] = self.output_mask[dataset_name].rollout_boundary(
             x[:, -1],
             batch[:, self.multi_step + rollout_step],
-            self.data_indices,
+            self.data_indices[dataset_name],
             grid_shard_slice=self.grid_shard_slice,
         )
 
         # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
+        x[:, -1, :, :, self.data_indices[dataset_name].model.input.forcing] = batch[
             :,
             self.multi_step + rollout_step,
             :,
             :,
-            self.data_indices.data.input.forcing,
+            self.data_indices[dataset_name].data.input.forcing,
         ]
         return x
 
@@ -126,7 +127,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
                 x[dataset_name],
                 y_pred[dataset_name],
                 batch[dataset_name],
-                rollout_step,
+                rollout_step=rollout_step,
+                dataset_name=dataset_name,
             )
         return x
 

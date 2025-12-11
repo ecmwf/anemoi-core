@@ -38,6 +38,7 @@ from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from torch_geometric import data
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -835,11 +836,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for metric_name, metric in metrics_dict.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric{suffix}"] = metric(y_pred_postprocessed, y_postprocessed)
+                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
-            for mkey, indices in self.val_metric_ranges.items():
-                metric_step_name = f"{metric_name}_metric/{mkey}{suffix}"
+            for mkey, indices in val_metric_ranges.items():
+                metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
                 if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
