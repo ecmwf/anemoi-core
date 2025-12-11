@@ -83,9 +83,11 @@ The following missing config options which must be overridden by users:
 
 For datsets you can either pass an absolute path or a relative path
 (excluding the file format (ex: .zarr)). This functionality requires to
-have the settings.toml correctly configured (!TODO add link)
+have the settings.toml correctly configured `see anemoi-datasets docs
+for more information on how to do so
+<https://anemoi.readthedocs.io/projects/datasets/en/latest/using/configuration.html#configuration>`__
 
-Root can be left empty (if set to Null or '') then the current working
+Root can be left empty (if set to Null or "") then the current working
 directory will be used. Output paths for checkpoints, logs, profiler
 outputs and plots are built using the root path as base.
 
