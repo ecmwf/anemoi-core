@@ -76,7 +76,7 @@ class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for StretchedTriNodes."""
 
     def add_edges(
-        self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int], new_method: bool = False
+        self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]
     ) -> NodeStorage:
         from anemoi.graphs.generate import tri_icosahedron
         from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
