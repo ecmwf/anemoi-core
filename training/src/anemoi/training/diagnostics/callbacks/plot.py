@@ -813,7 +813,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         **kwargs,
     ) -> None:
 
-        self.plot(trainer, pl_module, epoch=trainer.current_epoch, **kwargs)
+        self.plot(trainer, pl_module, self.dataset_names, epoch=trainer.current_epoch, **kwargs)
 
 
 class PlotLoss(BasePerBatchPlotCallback):
@@ -979,11 +979,11 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             for rollout_step in range(output_times[0]):
                 y_hat = outputs[1][rollout_step][dataset_name]
-                y_true = batch[
+                y_true = batch[dataset_name][
                     :,
                     pl_module.multi_step + rollout_step,
                     ...,
-                    pl_module.data_indices.data.output.full,
+                    data_indices.data.output.full,
                 ]
                 loss = self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy()
 
@@ -1051,8 +1051,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons.cpu().numpy())
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][pl_module.model.model._graph_name_data].x.detach()
+            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         input_tensor = (
@@ -1166,7 +1166,7 @@ class PlotSample(BasePlotAdditionalMetrics):
 
             local_rank = pl_module.local_rank
 
-            for rollout_step in range(output_times[0):
+            for rollout_step in range(output_times[0]):
 
                 init_step = self._get_init_step(rollout_step, output_times[1])
                 fig = plot_predicted_multilevel_flat_sample(

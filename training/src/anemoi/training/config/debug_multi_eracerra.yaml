@@ -1,7 +1,7 @@
 defaults:
 - data: multi
 - dataloader: multi
-- diagnostics: evaluation
+- diagnostics: evaluation_multi
 - system: example
 - graph: multi_scale
 - model: graphtransformer
@@ -51,8 +51,8 @@ system:
     num_gpus_per_model: 1
 
 diagnostics:
-  plot:
-    callbacks: []
+  # plot:
+  #   callbacks: []
   log:
     mlflow:
       enabled: False
