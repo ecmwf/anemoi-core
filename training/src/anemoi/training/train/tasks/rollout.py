@@ -158,7 +158,11 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             Computed metrics
         """
         return self.calculate_val_metrics(
-            y_pred, y, step=step, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name,
+            y_pred,
+            y,
+            step=step,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
         )
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:

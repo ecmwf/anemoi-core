@@ -38,7 +38,6 @@ from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from torch_geometric import data
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -599,7 +598,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         metrics_next = {}
         if validation_mode:
             metrics_next = self._compute_metrics(
-                y_pred_full, y_full, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name, **kwargs,
+                y_pred_full,
+                y_full,
+                grid_shard_slice=grid_shard_slice,
+                dataset_name=dataset_name,
+                **kwargs,
             )
 
         return loss, metrics_next, y_pred_full
