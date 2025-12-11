@@ -187,7 +187,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         for dataset_name in batch.keys():
             x[dataset_name] = torch.cat(
-                [x[dataset_name]] * self.nens_per_device, dim=2,
+                [x[dataset_name]] * self.nens_per_device,
+                dim=2,
             )  # shape == (bs, ms, nens_per_device, latlon, nvar)
             LOGGER.debug("Shapes: x.shape = %s", list(x[dataset_name].shape))
 

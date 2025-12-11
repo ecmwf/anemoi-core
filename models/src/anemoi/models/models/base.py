@@ -279,10 +279,12 @@ class BaseGraphModel(nn.Module):
                     len(batch[dataset_name].shape) == 4
                 ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
                 # Dimensions are: batch, timesteps, grid, variables
-            
+
             x = {}
             for dataset_name in dataset_names:
-                x[dataset_name] = batch[dataset_name][:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+                x[dataset_name] = batch[dataset_name][
+                    :, 0:multi_step, None, ...
+                ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
             grid_shard_shapes = {}
