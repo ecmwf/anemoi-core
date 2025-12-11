@@ -359,7 +359,7 @@ class MlflowSchema(BaseModel):
     max_params_length: int = MAX_PARAMS_LENGTH
     "Maximum number of hpParams to be logged with mlflow"
     save_dir: str | None = None
-    "Directory to save logs to when offline=True, default=config.hardware.paths.logs.mlflow"
+    "Directory to save logs to when offline=True, default={system.output.root}/{system.output.logs.mlflow}"
 
     @root_validator(pre=True)
     def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
