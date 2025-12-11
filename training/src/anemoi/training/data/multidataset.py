@@ -62,7 +62,7 @@ class MultiDataset(IterableDataset):
         self.dataset_names = list(data_readers.keys())
 
         # relative_date_indices are computed in terms of data frequency
-        # data_relative_date_indices are in terms of the specific dataset 
+        # data_relative_date_indices are in terms of the specific dataset
         data_relative_date_indices = [self.timeincrement * idx for idx in relative_date_indices]
 
         # Create individual NativeGridDataset for each dataset with its own grid_indices
