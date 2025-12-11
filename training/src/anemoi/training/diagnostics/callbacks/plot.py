@@ -345,7 +345,12 @@ class BasePerEpochPlotCallback(BasePlotCallback):
             output_times = self._get_output_times(self.config, pl_module)
 
             self.plot(
-                trainer, pl_module, self.dataset_names, epoch=trainer.current_epoch, output_times=output_times, **kwargs,
+                trainer,
+                pl_module,
+                self.dataset_names,
+                epoch=trainer.current_epoch,
+                output_times=output_times,
+                **kwargs,
             )
 
 
