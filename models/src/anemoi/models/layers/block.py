@@ -34,9 +34,12 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
-from anemoi.models.triton.gt import GraphTransformerFunction
 from anemoi.models.triton.utils import edge_index_to_csc
+from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
+
+if is_triton_available():
+    from anemoi.models.triton.gt import GraphTransformerFunction
 
 LOGGER = logging.getLogger(__name__)
 
@@ -521,11 +524,16 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             "pyg",
         ], f"Backend {self.graph_attention_backend} not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
 
+        if not is_triton_available():
+            LOGGER.warning(
+                f"{self.__class__.__name__} requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend."
+            )
+            self.graph_attention_backend = "pyg"
+
         if self.graph_attention_backend == "triton":
             LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
             self.conv = GraphTransformerFunction.apply
         else:
-            LOGGER.warning(f"{self.__class__.__name__} using pyg graph attention backend, consider using 'triton'.")
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):

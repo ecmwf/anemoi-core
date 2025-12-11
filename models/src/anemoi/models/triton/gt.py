@@ -9,8 +9,16 @@
 
 
 import torch
-import triton
-import triton.language as tl
+
+# check if triton is installed
+# If pytorch is installed on CPU then torch is not available
+try:
+    import triton
+    import triton.language as tl
+except ImportError:
+    raise ValueError(
+        "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
+    )
 
 
 @triton.jit
@@ -291,6 +299,12 @@ def _gt_bwd_src_pass(
 
 class GraphTransformerFunction(torch.autograd.Function):
     """Custom autograd for GraphTransformer using Triton kernels."""
+
+    def __init__(self):
+        if not torch.cuda.is_available():
+            raise ValueError(
+                "Error. The 'triton' backend was selected for the GraphTransformer but 'torch.cuda.is_available()' returned 'False'. The 'triton' backend is currently only supported on GPUs. To run on other device types, please select a different backend for the GraphTransformer in the models config. If you intend to run on GPUs, please ensure your torch install supports running on GPUs."
+            )
 
     @staticmethod
     def forward(ctx, q, k, v, e, csc, reverse):
