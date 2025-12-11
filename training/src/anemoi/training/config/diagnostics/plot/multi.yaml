@@ -56,7 +56,7 @@ callbacks:
       sfc_wind: [10u, 10v]
     every_n_batches: ${diagnostics.plot.frequency.batch}
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
-    dataset_names: ["era5"] 
+    dataset_names: ["era5"]
     sample_idx: ${diagnostics.plot.sample_idx}
     per_sample : 6
     parameters: ${diagnostics.plot.parameters}

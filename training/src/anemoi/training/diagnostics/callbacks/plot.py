@@ -344,7 +344,9 @@ class BasePerEpochPlotCallback(BasePlotCallback):
 
             output_times = self._get_output_times(self.config, pl_module)
 
-            self.plot(trainer, pl_module, self.dataset_names, epoch=trainer.current_epoch, output_times=output_times, **kwargs)
+            self.plot(
+                trainer, pl_module, self.dataset_names, epoch=trainer.current_epoch, output_times=output_times, **kwargs,
+            )
 
 
 class LongRolloutPlots(BasePlotCallback):
@@ -1051,7 +1053,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][pl_module.model.model._graph_name_data].x.detach()
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][
+                pl_module.model.model._graph_name_data
+            ].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
@@ -1339,7 +1343,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
-
 
             for rollout_step in range(output_times[0]):
 
