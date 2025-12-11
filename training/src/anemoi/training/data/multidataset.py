@@ -79,7 +79,8 @@ class MultiDataset(IterableDataset):
         # relative_date_indices are computed in terms of data frequency
         # data_relative_date_indices are in terms of the specific dataset
         self.data_relative_date_indices = np.array(
-            [self.timeincrement * idx for idx in relative_date_indices], dtype=np.int64,
+            [self.timeincrement * idx for idx in relative_date_indices],
+            dtype=np.int64,
         )
 
         LOGGER.info(
@@ -217,7 +218,8 @@ class MultiDataset(IterableDataset):
             if valid_date_indices_ref is None:
                 valid_date_indices_ref = valid_date_indices
             assert np.array_equal(
-                valid_date_indices_ref, valid_date_indices,
+                valid_date_indices_ref,
+                valid_date_indices,
             ), "Datasets have different valid_date_indices, cannot synchronize samples"
         return valid_date_indices_ref
 
