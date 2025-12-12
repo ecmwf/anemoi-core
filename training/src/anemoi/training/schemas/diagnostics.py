@@ -460,7 +460,11 @@ class BenchmarkProfilerSchema(BaseModel):
 
 
 class ProgressBarSchema(BaseModel):
-    target_: Literal["pytorch_lightning.callbacks.TQDMProgressBar"] = Field(alias="_target_")
+    target_: Literal[
+        "pytorch_lightning.callbacks.TQDMProgressBar",
+        "pytorch_lightning.callbacks.RichProgressBar",
+        "anemoi.training.diagnostics.profilers.ProfilerProgressBar",
+    ] = Field(alias="_target_")
     "TQDMProgressBar object from pytorch lightning."
     refresh_rate: PositiveInt = Field(default=1)
     "Refresh rate of the progress bar."
