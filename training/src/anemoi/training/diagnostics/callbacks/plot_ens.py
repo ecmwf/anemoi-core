@@ -41,8 +41,8 @@ class EnsemblePlotMixin:
     def _handle_ensemble_batch_and_output(
         self,
         pl_module: pl.LightningModule,
-        output: list[torch.Tensor],
-        batch: torch.Tensor,
+        output: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Handle ensemble batch and output structure.
 
@@ -85,8 +85,8 @@ class EnsemblePlotMixin:
         self,
         pl_module: pl.LightningModule,
         dataset_name: str,
-        outputs: list,
-        batch: torch.Tensor,
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         output_times: tuple,
         members: Union[int, list[int]] = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -159,8 +159,8 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        output: list[torch.Tensor],
-        batch: torch.Tensor,
+        output: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         **kwargs,
     ) -> None:
@@ -272,8 +272,8 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: list[torch.Tensor],  # Now expects [loss, y_preds] format
-        batch: torch.Tensor,
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
         output_times: tuple,
@@ -336,8 +336,8 @@ class PlotLoss(_PlotLoss):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: Any,
-        batch: torch.Tensor,
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
     ) -> None:
         first_member_batch = {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}

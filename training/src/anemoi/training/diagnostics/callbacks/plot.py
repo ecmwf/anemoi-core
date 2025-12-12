@@ -260,8 +260,8 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        output: list[torch.Tensor],
-        batch: torch.Tensor,
+        output: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         **kwargs,
     ) -> None:
@@ -345,7 +345,12 @@ class BasePerEpochPlotCallback(BasePlotCallback):
             output_times = self._get_output_times(self.config, pl_module)
 
             self.plot(
-                trainer, pl_module, self.dataset_names, epoch=trainer.current_epoch, output_times=output_times, **kwargs,
+                trainer,
+                pl_module,
+                self.dataset_names,
+                epoch=trainer.current_epoch,
+                output_times=output_times,
+                **kwargs,
             )
 
 
@@ -950,8 +955,8 @@ class PlotLoss(BasePerBatchPlotCallback):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
         output_times: tuple,
@@ -1007,8 +1012,8 @@ class PlotLoss(BasePerBatchPlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        output: list[torch.Tensor],
-        batch: torch.Tensor,
+        output: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
     ) -> None:
 
@@ -1044,8 +1049,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         self,
         pl_module: pl.LightningModule,
         dataset_name: str,
-        outputs: list,
-        batch: torch.Tensor,
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         output_times: tuple,
     ) -> tuple[np.ndarray, np.ndarray]:
 
@@ -1143,8 +1148,8 @@ class PlotSample(BasePlotAdditionalMetrics):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
         output_times: tuple,
@@ -1236,8 +1241,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
         output_times: tuple,
@@ -1331,8 +1336,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
         output_times: tuple,
