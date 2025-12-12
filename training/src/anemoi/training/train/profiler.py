@@ -285,8 +285,8 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
+        self.config.diagnostics.progress_bar._target_ = ProfilerProgressBar
         callbacks = super().callbacks
-        callbacks.append(ProfilerProgressBar())
         if self.config.diagnostics.benchmark_profiler.snapshot.enabled:
             from anemoi.training.diagnostics.callbacks.profiler import MemorySnapshotRecorder
             from anemoi.training.diagnostics.profilers import check_torch_version
