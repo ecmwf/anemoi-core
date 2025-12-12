@@ -19,7 +19,6 @@ from urllib.parse import urlparse
 
 import mlflow.entities
 from mlflow_export_import.common import utils
-from mlflow_export_import.logged_model.import_logged_model import import_logged_model
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
@@ -400,6 +399,8 @@ class MlFlowSync:
         src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
 
         if self.log_model:
+            from mlflow_export_import.logged_model.import_logged_model import import_logged_model
+
             for model in src_run_dct["inputs"]["model_inputs"]:
                 model_path = (
                     run.data.params["config.diagnostics.log.mlflow.save_dir"]
