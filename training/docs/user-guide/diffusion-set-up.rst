@@ -226,7 +226,7 @@ A minimal config file for standard diffusion training:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: graphtransformer_diffusion  # Use diffusion model
    - training: diffusion                 # Use diffusion training config
@@ -246,7 +246,7 @@ For tendency-based diffusion, change the model config and model task:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: graphtransformer_diffusiontend  # Use tendency diffusion model
    - training: diffusion                     # Same training config

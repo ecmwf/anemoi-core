@@ -15,6 +15,7 @@ import os
 import pathlib
 from functools import reduce
 from operator import getitem
+from pathlib import Path
 
 import matplotlib as mpl
 import pytest
@@ -44,12 +45,10 @@ def aicon_config_with_tmp_dir(get_tmp_paths: GetTmpPaths, get_test_archive: GetT
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(config, ["dataset", "forcing_dataset"])
-    config.hardware.paths.output = tmp_dir
-    config.hardware.paths.graph = tmp_dir
+    config.system.output.root = tmp_dir
     dataset, forcing_dataset = rel_paths
-    config.hardware.paths.data = tmp_dir
-    config.hardware.files.dataset = dataset
-    config.hardware.files.forcing_dataset = forcing_dataset
+    config.system.input.dataset = str(Path(tmp_dir, dataset))
+    config.system.input.forcing_dataset = str(Path(tmp_dir, forcing_dataset))
 
     for url in dataset_urls:
         get_test_archive(url)

@@ -1,9 +1,13 @@
-dataset: ???
-graph: ???
-truncation: null
-truncation_inv: null
-checkpoint:
+root: ???
+logs:
+  root: logs
+  wandb: wandb
+  mlflow: mlflow
+  tensorboard: tensorboard
+checkpoints:
+  root: checkpoint
   every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
   every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
   every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
-warm_start: null
+plots: plots
+profiler: profiler
