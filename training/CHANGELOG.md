@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.2](https://github.com/ecmwf/anemoi-core/compare/training-0.8.1...training-0.8.2) (2025-12-12)
+
+
+### Bug Fixes
+
+* **docs,schemas:** Update hardware reference in docstrings, documentation and schemas ([#737](https://github.com/ecmwf/anemoi-core/issues/737)) ([4872c7c](https://github.com/ecmwf/anemoi-core/commit/4872c7cba8e9ffabce48ef353b75c73d6c166a9f))
+* **training:** Add missing rad2deg in plot sample ([#744](https://github.com/ecmwf/anemoi-core/issues/744)) ([a5fedb3](https://github.com/ecmwf/anemoi-core/commit/a5fedb3affd989ea3502b91a43085694bef34291))
+
 ## [0.8.1](https://github.com/ecmwf/anemoi-core/compare/training-0.8.0...training-0.8.1) (2025-12-08)
 
 
