@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from lightning_utilities.core.rank_zero import rank_zero_info
 
 import logging
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ from torch import nn
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-
+import torch 
 LOGGER = logging.getLogger(__name__)
 
 continents = Coastlines()
@@ -387,6 +388,182 @@ def plot_histogram(
 
     return fig
 
+def plot_predicted_multilevel_flat_sample_unconditional(
+    parameters: dict[str, int],
+    n_plots_per_sample: int,
+    latlons: np.ndarray,
+    clevels: float,
+    y_example: np.ndarray,
+    y_pred: np.ndarray,
+    datashader: bool = False,
+    precip_and_related_fields: list | None = None,
+    colormaps: dict[str, Colormap] | None = None,
+) -> Figure:
+    """Plots data for one multilevel latlon-"flat" sample used for unconditional diffusion
+
+    NB: this can be very slow for large data arrays
+    call it as infrequently as possible!
+
+    Parameters
+    ----------
+    parameters : dict[str, int]
+        Dictionary of variable names and indices
+    n_plots_per_sample : int
+        Number of plots per sample
+    latlons : np.ndarray
+        lat/lon coordinates array, shape (lat*lon, 2)
+    clevels : float
+        Accumulation levels used for precipitation related plots
+    y_example : np.ndarray
+        Example of data of shape (lat*lon, nvar*level)
+    y_pred : np.ndarray
+        Predicted data of shape (lat*lon, nvar*level)
+    datashader: bool, optional
+        Scatter plot, by default False
+    precip_and_related_fields : list, optional
+        List of precipitation-like variables, by default []
+    colormaps : dict[str, Colormap], optional
+        Dictionary of colormaps, by default None
+
+    Returns
+    -------
+    Figure
+        The figure object handle.
+
+    """
+    rank_zero_info("[DEBUG] : on passe dans plot_predicted_multilevel_flat_sample_unconditional")
+    rank_zero_info(f"[DEBUG] : len(paramaters={len(parameters)} and n_plots_per_sample={n_plots_per_sample})")
+    n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
+
+    figsize = (n_plots_y * 4, n_plots_x * 3)
+    fig, axs = plt.subplots(n_plots_x, n_plots_y, figsize=figsize, layout=LAYOUT)
+
+    pc_lat, pc_lon = equirectangular_projection(latlons)
+    if colormaps is None:
+        colormaps = {}
+    for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
+        yt = (y_example if y_example.ndim == 1 else y_example[..., variable_idx]).reshape(-1)
+        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
+
+        # get the colormap for the variable as defined in config file
+        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
+        for key in colormaps:
+            if key not in ["default", "error"] and variable_name in colormaps[key].variables:
+                cmap = colormaps[key].get_cmap()
+                continue
+        ax = axs[plot_idx, :] if n_plots_x > 1 else axs
+        plot_flat_sample_unconditional(
+            fig=fig,
+            ax=ax,
+            lon=pc_lon,
+            lat=pc_lat,
+            example=yt,
+            pred=yp,
+            vname=variable_name,
+            clevels=clevels,
+            datashader=datashader,
+            precip_and_related_fields=precip_and_related_fields,
+            cmap=cmap,
+        )
+    return fig
+
+def plot_flat_sample_unconditional(
+    fig: Figure,
+    ax: plt.Axes,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    example: np.ndarray,
+    pred: np.ndarray,
+    vname: str,
+    clevels: float,
+    datashader: bool = False,
+    precip_and_related_fields: list | None = None,
+    cmap: Colormap | None = None,
+) -> None:
+    """Plot a "flat" 1D sample.
+
+    Data on non-rectangular (reduced Gaussian) grids.
+
+    Parameters
+    ----------
+    fig : Figure
+        Figure object handle
+    ax : matplotlib.axes
+        Axis object handle
+    lon : np.ndarray
+        longitude coordinates array, shape (lon,)
+    lat : np.ndarray
+        latitude coordinates array, shape (lat,)
+    example : np.ndarray
+        Example of data of shape (lat*lon,)
+    pred : np.ndarray
+        Predicted data of shape (lat*lon,)
+    vname : str
+        Variable name
+    clevels : float
+        Accumulation levels used for precipitation related plots
+    datashader: bool, optional
+        Datashader plott, by default True
+    precip_and_related_fields : list, optional
+        List of precipitation-like variables, by default []
+    cmap : Colormap, optional
+        Colormap for the plot
+    error_cmap : Colormap, optional
+        Colormap for the error plot
+
+    Returns
+    -------
+    None
+    """
+    rank_zero_info("[DEBUG] : on passe dans plot_flat_sample_unconditional")
+    precip_and_related_fields = precip_and_related_fields or []
+    if vname in precip_and_related_fields:
+        # converting to mm from m
+        example *= 1000.0
+        pred *= 1000.0
+    data = [None for _ in range(2)]
+    # example, prediction and prediction error always plotted
+    data[0:2] = [example, pred]
+    # default titles for 6 plots
+    titles = [
+        f"{vname} example",
+        f"{vname} pred",
+    ]
+    # colormaps
+    cmaps = [cmap] * 2
+    # normalizations for significant colormaps
+    norms = [None for _ in range(2)]
+
+    if vname in precip_and_related_fields:
+        # Defining the actual precipitation accumulation levels in mm
+        cummulation_lvls = clevels
+        norm = BoundaryNorm(cummulation_lvls, len(cummulation_lvls) + 1)
+
+        norms[0] = norm
+        norms[1] = norm
+
+    else:
+        combined_data = np.concatenate((example, pred))
+        # For 'errors', only persistence and increments need identical colorbar-limits
+
+        norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
+
+        norms[0] = norm
+        norms[1] = norm
+
+    for ii in range(2):
+        if data[ii] is not None:
+            single_plot(
+                fig,
+                ax[ii],
+                lon,
+                lat,
+                data[ii],
+                cmap=cmaps[ii],
+                norm=norms[ii],
+                title=titles[ii],
+                datashader=datashader,
+            )
 
 def plot_predicted_multilevel_flat_sample(
     parameters: dict[str, int],
@@ -434,6 +611,7 @@ def plot_predicted_multilevel_flat_sample(
         The figure object handle.
 
     """
+    rank_zero_info("[DEBUG] : on passe dans plot_predicted_multilevel_flat_sample")
     n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
@@ -442,9 +620,9 @@ def plot_predicted_multilevel_flat_sample(
     pc_lat, pc_lon = equirectangular_projection(latlons)
     if colormaps is None:
         colormaps = {}
-
+    x_zeros = np.zeros_like(x)
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
+        xt = (x_zeros if x.ndim == 1 else x_zeros[..., variable_idx]).reshape(-1) * int(output_only)
         yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
@@ -456,6 +634,8 @@ def plot_predicted_multilevel_flat_sample(
                 cmap = colormaps[key].get_cmap()
                 continue
         ax = axs[plot_idx, :] if n_plots_x > 1 else axs
+        rank_zero_info(f"[DEBUG] : dans plot predicted multilvel, on a x = xzeros, donc xt = {xt}")
+        rank_zero_info("v222222222222222222222222222222222222")
         plot_flat_sample(
             fig=fig,
             ax=ax,
@@ -526,6 +706,7 @@ def plot_flat_sample(
     -------
     None
     """
+    rank_zero_info("[DEBUG] : on passe dans plot_flat_sample")
     precip_and_related_fields = precip_and_related_fields or []
     if vname in precip_and_related_fields:
         # converting to mm from m
