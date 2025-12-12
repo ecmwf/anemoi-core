@@ -638,7 +638,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             x_t1 = input_post_processor(x_t1, in_place=False, data_index=self.data_indices.data.output.full)
             x_t0 = input_post_processor(x_t0, in_place=False, data_index=self.data_indices.data.output.prognostic)
 
-        tendency = x_t1.clone().detach()
+        tendency = x_t1.clone()
         tendency[..., self.data_indices.model.output.prognostic] = pre_processors_tendencies(
             x_t1[..., self.data_indices.model.output.prognostic] - x_t0,
             in_place=False,
