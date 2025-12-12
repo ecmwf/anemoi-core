@@ -8,12 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
-
-if TYPE_CHECKING:
-    from anemoi.training.data.dataset import NativeGridDataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -21,34 +17,21 @@ LOGGER = logging.getLogger(__name__)
 class CheckVariableOrder(pl.callbacks.Callback):
     """Check the order of the variables in a pre-trained / fine-tuning model."""
 
-    def __init__(self) -> None:
-        super().__init__()
-
-    def _check_variable_order(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        dataset: "NativeGridDataset",
-    ) -> None:
-        """Check the order of variables between model checkpoint and dataset.
-
-        Parameters
-        ----------
-        trainer : pl.Trainer
-            Pytorch Lightning trainer
-        pl_module : pl.LightningModule
-            Lightning module (already unwrapped by PyTorch Lightning)
-        dataset : NativeGridDataset
-            Dataset to compare against
-        """
-        data_name_to_index = dataset.name_to_index
-
+    def _get_model_name_to_index(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Get the model name to index mapping, handling both checkpoint and data indices."""
         if hasattr(pl_module, "_ckpt_model_name_to_index"):
-            model_name_to_index = pl_module._ckpt_model_name_to_index
-        else:
-            model_name_to_index = trainer.datamodule.data_indices.name_to_index
+            return pl_module._ckpt_model_name_to_index
+        if isinstance(trainer.datamodule.data_indices, dict):
+            model_name_to_index = {}
+            for dataset_name, data_indices in trainer.datamodule.data_indices.items():
+                model_name_to_index[dataset_name] = data_indices.name_to_index
+            return model_name_to_index
+        return trainer.datamodule.data_indices.name_to_index
 
-        trainer.datamodule.data_indices.compare_variables(model_name_to_index, data_name_to_index)
+    def _compare_variables(self, trainer: pl.Trainer, model_name_to_index, data_name_to_index) -> None:  # type: ignore[misc]
+        """Compare variables between model and data indices."""
+        for dataset_name, data_indices in trainer.datamodule.data_indices.items():
+            data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the training data.
@@ -57,10 +40,12 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
-            Lightning module
+        _ : pl.LightningModule
+            Not used
         """
-        self._check_variable_order(trainer, pl_module, trainer.datamodule.ds_train)
+        data_name_to_index = trainer.datamodule.ds_train.name_to_index
+        self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
+        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
 
     def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the validation data.
@@ -69,10 +54,12 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
-            Lightning module
+        _ : pl.LightningModule
+            Not used
         """
-        self._check_variable_order(trainer, pl_module, trainer.datamodule.ds_valid)
+        data_name_to_index = trainer.datamodule.ds_valid.name_to_index
+        self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
+        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
 
     def on_test_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the test data.
@@ -81,7 +68,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
-            Lightning module
+        _ : pl.LightningModule
+            Not used
         """
-        self._check_variable_order(trainer, pl_module, trainer.datamodule.ds_test)
+        data_name_to_index = trainer.datamodule.ds_test.name_to_index
+        self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
+        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
