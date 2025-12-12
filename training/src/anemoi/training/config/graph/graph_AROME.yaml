@@ -1,0 +1,73 @@
+overwrite: True
+data: data
+hidden: hidden
+ 
+nodes:
+  # Data nodes
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # à laisser comme ça : c'est ce qu'on doit utiliser.
+      dataset:
+        - dataset: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr #une fois qu'on aura accès au vrai dataset, l'utiliser
+    attributes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.PlanarAreaWeights
+        norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
+
+  # Hidden nodes
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.LimitedAreaTriNodes #autre possibilité ;
+      resolution: 10 # res10 = res arome ia d'après eliott
+      reference_node_name: data
+edges:
+# Encoder configuration
+- source_name: data
+  target_name: hidden
+  edge_builders:
+    # - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    #   num_nearest_neighbours: 12 # only for knn method
+
+    - _target_: anemoi.graphs.edges.CutOffEdges #recommandé pour l'encodeur pour ne pas laisser des noeuds des data dans le vide
+      cutoff_factor: 1 #présent dans la config d'eliott, et sur la doc anemoi-graph. A confirmer, regarder combien de noeuds dans data sont laissés isolés ?
+  attributes:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength #classique sur la doc et sur les configs de anemoi-mf
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection #classique sur la doc et sur les configs de anemoi-mf
+      norm: unit-std
+  # Processor configuration
+- source_name: hidden
+  target_name: hidden
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges #essayer de mettre anemoi.graphs.edges.MultiScaleEdges avec x hop = 1 et voir scale resolution (à définir)
+    cutoff_factor: 1 #=1 permet d'avoir tous les hidden to hidden avec une seule connexion
+  attributes:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+  # Decoder configuration
+- source_name: hidden
+  target_name: data
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges #utilsié dans le papier sur BRIS
+    num_nearest_neighbours: 3 # only for knn method, utilisé dans BRIS de cette manière là
+  attributes:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+#####METTRE UN SKIP CONNECTION ???
+# - source_name: data
+#   target_name: out
+
+post_processors:
+  - _target_: anemoi.graphs.processors.RemoveUnconnectedNodes
+    nodes_name: data
+    save_mask_indices_to_attr: indices_connected_nodes # optional

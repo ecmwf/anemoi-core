@@ -16,21 +16,19 @@ export NVHPC_CUDA_HOME=/usr/local/cuda-12.1
 export CXX=g++ #the compiler for cpp extensions
 export CC=gcc  #the compiler to access the good cpp standard
 export NCCL_ASYNC_ERROR_HANDLING=1
-module load env/release/2023.1
-module load env/staging/2023.1
-module load Apptainer/1.2.4-GCCcore-12.3.0
+module load env/release/2024.1
+module load env/staging/2024.1
 module load NVHPC
 module load GCC
+module load Python/3.11.10-GCCcore-13.3.0
+load_puv
+
 
 
 # Echo des commandes lancees
 set -x
 
-# Ensure the logs directory exists or create it if not
-# if [ ! -d "$LOG_DIR" ]; then
-#   mkdir "$LOG_DIR"
-# fi
 cd /home/users/u102751/code/anemoi/anemoi-core/training
 export HYDRA_FULL_ERROR=1
 
-srun bash -c "puv srun anemoi-training train --config-name=diffusion_test"
+srun puv run anemoi-training train --config-name=diffusion_test
