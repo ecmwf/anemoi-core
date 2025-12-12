@@ -37,13 +37,13 @@ training:
       -  :class:`AnemoiDatasetsDataModule`
       -  :class:`AnemoiEnsDatasetsDataModule`
 
-****************************
- Changes in hardware config
-****************************
+**************************
+ Changes in System config
+**************************
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml
-   :start-after: # Changes in hardware
+   :start-after: # Changes in system
    :end-before: num_gpus_per_ensemble:
 
 The `truncation` and `truncation_inv` can be used in the deterministic
