@@ -13,7 +13,7 @@ from __future__ import annotations
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
-from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC002
+from anemoi.models.schemas.data_processor import PreprocessorSchema
 
 
 class DataSchema(PydanticBaseModel):
