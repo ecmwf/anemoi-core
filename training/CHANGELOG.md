@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.1](https://github.com/ecmwf/anemoi-core/compare/training-0.8.0...training-0.8.1) (2025-12-08)
+
+
+### Features
+
+* Edge pre mlp for gt conv ([#695](https://github.com/ecmwf/anemoi-core/issues/695)) ([c72a789](https://github.com/ecmwf/anemoi-core/commit/c72a789217f3ec13575a2f339cfe331732648cd9))
+* Noise injector refactor ([#724](https://github.com/ecmwf/anemoi-core/issues/724)) ([e1000af](https://github.com/ecmwf/anemoi-core/commit/e1000af21525632555d1b7065fb6e808bcdf32cc))
+
+
+### Bug Fixes
+
+* **training:** Handle CombinedLoss in print_variable_scaling ([#723](https://github.com/ecmwf/anemoi-core/issues/723)) ([b650c59](https://github.com/ecmwf/anemoi-core/commit/b650c59ac975f63c29f4ce1bbc2c438b988f3a5a))
+
 ## [0.8.0](https://github.com/ecmwf/anemoi-core/compare/training-0.7.0...training-0.8.0) (2025-12-05)
 
 
