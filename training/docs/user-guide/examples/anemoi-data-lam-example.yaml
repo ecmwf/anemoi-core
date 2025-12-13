@@ -8,8 +8,8 @@ dataset:
     Example limited-area dataset combining a regional reanalysis (CERra-like)
     with ERA5 global boundary forcing on a 0.25° grid. Designed for training a
     regional AI weather model with Anemoi.
-  frequency: 6h                         # Target time step of the output dataset
-  timestep: 6h                          # Model time step; must be a multiple of frequency
+  frequency: 1h                         # Target time step of the output dataset
+  timestep: 1h                          # Model time step; must be a multiple of frequency
 
   # Spatial domain selection for the limited-area (Lambert conformal or lat/lon)
   domain:
@@ -54,7 +54,7 @@ storage:
 sources:
   regional_core:
     kind: zarr
-    dataset: ???                        # Path/URL to the limited-area reanalysis (e.g. CERra cutout)
+    dataset: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-ai-grib2-files/                        # Path/URL to the limited-area reanalysis (e.g. CERra cutout)
     variables:
       state:
         - "t"
