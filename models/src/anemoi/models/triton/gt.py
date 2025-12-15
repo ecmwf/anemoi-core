@@ -164,12 +164,12 @@ def _gt_bwd_dst_pass(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    qk_scale: tl.constexpr,
 ):
     dst_idx = tl.program_id(0)
     if dst_idx >= N_dst:
         return
 
-    qk_scale = 1.0 / tl.sqrt(float(C))
     dst_off = dst_idx * H * C + tl.arange(0, H * C)
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
@@ -374,7 +374,6 @@ class GraphTransformerFunction(torch.autograd.Function):
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
         #compute qk_scale outside the kernel once
-        #qk_scale = 1 / float(torch.sqrt(torch.tensor(C, device=q.device, dtype=torch.float32)))
         qk_scale = 1 / sqrt(C)
 
         _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_scale)
@@ -397,9 +396,10 @@ class GraphTransformerFunction(torch.autograd.Function):
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
+        qk_scale = 1 / sqrt(C) #compute sqrt once outside kernel
 
         # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
+        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype, qk_scale)
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
