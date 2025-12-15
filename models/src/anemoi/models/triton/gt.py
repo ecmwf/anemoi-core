@@ -8,8 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
-import torch
 from math import sqrt
+
+import torch
 
 # check if triton is installed
 # If pytorch is installed on CPU then torch is not available
@@ -42,33 +43,33 @@ def _gt_fwd(
     dst_idx = pid
     if dst_idx >= N_dst:
         return
-    
+
     # Add padding if H or C is not a power of 2
     # Must be done bc tl.arange(), tl.zeros() etc require powers of 2
     # Padding allows us to use non-power-of-2 number of heads and/or channels
     # Before loading or storing, we mask out the padded values
     # It makes the code more complex
     # e.g. 'tl.arange(H*C,)' is replaced with 'H_pad_off * C + C_pad_off'
-    H_pad: tl.constexpr  = triton.next_power_of_2(H)
-    C_pad: tl.constexpr  = triton.next_power_of_2(C)
-    
+    H_pad: tl.constexpr = triton.next_power_of_2(H)
+    C_pad: tl.constexpr = triton.next_power_of_2(C)
+
     # Mask out the padded values
     # mask for H
     # e.g. if H is 3, H_pad is 4
     # H_mask = [True, True, True, False]
     H_mask = tl.arange(0, H_pad) < H
-   
-    # 2D mask for H * C 
+
+    # 2D mask for H * C
     # e.g 1 2 X X
     #     5 6 X X
     #     X X X X
     # But this kernel loads in 1d, hence we reshape to 1d
-    H_pad_off = tl.arange(0, H_pad)[:, None]   # shape (H_pad, 1)
-    C_pad_off = tl.arange(0, C_pad)[None, :]   # shape (1, C_pad)
+    H_pad_off = tl.arange(0, H_pad)[:, None]  # shape (H_pad, 1)
+    C_pad_off = tl.arange(0, C_pad)[None, :]  # shape (1, C_pad)
     H_C_mask_2d = (H_pad_off < H) & (C_pad_off < C)
-    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad*C_pad,))
-    
-    #tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
+    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
+
+    # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
     # Therefore we make our own range, using unpadded major dimension (C)
     H_C_pad_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
 
@@ -81,13 +82,13 @@ def _gt_fwd(
 
     if num_edges == 0:
         zeros = tl.zeros((H_pad,), dtype=tl.float32)  # m initialised as torch.float32
-        M_off = M_ptr + dst_idx * H + tl.arange(0, H_pad) 
-        tl.store(M_off, zeros, mask=H_mask )
+        M_off = M_ptr + dst_idx * H + tl.arange(0, H_pad)
+        tl.store(M_off, zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         OUT_off = OUT_ptr + dst_off
         tl.store(OUT_off, zeros, mask=H_C_mask_1d)
         return
-    
+
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
@@ -136,7 +137,7 @@ def _gt_fwd(
         acc.to(out_dtype).reshape(
             H_pad * C_pad,
         ),
-        mask=H_C_mask_1d
+        mask=H_C_mask_1d,
     )
 
     # store m_i + log(l_i) for backward
@@ -169,33 +170,33 @@ def _gt_bwd_dst_pass(
     dst_idx = tl.program_id(0)
     if dst_idx >= N_dst:
         return
-    
+
     # Add padding if H or C is not a power of 2
     # Must be done bc tl.arange(), tl.zeros() etc require powers of 2
     # Padding allows us to use non-power-of-2 number of heads and/or channels
     # Before loading or storing, we mask out the padded values
     # It makes the code more complex
     # e.g. 'tl.arange(H*C,)' is replaced with 'H_pad_off * C + C_pad_off'
-    H_pad: tl.constexpr  = triton.next_power_of_2(H)
-    C_pad: tl.constexpr  = triton.next_power_of_2(C)
-    
+    H_pad: tl.constexpr = triton.next_power_of_2(H)
+    C_pad: tl.constexpr = triton.next_power_of_2(C)
+
     # Mask out the padded values
     # mask for H
     # e.g. if H is 3, H_pad is 4
     # H_mask = [True, True, True, False]
     H_mask = tl.arange(0, H_pad) < H
-   
-    # 2D mask for H * C 
+
+    # 2D mask for H * C
     # e.g 1 2 X X
     #     5 6 X X
     #     X X X X
     # But this kernel loads in 1d, hence we reshape to 1d
-    H_pad_off = tl.arange(0, H_pad)[:, None]   # shape (H_pad, 1)
-    C_pad_off = tl.arange(0, C_pad)[None, :]   # shape (1, C_pad)
+    H_pad_off = tl.arange(0, H_pad)[:, None]  # shape (H_pad, 1)
+    C_pad_off = tl.arange(0, C_pad)[None, :]  # shape (1, C_pad)
     H_C_mask_2d = (H_pad_off < H) & (C_pad_off < C)
-    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad*C_pad,))
-    
-    #tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
+    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
+
+    # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
     # Therefore we make our own range, using unpadded major dimension (C)
     H_C_pad_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
 
@@ -285,33 +286,33 @@ def _gt_bwd_src_pass(
     src_idx = tl.program_id(0)
     if src_idx >= N_src:
         return
-    
+
     # Add padding if H or C is not a power of 2
     # Must be done bc tl.arange(), tl.zeros() etc require powers of 2
     # Padding allows us to use non-power-of-2 number of heads and/or channels
     # Before loading or storing, we mask out the padded values
     # It makes the code more complex
     # e.g. 'tl.arange(H*C,)' is replaced with 'H_pad_off * C + C_pad_off'
-    H_pad: tl.constexpr  = triton.next_power_of_2(H)
-    C_pad: tl.constexpr  = triton.next_power_of_2(C)
-    
+    H_pad: tl.constexpr = triton.next_power_of_2(H)
+    C_pad: tl.constexpr = triton.next_power_of_2(C)
+
     # Mask out the padded values
     # mask for H
     # e.g. if H is 3, H_pad is 4
     # H_mask = [True, True, True, False]
     H_mask = tl.arange(0, H_pad) < H
-   
-    # 2D mask for H * C 
+
+    # 2D mask for H * C
     # e.g 1 2 X X
     #     5 6 X X
     #     X X X X
     # But this kernel loads in 1d, hence we reshape to 1d
-    H_pad_off = tl.arange(0, H_pad)[:, None]   # shape (H_pad, 1)
-    C_pad_off = tl.arange(0, C_pad)[None, :]   # shape (1, C_pad)
+    H_pad_off = tl.arange(0, H_pad)[:, None]  # shape (H_pad, 1)
+    C_pad_off = tl.arange(0, C_pad)[None, :]  # shape (1, C_pad)
     H_C_mask_2d = (H_pad_off < H) & (C_pad_off < C)
-    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad*C_pad,))
-    
-    #tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
+    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
+
+    # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
     # Therefore we make our own range, using unpadded major dimension (C)
     H_C_pad_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
 
@@ -347,7 +348,7 @@ def _gt_bwd_src_pass(
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
 
         e_off = e_idx * H * C + H_C_pad_off
-        e = tl.load(E_ptr + e_off,mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+        e = tl.load(E_ptr + e_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
 
         ke = k + e
         ve = v + e
@@ -368,7 +369,7 @@ def _gt_bwd_src_pass(
             dE_edge.to(out_dtype).reshape(
                 H_pad * C_pad,
             ),
-            mask=H_C_mask_1d
+            mask=H_C_mask_1d,
         )
 
         accK += dK_edge
@@ -380,14 +381,14 @@ def _gt_bwd_src_pass(
         accK.to(out_dtype).reshape(
             H_pad * C_pad,
         ),
-        mask=H_C_mask_1d
+        mask=H_C_mask_1d,
     )
     tl.store(
         D_V_ptr + src_off,
         accV.to(out_dtype).reshape(
             H_pad * C_pad,
         ),
-        mask=H_C_mask_1d
+        mask=H_C_mask_1d,
     )
 
 
@@ -436,7 +437,7 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
-        #compute qk_scale outside the kernel once
+        # compute qk_scale outside the kernel once
         qk_scale = 1 / sqrt(C)
 
         _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_scale)
@@ -459,7 +460,7 @@ class GraphTransformerFunction(torch.autograd.Function):
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
-        qk_scale = 1 / sqrt(C) #compute sqrt once outside kernel
+        qk_scale = 1 / sqrt(C)  # compute sqrt once outside kernel
 
         # Pass A: destination nodes (computes D and dQ)
         _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype, qk_scale)

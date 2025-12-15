@@ -50,10 +50,10 @@ def max_abs_diff(a: torch.Tensor, b: torch.Tensor) -> float:
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
     [
-        (4, 10, 2, 4), 
-        (4, 10, 6, 4), #tests num_heads != pow_of_2
-        (4, 10, 2, 6), #tests  num_channels != pow_of_2
-        (4, 10, 6, 6), #tests num_heads * num_channels != pow_of_2
+        (4, 10, 2, 4),
+        (4, 10, 6, 4),  # tests num_heads != pow_of_2
+        (4, 10, 2, 6),  # tests  num_channels != pow_of_2
+        (4, 10, 6, 6),  # tests num_heads * num_channels != pow_of_2
     ],
 )
 def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
@@ -72,8 +72,8 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr_csc = edge_attr[perm]
     out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
 
-    #args_conv_pyg = (edges, edge_index, conv_size)
-    #out_pyg =  GraphTransformerConv(out_channels=self.out_channels_conv)
+    # args_conv_pyg = (edges, edge_index, conv_size)
+    # out_pyg =  GraphTransformerConv(out_channels=self.out_channels_conv)
 
     # Verify output shape
     assert out_triton.shape == (n_dst, h, d), f"Expected shape {(n_dst, h, d)}, got {out_triton.shape}"
@@ -148,6 +148,7 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     tolerance = 1e-5
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
 
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
@@ -193,7 +194,7 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     # Compare outputs and gradients
     tolerance = 1e-5
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
-    torch.testing.assert_close(grads_triton[0], grads_ref[0], atol=tolerance, rtol=0) # queries
-    torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0) # keys
-    torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0) # values
-    torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0) # edges
+    torch.testing.assert_close(grads_triton[0], grads_ref[0], atol=tolerance, rtol=0)  # queries
+    torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
+    torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
+    torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
