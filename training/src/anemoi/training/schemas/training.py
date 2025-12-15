@@ -309,9 +309,9 @@ class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
     run_id: str | None = Field(example=None)
-    "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
+    "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
-    "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."
+    "Run ID to fork from, either last.ckpt or specified in system.input.warm_start."
     load_weights_only: bool = Field(example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
     transfer_learning: bool = Field(example=False)
