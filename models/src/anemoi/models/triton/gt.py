@@ -297,11 +297,6 @@ def _gt_bwd_src_pass(
     C_pad: tl.constexpr = triton.next_power_of_2(C)
 
     # Mask out the padded values
-    # mask for H
-    # e.g. if H is 3, H_pad is 4
-    # H_mask = [True, True, True, False]
-    H_mask = tl.arange(0, H_pad) < H
-
     # 2D mask for H * C
     # e.g 1 2 X X
     #     5 6 X X
