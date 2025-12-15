@@ -228,30 +228,4 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                     rollout_step,
                 )
 
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], (x if validation_mode else None)
-
-    def _step(
-        self,
-        batch: tuple[torch.Tensor, ...],
-        validation_mode: bool = False,
-    ) -> tuple:
-        """Training / validation step."""
-        LOGGER.debug("SHAPES: batch.shape = %s", list(batch.shape))
-
-        loss = torch.zeros(self.loss.num_scales, dtype=batch[0].dtype, device=self.device, requires_grad=False)
-
-        metrics = {}
-        y_preds = []
-
-        for loss_next, metrics_next, y_preds_next, _ens_ic in self._rollout_step(
-            batch,
-            rollout=self.rollout,
-            validation_mode=validation_mode,
-        ):
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_preds_next)
-
-        loss *= 1.0 / self.rollout
-
-        return loss, metrics, y_preds, _ens_ic
+            yield loss, metrics_next, y_pred_ens_group
