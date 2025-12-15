@@ -357,7 +357,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         edge_weight_attribute: Optional[str] = None,
         src_node_weight_attribute: Optional[str] = None,
         file_path: Optional[str | Path] = None,
-        row_normalize: bool = True,
+        row_normalize: bool = False,
         transpose: bool = False,
     ) -> None:
         """Initialize ProjectionGraphProvider.
@@ -422,11 +422,18 @@ class ProjectionGraphProvider(BaseGraphProvider):
         if src_node_weight_attribute:
             weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
 
+        # PyG convention: edge_index[0]=source, edge_index[1]=target
+        # For M @ x, we need matrix shape (targets, sources) with:
+        #   - row indices = targets
+        #   - col indices = sources
+        # -> swap edge_index to [targets, sources] for COO tensor
+        edge_index_for_coo = torch.stack([sub_graph.edge_index[1], sub_graph.edge_index[0]])
+
         self._create_matrix(
-            sub_graph.edge_index,
+            edge_index_for_coo,
             weights,
-            graph[edges_name[0]].num_nodes,
-            graph[edges_name[2]].num_nodes,
+            graph[edges_name[2]].num_nodes,  # dst_size (targets) = rows
+            graph[edges_name[0]].num_nodes,  # src_size (sources) = cols
             row_normalize,
             transpose,
         )
@@ -443,7 +450,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         """Create sparse projection matrix."""
 
         if row_normalize:
-            weights = self._row_normalize_weights(edge_index, weights, dst_size)
+            weights = self._row_normalize_weights(edge_index, weights, src_size)
 
         self.projection_matrix = torch.sparse_coo_tensor(
             edge_index,
@@ -458,11 +465,12 @@ class ProjectionGraphProvider(BaseGraphProvider):
         self._edge_dim = self.projection_matrix.shape[1]
 
     @staticmethod
-    def _row_normalize_weights(edge_index: Tensor, weights: Tensor, num_target_nodes: int) -> Tensor:
-        """Normalize weights per destination node."""
-        total = torch.zeros(num_target_nodes, device=weights.device)
-        norm = total.scatter_add_(0, edge_index[1].long(), weights)
-        norm = norm[edge_index[1]]
+    def _row_normalize_weights(edge_index: Tensor, weights: Tensor, num_rows: int) -> Tensor:
+        """Normalize weights per row (target node) so each row sums to 1."""
+        total = torch.zeros(num_rows, device=weights.device)
+        # edge_index[0] contains row indices (targets) for COO tensor format
+        norm = total.scatter_add_(0, edge_index[0].long(), weights)
+        norm = norm[edge_index[0]]
         return weights / (norm + 1e-8)
 
     @property
