@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from lightning_utilities.core.rank_zero import rank_zero_info
+
 import logging
 from typing import TYPE_CHECKING
 
@@ -59,6 +61,8 @@ class GraphDiffusionForecaster(GraphForecaster):
         self.rho = config.model.model.diffusion.rho
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+        # rank_zero_info("[DEBUG] : forward de rgaphDiffusionforecaster")
+        x_zeros = torch.zeros_like(x)
         return self.model.model.fwd_with_preconditioning(
             x,
             y_noised,
@@ -130,6 +134,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             Loss value, metrics, and predictions (per step)
 
         """
+        # rank_zero_info("[DEBUG] dans rollout step")
         # start rollout of preprocessed batch
         x = batch[
             :,

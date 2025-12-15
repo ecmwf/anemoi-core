@@ -13,7 +13,7 @@ import warnings
 from typing import Callable
 from typing import Optional
 from typing import Union
-
+from lightning_utilities.core.rank_zero import rank_zero_info
 import einops
 import torch
 from hydra.utils import instantiate
@@ -29,7 +29,7 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
-
+import matplotlib.pyplot as plt 
 LOGGER = logging.getLogger(__name__)
 
 
@@ -117,14 +117,20 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         return mlp
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
+
+        # rank_zero_info("[DEBUG] : PASSAGE PAR ASSEMBLE INPUT")
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
+        # rank_zero_info(f"nodes attributes data shape {node_attributes_data.shape}")
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
-
+        # rank_zero_info(f"shape de x dans assemble input :, {x.shape}")
+        # rank_zero_info(f"shape de y_noised dans assemble_input :  {y_noised.shape}")
+        # rank_zero_info(f"time dans x : {x[0,:,0,0,0]}")
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
+        x_zeros = torch.zeros_like(x)
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
@@ -136,10 +142,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
-
+        # rank_zero_info(f"[DEBUG] x dans assemble input {x}")
         return x_data_latent, None, shard_shapes_data
 
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
+        # rank_zero_info("DEBUG: dans ASSEMBLE OUTPUT")
+
         x_out = einops.rearrange(
             x_out,
             "(batch ensemble grid) vars -> batch ensemble grid vars",
@@ -157,6 +165,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         return out
 
     def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
+        
+        # rank_zero_info("[DEBUG] : PASSAGE PAR generate noise conditioning")
+
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
 
@@ -197,7 +208,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
-
+      
+        # rank_zero_info("[DEBUG]: on passe dans le forward")
         batch_size, ensemble_size = x.shape[0], x.shape[2]
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
@@ -214,13 +226,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         fwd_mapper_kwargs = {"cond": (c_data, c_hidden)}
         processor_kwargs = {"cond": c_hidden}
         bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
-
+        x_zeros = torch.zeros_like(x)
         x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
             x, y_noised, bse, grid_shard_shapes, model_comm_group
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
-
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=bse,
@@ -267,6 +278,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     ) -> torch.Tensor:
         """Forward pass with pre-conditioning of EDM diffusion model."""
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
+        # rank_zero_info(f"[DEBUG] dans fwd : {x}")
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )  # calls forward ...
@@ -491,7 +503,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         torch.Tensor
             Sampled output with shape (batch, ensemble, grid, vars)
         """
-
         # Start with inference defaults
         noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
 
@@ -527,15 +538,17 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
-
+        # rank_zero_info(f"[DEBUG] actual sampler utilisé : {actual_sampler} ")
         if actual_sampler not in diffusion_samplers.DIFFUSION_SAMPLERS:
             raise ValueError(f"Unknown sampler: {actual_sampler}")
 
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
 
+        x_no_cond=torch.zeros_like(x)
+        # rank_zero_info(f"[DEBUG] dans sample d encprodec x no cond: {x_no_cond}")
         return sampler_instance.sample(
-            x,
+            x_no_cond,
             y_init,
             sigmas,
             self.fwd_with_preconditioning,
@@ -556,7 +569,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         graph_data: HeteroData,
         truncation_data: dict,
     ) -> None:
-
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -572,6 +584,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         return input_dim
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
+
         x_trunc = x[:, -1, :, :, self._internal_input_idx]
         x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
         x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)

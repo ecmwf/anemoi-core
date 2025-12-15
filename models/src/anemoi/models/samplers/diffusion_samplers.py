@@ -12,6 +12,7 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Callable
 from typing import Optional
+from lightning_utilities.core.rank_zero import rank_zero_info
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -212,6 +213,9 @@ class EDMHeunSampler(DiffusionSampler):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
+        
+        rank_zero_info("[DEBUG] Le sample utilisé est le EDMHeun")
+        rank_zero_info(f"[DEBUG] x dans heun sampler : {x}")
         # Override instance defaults with any kwargs
         S_churn = kwargs.get("S_churn", self.S_churn)
         S_min = kwargs.get("S_min", self.S_min)
@@ -282,6 +286,7 @@ class DPMpp2MSampler(DiffusionSampler):
         **kwargs,
     ) -> torch.Tensor:
         # DPM++ sampler converts to x.dtype
+        rank_zero_info("[DEBUG] Le sample utilisé est le DMPp2Msapler")
         y = y.to(x.dtype)
         sigmas = sigmas.to(x.dtype)
 

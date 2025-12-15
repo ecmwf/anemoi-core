@@ -83,7 +83,6 @@ hardware:
     graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
   num_gpus_per_node: 4
   num_gpus_per_model: 2
-  num_nodes: 1
 training:
-  max_epochs: 100
+  max_epochs: 30
   # run_id: "6b4c3173b6344de5a6c21ebe226c5399"
