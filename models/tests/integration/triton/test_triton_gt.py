@@ -148,6 +148,16 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     tolerance = 1e-5
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
 
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "n_src,n_dst,h,d",
+    [
+        (4, 10, 2, 4),
+        (4, 10, 6, 4),
+        (4, 10, 2, 6),
+        (4, 10, 6, 6),
+    ],
+)
 def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
