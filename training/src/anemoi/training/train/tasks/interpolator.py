@@ -7,18 +7,24 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from operator import itemgetter
+from typing import TYPE_CHECKING
 
-import torch
-from omegaconf import DictConfig
-from torch.utils.checkpoint import checkpoint
-from torch_geometric.data import HeteroData
-
-from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from omegaconf import DictConfig
+    from torch import Tensor
+    from torch_geometric.data import HeteroData
+
+    from anemoi.models.data_indices.collection import IndexCollection
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,80 +70,54 @@ class GraphInterpolator(BaseGraphModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
-        if len(config.training.target_forcing.data) >= 1:
-            self.target_forcing_indices = itemgetter(*config.training.target_forcing.data)(
-                data_indices.data.input.name_to_index,
-            )
-            if isinstance(self.target_forcing_indices, int):
-                self.target_forcing_indices = [self.target_forcing_indices]
-        else:
-            self.target_forcing_indices = []
-
-        self.use_time_fraction = config.training.target_forcing.time_fraction
-
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
+        self.multi_out = len(self.interp_times)
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
+        self.num_gpus_per_model = config.hardware.num_gpus_per_model
 
-        self.rollout = 1
+        self.lr = config.hardware.num_nodes * config.hardware.num_gpus_per_node * config.training.lr.rate
+
+        LOGGER.info("Base (config) learning rate: %e -- Effective learning rate: %e", config.training.lr.rate, self.lr)
 
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: Tensor,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+    ) -> tuple[Tensor, Mapping[str, Tensor], Tensor]:
+        """Training / validation step."""
         metrics = {}
-        y_preds = []
+        batch = self.model.pre_processors(batch, in_place=not validation_mode)
+
+        # Scalers which are delayed need to be initialized after the pre-processors
+        if self.is_first_step:
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
+            self.is_first_step = False
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
             ...,
             self.data_indices.data.input.full,
         ]  # (bs, time, ens, latlon, nvar)
 
-        num_tfi = len(self.target_forcing_indices)
-        target_forcing = torch.empty(
-            batch.shape[0],
-            batch.shape[2],
-            batch.shape[3],
-            num_tfi + self.use_time_fraction,
-            device=self.device,
-            dtype=batch.dtype,
-        )
-        for interp_step in self.interp_times:
-            # get the forcing information for the target interpolation time:
-            if num_tfi >= 1:
-                target_forcing[..., :num_tfi] = batch[:, self.imap[interp_step], :, :, self.target_forcing_indices]
-            if self.use_time_fraction:
-                target_forcing[..., -1] = (interp_step - self.boundary_times[-2]) / (
-                    self.boundary_times[-1] - self.boundary_times[-2]
-                )
-
-            y_pred = self(x_bound, target_forcing)
-            y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]
-
-            loss_step, metrics_next = checkpoint(
-                self.compute_loss_metrics,
-                y_pred,
-                y,
-                interp_step - 1,
-                validation_mode=validation_mode,
-                use_reentrant=False,
-            )
-
-            loss += loss_step
-            metrics.update(metrics_next)
-            y_preds.append(y_pred)
-
-        loss *= 1.0 / len(self.interp_times)
-        return loss, metrics, y_preds
-
-    def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
-        return self.model(
-            x,
-            target_forcing=target_forcing,
+        y_pred = self(x_bound)  # has shape (bs, time, ens, latlon, nvar)
+        y = batch[:, itemgetter(*self.interp_times)(self.imap)][:, :, 0, :, self.data_indices.data.output.full]
+        loss = self._compute_loss(
+            y_pred,
+            y,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_slice=self.grid_shard_slice,
         )
+        metrics = {}
+        for interp_step in self.interp_times:
+            y_pred_step = y_pred[:, interp_step - 1, ...]
+            y_step = y[:, interp_step - 1, ...]
+            metrics_step = self._compute_metrics(
+                y_pred=y_pred_step,
+                y=y_step,
+                rollout_step=interp_step - 1,
+                grid_shard_slice=self.grid_shard_slice,
+            )
+            metrics.update(metrics_step)
+        return loss, metrics, y_pred
