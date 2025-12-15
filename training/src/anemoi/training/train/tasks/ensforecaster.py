@@ -168,8 +168,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             None
         """
         # Stack the analysis nens_per_device times along an ensemble dimension
-        x = self._get_input(batch)
-
+        x = self._get_input(batch)  # shape == (bs, ms, 1, latlon, nvar)
         x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
@@ -178,12 +177,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             f"Expected ({self.multi_step}, {self.nens_per_device}), "
             f"got ({x.shape[1]}, {x.shape[2]})!"
         )
-
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-        )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)

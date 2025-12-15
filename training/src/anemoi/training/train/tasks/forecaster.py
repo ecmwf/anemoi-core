@@ -54,11 +54,6 @@ class GraphForecaster(BaseRolloutGraphModule):
         """
         # start rollout of preprocessed batch
         x = self._get_input(batch)
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-        )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
