@@ -9,6 +9,7 @@
 
 
 import torch
+from math import sqrt
 
 # check if triton is installed
 # If pytorch is installed on CPU then torch is not available
@@ -35,68 +36,76 @@ def _gt_fwd(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    qk_scale: tl.constexpr,
 ):
     pid = tl.program_id(0)
     dst_idx = pid
     if dst_idx >= N_dst:
         return
     
-    #H_C_pow2: tl.constexpr  = triton.next_power_of_2(H * C)
-    H_pow2: tl.constexpr  = triton.next_power_of_2(H)
-    C_pow2: tl.constexpr  = triton.next_power_of_2(C)
-    #TODO once something works with (H_pow2, C_pow2) replace with (H_C_pow2,)
-    H_C_pow2_off=tl.arange(0, H_pow2 * C_pow2).reshape(H_pow2, C_pow2)
-    H_pow2_off = tl.arange(0, H_pow2)[:, None]   # shape (H_pow2, 1)
-    C_pow2_off = tl.arange(0, C_pow2)[None, :]   # shape (1, C_pow2)
-
-    H_C_mask_2d = (H_pow2_off < H) & (C_pow2_off < C)
-    #H_C_mask_2d = (H_pow2_off[:,None] < H) & (C_pow2_off[None,:] < C)
-    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pow2*C_pow2,))
-    H_mask = tl.arange(0, H_pow2) < H
+    # Add padding if H or C is not a power of 2
+    # Must be done bc tl.arange(), tl.zeros() etc require powers of 2
+    # Padding allows us to use non-power-of-2 number of heads and/or channels
+    # Before loading or storing, we mask out the padded values
+    # It makes the code more complex
+    # e.g. 'tl.arange(H*C,)' is replaced with 'H_pad_off * C + C_pad_off'
+    H_pad: tl.constexpr  = triton.next_power_of_2(H)
+    C_pad: tl.constexpr  = triton.next_power_of_2(C)
     
-    #tl.arange(H_pow2, C_pow2) doesnt work
-    # this is a padded version
-    H_C_pow2_off_2d = H_pow2_off * C + C_pow2_off
-    H_C_pow2_off_1d = tl.reshape(H_C_pow2_off_2d, (H_pow2 * C_pow2,))
+    # Mask out the padded values
+    # mask for H
+    # e.g. if H is 3, H_pad is 4
+    # H_mask = [True, True, True, False]
+    H_mask = tl.arange(0, H_pad) < H
+   
+    # 2D mask for H * C 
+    # e.g 1 2 X X
+    #     5 6 X X
+    #     X X X X
+    # But this kernel loads in 1d, hence we reshape to 1d
+    H_pad_off = tl.arange(0, H_pad)[:, None]   # shape (H_pad, 1)
+    C_pad_off = tl.arange(0, C_pad)[None, :]   # shape (1, C_pad)
+    H_C_mask_2d = (H_pad_off < H) & (C_pad_off < C)
+    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad*C_pad,))
+    
+    #tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
+    # Therefore we make our own range, using unpadded major dimension (C)
+    H_C_pad_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
 
     dst_start = dst_idx * H * C
-    #dst_off = dst_start + tl.arange(0, H_pow2*C_pow2)
-    dst_off = dst_start + H_C_pow2_off_1d
+    dst_off = dst_start + H_C_pad_off
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
-        zeros = tl.zeros((H_pow2,), dtype=tl.float32)  # m initialised as torch.float32
-        M_off = M_ptr + dst_idx * H + tl.arange(0, H_pow2) 
+        zeros = tl.zeros((H_pad,), dtype=tl.float32)  # m initialised as torch.float32
+        M_off = M_ptr + dst_idx * H + tl.arange(0, H_pad) 
         tl.store(M_off, zeros, mask=H_mask )
-        zeros = tl.zeros((H_pow2 * C_pow2,), dtype=out_dtype)
+        zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         OUT_off = OUT_ptr + dst_off
         tl.store(OUT_off, zeros, mask=H_C_mask_1d)
         return
     
-    q = tl.load(Q_ptr + dst_off).to(tl.float32).reshape((H_pow2, C_pow2))
-    acc = tl.zeros((H_pow2, C_pow2), dtype=tl.float32)  # output accumulator, pending normalization by l_i
-    l_i = tl.zeros((H_pow2,), dtype=tl.float32)  # sum of attention weights
-    m_i = tl.full((H_pow2,), value=-float("inf"), dtype=tl.float32)  # running max for stability
+    q = tl.load(Q_ptr + dst_off).to(tl.float32).reshape((H_pad, C_pad))
+    acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
+    l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
+    m_i = tl.full((H_pad,), value=-float("inf"), dtype=tl.float32)  # running max for stability
 
     # helpers to avoid repeated computations/indexing:
-    qk_scale = 1 / tl.sqrt(float(C))
-    #edge_ptr = E_ptr + neigh_start * H * C + tl.arange(0, H_pow2 * C_pow2)  # pointer to first edge_attr
-    edge_ptr = E_ptr + neigh_start * H * C + H_C_pow2_off_1d  # pointer to first edge_attr
+    edge_ptr = E_ptr + neigh_start * H * C + H_C_pad_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
 
     for _ in range(num_edges):  # iterate over incident edges
-        e = tl.load(edge_ptr, mask=H_C_mask_1d).to(tl.float32).reshape((H_pow2, C_pow2))
+        e = tl.load(edge_ptr, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
 
         # src neighbor index: rowptr[e_idx]
         src_idx = tl.load(ROW_ptr + e_idx)
 
-        #src_off = src_idx * H * C + tl.arange(0, H_pow2 * C_pow2)
-        src_off = src_idx * H * C + H_C_pow2_off_1d
-        k = tl.load(K_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pow2, C_pow2))
-        v = tl.load(V_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pow2, C_pow2))
+        src_off = src_idx * H * C + H_C_pad_off
+        k = tl.load(K_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
 
         k_e = k + e
         v_e = v + e
@@ -125,14 +134,14 @@ def _gt_fwd(
     tl.store(
         OUT_ptr + dst_off,
         acc.to(out_dtype).reshape(
-            H_pow2 * C_pow2,
+            H_pad * C_pad,
         ),
         mask=H_C_mask_1d
     )
 
     # store m_i + log(l_i) for backward
     m_start = dst_idx * H
-    m_off = m_start + tl.arange(0, H_pow2)
+    m_off = m_start + tl.arange(0, H_pad)
 
     m_i += tl.log(l_i)
     tl.store(M_ptr + m_off, m_i, mask=H_mask)
@@ -364,8 +373,11 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
+        #compute qk_scale outside the kernel once
+        #qk_scale = 1 / float(torch.sqrt(torch.tensor(C, device=q.device, dtype=torch.float32)))
+        qk_scale = 1 / sqrt(C)
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype)
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_scale)
 
         # Save tensors for backward
         ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
