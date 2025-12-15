@@ -326,6 +326,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         src_node_weight_attribute: Optional[str] = None,
         file_path: Optional[str | Path] = None,
         row_normalize: bool = True,
+        transpose: bool = False,
     ) -> None:
         """Initialize ProjectionGraphProvider.
 
@@ -343,18 +344,22 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Path to .npz file with projection matrix
         row_normalize : bool
             Whether to normalize weights per destination node
+        transpose : bool
+            Whether to transpose the projection matrix
         """
         super().__init__()
 
         if file_path is not None:
-            self._build_from_file(file_path)
+            self._build_from_file(file_path, row_normalize, transpose)
         else:
             assert (
                 graph is not None and edges_name is not None
             ), "Must provide graph and edges_name if file_path not given"
-            self._build_from_graph(graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize)
+            self._build_from_graph(
+                graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize, transpose
+            )
 
-    def _build_from_file(self, file_path: str | Path) -> None:
+    def _build_from_file(self, file_path: str | Path, row_normalize: bool, transpose: bool) -> None:
         """Load projection matrix from file."""
         from scipy.sparse import load_npz
 
@@ -363,7 +368,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         weights = torch.tensor(truncation_data.data, dtype=torch.float32)
         src_size, dst_size = truncation_data.shape
 
-        self._create_matrix(edge_index, weights, src_size, dst_size, row_normalize=False)
+        self._create_matrix(edge_index, weights, src_size, dst_size, row_normalize, transpose)
 
     def _build_from_graph(
         self,
@@ -372,6 +377,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         edge_weight_attribute: Optional[str],
         src_node_weight_attribute: Optional[str],
         row_normalize: bool,
+        transpose: bool,
     ) -> None:
         """Build projection matrix from graph."""
         sub_graph = graph[edges_name]
@@ -390,26 +396,33 @@ class ProjectionGraphProvider(BaseGraphProvider):
             graph[edges_name[0]].num_nodes,
             graph[edges_name[2]].num_nodes,
             row_normalize,
+            transpose,
         )
 
     def _create_matrix(
-        self, edge_index: Tensor, weights: Tensor, src_size: int, dst_size: int, row_normalize: bool
+        self,
+        edge_index: Tensor,
+        weights: Tensor,
+        src_size: int,
+        dst_size: int,
+        row_normalize: bool,
+        transpose: bool,
     ) -> None:
-        """Create sparse projection matrix.
+        """Create sparse projection matrix."""
 
-        Creates a matrix where rows are destination nodes and columns are source nodes.
-        output = projection_matrix @ input
-        """
         if row_normalize:
             weights = self._row_normalize_weights(edge_index, weights, dst_size)
 
-        swapped_indices = torch.stack([edge_index[1], edge_index[0]])
         self.projection_matrix = torch.sparse_coo_tensor(
-            swapped_indices,
+            edge_index,
             weights,
-            (dst_size, src_size),
+            (src_size, dst_size),
             device=edge_index.device,
         ).coalesce()
+
+        if transpose:
+            self.projection_matrix = self.projection_matrix.T
+
         self._edge_dim = self.projection_matrix.shape[1]
 
     @staticmethod

@@ -14,8 +14,9 @@ from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.layers.graph_providers import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.sparse_projector import build_sparse_projector
+from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -132,15 +133,16 @@ class NoiseConditioning(BaseNoiseInjector):
             layer_norm=True,
         )
 
-        self.noise_projector = None
+        self.noise_graph_provider = None
+        self._sparse_projector = None
         if noise_matrix is not None:
-            self.noise_projector = build_sparse_projector(
+            self.noise_graph_provider = ProjectionGraphProvider(
                 file_path=noise_matrix,
                 transpose=transpose_noise_matrix,
                 row_normalize=row_normalize_noise_matrix,
-                autocast=autocast,
             )
-            LOGGER.info("Noise projector matrix shape = %s", self.noise_projector.projection_matrix.shape)
+            self._sparse_projector = SparseProjector(autocast=autocast)
+            LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
 
         LOGGER.info("processor noise channels = %d", self.noise_channels)
 
@@ -158,7 +160,7 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_shape = (
             batch_size,
             ensemble_size,
-            grid_size if self.noise_projector is None else self.noise_projector.projection_matrix.shape[1],
+            grid_size if self.noise_graph_provider is None else self.noise_graph_provider.projection_matrix.shape[1],
             self.noise_channels,
         )
 
@@ -167,7 +169,7 @@ class NoiseConditioning(BaseNoiseInjector):
 
         noise_shard_shapes_final = change_channels_in_shape(shard_shapes_ref, self.noise_channels)
 
-        if self.noise_projector is not None:
+        if self.noise_graph_provider is not None:
             noise_shard_shapes = get_shard_shapes(noise, -1, model_comm_group)
             noise = shard_tensor(noise, -1, noise_shard_shapes, model_comm_group)  # split across channels
 
@@ -175,7 +177,8 @@ class NoiseConditioning(BaseNoiseInjector):
                 noise, "batch ensemble grid vars -> (batch ensemble) grid vars"
             )  # batch and ensemble always 1 when sharded
 
-            noise = self.noise_projector(noise)  # to shape of hidden grid
+            projection_matrix = self.noise_graph_provider.get_edges(device=noise.device)
+            noise = self._sparse_projector(noise, projection_matrix)  # to shape of hidden grid
 
             noise = einops.rearrange(noise, "bse grid vars -> (bse grid) vars")  # shape of x
             noise = gather_channels(
