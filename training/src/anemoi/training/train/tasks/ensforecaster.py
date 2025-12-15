@@ -228,4 +228,4 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                     rollout_step,
                 )
 
-            yield loss, metrics_next, y_pred_ens_group
+            yield loss, metrics_next, y_pred_ens_group if validation_mode else []
