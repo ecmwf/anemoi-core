@@ -72,9 +72,6 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr_csc = edge_attr[perm]
     out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
 
-    # args_conv_pyg = (edges, edge_index, conv_size)
-    # out_pyg =  GraphTransformerConv(out_channels=self.out_channels_conv)
-
     # Verify output shape
     assert out_triton.shape == (n_dst, h, d), f"Expected shape {(n_dst, h, d)}, got {out_triton.shape}"
 
