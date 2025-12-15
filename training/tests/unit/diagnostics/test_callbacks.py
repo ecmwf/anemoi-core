@@ -17,6 +17,7 @@ import pytest
 import torch
 import yaml
 
+from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
 from anemoi.training.diagnostics.callbacks.plot_ens import EnsemblePlotMixin
@@ -42,6 +43,7 @@ diagnostics:
     # this will detect and trace back NaNs / Infs etc. but will slow down training
     anomaly_detection: False
 
+  enable_progress_bar: False
   enable_checkpointing: False
   checkpoint:
 
@@ -257,3 +259,67 @@ def test_ensemble_plot_callbacks_instantiation():
         parameters=["temperature"],
     )
     assert plot_histogram is not None
+
+
+# Progress bar callback tests
+progress_bar_config = """
+training:
+  model_task: anemoi.training.train.tasks.GraphEnsForecaster
+
+diagnostics:
+  callbacks: []
+
+  plot:
+    enabled: False
+    callbacks: []
+
+  debug:
+    anomaly_detection: False
+
+  enable_checkpointing: False
+  checkpoint:
+
+  log: {}
+
+  enable_progress_bar: True
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
+"""
+
+
+def test_progress_bar_disabled():
+    """Test that no progress bar callback is added when disabled."""
+    config = omegaconf.OmegaConf.create(yaml.safe_load(progress_bar_config))
+    config.diagnostics.enable_progress_bar = False
+
+    callbacks = _get_progress_bar_callback(config)
+    assert len(callbacks) == 0
+
+
+def test_progress_bar_default():
+    """Test that default TQDMProgressBar is used when progress_bar config has no _target_."""
+    from pytorch_lightning.callbacks import TQDMProgressBar
+
+    config = omegaconf.OmegaConf.create(yaml.safe_load(progress_bar_config))
+    config.diagnostics.progress_bar = None  # No _target_ specified
+
+    callbacks = _get_progress_bar_callback(config)
+
+    assert len(callbacks) == 1
+    assert isinstance(callbacks[0], TQDMProgressBar)
+
+
+def test_progress_bar_custom():
+    """Test that custom progress bar can be instantiated via _target_."""
+    from pytorch_lightning.callbacks import RichProgressBar
+
+    config = omegaconf.OmegaConf.create(yaml.safe_load(progress_bar_config))
+    config.diagnostics.progress_bar = {
+        "_target_": "pytorch_lightning.callbacks.RichProgressBar",
+    }
+
+    callbacks = _get_progress_bar_callback(config)
+
+    assert len(callbacks) == 1
+    assert isinstance(callbacks[0], RichProgressBar)
