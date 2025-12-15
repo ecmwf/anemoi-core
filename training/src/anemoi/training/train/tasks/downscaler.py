@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from icecream import ic
+import time
 from typing import TYPE_CHECKING
 import time
 import torch
@@ -66,7 +67,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
         self.training_approach = getattr(
-            config.training, "training_approach", "probabilistic"
+            config.training, "training_approach", "probabilistic_low_noise"
         )
         self.x_in_matching_channel_indices = match_tensor_channels(
             self.data_indices.data.input[0].name_to_index,
@@ -158,9 +159,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """Process batch size of len 3 with each item of dimensions:
         [batch_size, dates, ensemble, gridpoints, variables].
         """
-        import time
 
-        time_init = time.time()
         del batch_idx
         # loss = torch.zeros(
         #    1, dtype=batch[0].dtype, device=self.device, requires_grad=False
@@ -211,13 +210,14 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         residuals_target_noised = self._noise_target(residuals_target, sigma)
 
         # prediction, fwd_with_preconditioning
-
+        # time_for_pred = time.time()
         y_pred = self(
             x_in_interp_to_hres,
             x_in_hres,
             residuals_target_noised,
             sigma,
         )  # shape is (bs, ens, latlon, nvar)
+        # print("time for pred", time.time() - time_for_pred)
 
         # Use checkpoint for compute_loss_metrics
         loss, metrics_next = checkpoint(
@@ -232,9 +232,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         )
 
         y_preds = [x_in_interp_to_hres + y_pred, y_pred]
-
-        time_elapsed = time.time() - time_init
-        # ic("fwd step", time_elapsed)
 
         return loss, metrics_next, y_preds
 
@@ -258,22 +255,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                 sigma_max ** (1.0 / rho)
                 + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
             ) ** rho
-        elif self.training_approach == "probabilistic":
-            if torch.rand(1, device=device) < 0.8:
-                log_sigma = torch.normal(
-                    mean=self.lognormal_mean,
-                    std=self.lognormal_std,
-                    size=shape,
-                    device=device,
-                )
-                sigma = torch.exp(log_sigma)
-            else:
-                rnd_uniform = torch.rand(shape, device=device)
-                sigma = (
-                    sigma_max ** (1.0 / rho)
-                    + rnd_uniform
-                    * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
-                ) ** rho
 
         elif self.training_approach == "probabilistic_low_noise":
             log_sigma = torch.normal(

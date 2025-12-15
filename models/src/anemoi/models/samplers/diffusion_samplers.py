@@ -279,9 +279,10 @@ class EDMHeunSampler(DiffusionSampler):
                 grid_shard_shapes,
             ).to(dtype)
 
-            d = (y - D1) / (sigma_effective + eps_prec)
+            d = (y - D1) / (sigma_effective + eps_prec)  # this is the score
 
             y_next = y + (sigma_next - sigma_effective) * d
+            # movement in direction of d, amount of movement is equal to the change in noise level
 
             if sigma_next > eps_prec:
                 D2 = denoising_fn(

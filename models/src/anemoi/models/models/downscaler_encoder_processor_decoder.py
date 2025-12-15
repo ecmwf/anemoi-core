@@ -13,6 +13,7 @@ import warnings
 from typing import Callable
 from typing import Optional
 from typing import Union
+import time
 
 import einops
 import torch
@@ -200,7 +201,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
-
+        start_init = time.time()
         batch_size, ensemble_size = (
             x_in_lres_interp_hres.shape[0],
             x_in_lres_interp_hres.shape[2],
@@ -236,6 +237,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
+        # time_encoder = time.time()
         x_data_latent, x_latent = self._run_mapper(
             self.encoder,
             (x_data_latent, x_hidden_latent),
@@ -247,7 +249,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             **fwd_mapper_kwargs,
         )
-
+        # print("time in encoder", time.time() - time_encoder)
+        # time_processor = time.time()
         x_latent_proc = self.processor(
             x=x_latent,
             batch_size=bse,
@@ -255,8 +258,10 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             model_comm_group=model_comm_group,
             **processor_kwargs,
         )
+        # print("time in processor", time.time() - time_processor)
 
         x_latent_proc = x_latent_proc + x_latent
+        # time_decoder = time.time()
 
         x_out = self._run_mapper(
             self.decoder,
@@ -269,11 +274,12 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
             **bwd_mapper_kwargs,
         )
+        # print("time in decoder", time.time() - time_decoder)
 
         x_out = self._assemble_output(
             x_out, x_skip, batch_size, ensemble_size, x_in_lres_interp_hres.dtype
         )
-
+        # print("time in model forward step", time.time() - start_init)
         return x_out
 
     def fwd_with_preconditioning(
@@ -403,6 +409,28 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         torch.Tensor
             Sampled output (after post-processing)
         """
+
+        noise_scheduler_params = {
+            "schedule_type": "karras",
+            # "sigma_max": 88,
+            "sigma_max": 100000,
+            "sigma_min": 0.02,
+            "rho": 7.0,
+            "num_steps": 80,
+        }
+
+        sampler_params = {
+            "sampler": "heun",
+            "S_churn": 2.5,
+            "S_min": 0.75,
+            # "S_max": 88,
+            "S_max": 100000,
+            "S_noise": 1.05,
+        }
+
+        print("noise_scheduler_params:", noise_scheduler_params)
+        print("sampler_params:", sampler_params)
+
         with torch.no_grad():
 
             if len(x_in_lres.shape) == 4:
@@ -498,6 +526,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             noise_scheduler_config.update(noise_scheduler_params)
 
         warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}")
+        print(f"noise_scheduler_config: {noise_scheduler_config}")
 
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")

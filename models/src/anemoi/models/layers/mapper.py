@@ -44,7 +44,9 @@ LOGGER = logging.getLogger(__name__)
 
 # Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/406)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
-NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
+NUM_CHUNKS_INFERENCE_MAPPER = int(
+    os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE)
+)
 
 
 class BaseMapper(nn.Module, ABC):
@@ -80,7 +82,12 @@ class BaseMapper(nn.Module, ABC):
             self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
 
     def pre_process(
-        self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False
+        self,
+        x,
+        shard_shapes,
+        model_comm_group=None,
+        x_src_is_sharded=False,
+        x_dst_is_sharded=False,
     ) -> tuple[Tensor, Tensor, tuple[int], tuple[int]]:
         """Pre-processing for the Mappers.
 
@@ -104,7 +111,9 @@ class BaseMapper(nn.Module, ABC):
         x_src, x_dst = x
         return x_src, x_dst, shapes_src, shapes_dst
 
-    def post_process(self, x_dst, shapes_dst, model_comm_group=None, keep_x_dst_sharded=False) -> Tensor:
+    def post_process(
+        self, x_dst, shapes_dst, model_comm_group=None, keep_x_dst_sharded=False
+    ) -> Tensor:
         """Post-processing for the mapper."""
         return x_dst
 
@@ -112,11 +121,16 @@ class BaseMapper(nn.Module, ABC):
 class BackwardMapperPostProcessMixin:
     """Post-processing for Backward Mapper from hidden -> data."""
 
-    def post_process(self, x_dst, shapes_dst, model_comm_group=None, keep_x_dst_sharded=False):
+    def post_process(
+        self, x_dst, shapes_dst, model_comm_group=None, keep_x_dst_sharded=False
+    ):
         x_dst = self.node_data_extractor(x_dst)
         if not keep_x_dst_sharded:
             x_dst = gather_tensor(
-                x_dst, 0, change_channels_in_shape(shapes_dst, self.out_channels_dst), model_comm_group
+                x_dst,
+                0,
+                change_channels_in_shape(shapes_dst, self.out_channels_dst),
+                model_comm_group,
             )
         return x_dst
 
@@ -124,7 +138,14 @@ class BackwardMapperPostProcessMixin:
 class ForwardMapperPreProcessMixin:
     """Pre-processing for Forward Mapper from data -> hidden."""
 
-    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+    def pre_process(
+        self,
+        x,
+        shard_shapes,
+        model_comm_group=None,
+        x_src_is_sharded=False,
+        x_dst_is_sharded=False,
+    ):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
             x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
         )
@@ -141,7 +162,12 @@ class ForwardMapperPreProcessMixin:
 
 class GraphEdgeMixin:
     def _register_edges(
-        self, sub_graph: HeteroData, edge_attributes: list[str], src_size: int, dst_size: int, trainable_size: int
+        self,
+        sub_graph: HeteroData,
+        edge_attributes: list[str],
+        src_size: int,
+        dst_size: int,
+        trainable_size: int,
     ) -> None:
         """Register edge dim, attr, index_base, and increment.
 
@@ -158,16 +184,22 @@ class GraphEdgeMixin:
         trainable_size : int
             Trainable tensor size
         """
-        assert sub_graph, f"{self.__class__.__name__} needs a valid sub_graph to register edges."
+        assert (
+            sub_graph
+        ), f"{self.__class__.__name__} needs a valid sub_graph to register edges."
         assert edge_attributes is not None, "Edge attributes must be provided"
 
-        edge_attr_tensor = torch.cat([sub_graph[attr] for attr in edge_attributes], axis=1)
+        edge_attr_tensor = torch.cat(
+            [sub_graph[attr] for attr in edge_attributes], axis=1
+        )
 
         self.edge_dim = edge_attr_tensor.shape[1] + trainable_size
         self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
         self.register_buffer("edge_index_base", sub_graph.edge_index, persistent=False)
         self.register_buffer(
-            "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=True
+            "edge_inc",
+            torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)),
+            persistent=True,
         )
 
     def _expand_edges(self, edge_index: Adj, edge_inc: Tensor, batch_size: int) -> Adj:
@@ -269,9 +301,17 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         Linear = self.layer_factory.Linear
 
-        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        self._register_edges(
+            sub_graph,
+            sub_graph_edge_attributes,
+            src_grid_size,
+            dst_grid_size,
+            trainable_size,
+        )
 
-        self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        self.trainable = TrainableTensor(
+            trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0]
+        )
 
         self.proc = GraphTransformerMapperBlock(
             in_channels=hidden_dim,
@@ -289,7 +329,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim)
 
         self.shard_strategy = shard_strategy
-
+        # print("shard strategy", self.shard_strategy)
         assert shard_strategy in ["heads", "edges"], (
             f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
             f"Supported strategies are 'heads' and 'edges'."
@@ -303,8 +343,10 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
     ) -> tuple[Tensor, Adj]:
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
-        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-            size, edge_attr, edge_index, model_comm_group, relabel_dst_nodes=True
+        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = (
+            sort_edges_1hop_sharding(
+                size, edge_attr, edge_index, model_comm_group, relabel_dst_nodes=True
+            )
         )
 
         edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
@@ -327,19 +369,30 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         shapes_x_src = change_channels_in_shape(shapes_src, x_src.shape[-1])
         # gather/scatter if x_src is sharded, always reduce gradients in bwds
-        x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
+        x_src = sync_tensor(
+            x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded
+        )
 
-        size_full_graph = (sum(shape[0] for shape in shard_shapes[0]), sum(shape[0] for shape in shard_shapes[1]))
-        edge_attr, edge_index = self.prepare_edges(size_full_graph, batch_size, model_comm_group)
+        size_full_graph = (
+            sum(shape[0] for shape in shard_shapes[0]),
+            sum(shape[0] for shape in shard_shapes[1]),
+        )
+        edge_attr, edge_index = self.prepare_edges(
+            size_full_graph, batch_size, model_comm_group
+        )
 
         # at this point, x_src is synced i.e. full, x_dst is sharded, edges are sharded (incoming edges to x_dst)
         size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
-        x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
+        x_src, edge_index, nodes_src = drop_unconnected_src_nodes(
+            x_src, edge_index, size_src_full_dst_shard
+        )
 
         if cond is not None:  # sync cond_src to match x_src:
             cond_src, cond_dst = cond
             shapes_cond_src = change_channels_in_shape(shapes_src, cond_src.shape[-1])
-            cond_src_full = sync_tensor(cond_src, 0, shapes_cond_src, model_comm_group, gather_in_fwd=True)
+            cond_src_full = sync_tensor(
+                cond_src, 0, shapes_cond_src, model_comm_group, gather_in_fwd=True
+            )
             cond = (cond_src_full[nodes_src], cond_dst)
 
         if not x_dst_is_sharded:
@@ -362,6 +415,10 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
     ) -> Tensor:
         x_src, x_dst = x
 
+        import time
+
+        start_time = time.time()
+
         # get subgraph of x_dst_chunk and incoming edges, drop unconnected src nodes
         nodes_src_full = torch.arange(size[0], device=edge_index.device)
         edge_index, edge_attr = bipartite_subgraph(
@@ -371,9 +428,12 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             size=size,
             relabel_nodes=True,
         )
+        # print("time to get subgraph in decoder", time.time() - start_time)
 
         # drop unconnected src nodes and relabel edges
-        x_src_chunk, edge_index_chunk, connected_src_nodes = drop_unconnected_src_nodes(x_src, edge_index, size)
+        x_src_chunk, edge_index_chunk, connected_src_nodes = drop_unconnected_src_nodes(
+            x_src, edge_index, size
+        )
         x_dst_chunk = x_dst[dst_chunk]
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 
@@ -382,9 +442,16 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             cond = (cond_src[connected_src_nodes], cond_dst[dst_chunk])
 
         # pre-process chunk, embedding x_src/x_dst if not already done
+        time_preprocess = time.time()
         x_src_chunk, x_dst_chunk, _, _ = self.pre_process(
-            (x_src_chunk, x_dst_chunk), shapes, model_comm_group, x_src_is_sharded=True, x_dst_is_sharded=True
+            (x_src_chunk, x_dst_chunk),
+            shapes,
+            model_comm_group,
+            x_src_is_sharded=True,
+            x_dst_is_sharded=True,
         )
+        # print("time to preprocess chunk in decoder", time.time() - time_preprocess)
+        time_processor = time.time()
 
         (_, x_dst_out), _ = self.proc(
             (x_src_chunk, x_dst_chunk),
@@ -397,8 +464,11 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             cond=cond,
             **kwargs,
         )
-
-        return self.post_process(x_dst_out, shapes[1], model_comm_group, keep_x_dst_sharded=True)
+        # print("time to process chunk in decoder", time.time() - time_processor)
+        # print("tie in total decoder chunk", time.time() - start_time)
+        return self.post_process(
+            x_dst_out, shapes[1], model_comm_group, keep_x_dst_sharded=True
+        )
 
     def forward_with_edge_sharding(
         self,
@@ -428,9 +498,19 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
 
         dst_chunks = torch.arange(size[1], device=x_dst.device).tensor_split(num_chunks)
-        out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
-        out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
-        out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
+        out_channels = (
+            self.out_channels_dst
+            if self.out_channels_dst is not None
+            else self.hidden_dim
+        )
+        out_type = (
+            torch.get_autocast_gpu_dtype()
+            if torch.is_autocast_enabled()
+            else x_dst.dtype
+        )
+        out_dst = torch.empty(
+            (*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type
+        )
 
         for dst_chunk in dst_chunks:
             out_dst[dst_chunk] = checkpoint(
@@ -449,7 +529,12 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             ).to(dtype=out_type)
 
         if not keep_x_dst_sharded:  # gather after processing chunks
-            out_dst = gather_tensor(out_dst, 0, change_channels_in_shape(shapes_dst, out_channels), model_comm_group)
+            out_dst = gather_tensor(
+                out_dst,
+                0,
+                change_channels_in_shape(shapes_dst, out_channels),
+                model_comm_group,
+            )
 
         return out_dst
 
@@ -485,7 +570,9 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             **kwargs,
         )
 
-        x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded)
+        x_dst = self.post_process(
+            x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded
+        )
 
         return x_dst
 
@@ -518,7 +605,9 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             return self.forward_with_heads_sharding(**kwargs_forward)
 
 
-class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransformerBaseMapper):
+class GraphTransformerForwardMapper(
+    ForwardMapperPreProcessMixin, GraphTransformerBaseMapper
+):
     """Graph Transformer Mapper from data -> hidden."""
 
     def __init__(
@@ -594,7 +683,9 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             shard_strategy=shard_strategy,
         )
 
-        self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+        self.emb_nodes_src = self.layer_factory.Linear(
+            self.in_channels_src, self.hidden_dim
+        )
 
     def forward(
         self,
@@ -620,7 +711,9 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         return x[0], x_dst
 
 
-class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransformerBaseMapper):
+class GraphTransformerBackwardMapper(
+    BackwardMapperPostProcessMixin, GraphTransformerBaseMapper
+):
     """Graph Transformer Mapper from hidden -> data."""
 
     def __init__(
@@ -704,7 +797,8 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         )
 
         self.node_data_extractor = nn.Sequential(
-            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+            nn.LayerNorm(self.hidden_dim),
+            nn.Linear(self.hidden_dim, self.out_channels_dst),
         )
         if initialise_data_extractor_zero:
             for module in self.node_data_extractor.modules():
@@ -713,7 +807,14 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
                     if module.bias is not None:
                         nn.init.constant_(module.bias, 0.0)
 
-    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+    def pre_process(
+        self,
+        x,
+        shard_shapes,
+        model_comm_group=None,
+        x_src_is_sharded=False,
+        x_dst_is_sharded=False,
+    ):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
             x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
         )
@@ -789,7 +890,13 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             layer_kernels=layer_kernels,
         )
 
-        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        self._register_edges(
+            sub_graph,
+            sub_graph_edge_attributes,
+            src_grid_size,
+            dst_grid_size,
+            trainable_size,
+        )
 
         self.emb_edges = MLP(
             in_features=self.edge_dim,
@@ -799,7 +906,9 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             n_extra_layers=mlp_extra_layers,
         )
 
-        self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        self.trainable = TrainableTensor(
+            trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0]
+        )
 
     def prepare_edges(
         self,
@@ -809,8 +918,8 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
     ) -> tuple[Tensor, Adj]:
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
-        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-            size, edge_attr, edge_index, model_comm_group
+        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = (
+            sort_edges_1hop_sharding(size, edge_attr, edge_index, model_comm_group)
         )
 
         edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
@@ -848,7 +957,9 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             **kwargs,
         )
 
-        x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded)
+        x_dst = self.post_process(
+            x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded
+        )
 
         return x_src, x_dst
 
@@ -1038,7 +1149,14 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             final_activation=False,
         )
 
-    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+    def pre_process(
+        self,
+        x,
+        shard_shapes,
+        model_comm_group=None,
+        x_src_is_sharded=False,
+        x_dst_is_sharded=False,
+    ):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
             x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
         )
@@ -1177,7 +1295,9 @@ class TransformerBaseMapper(BaseMapper):
             model_comm_group,
         )
 
-        x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded)
+        x_dst = self.post_process(
+            x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded
+        )
 
         return x_dst
 
@@ -1271,7 +1391,13 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
         keep_x_dst_sharded: bool = False,
     ) -> PairTensor:
         x_dst = super().forward(
-            x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded
+            x,
+            batch_size,
+            shard_shapes,
+            model_comm_group,
+            x_src_is_sharded,
+            x_dst_is_sharded,
+            keep_x_dst_sharded,
         )
         return x[0], x_dst
 
@@ -1353,10 +1479,18 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         )
 
         self.node_data_extractor = nn.Sequential(
-            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+            nn.LayerNorm(self.hidden_dim),
+            nn.Linear(self.hidden_dim, self.out_channels_dst),
         )
 
-    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+    def pre_process(
+        self,
+        x,
+        shard_shapes,
+        model_comm_group=None,
+        x_src_is_sharded=False,
+        x_dst_is_sharded=False,
+    ):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
             x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
         )

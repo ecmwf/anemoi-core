@@ -129,6 +129,6 @@ class DownscalingDataset(NativeGridDataset):
             time_end = time.time()
             from icecream import ic
 
-            ic("data load time", time_end - time_start)
+            # ic("data load time", time_end - time_start)
 
             yield x_in_lres, x_in_hres, y

@@ -6,7 +6,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
+import time
 
 from abc import ABC
 from typing import Optional
@@ -78,6 +78,7 @@ class BaseProcessor(nn.Module, ABC):
         """Run Layers with checkpoint."""
         for layer in self.proc:
             data = checkpoint(layer, *data, *args, **kwargs, use_reentrant=False)
+
         return data
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
@@ -183,7 +184,9 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+        (x,) = self.run_layers(
+            (x,), shape_nodes, batch_size, model_comm_group, **kwargs
+        )
 
         return x
 
@@ -245,9 +248,17 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
             layer_kernels=layer_kernels,
         )
 
-        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        self._register_edges(
+            sub_graph,
+            sub_graph_edge_attributes,
+            src_grid_size,
+            dst_grid_size,
+            trainable_size,
+        )
 
-        self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        self.trainable = TrainableTensor(
+            trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0]
+        )
 
         kwargs = {
             "mlp_extra_layers": mlp_extra_layers,
@@ -275,17 +286,23 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
         target_nodes = sum(x[0] for x in shape_nodes)
-        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-            target_nodes,
-            edge_attr,
-            edge_index,
-            model_comm_group,
+        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = (
+            sort_edges_1hop_sharding(
+                target_nodes,
+                edge_attr,
+                edge_index,
+                model_comm_group,
+            )
         )
         edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
         x, edge_attr = self.run_layers(
-            (x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group, **kwargs
+            (x, edge_attr),
+            edge_index,
+            (shape_nodes, shape_nodes),
+            model_comm_group,
+            **kwargs,
         )
 
         return x
@@ -354,9 +371,17 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             layer_kernels=layer_kernels,
         )
 
-        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        self._register_edges(
+            sub_graph,
+            sub_graph_edge_attributes,
+            src_grid_size,
+            dst_grid_size,
+            trainable_size,
+        )
 
-        self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        self.trainable = TrainableTensor(
+            trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0]
+        )
 
         self.build_layers(
             GraphTransformerProcessorChunk,
@@ -380,8 +405,9 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         *args,
         **kwargs,
     ) -> Tensor:
-        size = sum(x[0] for x in shard_shapes)
 
+        size = sum(x[0] for x in shard_shapes)
+        # start_time = time.time()
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         edge_attr = self.trainable(self.edge_attr, batch_size)
 

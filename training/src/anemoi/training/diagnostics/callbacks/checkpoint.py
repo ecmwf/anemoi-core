@@ -231,9 +231,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
             )
 
             torch.save(model, inference_checkpoint_filepath)
-            from icecream import ic
 
-            ic(supporting_arrays)
             save_metadata(
                 inference_checkpoint_filepath,
                 metadata,
