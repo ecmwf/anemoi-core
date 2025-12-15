@@ -12,7 +12,7 @@ from functools import partial
 from typing import Annotated
 from typing import Any
 from typing import Literal
-
+from typing import Optional
 from pydantic import AfterValidator
 from pydantic import Discriminator
 from pydantic import Field
@@ -372,7 +372,15 @@ class ForecasterEnsSchema(ForecasterSchema):
     ensemble_size_per_device: PositiveInt = Field(example=1)
     "Number of ensemble member per device"
 
-
+# class UncondDiffusionForecasterSchema(ForecasterSchema):
+#     model_task: Literal["anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster"] = Field(..., alias="model_task")
+#     "Training objective."
+    
+class UncondDiffusionForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster"]
+    resume_from_checkpoint: Optional[str] = None
+    load_weights_only: bool = False   # si nécessaire
+    
 class DiffusionForecasterSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
     "Training objective."
@@ -400,6 +408,7 @@ TrainingSchema = Annotated[
     | ForecasterEnsSchema
     | InterpolationSchema
     | DiffusionForecasterSchema
+    | UncondDiffusionForecasterSchema
     | DiffusionTendForecasterSchema,
     Discriminator("model_task"),
 ]

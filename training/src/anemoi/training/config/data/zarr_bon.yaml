@@ -23,9 +23,9 @@ forcing:
 # features that are only part of the forecast state
 # but are not used as the input to the model
 diagnostic:
-- "tp"
-- "cp"
-- "sp"
+- tp
+- cp
+
 normalizer:
   default: "mean-std"
 
@@ -41,9 +41,8 @@ normalizer:
   # zero value in the normalized space.
   std:
   - "tp"
-  - "cp"
-  - "sp"
-  
+  # - "cp"
+
   min-max:
   max:
   - "sdor"

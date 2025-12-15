@@ -64,13 +64,13 @@ validation_rollout: 1 # number of rollouts to use for validation, must be equal
 validation:
   dataset: ${dataloader.dataset}
   start: 2021
-  end: 2022
+  end: 2021
   frequency: ${data.frequency}
   drop:  []
 
 test:
   dataset: ${dataloader.dataset}
-  start: 2023
+  start: 2022
   end: null
   frequency: ${data.frequency}
   drop:  []
