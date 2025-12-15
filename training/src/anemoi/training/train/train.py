@@ -278,6 +278,8 @@ class AnemoiTrainer(ABC):
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
         warm_start_path = self.config.system.input.warm_start
+        if isinstance(warm_start_path, str):
+            warm_start_path = Path(warm_start_path)
 
         if warm_start_path:
             msg = f"Warm start checkpoint not found: {warm_start_path}"
