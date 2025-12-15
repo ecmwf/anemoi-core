@@ -14,7 +14,7 @@ from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_providers import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import load_layer_kernels
@@ -106,6 +106,7 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_mlp_hidden_dim: int,
         layer_kernels: DotDict,
         noise_matrix: Optional[str] = None,
+        transpose_noise_matrix: bool = False,
         row_normalize_noise_matrix: bool = False,
         autocast: bool = False,
         num_channels: Optional[int] = None,
@@ -137,6 +138,7 @@ class NoiseConditioning(BaseNoiseInjector):
         if noise_matrix is not None:
             self.noise_graph_provider = ProjectionGraphProvider(
                 file_path=noise_matrix,
+                transpose=transpose_noise_matrix,
                 row_normalize=row_normalize_noise_matrix,
             )
             self._sparse_projector = SparseProjector(autocast=autocast)
