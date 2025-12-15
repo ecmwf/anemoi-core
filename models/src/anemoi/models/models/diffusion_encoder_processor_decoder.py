@@ -45,7 +45,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         graph_data: HeteroData,
         truncation_data: dict,
     ) -> None:
-
+        # print('JE SUIS CONFIG LOCALE', DotDict(model_config).model)
         model_config_local = DotDict(model_config)
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
@@ -267,13 +267,11 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         grid_shard_shapes: Optional[list] = None,
     ) -> torch.Tensor:
         """Forward pass with pre-conditioning of EDM diffusion model."""
-        print('JE PASSE PAR LA 1')
 
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )  # calls forward ...
-        print('JE PASSE PAR LA 2')
 
         D_x = c_skip * y_noised + c_out * pred
 
@@ -572,7 +570,8 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
             truncation_data=truncation_data,
 
         )
-
+        print('CONFIG DANS DIFF ENC PROCC DEC',model_config
+              )
     # -------------------------------------------------------------------------
     # Forward inconditionnel
     # -------------------------------------------------------------------------
