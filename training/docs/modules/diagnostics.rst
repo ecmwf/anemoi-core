@@ -72,6 +72,33 @@ sharper and more detailed visuals but may be slower for large datasets.
 **Note** - this asynchronous behaviour is only available for the
 plotting callbacks.
 
+**Progress Bar**
+
+The progress bar callback can be configured to control how training
+progress is displayed. This is particularly useful on HPC systems with
+SLURM where output is written to files, as the default RichProgressBar
+in PyTorch Lightning 2.6+ may not work correctly.
+
+The progress bar is controlled by two configuration options:
+
+-  ``enable_progress_bar``: A boolean flag to enable or disable the
+   progress bar entirely
+-  ``progress_bar``: Configuration for which progress bar callback to
+   use
+
+.. code:: yaml
+
+   enable_progress_bar: True
+   progress_bar:
+     _target_: pytorch_lightning.callbacks.TQDMProgressBar
+     refresh_rate: 1
+
+Lightning 2.6+ supports the
+(https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.RichProgressBar.html#lightning.pytorch.callbacks.RichProgressBar)[RichProgressBar],
+which is recommended for interactive terminals and
+(https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.TQDMProgressBar.html#lightning.pytorch.callbacks.TQDMProgressBar)[TQDMProgressBar]
+, that should be used with SLURM.
+
 .. code:: yaml
 
    plot:

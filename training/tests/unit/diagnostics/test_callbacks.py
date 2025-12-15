@@ -12,6 +12,7 @@
 import omegaconf
 import yaml
 
+from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
@@ -28,8 +29,7 @@ diagnostics:
     # this will detect and trace back NaNs / Infs etc. but will slow down training
     anomaly_detection: False
 
-  profiler: False
-
+  enable_progress_bar: False
   enable_checkpointing: False
   checkpoint:
 
