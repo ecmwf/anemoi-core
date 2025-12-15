@@ -33,7 +33,7 @@ def create_graph_provider(
 ) -> "BaseGraphProvider":
     """Factory function to create appropriate graph provider.
 
-    Returns StaticGraphProvider if graph is provided,
+    Returns StaticGraphProvider if graph has edges,
     otherwise returns NoOpGraphProvider for edge-less architectures.
 
     Parameters
@@ -54,7 +54,7 @@ def create_graph_provider(
     BaseGraphProvider
         Appropriate graph provider instance
     """
-    if graph is not None:
+    if graph:
         return StaticGraphProvider(
             graph=graph,
             edge_attributes=edge_attributes,
