@@ -40,39 +40,51 @@ def _gt_fwd(
     dst_idx = pid
     if dst_idx >= N_dst:
         return
+    
+    #H_C_pow2: tl.constexpr  = triton.next_power_of_2(H * C)
+    H_pow2: tl.constexpr  = triton.next_power_of_2(H)
+    C_pow2: tl.constexpr  = triton.next_power_of_2(C)
+    H_C_pow2_off=tl.arange(0, H_pow2 * C_pow2).reshape(H_pow2, C_pow2)
+    H_pow2_off =  tl.arange(0, H_pow2)[:, None] # shape (H_pow2, 1)
+    C_pow2_off =  tl.arange(0, C_pow2)[None, :] # shape (1, C_pow2)
+    H_C_mask_2d = (H_pow2_off[:,None] < H) & (C_pow2_off[None,:] < C)
+    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pow2*C_pow2,))
+    H_mask = tl.arange(0, H_pow2) < H
 
     dst_start = dst_idx * H * C
-    dst_off = dst_start + tl.arange(0, H * C)
+    dst_off = dst_start + tl.arange(0, H_pow2*C_pow2)
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
-        zeros = tl.zeros((H,), dtype=tl.float32)  # m initialised as torch.float32
-        tl.store(M_ptr + dst_idx * H + tl.arange(0, H), zeros)
-        zeros = tl.zeros((H * C,), dtype=out_dtype)
-        tl.store(OUT_ptr + dst_off, zeros)
+        zeros = tl.zeros((H_pow2,), dtype=tl.float32)  # m initialised as torch.float32
+        M_off = M_ptr + dst_idx * H + tl.arange(0, H_pow2) 
+        tl.store(M_off, zeros, mask=H_mask )
+        zeros = tl.zeros((H_pow2 * C_pow2,), dtype=out_dtype)
+        OUT_off = OUT_ptr + dst_off
+        tl.store(OUT_off, zeros, mask=H_C_mask_1d)
         return
 
-    q = tl.load(Q_ptr + dst_off).to(tl.float32).reshape((H, C))
-    acc = tl.zeros((H, C), dtype=tl.float32)  # output accumulator, pending normalization by l_i
-    l_i = tl.zeros((H,), dtype=tl.float32)  # sum of attention weights
-    m_i = tl.full((H,), value=-float("inf"), dtype=tl.float32)  # running max for stability
+    q = tl.load(Q_ptr + dst_off).to(tl.float32).reshape((H_pow2, C_pow2))
+    acc = tl.zeros((H_pow2, C_pow2), dtype=tl.float32)  # output accumulator, pending normalization by l_i
+    l_i = tl.zeros((H_pow2,), dtype=tl.float32)  # sum of attention weights
+    m_i = tl.full((H_pow2,), value=-float("inf"), dtype=tl.float32)  # running max for stability
 
     # helpers to avoid repeated computations/indexing:
     qk_scale = 1 / tl.sqrt(float(C))
-    edge_ptr = E_ptr + neigh_start * H * C + tl.arange(0, H * C)  # pointer to first edge_attr
+    edge_ptr = E_ptr + neigh_start * H * C + tl.arange(0, H_pow2 * C_pow2)  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
 
     for _ in range(num_edges):  # iterate over incident edges
-        e = tl.load(edge_ptr).to(tl.float32).reshape((H, C))
+        e = tl.load(edge_ptr, mask=H_C_mask_1d).to(tl.float32).reshape((H_pow2, C_pow2))
 
         # src neighbor index: rowptr[e_idx]
         src_idx = tl.load(ROW_ptr + e_idx)
-        src_off = src_idx * H * C + tl.arange(0, H * C)
-        k = tl.load(K_ptr + src_off).to(tl.float32).reshape((H, C))
-        v = tl.load(V_ptr + src_off).to(tl.float32).reshape((H, C))
+        src_off = src_idx * H * C + tl.arange(0, H_pow2 * C_pow2)
+        k = tl.load(K_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pow2, C_pow2))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pow2, C_pow2))
 
         k_e = k + e
         v_e = v + e
@@ -101,16 +113,17 @@ def _gt_fwd(
     tl.store(
         OUT_ptr + dst_off,
         acc.to(out_dtype).reshape(
-            H * C,
+            H_pow2 * C_pow2,
         ),
+        mask=H_C_mask_1d
     )
 
     # store m_i + log(l_i) for backward
     m_start = dst_idx * H
-    m_off = m_start + tl.arange(0, H)
+    m_off = m_start + tl.arange(0, H_pow2)
 
     m_i += tl.log(l_i)
-    tl.store(M_ptr + m_off, m_i)
+    tl.store(M_ptr + m_off, m_i, mask=H_mask)
 
 
 @triton.jit
