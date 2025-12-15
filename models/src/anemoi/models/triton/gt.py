@@ -44,15 +44,24 @@ def _gt_fwd(
     #H_C_pow2: tl.constexpr  = triton.next_power_of_2(H * C)
     H_pow2: tl.constexpr  = triton.next_power_of_2(H)
     C_pow2: tl.constexpr  = triton.next_power_of_2(C)
+    #TODO once something works with (H_pow2, C_pow2) replace with (H_C_pow2,)
     H_C_pow2_off=tl.arange(0, H_pow2 * C_pow2).reshape(H_pow2, C_pow2)
-    H_pow2_off =  tl.arange(0, H_pow2)[:, None] # shape (H_pow2, 1)
-    C_pow2_off =  tl.arange(0, C_pow2)[None, :] # shape (1, C_pow2)
-    H_C_mask_2d = (H_pow2_off[:,None] < H) & (C_pow2_off[None,:] < C)
+    H_pow2_off = tl.arange(0, H_pow2)[:, None]   # shape (H_pow2, 1)
+    C_pow2_off = tl.arange(0, C_pow2)[None, :]   # shape (1, C_pow2)
+
+    H_C_mask_2d = (H_pow2_off < H) & (C_pow2_off < C)
+    #H_C_mask_2d = (H_pow2_off[:,None] < H) & (C_pow2_off[None,:] < C)
     H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pow2*C_pow2,))
     H_mask = tl.arange(0, H_pow2) < H
+    
+    #tl.arange(H_pow2, C_pow2) doesnt work
+    # this is a padded version
+    H_C_pow2_off_2d = H_pow2_off * C + C_pow2_off
+    H_C_pow2_off_1d = tl.reshape(H_C_pow2_off_2d, (H_pow2 * C_pow2,))
 
     dst_start = dst_idx * H * C
-    dst_off = dst_start + tl.arange(0, H_pow2*C_pow2)
+    #dst_off = dst_start + tl.arange(0, H_pow2*C_pow2)
+    dst_off = dst_start + H_C_pow2_off_1d
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
@@ -66,7 +75,7 @@ def _gt_fwd(
         OUT_off = OUT_ptr + dst_off
         tl.store(OUT_off, zeros, mask=H_C_mask_1d)
         return
-
+    
     q = tl.load(Q_ptr + dst_off).to(tl.float32).reshape((H_pow2, C_pow2))
     acc = tl.zeros((H_pow2, C_pow2), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pow2,), dtype=tl.float32)  # sum of attention weights
@@ -74,7 +83,8 @@ def _gt_fwd(
 
     # helpers to avoid repeated computations/indexing:
     qk_scale = 1 / tl.sqrt(float(C))
-    edge_ptr = E_ptr + neigh_start * H * C + tl.arange(0, H_pow2 * C_pow2)  # pointer to first edge_attr
+    #edge_ptr = E_ptr + neigh_start * H * C + tl.arange(0, H_pow2 * C_pow2)  # pointer to first edge_attr
+    edge_ptr = E_ptr + neigh_start * H * C + H_C_pow2_off_1d  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
 
     for _ in range(num_edges):  # iterate over incident edges
@@ -82,7 +92,9 @@ def _gt_fwd(
 
         # src neighbor index: rowptr[e_idx]
         src_idx = tl.load(ROW_ptr + e_idx)
-        src_off = src_idx * H * C + tl.arange(0, H_pow2 * C_pow2)
+
+        #src_off = src_idx * H * C + tl.arange(0, H_pow2 * C_pow2)
+        src_off = src_idx * H * C + H_C_pow2_off_1d
         k = tl.load(K_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pow2, C_pow2))
         v = tl.load(V_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pow2, C_pow2))
 
