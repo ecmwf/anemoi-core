@@ -248,6 +248,7 @@ def lam_config_with_graph(
 def ensemble_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
+    get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
@@ -262,6 +263,13 @@ def ensemble_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
+
+    url_truncation = cfg.system.input.truncation_loss_path
+    for file in cfg.system.input.truncation_loss:
+        tmp_path_truncation = get_test_data(url_truncation + file)
+
+    cfg.system.input.truncation_loss_path = Path(tmp_path_truncation).parent
+
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls[0]
 
