@@ -59,10 +59,10 @@ class TestGNNProcessor:
     @pytest.fixture
     def graph_provider(self, fake_graph):
         return create_graph_provider(
-            sub_graph=fake_graph[("nodes", "to", "nodes")],
-            sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            src_grid_size=self.NUM_NODES,
-            dst_grid_size=self.NUM_NODES,
+            graph=fake_graph[("nodes", "to", "nodes")],
+            edge_attributes=["edge_attr1", "edge_attr2"],
+            src_size=self.NUM_NODES,
+            dst_size=self.NUM_NODES,
             trainable_size=8,
         )
 

@@ -35,12 +35,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Create graph providers
         self.encoder_graph_provider = create_graph_provider(
-            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-            sub_graph_edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             trainable_size=model_config.model.encoder.get("trainable_size", 0),
-            edge_dim=model_config.model.encoder.get("edge_dim"),
         )
 
         # Encoder data -> hidden
@@ -55,12 +54,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            sub_graph_edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             trainable_size=model_config.model.processor.get("trainable_size", 0),
-            edge_dim=model_config.model.processor.get("edge_dim"),
         )
 
         self.processor = instantiate(
@@ -72,12 +70,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Decoder hidden -> data
         self.decoder_graph_provider = create_graph_provider(
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            sub_graph_edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_data],
             trainable_size=model_config.model.decoder.get("trainable_size", 0),
-            edge_dim=model_config.model.decoder.get("edge_dim"),
         )
 
         self.decoder = instantiate(

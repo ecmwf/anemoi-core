@@ -25,60 +25,52 @@ from anemoi.models.layers.graph import TrainableTensor
 
 
 def create_graph_provider(
-    sub_graph: Optional[HeteroData] = None,
-    sub_graph_edge_attributes: Optional[list[str]] = None,
-    src_grid_size: Optional[int] = None,
-    dst_grid_size: Optional[int] = None,
+    graph: Optional[HeteroData] = None,
+    edge_attributes: Optional[list[str]] = None,
+    src_size: Optional[int] = None,
+    dst_size: Optional[int] = None,
     trainable_size: int = 0,
-    edge_dim: Optional[int] = None,
 ) -> "BaseGraphProvider":
     """Factory function to create appropriate graph provider.
 
+    Returns StaticGraphProvider if graph is provided,
+    otherwise returns NoOpGraphProvider for edge-less architectures.
+
     Parameters
     ----------
-    sub_graph : HeteroData, optional
-        Sub graph of the full structure (for static mode)
-    sub_graph_edge_attributes : list[str], optional
+    graph : HeteroData, optional
+        Graph containing edges (for static mode)
+    edge_attributes : list[str], optional
         Edge attributes to use (for static mode)
-    src_grid_size : int, optional
+    src_size : int, optional
         Source grid size (for static mode)
-    dst_grid_size : int, optional
+    dst_size : int, optional
         Destination grid size (for static mode)
     trainable_size : int, optional
         Trainable tensor size, by default 0
-    edge_dim : int, optional
-        Edge dimension (for dynamic mode)
 
     Returns
     -------
     BaseGraphProvider
-        Appropriate graph provider instance (StaticGraphProvider or DynamicGraphProvider)
+        Appropriate graph provider instance
     """
-    if sub_graph is not None:
-        # Static mode
-        assert sub_graph_edge_attributes is not None, "sub_graph_edge_attributes required for static mode"
-        assert src_grid_size is not None, "src_grid_size required for static mode"
-        assert dst_grid_size is not None, "dst_grid_size required for static mode"
+    if graph is not None:
         return StaticGraphProvider(
-            sub_graph=sub_graph,
-            edge_attributes=sub_graph_edge_attributes,
-            src_size=src_grid_size,
-            dst_size=dst_grid_size,
+            graph=graph,
+            edge_attributes=edge_attributes,
+            src_size=src_size,
+            dst_size=dst_size,
             trainable_size=trainable_size,
         )
     else:
-        # Dynamic mode
-        assert trainable_size == 0, "Dynamic mode does not support trainable edge parameters (trainable_size must be 0)"
-        assert edge_dim is not None, "edge_dim required for dynamic mode"
-        return DynamicGraphProvider(edge_dim=edge_dim)
+        return NoOpGraphProvider()
 
 
 class BaseGraphProvider(nn.Module, ABC):
     """Base class for graph edge providers.
 
     Graph providers encapsulate the logic for supplying edge indices and attributes
-    to mapper and processor layers. This allows for different strategies (static, dynamic, etc.)
-    to be implemented and swapped without modifying the mapper classes.
+    to mapper and processor layers. This allows for different strategies (static, dynamic, etc.).
     """
 
     @abstractmethod
@@ -128,7 +120,7 @@ class StaticGraphProvider(BaseGraphProvider):
 
     def __init__(
         self,
-        sub_graph: HeteroData,
+        graph: HeteroData,
         edge_attributes: list[str],
         src_size: int,
         dst_size: int,
@@ -138,8 +130,8 @@ class StaticGraphProvider(BaseGraphProvider):
 
         Parameters
         ----------
-        sub_graph : HeteroData
-            Sub graph of the full structure
+        graph : HeteroData
+            Graph containing edges
         edge_attributes : list[str]
             Edge attributes to use
         src_size : int
@@ -151,13 +143,13 @@ class StaticGraphProvider(BaseGraphProvider):
         """
         super().__init__()
 
-        assert sub_graph, "StaticGraphProvider needs a valid sub_graph to register edges."
+        assert graph, "StaticGraphProvider needs a valid graph to register edges."
         assert edge_attributes is not None, "Edge attributes must be provided"
 
-        edge_attr_tensor = torch.cat([sub_graph[attr] for attr in edge_attributes], axis=1)
+        edge_attr_tensor = torch.cat([graph[attr] for attr in edge_attributes], axis=1)
 
         self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
-        self.register_buffer("edge_index_base", sub_graph.edge_index, persistent=False)
+        self.register_buffer("edge_index_base", graph.edge_index, persistent=False)
         self.register_buffer(
             "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=True
         )
@@ -221,11 +213,51 @@ class StaticGraphProvider(BaseGraphProvider):
         return edge_attr, edge_index
 
 
+class NoOpGraphProvider(BaseGraphProvider):
+    """Provider for edge-less architectures (e.g., Transformers).
+
+    Returns None for edges and has edge_dim=0. Used when the mapper/processor
+    does not require graph structure (e.g., pure attention-based models).
+    """
+
+    def __init__(self) -> None:
+        """Initialize NoOpGraphProvider."""
+        super().__init__()
+
+    @property
+    def edge_dim(self) -> int:
+        """Return the edge dimension (0 for no edges)."""
+        return 0
+
+    def get_edges(
+        self,
+        batch_size: Optional[int] = None,
+        src_coords: Optional[Tensor] = None,
+        dst_coords: Optional[Tensor] = None,
+    ) -> tuple[None, None]:
+        """Return None for both edge attributes and edge index.
+
+        Parameters
+        ----------
+        batch_size : int, optional
+            Unused
+        src_coords : Tensor, optional
+            Unused
+        dst_coords : Tensor, optional
+            Unused
+
+        Returns
+        -------
+        tuple[None, None]
+            No edges
+        """
+        return None, None
+
+
 class DynamicGraphProvider(BaseGraphProvider):
     """Provider for dynamic graphs where edges are supplied at runtime.
 
-    Current implementation requires edge indices and attributes to be passed in during
-    forward pass via get_edges(). Does not support trainable edge parameters.
+    Does not support trainable edge parameters.
 
     Future implementation will support on-the-fly graph construction via build_graph()
     (e.g., k-NN graphs, radius graphs, adaptive connectivity).
@@ -469,5 +501,6 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Sparse projection matrix
         """
         if device is not None:
+            # sparse tensors can't be registered as buffers with ddp, so move on demand
             self.projection_matrix = self.projection_matrix.to(device)
         return self.projection_matrix
