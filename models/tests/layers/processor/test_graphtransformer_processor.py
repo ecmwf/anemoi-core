@@ -35,6 +35,7 @@ class GraphTransformerProcessorConfig:
     layer_kernels: field(default_factory=DotDict) = None
     graph_attention_backend: str = "pyg"
     edge_dim: int = None  # Will be set from graph_provider
+    edge_pre_mlp: bool = False
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)

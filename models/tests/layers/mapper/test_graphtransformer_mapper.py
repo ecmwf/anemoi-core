@@ -50,6 +50,7 @@ class MapperConfig:
     shard_strategy: str = "edges"
     graph_attention_backend: str = "pyg"
     edge_dim: int = None  # Will be set from graph_provider
+    edge_pre_mlp: bool = False
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
