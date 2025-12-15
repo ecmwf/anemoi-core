@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 from pathlib import Path
@@ -22,6 +23,8 @@ from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 
 from anemoi.models.layers.graph import TrainableTensor
+
+LOGGER = logging.getLogger(__name__)
 
 
 def create_graph_provider(
@@ -358,7 +361,6 @@ class ProjectionGraphProvider(BaseGraphProvider):
         src_node_weight_attribute: Optional[str] = None,
         file_path: Optional[str | Path] = None,
         row_normalize: bool = False,
-        transpose: bool = False,
     ) -> None:
         """Initialize ProjectionGraphProvider.
 
@@ -375,23 +377,19 @@ class ProjectionGraphProvider(BaseGraphProvider):
         file_path : str | Path, optional
             Path to .npz file with projection matrix
         row_normalize : bool
-            Whether to normalize weights per destination node
-        transpose : bool
-            Whether to transpose the projection matrix
+            Whether to normalize weights per row (target node) so each row sums to 1
         """
         super().__init__()
 
         if file_path is not None:
-            self._build_from_file(file_path, row_normalize, transpose)
+            self._build_from_file(file_path, row_normalize)
         else:
             assert (
                 graph is not None and edges_name is not None
             ), "Must provide graph and edges_name if file_path not given"
-            self._build_from_graph(
-                graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize, transpose
-            )
+            self._build_from_graph(graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize)
 
-    def _build_from_file(self, file_path: str | Path, row_normalize: bool, transpose: bool) -> None:
+    def _build_from_file(self, file_path: str | Path, row_normalize: bool) -> None:
         """Load projection matrix from file."""
         from scipy.sparse import load_npz
 
@@ -400,7 +398,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         weights = torch.tensor(truncation_data.data, dtype=torch.float32)
         src_size, dst_size = truncation_data.shape
 
-        self._create_matrix(edge_index, weights, src_size, dst_size, row_normalize, transpose)
+        self._create_matrix(edge_index, weights, src_size, dst_size, row_normalize)
 
     def _build_from_graph(
         self,
@@ -409,7 +407,6 @@ class ProjectionGraphProvider(BaseGraphProvider):
         edge_weight_attribute: Optional[str],
         src_node_weight_attribute: Optional[str],
         row_normalize: bool,
-        transpose: bool,
     ) -> None:
         """Build projection matrix from graph."""
         sub_graph = graph[edges_name]
@@ -435,7 +432,6 @@ class ProjectionGraphProvider(BaseGraphProvider):
             graph[edges_name[2]].num_nodes,  # dst_size (targets) = rows
             graph[edges_name[0]].num_nodes,  # src_size (sources) = cols
             row_normalize,
-            transpose,
         )
 
     def _create_matrix(
@@ -445,7 +441,6 @@ class ProjectionGraphProvider(BaseGraphProvider):
         src_size: int,
         dst_size: int,
         row_normalize: bool,
-        transpose: bool,
     ) -> None:
         """Create sparse projection matrix."""
 
@@ -459,10 +454,17 @@ class ProjectionGraphProvider(BaseGraphProvider):
             device=edge_index.device,
         ).coalesce()
 
-        if transpose:
-            self.projection_matrix = self.projection_matrix.T
-
         self._edge_dim = self.projection_matrix.shape[1]
+
+        row_sums = torch.zeros(src_size, device=weights.device).scatter_add_(0, edge_index[0], weights)
+        if not torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5):
+            LOGGER.warning(
+                "Projection matrix rows do not sum to 1 (min=%.4f, max=%.4f, mean=%.4f). "
+                "Consider using row_normalize=True or pre-normalized weights.",
+                row_sums.min().item(),
+                row_sums.max().item(),
+                row_sums.mean().item(),
+            )
 
     @staticmethod
     def _row_normalize_weights(edge_index: Tensor, weights: Tensor, num_rows: int) -> Tensor:

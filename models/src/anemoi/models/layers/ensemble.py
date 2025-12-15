@@ -106,7 +106,6 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_mlp_hidden_dim: int,
         layer_kernels: DotDict,
         noise_matrix: Optional[str] = None,
-        transpose_noise_matrix: bool = False,
         row_normalize_noise_matrix: bool = False,
         autocast: bool = False,
         num_channels: Optional[int] = None,
@@ -138,7 +137,6 @@ class NoiseConditioning(BaseNoiseInjector):
         if noise_matrix is not None:
             self.noise_graph_provider = ProjectionGraphProvider(
                 file_path=noise_matrix,
-                transpose=transpose_noise_matrix,
                 row_normalize=row_normalize_noise_matrix,
             )
             self._sparse_projector = SparseProjector(autocast=autocast)
