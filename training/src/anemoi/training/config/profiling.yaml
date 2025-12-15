@@ -1,0 +1,134 @@
+defaults:
+- data: zarr #to change to our own config
+- dataloader: native_grid #to change to our own config
+- diagnostics: evaluation
+- datamodule: single
+- hardware: example
+- graph: existing_graph
+- model: graphtransformer_diffusionuncond
+- training: diffusion
+- _self_
+
+config_validation: True
+
+diagnostics:
+  benchmark_profiler:
+    memory:
+      enabled: true
+      steps: 5
+      warmup: 2
+      extra_plots: true
+      trace_rank0_only: false
+    time:
+      enabled: true
+      verbose: false
+    speed:
+      enabled: true
+    system:
+      enabled: true
+    model_summary:
+      enabled: false
+    snapshot:
+      enabled: true
+      steps: 4
+      warmup: 0
+  print_memory_summary: True
+  plot:
+    callbacks: []
+    parameters:
+      - z_500
+      - t_850
+      - u_850
+      - v_850
+      - 2t
+      - 10u
+      - 10v
+      - sp
+      - tp
+    precip_and_related_fields: [tp]
+  log:
+    mlflow:
+      enabled: True
+      offline: False
+      experiment_name: 'uncond-diffusion-debug-profile'
+      project_name: 'uncond-diffusion'
+      run_name: 'testing'
+      tracking_uri: 'https://mlflow.ecmwf.int'
+      authentication: True
+      terminal: False
+      system: True
+    wandb:
+      enabled: False
+      entity: 'uncond-diffusion'
+
+data:
+    diagnostic: ["tp"] #variables que le modèle ne prendra pas en input mais va sortir en output : tp est la pluie, on ne la prend pas en input 
+    # ça peut perturber en input les variables et tout le modne fait comme ça.
+    forcing:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "insolation"
+      - "lsm"
+      - "z"
+    normalizer:
+      std: null
+      max: null
+      none: ${data.forcing}
+
+dataloader:
+  num_workers:
+    training: 8
+    validation: 8
+  batch_size:
+    training: 1
+    validation: 1
+  
+  training:
+        start: "2023-05-21"
+        end: "2023-06-21"
+        select: ['10u','10v', '2t','cos_latitude', 'insolation', 'r_500', 'r_850', 'sin_latitude', 't_500', 't_850', 'u_500', 'u_850', 'v_500', 'v_850', 'z_500', 'z_850', 'sp', 'tp']
+    
+  validation:
+      start: "2023-06-01"
+      end: "2023-06-20"
+      select: ['10u','10v', '2t','cos_latitude', 'insolation', 'r_500', 'r_850', 'sin_latitude', 't_500', 't_850', 'u_500', 'u_850', 'v_500', 'v_850', 'z_500', 'z_850', 'sp', 'tp']
+  test:
+      start: "2023-06-21"
+      end: "2023-07-11"
+      select: ['10u','10v', '2t','cos_latitude', 'insolation', 'r_500', 'r_850', 'sin_latitude', 't_500', 't_850', 'u_500', 'u_850', 'v_500', 'v_850', 'z_500', 'z_850', 'sp', 'tp']
+
+  dataset:
+        - dataset: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
+
+model:
+  trainable_parameters:
+    data: 0
+    data2hidden: 0
+    hidden: 0
+    hidden2data: 0
+    hidden2hidden: 0
+  processor:
+    num_chunks: 2
+
+# training:
+#   load_weights_only: True
+#   transfer_learning: True
+#   fork_run_id: starting-point
+
+hardware:
+  paths:
+    data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
+    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/outputs_incond/
+  files:
+    dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
+    graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
+  num_gpus_per_node: 4
+  num_gpus_per_model: 2
+training:
+  max_epochs: 2

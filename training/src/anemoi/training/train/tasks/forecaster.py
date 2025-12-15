@@ -196,9 +196,6 @@ class GraphForecaster(BaseGraphModule):
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
-        print('JE SUIS DANS FORECAST', self.rollout_step(batch,
-            rollout=self.rollout,
-            validation_mode=validation_mode,),batch.shape,self.rollout, validation_mode)
         for loss_next, metrics_next, y_preds_next in self.rollout_step(
             batch,
             rollout=self.rollout,

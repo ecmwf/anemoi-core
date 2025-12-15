@@ -5,7 +5,7 @@ eval:
   frequency: 20
 
 defaults:
-  - plot: detailed
+  - plot: detailed_uncond
   - callbacks: placeholder
   - benchmark_profiler: detailed
 
