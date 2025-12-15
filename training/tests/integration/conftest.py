@@ -265,7 +265,7 @@ def ensemble_config(
     OmegaConf.resolve(cfg)
 
     url_truncation = cfg.system.input.truncation_loss_path
-    for file in cfg.system.input.truncation_loss:
+    for file in cfg.system.input.truncation_loss[:-1]:
         tmp_path_truncation = get_test_data(url_truncation + file)
 
     cfg.system.input.truncation_loss_path = Path(tmp_path_truncation).parent
