@@ -40,12 +40,6 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
     edge_index = torch.tensor(edges, dtype=torch.long).t()
     return edge_index, edge_index.shape[1]
 
-
-def max_abs_diff(a: torch.Tensor, b: torch.Tensor) -> float:
-    """Compute maximum absolute difference between two tensors."""
-    return (a - b).abs().max().item()
-
-
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
