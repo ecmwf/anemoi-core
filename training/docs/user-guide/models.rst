@@ -181,11 +181,13 @@ The truncation system supports several types of transformation matrices:
 **Inverse Truncation Matrix (``truncation_inv``)**
    The inverse transformation matrix.
 
-**Loss Truncation Matrices (``truncation_loss``)**
-   A list of matrices used for multi-scale loss computation during
-   ensemble training only. Each matrix corresponds to a different scale
-   for loss evaluation. These need to be ordered so that the first
-   matrix corresponds to the largest scales. The following matrices then
+**Loss Matrices Path (``loss_matrices_path``)**
+   Path to the directory containing smoothing matrices for multi-scale
+   loss computation. The list of matrix filenames is configured directly
+   in the ``training_loss`` section as ``loss_matrices``. Works only for
+   ensemble training. Each matrix corresponds to a different scale for
+   loss evaluation. These need to be ordered so that the first matrix
+   corresponds to the largest scales. The following matrices then
    include smaller and smaller scales.
 
 .. note::

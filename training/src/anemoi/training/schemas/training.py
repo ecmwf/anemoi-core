@@ -249,14 +249,14 @@ class MultiScaleLossSchema(BaseModel):
     per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
     weights: list[float]
     keep_batch_sharded: bool
-    truncation_path: str
-    filenames: list[str | None]
+    loss_matrices_path: str
+    loss_matrices: list[str | None]
 
     @field_validator("weights")
     @classmethod
     def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
-        if "filenames" in info.data:
-            assert len(v) == len(info.data["filenames"]), "weights must have same length as filenames"
+        if "loss_matrices" in info.data:
+            assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
         return v
 
 

@@ -68,11 +68,10 @@ loss_gradient_scaling: False
 training_loss:
   # loss class to initialise, can be anything subclassing torch.nn.Module
   _target_: anemoi.training.losses.MultiscaleLossWrapper
-  truncation_path: ${system.input.truncation_loss_path}
-  filenames: ${system.input.truncation_loss}
-  weights:
-    - 1.0
-    - 1.0
+  loss_matrices_path: ${system.input.loss_matrices_path}
+  loss_matrices: [null]
+  weights: [1.0]
+
   keep_batch_sharded: ${model.keep_batch_sharded}
 
   per_scale_loss:
@@ -106,12 +105,11 @@ validation_metrics:
   multiscale:
     _target_: anemoi.training.losses.MultiscaleLossWrapper
 
-    truncation_path: ${system.input.truncation_loss_path}
-    filenames: ${system.input.truncation_loss}
+    loss_matrices_path: ${system.input.loss_matrices_path}
+    loss_matrices: [null]
+    weights: [1.0]
+
     keep_batch_sharded: ${model.keep_batch_sharded}
-    weights:
-     - 1.0
-     - 1.0
 
     per_scale_loss:
       _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
