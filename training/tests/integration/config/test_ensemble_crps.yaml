@@ -10,11 +10,11 @@ system:
 
 training:
   training_loss:
-    loss_matrices: ["trunc_o48-o32.npz", null]
+    loss_matrices: [ "o96_smoothing_o96.npz", null]
     weights: [1.0, 1.0]
   validation_metrics:
     multiscale:
-      loss_matrices: ["trunc_o48-o32.npz", null]
+      loss_matrices: ["o96_smoothing_o96.npz", null]
       weights: [1.0, 1.0]
 
 dataloader:

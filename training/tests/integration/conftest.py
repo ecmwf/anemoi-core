@@ -269,9 +269,10 @@ def ensemble_config(
     for file in cfg.training.training_loss.loss_matrices:
         if file is not None:
             tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
-
     if tmp_path_loss_matrices is not None:
         cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
+        cfg.training.training_loss.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+        cfg.training.validation_metrics.multiscale.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
 
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls[0]
