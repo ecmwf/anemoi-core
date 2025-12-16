@@ -73,7 +73,7 @@ try:
 except ImportError:
     msg = (
         "The 'mlflow-export-import' package is not installed."
-        "You can install it from `mlflowsync` optional dependencies in the pyproject.toml"
+        "You can install it doing pip install anemoi-training[mlflowsync]"
     )
     raise ImportError(msg) from None
 
@@ -444,7 +444,7 @@ class MlFlowSync:
             LOGGER.exception(
                 "Importing run %s of experiment %s failed."
                 "Make sure you're using the latest version of mlflow_export_import"
-                "To do so, first uninstall and then reinstall it. Check pyproject.toml for details.",
+                "Please install it from https://github.com/mlflow/mlflow-export-import",
                 dst_run_id,
                 self.experiment_name,
             )
