@@ -284,7 +284,8 @@ class AnemoiTrainer(ABC):
         warm_start_path = Path(raw_path)
 
         if not warm_start_path.is_file():
-            raise FileNotFoundError(f"Warm start checkpoint not found: {warm_start_path}")
+            msg = f"Warm start checkpoint not found: {warm_start_path}"
+            raise FileNotFoundError(msg)
         return warm_start_path
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
