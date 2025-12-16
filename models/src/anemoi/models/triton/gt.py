@@ -19,6 +19,63 @@ except ImportError:
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
 
+@triton.jit
+def build_masks_and_offsets(H:tl.constexpr, C:tl.constexpr, H_pad:tl.constexpr, C_pad: tl.constexpr):
+    """ Pads H and C to the nearest power of 2 if needed. 
+    
+    This is required to support non-square numbers of heads and/or channels.
+    Returns a mask for H, H*C and an offset for accessing into a 2D H*C matrix, ignoring padded values
+    
+    masking apparently has a price, so if H and C are already powers of 2, nothing is returned
+    If H is already a power of 2 but C is not, a simpler H*C mask is returned
+    
+    This function assumes a matrix layout of shape [H,C] for mask_H_C and H_C_off
+    """
+    
+    # default mask (assume no padded values)
+    H_mask=True
+    H_C_mask=True
+    
+    if H == H_pad and C == C_pad:
+        H_C_off = tl.arange(0, H * C)
+        
+    elif H == H_pad: # just C is not square, we can avoid mask_H
+        C_pad_off = tl.arange(0, C_pad)[None, :] # (1, C_pad)
+        H_off = tl.arange(0, H)[:, None] # (H, 1)
+
+        # 2D mask for H * C
+        # e.g 1 2 X X
+        #     5 6 X X
+        #     X X X X
+        # But this kernel loads in 1d, hence we reshape to 1d
+        # shape (H_pad, 1) & shape (1, C_pad) => shape (H_pad, C_pad) => shape (H_pad * C_pad, )
+        H_C_mask_2d = (C_pad_off < C) & (H_off < H)        # (H, C_pad)
+        H_C_mask = tl.reshape(H_C_mask_2d, (H * C_pad,)) 
+        H_C_off = tl.reshape(H_off * C + C_pad_off, (H * C_pad,))
+        
+    else: # H and C both not square
+        H_pad_off = tl.arange(0, H_pad)[:, None]
+        C_pad_off = tl.arange(0, C_pad)[None, :] 
+
+        # mask for H
+        H_mask = tl.arange(0, H_pad) < H
+        
+        # 2D mask for H * C
+        # e.g 1 2 X X
+        #     5 6 X X
+        #     X X X X
+        # But this kernel loads in 1d, hence we reshape to 1d
+        # shape (H_pad, 1) & shape (1, C_pad) => shape (H_pad, C_pad) => shape (H_pad * C_pad, )
+        H_C_mask_2d = (C_pad_off < C) & (H_pad_off < H)        # (H, C_pad)
+        H_C_mask = tl.reshape(H_C_mask_2d, (H_pad * C_pad,)) 
+    
+        # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
+        # Therefore we make our own range, using unpadded major dimension (C)
+        H_C_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
+        
+    return H_mask, H_C_mask, H_C_off
+        
+
 
 @triton.jit
 def _gt_fwd(
@@ -39,38 +96,14 @@ def _gt_fwd(
     dst_idx = pid
     if dst_idx >= N_dst:
         return
+    
 
-    # Add padding if H or C is not a power of 2
-    # Must be done bc tl.arange(), tl.zeros() etc require powers of 2
-    # Padding allows us to use non-power-of-2 number of heads and/or channels
-    # Before loading or storing, we mask out the padded values
-    # It makes the code more complex
-    # e.g. 'tl.arange(H*C,)' is replaced with 'H_pad_off * C + C_pad_off'
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
-
-    # Mask out the padded values
-    # mask for H
-    # e.g. if H is 3, H_pad is 4
-    # H_mask = [True, True, True, False]
-    H_mask = tl.arange(0, H_pad) < H
-
-    # 2D mask for H * C
-    # e.g 1 2 X X
-    #     5 6 X X
-    #     X X X X
-    # But this kernel loads in 1d, hence we reshape to 1d
-    H_pad_off = tl.arange(0, H_pad)[:, None]  # shape (H_pad, 1)
-    C_pad_off = tl.arange(0, C_pad)[None, :]  # shape (1, C_pad)
-    H_C_mask_2d = (H_pad_off < H) & (C_pad_off < C)
-    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
-
-    # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
-    # Therefore we make our own range, using unpadded major dimension (C)
-    H_C_pad_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
+    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H,C,H_pad,C_pad)
 
     dst_start = dst_idx * H * C
-    dst_off = dst_start + H_C_pad_off
+    dst_off = dst_start + H_C_off
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
@@ -82,28 +115,29 @@ def _gt_fwd(
         tl.store(M_off, zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         OUT_off = OUT_ptr + dst_off
-        tl.store(OUT_off, zeros, mask=H_C_mask_1d)
+        tl.store(OUT_off, zeros, mask=H_C_mask)
         return
 
-    q = tl.load(Q_ptr + dst_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+    q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
     m_i = tl.full((H_pad,), value=-float("inf"), dtype=tl.float32)  # running max for stability
 
     # helpers to avoid repeated computations/indexing:
-    edge_ptr = E_ptr + neigh_start * H * C + H_C_pad_off  # pointer to first edge_attr
+    edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
-    for _ in range(num_edges):  # iterate over incident edges
-        e = tl.load(edge_ptr, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+    #for _ in tl.range(num_edges, warp_specialize=True):
+    for _ in range(num_edges):
+        e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         # src neighbor index: rowptr[e_idx]
         src_idx = tl.load(ROW_ptr + e_idx)
 
-        src_off = src_idx * H * C + H_C_pad_off
-        k = tl.load(K_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
-        v = tl.load(V_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+        src_off = src_idx * H * C + H_C_off
+        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         k_e = k + e
         v_e = v + e
@@ -134,7 +168,7 @@ def _gt_fwd(
         acc.to(out_dtype).reshape(
             H_pad * C_pad,
         ),
-        mask=H_C_mask_1d,
+        mask=H_C_mask,
     )
 
     # store m_i + log(l_i) for backward
@@ -167,36 +201,11 @@ def _gt_bwd_dst_pass(
     if dst_idx >= N_dst:
         return
 
-    # Add padding if H or C is not a power of 2
-    # Must be done bc tl.arange(), tl.zeros() etc require powers of 2
-    # Padding allows us to use non-power-of-2 number of heads and/or channels
-    # Before loading or storing, we mask out the padded values
-    # It makes the code more complex
-    # e.g. 'tl.arange(H*C,)' is replaced with 'H_pad_off * C + C_pad_off'
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
+    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H,C,H_pad,C_pad)
 
-    # Mask out the padded values
-    # mask for H
-    # e.g. if H is 3, H_pad is 4
-    # H_mask = [True, True, True, False]
-    H_mask = tl.arange(0, H_pad) < H
-
-    # 2D mask for H * C
-    # e.g 1 2 X X
-    #     5 6 X X
-    #     X X X X
-    # But this kernel loads in 1d, hence we reshape to 1d
-    H_pad_off = tl.arange(0, H_pad)[:, None]  # shape (H_pad, 1)
-    C_pad_off = tl.arange(0, C_pad)[None, :]  # shape (1, C_pad)
-    H_C_mask_2d = (H_pad_off < H) & (C_pad_off < C)
-    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
-
-    # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
-    # Therefore we make our own range, using unpadded major dimension (C)
-    H_C_pad_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
-
-    dst_off = dst_idx * H * C + H_C_pad_off
+    dst_off = dst_idx * H * C + H_C_off
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
@@ -207,28 +216,29 @@ def _gt_bwd_dst_pass(
         zeros = tl.zeros((H_pad,), dtype=out_dtype)
         tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
-        tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask_1d)
+        tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
         return
 
-    d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
-    out = tl.load(OUT_ptr + dst_off, H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+    d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    out = tl.load(OUT_ptr + dst_off, H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     # D_j = <d_out, out> for one-pass computation of dQ
     Dj = tl.sum(d_out * out, axis=-1)  # [H]
 
-    q = tl.load(Q_ptr + dst_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+    q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
-    edge_ptr = E_ptr + neigh_start * H * C + H_C_pad_off  # pointer to first edge_attr
+    edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
+    #for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
-        e = tl.load(edge_ptr, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+        e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         src = tl.load(ROW_ptr + e_idx)
-        src_off = src * H * C + H_C_pad_off
-        k = tl.load(K_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+        src_off = src * H * C + H_C_off
+        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         ke = k + e
         # score and alpha using saved M
@@ -236,7 +246,7 @@ def _gt_bwd_dst_pass(
         s_ij = tl.sum(q * ke, axis=-1) * qk_scale
         alpha_ij = tl.exp(s_ij - m_j)
 
-        v = tl.load(V_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         ve = v + e
 
         dalpha = tl.sum(d_out * ve, axis=-1)
@@ -255,7 +265,7 @@ def _gt_bwd_dst_pass(
         dq.to(out_dtype).reshape(
             H_pad * C_pad,
         ),
-        mask=H_C_mask_1d,
+        mask=H_C_mask,
     )
 
 
@@ -283,29 +293,9 @@ def _gt_bwd_src_pass(
     if src_idx >= N_src:
         return
 
-    # Add padding if H or C is not a power of 2
-    # Must be done bc tl.arange(), tl.zeros() etc require powers of 2
-    # Padding allows us to use non-power-of-2 number of heads and/or channels
-    # Before loading or storing, we mask out the padded values
-    # It makes the code more complex
-    # e.g. 'tl.arange(H*C,)' is replaced with 'H_pad_off * C + C_pad_off'
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
-
-    # Mask out the padded values
-    # 2D mask for H * C
-    # e.g 1 2 X X
-    #     5 6 X X
-    #     X X X X
-    # But this kernel loads in 1d, hence we reshape to 1d
-    H_pad_off = tl.arange(0, H_pad)[:, None]  # shape (H_pad, 1)
-    C_pad_off = tl.arange(0, C_pad)[None, :]  # shape (1, C_pad)
-    H_C_mask_2d = (H_pad_off < H) & (C_pad_off < C)
-    H_C_mask_1d = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
-
-    # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
-    # Therefore we make our own range, using unpadded major dimension (C)
-    H_C_pad_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
+    _, H_C_mask, H_C_off = build_masks_and_offsets(H,C,H_pad,C_pad)
 
     start = tl.load(ROWPTR_ptr + src_idx)
     end = tl.load(ROWPTR_ptr + src_idx + 1)
@@ -313,14 +303,14 @@ def _gt_bwd_src_pass(
 
     if num_edges == 0:
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
-        tl.store(D_K_ptr + src_idx * H * C + H_C_pad_off, zeros, mask=H_C_mask_1d)
-        tl.store(D_V_ptr + src_idx * H * C + H_C_pad_off, zeros, mask=H_C_mask_1d)
+        tl.store(D_K_ptr + src_idx * H * C + H_C_off, zeros, mask=H_C_mask)
+        tl.store(D_V_ptr + src_idx * H * C + H_C_off, zeros, mask=H_C_mask)
         return
 
     # src-side k, v (shared for all edges)
-    src_off = src_idx * H * C + H_C_pad_off
-    k = tl.load(K_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
-    v = tl.load(V_ptr + src_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+    src_off = src_idx * H * C + H_C_off
+    k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     accK = tl.zeros((H_pad, C_pad), dtype=tl.float32)
     accV = tl.zeros((H_pad, C_pad), dtype=tl.float32)
@@ -329,19 +319,20 @@ def _gt_bwd_src_pass(
 
     # note that edges aren't necessarily contiguous in memory here, use EDGE_IDS_ptr
     for i in range(num_edges):
+    #for i in tl.range(0, num_edges, warp_specialize=True):
         # indexing into edge list + corresponding dst node
         e_idx = tl.load(EDGE_IDS_ptr + start + i)
         dst = tl.load(EDGE_DST_ptr + e_idx)
 
         # get saved tensors for dst node
-        dst_off = dst * H * C + H_C_pad_off
-        q = tl.load(Q_ptr + dst_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
-        d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+        dst_off = dst * H * C + H_C_off
+        q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
 
-        e_off = e_idx * H * C + H_C_pad_off
-        e = tl.load(E_ptr + e_off, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
+        e_off = e_idx * H * C + H_C_off
+        e = tl.load(E_ptr + e_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         ke = k + e
         ve = v + e
@@ -362,7 +353,7 @@ def _gt_bwd_src_pass(
             dE_edge.to(out_dtype).reshape(
                 H_pad * C_pad,
             ),
-            mask=H_C_mask_1d,
+            mask=H_C_mask,
         )
 
         accK += dK_edge
@@ -374,14 +365,14 @@ def _gt_bwd_src_pass(
         accK.to(out_dtype).reshape(
             H_pad * C_pad,
         ),
-        mask=H_C_mask_1d,
+        mask=H_C_mask,
     )
     tl.store(
         D_V_ptr + src_off,
         accV.to(out_dtype).reshape(
             H_pad * C_pad,
         ),
-        mask=H_C_mask_1d,
+        mask=H_C_mask,
     )
 
 
