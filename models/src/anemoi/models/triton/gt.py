@@ -324,7 +324,7 @@ def _gt_bwd_src_pass(
 
     accK = tl.zeros((H_pad, C_pad), dtype=tl.float32)
     accV = tl.zeros((H_pad, C_pad), dtype=tl.float32)
-    
+
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
     # note that edges aren't necessarily contiguous in memory here, use EDGE_IDS_ptr
