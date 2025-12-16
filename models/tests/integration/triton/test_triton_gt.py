@@ -40,6 +40,7 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
     edge_index = torch.tensor(edges, dtype=torch.long).t()
     return edge_index, edge_index.shape[1]
 
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
