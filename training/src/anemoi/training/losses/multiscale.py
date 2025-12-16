@@ -101,6 +101,7 @@ class MultiscaleLossWrapper(BaseLoss):
                 truncation_matrices.append(None)
                 LOGGER.info("Loss truncation: %s", None)
             else:
+                LOGGER.info("Loading matrices from ", truncation_path)
                 truncation_matrix = load_npz(Path(truncation_path, interp_data_loss))
                 truncation_matrices.append(make_truncation_matrix(truncation_matrix))
                 LOGGER.info("Loss truncation: %s %s", truncation_matrix.shape[0], truncation_matrix.shape[1])
