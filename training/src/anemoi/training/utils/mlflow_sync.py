@@ -71,7 +71,10 @@ try:
     from mlflow_export_import.run.run_data_importer import _log_metrics
 
 except ImportError:
-    msg = "The 'mlflow-export-import' package is not installed. Please install it from https://github.com/mlflow/mlflow-export-import"
+    msg = (
+        "The 'mlflow-export-import' package is not installed."
+        "You can install it from `mlflowsync` optional dependencies in the pyproject.toml"
+    )
     raise ImportError(msg) from None
 
 LOGGER = logging.getLogger(__name__)
@@ -439,7 +442,9 @@ class MlFlowSync:
 
             traceback.print_exc()
             LOGGER.exception(
-                "Importing run %s of experiment %s failed",
+                "Importing run %s of experiment %s failed."
+                "Make sure you're using the latest version of mlflow_export_import"
+                "To do so, first uninstall and then reinstall it. Check pyproject.toml for details.",
                 dst_run_id,
                 self.experiment_name,
             )
