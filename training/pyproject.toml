@@ -79,6 +79,9 @@ optional-dependencies.docs = [
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]
+optional-dependencies.mlflowsync = [
+  "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import.git@master",
+]
 optional-dependencies.plotting = [
   "distinctipy>=1",
 ]
