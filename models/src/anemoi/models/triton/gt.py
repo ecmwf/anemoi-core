@@ -7,9 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
-from math import sqrt
-
 import torch
 
 # check if triton is installed
@@ -37,7 +34,6 @@ def _gt_fwd(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
-    qk_scale: tl.constexpr,
 ):
     pid = tl.program_id(0)
     dst_idx = pid
@@ -97,6 +93,7 @@ def _gt_fwd(
     # helpers to avoid repeated computations/indexing:
     edge_ptr = E_ptr + neigh_start * H * C + H_C_pad_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
+    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
     for _ in range(num_edges):  # iterate over incident edges
         e = tl.load(edge_ptr, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
@@ -165,7 +162,6 @@ def _gt_bwd_dst_pass(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
-    qk_scale: tl.constexpr,
 ):
     dst_idx = tl.program_id(0)
     if dst_idx >= N_dst:
@@ -225,6 +221,7 @@ def _gt_bwd_dst_pass(
 
     edge_ptr = E_ptr + neigh_start * H * C + H_C_pad_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
+    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
     for _ in range(num_edges):
         e = tl.load(edge_ptr, mask=H_C_mask_1d).to(tl.float32).reshape((H_pad, C_pad))
@@ -281,7 +278,6 @@ def _gt_bwd_src_pass(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
-    qk_scale: tl.constexpr,
 ):
     src_idx = tl.program_id(0)
     if src_idx >= N_src:
@@ -328,6 +324,8 @@ def _gt_bwd_src_pass(
 
     accK = tl.zeros((H_pad, C_pad), dtype=tl.float32)
     accV = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+    
+    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
     # note that edges aren't necessarily contiguous in memory here, use EDGE_IDS_ptr
     for i in range(num_edges):
@@ -432,10 +430,8 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
-        # compute qk_scale outside the kernel once
-        qk_scale = 1 / sqrt(C)
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_scale)
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype)
 
         # Save tensors for backward
         ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
@@ -455,14 +451,13 @@ class GraphTransformerFunction(torch.autograd.Function):
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
-        qk_scale = 1 / sqrt(C)  # compute sqrt once outside kernel
 
         # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype, qk_scale)
+        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
-            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype, qk_scale
+            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype
         )
 
         return dQ, dK, dV, dE, None, None
