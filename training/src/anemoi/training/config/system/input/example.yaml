@@ -2,6 +2,5 @@ dataset: ???
 graph: ???
 truncation: null
 truncation_inv: null
-truncation_loss_path: null
-truncation_loss: [None]
+loss_matrices_path: null
 warm_start: null

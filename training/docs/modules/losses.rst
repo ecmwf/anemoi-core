@@ -92,8 +92,8 @@ The config for the multiscale loss functions is the following:
 
    training_loss:
       _target_: anemoi.training.losses.MultiscaleLossWrapper
-      truncation_path: path/to/truncation_matrices
-      filenames: ["matrix.npz", None]
+      loss_matrices_path: ${system.input.loss_matrices_path}
+      loss_matrices: ["matrix.npz", null]
       weights:
          - 1.0
          - 1.0

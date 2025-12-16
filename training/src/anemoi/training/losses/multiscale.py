@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,14 +13,12 @@ from pathlib import Path
 
 import einops
 import torch
-from scipy.sparse import load_npz
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.truncation import interpolate_batch
-from anemoi.models.truncation import make_truncation_matrix
+from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
@@ -35,28 +33,28 @@ class MultiscaleLossWrapper(BaseLoss):
         per_scale_loss: BaseLoss,
         weights: list[float],
         keep_batch_sharded: bool,
-        truncation_path: Path | str | None = None,
-        filenames: list[Path | str] | None = None,
+        loss_matrices_path: Path | str | None = None,
+        loss_matrices: list[Path | str] | None = None,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
         Parameters
         ----------
-        truncation_path : Path | str
-            Path to the truncation matrices
-        filenames : list[Path | str] | None
-            Filenames of the truncation matrices
+        loss_matrices_path : Path | str
+            Path to the directory containing smoothing matrices
+        loss_matrices : list[Path | str] | None
+            Filenames of the smoothing matrices (must preserve grid size)
         weights : list[float]
             Per-scale loss weights
         keep_batch_sharded : bool
             Whether to keep the batch sharded during loss computation
-        internal_loss : BaseLoss
+        per_scale_loss : BaseLoss
             Loss to be used at each scale
         """
         super().__init__()
 
-        self.truncation_matrices = self.load_loss_truncation_matrices(truncation_path, filenames)
-        self.num_scales = len(self.truncation_matrices)
+        self.smoothing_matrices = self._load_smoothing_matrices(loss_matrices_path, loss_matrices)
+        self.num_scales = len(self.smoothing_matrices)
         assert (
             len(weights) == self.num_scales
         ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
@@ -81,34 +79,39 @@ class MultiscaleLossWrapper(BaseLoss):
         """
         self.loss.update_scaler(name=name, scaler=scaler, override=override)
 
-    def load_loss_truncation_matrices(
+    def _load_smoothing_matrices(
         self,
-        truncation_path: Path | str,
-        filenames: list[Path | str] | None,
-    ) -> list[torch.Tensor | None]:
+        loss_matrices_path: Path | str,
+        loss_matrices: list[Path | str] | None,
+    ) -> list[SparseProjector | None]:
+        """Load smoothing matrices for multi-scale loss computation.
 
-        # for loss decomposition
-        truncation_matrices = []
+        These matrices apply spatial smoothing while preserving grid size.
+        """
+        smoothing_matrices = []
 
-        # Handle None, empty list, or falsy values - default to single scale with no truncation
-        if not filenames:
-            LOGGER.info("No truncation files specified, using single scale without truncation")
+        # Handle None, empty list, or falsy values - default to single scale with no smoothing
+        if not loss_matrices:
+            LOGGER.info("No smoothing files specified, using single scale without smoothing")
             return [None]
 
-        for interp_data_loss in filenames:
+        for filename in loss_matrices:
             # Skip None, False, or the string "None"
-            if interp_data_loss is None or interp_data_loss is False or interp_data_loss == "None":
-                truncation_matrices.append(None)
-                LOGGER.info("Loss truncation: %s", None)
+            if filename is None or filename is False or filename == "None":
+                smoothing_matrices.append(None)
+                LOGGER.info("Loss smoothing: %s", None)
             else:
-                LOGGER.info("Loading matrices from ", truncation_path)
-                truncation_matrix = load_npz(Path(truncation_path, interp_data_loss))
-                truncation_matrices.append(make_truncation_matrix(truncation_matrix))
-                LOGGER.info("Loss truncation: %s %s", truncation_matrix.shape[0], truncation_matrix.shape[1])
+                projector = SparseProjector.from_file(
+                    Path(loss_matrices_path, filename),
+                    row_normalize=False,
+                    transpose=False,
+                )
+                smoothing_matrices.append(projector)
+                LOGGER.info("Loss smoothing: %s", projector.projection_matrix.shape)
 
-        return truncation_matrices
+        return smoothing_matrices
 
-    def _prepare_for_truncation(
+    def _prepare_for_smoothing(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
@@ -116,7 +119,7 @@ class MultiscaleLossWrapper(BaseLoss):
         grid_dim: int,
         grid_shard_shapes: list,
     ) -> tuple[torch.Tensor, torch.Tensor, tuple | None]:
-        """Prepare tensors for interpolation/smoothing.
+        """Prepare tensors for smoothing.
 
         Args:
             y_pred_ens: torch.Tensor
@@ -151,11 +154,18 @@ class MultiscaleLossWrapper(BaseLoss):
 
         return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
 
-    def _interp_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.truncation_matrices[i] is not None:
-            self.truncation_matrices[i] = self.truncation_matrices[i].to(x.device)
-            x = interpolate_batch(x, self.truncation_matrices[i])
-            y = interpolate_batch(y, self.truncation_matrices[i])
+    def _apply_projector(self, batch: torch.Tensor, projector: SparseProjector) -> torch.Tensor:
+        """Apply sparse projector to a batch, handling multi-dimensional inputs."""
+        input_shape = batch.shape
+        batch = batch.reshape(-1, *input_shape[-2:])
+        batch = projector(batch)
+        return batch.reshape(*input_shape[:-2] + batch.shape[-2:])
+
+    def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply smoothing matrix to predictions and targets for loss computation."""
+        if self.smoothing_matrices[i] is not None:
+            x = self._apply_projector(x, self.smoothing_matrices[i])
+            y = self._apply_projector(y, self.smoothing_matrices[i])
         return x, y
 
     def forward(
@@ -173,8 +183,8 @@ class MultiscaleLossWrapper(BaseLoss):
 
         shard_shapes, shard_shapes_y = None, None
         if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
-            # go to full sequence dimension for interpolation / smoothing
-            y_pred_ens_for_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
+            # go to full sequence dimension for smoothing
+            y_pred_ens_for_smooth, y_for_smooth, shard_shapes, shard_shapes_y = self._prepare_for_smoothing(
                 y_pred_ens,
                 y,
                 model_comm_group,
@@ -182,22 +192,21 @@ class MultiscaleLossWrapper(BaseLoss):
                 grid_shard_shapes,
             )
         else:
-            y_pred_ens_for_interp = y_pred_ens
-            y_for_interp = y
+            y_pred_ens_for_smooth = y_pred_ens
+            y_for_smooth = y
 
         loss_inc = []
         y_preds_ens = []
         y_ens = []
-        for i, trunc_matrix in enumerate(self.truncation_matrices):
+        for i, projector in enumerate(self.smoothing_matrices):
             LOGGER.debug(
-                "Loss: %s %s %s",
+                "Loss: %s %s",
                 i,
-                trunc_matrix.shape if trunc_matrix is not None else None,
-                trunc_matrix.device if trunc_matrix is not None else None,
+                projector.projection_matrix.shape if projector is not None else None,
             )
 
-            # interpolate / smooth the predictions and the truth for loss computation
-            y_pred_ens_tmp, y_tmp = self._interp_for_loss(y_pred_ens_for_interp, y_for_interp, i)
+            # smooth the predictions and the truth for loss computation
+            y_pred_ens_tmp, y_tmp = self._smooth_for_loss(y_pred_ens_for_smooth, y_for_smooth, i)
 
             if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
                 y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, model_comm_group)

@@ -264,11 +264,14 @@ def ensemble_config(
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
 
-    url_truncation = cfg.system.input.truncation_loss_path
-    for file in cfg.system.input.truncation_loss[:-1]:
-        tmp_path_truncation = get_test_data(url_truncation + file)
+    url_loss_matrices = cfg.system.input.loss_matrices_path
+    tmp_path_loss_matrices = None
+    for file in cfg.training.training_loss.loss_matrices:
+        if file is not None:
+            tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
 
-    cfg.system.input.truncation_loss_path = Path(tmp_path_truncation).parent
+    if tmp_path_loss_matrices is not None:
+        cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
 
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls[0]

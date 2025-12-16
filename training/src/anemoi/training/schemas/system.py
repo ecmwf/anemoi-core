@@ -46,10 +46,8 @@ class InputSchema(PydanticBaseModel):
     "Path to the truncation matrix file."
     truncation_inv: Path | None = None
     "Path to the inverse truncation matrix file."
-    truncation_loss_path: Path | None = None
-    "Path to the truncation matrices for the multiscale loss"
-    truncation_loss: list[str | None] = None
-    "List of filenames of truncation matrices for the multiscale loss, needs to be appended by None [filename, None]"
+    loss_matrices_path: Path | None = None
+    "Path to the directory containing smoothing matrices for the multiscale loss"
     warm_start: Path | None = None
     "Path of the checkpoint file to use for warm starting the training"
 
