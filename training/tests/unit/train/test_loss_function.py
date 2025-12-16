@@ -544,7 +544,7 @@ def test_multi_scale(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, t
     assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
 
 
-def test_multiscale_loss_eqivalent_to_per_scale_loss() -> None:
+def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
 
     tensor_shape = [1, 2, 4, 5]
     pred = torch.randn(tensor_shape)
