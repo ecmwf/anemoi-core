@@ -19,29 +19,30 @@ except ImportError:
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
 
+
 @triton.jit
-def build_masks_and_offsets(H:tl.constexpr, C:tl.constexpr, H_pad:tl.constexpr, C_pad: tl.constexpr):
-    """ Pads H and C to the nearest power of 2 if needed. 
-    
+def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
+    """Pads H and C to the nearest power of 2 if needed.
+
     This is required to support non-square numbers of heads and/or channels.
     Returns a mask for H, H*C and an offset for accessing into a 2D H*C matrix, ignoring padded values
-    
+
     masking apparently has a price, so if H and C are already powers of 2, nothing is returned
     If H is already a power of 2 but C is not, a simpler H*C mask is returned
-    
+
     This function assumes a matrix layout of shape [H,C] for mask_H_C and H_C_off
     """
-    
+
     # default mask (assume no padded values)
-    H_mask=True
-    H_C_mask=True
-    
+    H_mask = True
+    H_C_mask = True
+
     if H == H_pad and C == C_pad:
         H_C_off = tl.arange(0, H * C)
-        
-    elif H == H_pad: # just C is not square, we can avoid mask_H
-        C_pad_off = tl.arange(0, C_pad)[None, :] # (1, C_pad)
-        H_off = tl.arange(0, H)[:, None] # (H, 1)
+
+    elif H == H_pad:  # just C is not square, we can avoid mask_H
+        C_pad_off = tl.arange(0, C_pad)[None, :]  # (1, C_pad)
+        H_off = tl.arange(0, H)[:, None]  # (H, 1)
 
         # 2D mask for H * C
         # e.g 1 2 X X
@@ -49,32 +50,31 @@ def build_masks_and_offsets(H:tl.constexpr, C:tl.constexpr, H_pad:tl.constexpr, 
         #     X X X X
         # But this kernel loads in 1d, hence we reshape to 1d
         # shape (H_pad, 1) & shape (1, C_pad) => shape (H_pad, C_pad) => shape (H_pad * C_pad, )
-        H_C_mask_2d = (C_pad_off < C) & (H_off < H)        # (H, C_pad)
-        H_C_mask = tl.reshape(H_C_mask_2d, (H * C_pad,)) 
+        H_C_mask_2d = (C_pad_off < C) & (H_off < H)  # (H, C_pad)
+        H_C_mask = tl.reshape(H_C_mask_2d, (H * C_pad,))
         H_C_off = tl.reshape(H_off * C + C_pad_off, (H * C_pad,))
-        
-    else: # H and C both not square
+
+    else:  # H and C both not square
         H_pad_off = tl.arange(0, H_pad)[:, None]
-        C_pad_off = tl.arange(0, C_pad)[None, :] 
+        C_pad_off = tl.arange(0, C_pad)[None, :]
 
         # mask for H
         H_mask = tl.arange(0, H_pad) < H
-        
+
         # 2D mask for H * C
         # e.g 1 2 X X
         #     5 6 X X
         #     X X X X
         # But this kernel loads in 1d, hence we reshape to 1d
         # shape (H_pad, 1) & shape (1, C_pad) => shape (H_pad, C_pad) => shape (H_pad * C_pad, )
-        H_C_mask_2d = (C_pad_off < C) & (H_pad_off < H)        # (H, C_pad)
-        H_C_mask = tl.reshape(H_C_mask_2d, (H_pad * C_pad,)) 
-    
+        H_C_mask_2d = (C_pad_off < C) & (H_pad_off < H)  # (H, C_pad)
+        H_C_mask = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
+
         # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
         # Therefore we make our own range, using unpadded major dimension (C)
         H_C_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
-        
+
     return H_mask, H_C_mask, H_C_off
-        
 
 
 @triton.jit
@@ -96,11 +96,10 @@ def _gt_fwd(
     dst_idx = pid
     if dst_idx >= N_dst:
         return
-    
 
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
-    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H,C,H_pad,C_pad)
+    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
 
     dst_start = dst_idx * H * C
     dst_off = dst_start + H_C_off
@@ -128,7 +127,7 @@ def _gt_fwd(
     e_idx = neigh_start  # first edge index
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
-    #for _ in tl.range(num_edges, warp_specialize=True):
+    # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
         e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -203,7 +202,7 @@ def _gt_bwd_dst_pass(
 
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
-    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H,C,H_pad,C_pad)
+    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
 
     dst_off = dst_idx * H * C + H_C_off
 
@@ -232,7 +231,7 @@ def _gt_bwd_dst_pass(
     e_idx = neigh_start  # first edge index
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
-    #for _ in tl.range(num_edges, warp_specialize=True):
+    # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
         e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -295,7 +294,7 @@ def _gt_bwd_src_pass(
 
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
-    _, H_C_mask, H_C_off = build_masks_and_offsets(H,C,H_pad,C_pad)
+    _, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
 
     start = tl.load(ROWPTR_ptr + src_idx)
     end = tl.load(ROWPTR_ptr + src_idx + 1)
@@ -319,7 +318,7 @@ def _gt_bwd_src_pass(
 
     # note that edges aren't necessarily contiguous in memory here, use EDGE_IDS_ptr
     for i in range(num_edges):
-    #for i in tl.range(0, num_edges, warp_specialize=True):
+        # for i in tl.range(0, num_edges, warp_specialize=True):
         # indexing into edge list + corresponding dst node
         e_idx = tl.load(EDGE_IDS_ptr + start + i)
         dst = tl.load(EDGE_DST_ptr + e_idx)
