@@ -266,7 +266,7 @@ def ensemble_config(
 
     url_loss_matrices = cfg.system.input.loss_matrices_path
     tmp_path_loss_matrices = None
-    for file in cfg.training.training_loss.loss_matrices[:-1]:
+    for file in cfg.training.training_loss.loss_matrices:
         if file is not None:
             tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
 
