@@ -19,9 +19,9 @@ from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
+from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.losses.loss import instantiate
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
