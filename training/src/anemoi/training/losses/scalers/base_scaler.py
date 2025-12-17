@@ -109,11 +109,11 @@ class BaseUpdatingScaler(BaseScaler):
     The default implementation returns an array of ones.
     """
 
-    def on_training_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:  # noqa: ARG002
+    def on_training_start(self, model: AnemoiModelInterface, **kwargs) -> torch.Tensor | None:  # noqa: ARG002
         """Callback method called at the start of training."""
         LOGGER.debug("%s.on_training_start called.", self.__class__.__name__)
 
-    def on_batch_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:  # noqa: ARG002
+    def on_batch_start(self, model: AnemoiModelInterface, **kwargs) -> torch.Tensor | None:  # noqa: ARG002
         """Callback method called at the start of each batch."""
         LOGGER.debug("%s.on_train_batch_start called.", self.__class__.__name__)
 

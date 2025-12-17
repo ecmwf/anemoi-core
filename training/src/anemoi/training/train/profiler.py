@@ -306,21 +306,24 @@ class AnemoiProfiler(AnemoiTrainer):
         batch = next(iter(datamodule.train_dataloader()))
         if type(batch) in [list, tuple]:
             batch = batch[0]
-        self.example_input_array = batch[
-            :,
-            0 : self.config.training.multistep_input,
-            ...,
-            self.data_indices.data.input.full,
-        ]
-        # If the input batch is sharded, replicate it to its full size
-        if self.config.dataloader.read_group_size > 1:
-            self.example_input_array = self.example_input_array.repeat(
-                1,
-                1,
-                1,
-                self.config.dataloader.read_group_size,
-                1,
-            )
+
+        self.example_input_array = {}
+        for dataset_name in batch:
+            self.example_input_array[dataset_name] = batch[dataset_name][
+                :,
+                0 : self.config.training.multistep_input,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]
+            # If the input batch is sharded, replicate it to its full size
+            if self.config.dataloader.read_group_size > 1:
+                self.example_input_array[dataset_name] = self.example_input_array[dataset_name].repeat(
+                    1,
+                    1,
+                    1,
+                    self.config.dataloader.read_group_size,
+                    1,
+                )
         return datamodule
 
     @cached_property

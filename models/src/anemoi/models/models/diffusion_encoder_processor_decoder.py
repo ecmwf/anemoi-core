@@ -69,39 +69,47 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         """Builds the model components."""
 
         # Encoder data -> hidden
-        self.encoder = instantiate(
-            model_config.model.encoder,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.input_dim,
-            in_channels_dst=self.input_dim_latent,
-            hidden_dim=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-        )
+        self.encoder = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.encoder[dataset_name] = instantiate(
+                model_config.model.encoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.input_dim[dataset_name],
+                in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
+                hidden_dim=self.num_channels,
+                sub_graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
+                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+            )
 
-        # Processor hidden -> hidden
+        # Processor hidden -> hidden (shared across all datasets)
+        first_dataset_name = next(iter(self._graph_data.keys()))
+        processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
+        processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
+
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            sub_graph=processor_graph,
+            src_grid_size=processor_grid_size,
+            dst_grid_size=processor_grid_size,
         )
 
         # Decoder hidden -> data
-        self.decoder = instantiate(
-            model_config.model.decoder,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.num_channels,
-            in_channels_dst=self.input_dim,
-            hidden_dim=self.num_channels,
-            out_channels_dst=self.num_output_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-        )
+        self.decoder = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.decoder[dataset_name] = instantiate(
+                model_config.model.decoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.num_channels,
+                in_channels_dst=self.input_dim[dataset_name],
+                hidden_dim=self.num_channels,
+                out_channels_dst=self.num_output_channels[dataset_name],
+                sub_graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
+                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+            )
 
     def _calculate_input_dim(self):
         base_input_dim = super()._calculate_input_dim()
@@ -114,8 +122,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         mlp.add_module("linear2_no_gradscaling", nn.Linear(self.noise_channels, self.noise_cond_dim))
         return mlp
 
-    def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
-        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
+    def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
@@ -154,30 +163,38 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
         return out
 
-    def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
+    def _generate_noise_conditioning(
+        self, sigma: torch.Tensor, dataset_name: str, edge_conditioning: bool = False
+    ) -> torch.Tensor:
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
 
         c_data = self._make_noise_emb(
             noise_cond,
-            repeat=self.node_attributes.num_nodes[self._graph_name_data],
+            repeat=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
         )
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
+        c_hidden = self._make_noise_emb(
+            noise_cond, repeat=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden]
+        )
 
         if edge_conditioning:  # this is currently not used but could be useful for edge conditioning of GNN
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)]["edge_length"].shape[0],
+                repeat=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)][
+                    "edge_length"
+                ].shape[0],
             )
             c_hidden_to_data = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)]["edge_length"].shape[0],
+                repeat=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)][
+                    "edge_length"
+                ].shape[0],
             )
             c_hidden_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]["edge_length"].shape[
-                    0
-                ],
+                repeat=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)][
+                    "edge_length"
+                ].shape[0],
             )
         else:
             c_data_to_hidden = None
@@ -195,40 +212,64 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
+        # Multi-dataset case
+        dataset_names = list(x.keys())
 
-        batch_size, ensemble_size = x.shape[0], x.shape[2]
+        batch_size, ensemble_size = x[dataset_names[0]].shape[0], x[dataset_names[0]].shape[2]
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # prepare noise conditionings
-        c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
-        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
-        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
+        c_data, c_hidden, shape_c_data, shape_c_hidden = {}, {}, {}, {}
+        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = {}, {}, {}
+        for dataset_name, sig in sigma.items():
+            c_data[dataset_name], c_hidden[dataset_name], _, _, _ = self._generate_noise_conditioning(sig, dataset_name)
+            shape_c_data[dataset_name] = get_shard_shapes(c_data[dataset_name], 0, model_comm_group=model_comm_group)
+            shape_c_hidden[dataset_name] = get_shard_shapes(
+                c_hidden[dataset_name], 0, model_comm_group=model_comm_group
+            )
 
-        c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
-        c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
+            c_data[dataset_name] = shard_tensor(c_data[dataset_name], 0, shape_c_data[dataset_name], model_comm_group)
+            c_hidden[dataset_name] = shard_tensor(
+                c_hidden[dataset_name], 0, shape_c_hidden[dataset_name], model_comm_group
+            )
 
-        fwd_mapper_kwargs = {"cond": (c_data, c_hidden)}
-        processor_kwargs = {"cond": c_hidden}
-        bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
+            fwd_mapper_kwargs[dataset_name] = {"cond": (c_data[dataset_name], c_hidden[dataset_name])}
+            processor_kwargs[dataset_name] = {"cond": c_hidden[dataset_name]}
+            bwd_mapper_kwargs[dataset_name] = {"cond": (c_hidden[dataset_name], c_data[dataset_name])}
 
-        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x, y_noised, bse, grid_shard_shapes, model_comm_group
-        )
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+        # Process each dataset through its corresponding encoder
+        dataset_latents = {}
+        x_skip_dict = {}
+        x_data_latent_dict = {}
+        shard_shapes_data_dict = {}
+        shard_shapes_hidden_dict = {}
+        for dataset_name in dataset_names:
+            x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
+                x[dataset_name], y_noised[dataset_name], bse, grid_shard_shapes, model_comm_group, dataset_name
+            )
+            x_skip_dict[dataset_name] = x_skip
+            x_data_latent_dict[dataset_name] = x_data_latent
+            shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
-        x_data_latent, x_latent = self.encoder(
-            (x_data_latent, x_hidden_latent),
-            batch_size=bse,
-            shard_shapes=(shard_shapes_data, shard_shapes_hidden),
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-            x_dst_is_sharded=False,  # x_latent does not come sharded
-            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            **fwd_mapper_kwargs,
-        )
+            x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
+            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(
+                x_hidden_latent, 0, model_comm_group=model_comm_group
+            )
+
+            x_data_latent, dataset_latents[dataset_name] = self.encoder[dataset_name](
+                (x_data_latent, x_hidden_latent),
+                batch_size=bse,
+                shard_shapes=(shard_shapes_data_dict[dataset_name], shard_shapes_hidden_dict[dataset_name]),
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                x_dst_is_sharded=False,  # x_latent does not come sharded
+                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                **fwd_mapper_kwargs[dataset_name],
+            )
+
+        x_latent = sum(dataset_latents.values())
 
         x_latent_proc = self.processor(
             x=x_latent,
@@ -257,29 +298,36 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def fwd_with_preconditioning(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
-        sigma: torch.Tensor,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
     ) -> torch.Tensor:
         """Forward pass with pre-conditioning of EDM diffusion model."""
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
-            x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
+            x,
+            {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
+            c_noise,
+            model_comm_group=model_comm_group,
+            grid_shard_shapes=grid_shard_shapes,
         )  # calls forward ...
-        D_x = c_skip * y_noised + c_out * pred
+        D_x = {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
 
         return D_x
 
     def _get_preconditioning(
-        self, sigma: torch.Tensor, sigma_data: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        self, sigma: dict[str, torch.Tensor], sigma_data: torch.Tensor
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """Compute preconditioning factors."""
-        c_skip = sigma_data**2 / (sigma**2 + sigma_data**2)
-        c_out = sigma * sigma_data / (sigma**2 + sigma_data**2) ** 0.5
-        c_in = 1.0 / (sigma_data**2 + sigma**2) ** 0.5
-        c_noise = sigma.log() / 4.0
+        c_skip = {key: sigma_data**2 / (sigma_value**2 + sigma_data**2) for key, sigma_value in sigma.items()}
+        c_out = {
+            key: sigma_value * sigma_data / (sigma_value**2 + sigma_data**2) ** 0.5
+            for key, sigma_value in sigma.items()
+        }
+        c_in = {key: 1.0 / (sigma_data**2 + sigma_value**2) ** 0.5 for key, sigma_value in sigma.items()}
+        c_noise = {key: sigma_value.log() / 4.0 for key, sigma_value in sigma.items()}
 
         return c_skip, c_out, c_in, c_noise
 
