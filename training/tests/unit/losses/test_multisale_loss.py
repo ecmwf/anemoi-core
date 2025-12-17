@@ -9,8 +9,8 @@
 
 import pytest
 import torch
-
 from pytest_mock import MockerFixture
+
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
