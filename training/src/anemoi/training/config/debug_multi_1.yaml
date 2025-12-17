@@ -1,9 +1,8 @@
 defaults:
-- data: multi_debug
-- dataloader: multi_dataset
-- datamodule: single
+- data: multi
+- dataloader: multi
 - diagnostics: evaluation
-- hardware: example
+- system: example
 - graph: multi_scale
 - model: graphtransformer
 - training: multi_debug
@@ -24,15 +23,10 @@ dataloader:
     validation: 20
     test: 20
 
-hardware:
-  paths:
-    truncation: null
-    data: /home/mlx/ai-ml/datasets/
-    output: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
-  files:
-    truncation: null
-    truncation_inv: null
+system:
+  input:
     graph: graph_anemoi_new_${data.resolution}.pt
+    truncation: null
 
     # Primary dataset for ERA5
     dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8.zarr
@@ -40,10 +34,14 @@ hardware:
     # Secondary dataset for ERA5_copy (using same file for debugging)
     dataset_b: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8.zarr
 
-  accelerator: auto
-  num_gpus_per_node: 1
-  num_nodes: 1
-  num_gpus_per_model: 1
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
+
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
 
 data:
   resolution: o96  # Global resolution setting used in hardware file paths

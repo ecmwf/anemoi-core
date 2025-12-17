@@ -10,7 +10,7 @@ pin_memory: True
 #   The number of GPUs per model must be divisible by read_group_size.
 #   To disable, set to 1.
 # ============
-read_group_size: ${hardware.num_gpus_per_model}
+read_group_size: ${system.hardware.num_gpus_per_model}
 
 num_workers:
   training: 1
@@ -55,13 +55,13 @@ grid_indices:
 training:
   datasets:
     era5:
-      dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      dataset: ${system.input.dataset}
       start: 1985
       end: 2020
       frequency: ${data.frequency}
       drop: []
     cerra:
-      dataset: ${hardware.paths.data}/${hardware.files.dataset_b}  # Using same dataset as duplicate for testing
+      dataset: ${system.input.dataset_b}  # Using same dataset as duplicate for testing
       start: 1985
       end: 2020
       frequency: ${data.frequency}
@@ -73,13 +73,13 @@ validation_rollout: 1 # number of rollouts to use for validation
 validation:
   datasets:
     era5:
-      dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      dataset: ${system.input.dataset}
       start: 2021
       end: 2021
       frequency: ${data.frequency}
       drop: []
     cerra:
-      dataset: ${hardware.paths.data}/${hardware.files.dataset_b}
+      dataset: ${system.input.dataset_b}
       start: 2021
       end: 2021
       frequency: ${data.frequency}
@@ -89,13 +89,13 @@ validation:
 test:
   datasets:
     era5:
-      dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      dataset: ${system.input.dataset}
       start: 2022
       end: null
       frequency: ${data.frequency}
       drop: []
     cerra:
-      dataset: ${hardware.paths.data}/${hardware.files.dataset_b}
+      dataset: ${system.input.dataset_b}
       start: 2022
       end: null
       frequency: ${data.frequency}

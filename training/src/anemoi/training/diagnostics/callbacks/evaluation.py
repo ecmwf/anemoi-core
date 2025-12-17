@@ -60,7 +60,7 @@ class RolloutEval(Callback):
         )
 
         with torch.no_grad():
-            for loss_next, metrics_next, _ in pl_module.rollout_step(
+            for loss_next, metrics_next, _ in pl_module._rollout_step(
                 batch,
                 rollout=self.rollout,
                 validation_mode=True,
@@ -107,8 +107,6 @@ class RolloutEval(Callback):
     ) -> None:
         del outputs  # outputs are not used
         if batch_idx % self.every_n_batches == 0:
-            batch = pl_module.allgather_batch(batch)
-
             precision_mapping = {
                 "16-mixed": torch.float16,
                 "bf16-mixed": torch.bfloat16,
@@ -124,7 +122,7 @@ class RolloutEval(Callback):
 class RolloutEvalEns(RolloutEval):
     """Evaluates the model performance over a (longer) rollout window."""
 
-    def _eval(self, pl_module: pl.LightningModule, batch: torch.Tensor) -> None:
+    def _eval(self, pl_module: pl.LightningModule, batch: dict[str, torch.Tensor]) -> None:
         """Rolls out the model and calculates the validation metrics.
 
         Parameters
@@ -134,14 +132,15 @@ class RolloutEvalEns(RolloutEval):
         batch: torch.Tensor
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
         """
-        loss = torch.zeros(1, dtype=batch[0].dtype, device=pl_module.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=pl_module.device, requires_grad=False)
+        batch_shape = next(iter(batch.values())).shape
         assert (
-            batch[0].shape[1] >= self.rollout + pl_module.multi_step
-        ), "Batch length not sufficient for requested rollout length!"
+            batch_shape[1] >= self.rollout + pl_module.multi_step
+        ), f"Batch length ({batch_shape[1]}) not sufficient for requested rollout length!"
 
         metrics = {}
         with torch.no_grad():
-            for loss_next, metrics_next, _, _ in pl_module.rollout_step(
+            for loss_next, metrics_next, *_ in pl_module._rollout_step(
                 batch=batch,
                 rollout=self.rollout,
                 validation_mode=True,
@@ -151,7 +150,7 @@ class RolloutEvalEns(RolloutEval):
 
             # scale loss
             loss *= 1.0 / self.rollout
-            self._log(pl_module, loss, metrics, batch[0].shape[0])
+            self._log(pl_module, loss, metrics, batch_shape[0])
 
     def on_validation_batch_end(
         self,
@@ -170,7 +169,9 @@ class RolloutEvalEns(RolloutEval):
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
             context = (
-                torch.autocast(device_type=batch[0].device.type, dtype=dtype) if dtype is not None else nullcontext()
+                torch.autocast(device_type=next(iter(batch.values())).device.type, dtype=dtype)
+                if dtype is not None
+                else nullcontext()
             )
 
             with context:

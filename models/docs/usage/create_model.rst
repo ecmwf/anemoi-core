@@ -49,6 +49,9 @@ First, let's take the model configuration ``transformer.yaml``:
      mlp_hidden_ratio: 4
      num_heads: 16
 
+   residual:
+      _target_: anemoi.models.layers.residual.SkipConnection
+
    attributes:
      edges:
      - edge_length

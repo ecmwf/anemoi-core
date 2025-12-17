@@ -37,11 +37,40 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# Optimizer settings
+# =====================================================================
+# Optimizer configuration
+# =====================================================================
 optimizer:
-  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
-  kwargs:
-    betas: [0.9, 0.95]
+  # ---------------------------------------------------------------
+  # Choose optimizer type (_target_ approach)
+  # ---------------------------------------------------------------
+  # Default optimizer: AdamW
+  _target_: torch.optim.AdamW
+
+  # ---------------------------------------------------------------
+  # Common optimizer parameters
+  # ---------------------------------------------------------------
+  # Learning rate is defined elsewhere
+  #kwargs:
+  betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
+
+  # ---------------------------------------------------------------
+  # Optional: configuration for AdEMAMix (custom optimizer)
+  # Uncomment the lines below to enable it
+  # ---------------------------------------------------------------
+  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
+  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
+  # alpha: 8.0                   # Mixing factor controlling EMA fusion
+  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
+  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
+  # weight_decay: 0.01
+
+  # Optional: configuration for ZeroRedundancyOptimizer
+  # _target_: torch.distributed.optim.ZeroRedundancyOptimizer
+  # optimizer_class:
+  #   _target_: torch.optim.AdamW
+  #   _partial_: true
+  # betas: [0.9, 0.95]
 
 # select model
 model_task: anemoi.training.train.tasks.GraphForecaster
@@ -49,7 +78,7 @@ model_task: anemoi.training.train.tasks.GraphForecaster
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
 # loss functions
@@ -115,13 +144,13 @@ variable_groups:
     era5:
       default: sfc
       pl:
-        param: [q, t, u, v, w, z]  # ERA5 has vorticity and divergence
+        param: [q, t, u, v, w] #, z] TODO: # ERA5 has vorticity and divergence
       sfc:
         param: [tp, cp, 10u, 10v, 2d, sp]  # ERA5 surface variables
     cerra:
       default: sfc
       pl:
-        param: [q, t, u, v, w, z]  # CERRA has vorticity and divergence
+        param: [q, t, u, v, w] #, z] TODO: # CERRA has vorticity and divergence
       sfc:
         param: [tp, cp, 10u, 10v, 2d]  # CERRA surface variables
 

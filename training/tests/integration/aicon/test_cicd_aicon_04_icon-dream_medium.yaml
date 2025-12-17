@@ -19,33 +19,33 @@
 # set to true to switch on config validation
 config_validation: True
 
-hardware:
-  paths:
-    graph: none
-    output: output_training/${data.resolution}/
-    logs:
-      base: ${hardware.paths.output}logs/
-      wandb: ${hardware.paths.logs.base}
-      mlflow: ${hardware.paths.logs.base}mlflow/
-      tensorboard: ${hardware.paths.logs.base}tensorboard/
-    checkpoints: ${hardware.paths.output}checkpoint/
-    plots: ${hardware.paths.output}plots/
-    profiler: ${hardware.paths.output}profiler/
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
-  files:
+
+system:
+  input:
     graph: none
     dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
     forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
     warm_start: null
-    checkpoint:
+  output:
+    root: output_training/${data.resolution}
+    checkpoints:
+      root: checkpoint
       every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
       every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
       every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+    plots: plots
+    logs:
+      root: logs
+      wandb: ""
+      mlflow: mlflow
+      tensorboard: tensorboard
+    profiler: profiler
   # number of GPUs per node and number of nodes (for DDP)
-  accelerator: auto
-  num_gpus_per_node: 1
-  num_nodes: 1
-  num_gpus_per_model: 1
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
 
 graph:
   overwrite: True
@@ -106,9 +106,6 @@ graph:
       edge_dirs:
         _target_: anemoi.graphs.edges.attributes.EdgeDirection
         norm: unit-std
-
-datamodule:
-  _target_: anemoi.training.data.datamodule.AnemoiDatasetsDataModule
 
 
 data:
@@ -205,6 +202,8 @@ model:
     layer_kernels:
       Activation:
         _target_: torch.nn.GELU
+  residual:
+    _target_: anemoi.models.layers.residual.SkipConnection
   attributes:
     edges:
     - edge_length
@@ -239,13 +238,12 @@ training:
     enabled: false
     lr: 0.0001
   optimizer:
-    zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
-    kwargs:
-      betas: [0.9, 0.95]
+    _target_: torch.optim.AdamW # or anemoi.training.optimizers.AdEMAMix.AdEMAMix
+    betas: [0.9, 0.95]
   # select strategy
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-    num_gpus_per_model: ${hardware.num_gpus_per_model}
+    num_gpus_per_model: ${system.hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
   loss_gradient_scaling: False
   rollout:
@@ -357,6 +355,9 @@ diagnostics:
     interval: 100
   enable_checkpointing: False
   enable_progress_bar: true
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
   print_memory_summary: false
   benchmark_profiler:
     # Use anemoi-profile to profile the training process
@@ -384,8 +385,8 @@ diagnostics:
 dataloader:
   prefetch_factor: 1
   pin_memory: True
-  read_group_size: ${hardware.num_gpus_per_model}
-  #dataset: ${hardware.paths.data}/${hardware.files.dataset}
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  #dataset: ${system.input.dataset}
   batch_size:
     training: 1
     validation: 1
@@ -397,10 +398,8 @@ dataloader:
   training:
     dataset:
       join:
-      - ${hardware.paths.data}/${hardware.files.dataset}
-      - ${hardware.paths.data}/${hardware.files.forcing_dataset}
-      #- ../dataset_20220101_20230101_6H.zarr
-      #- ../forcings_20220101_20230101_6H.zarr
+      - ${system.input.dataset}
+      - ${system.input.forcing_dataset}
     start: "2022-01-01T00:00:00"
     end: "2022-01-04T00:00:00"
     frequency: ${data.frequency}
@@ -408,10 +407,8 @@ dataloader:
   validation:
     dataset:
       join:
-      - ${hardware.paths.data}/${hardware.files.dataset}
-      - ${hardware.paths.data}/${hardware.files.forcing_dataset}
-      #- ../dataset_20220101_20230101_6H.zarr
-      #- ../forcings_20220101_20230101_6H.zarr
+      - ${system.input.dataset}
+      - ${system.input.forcing_dataset}
     start: "2022-01-04T06:00:00"
     end: "2022-01-06T06:00:00"
     frequency: ${data.frequency}

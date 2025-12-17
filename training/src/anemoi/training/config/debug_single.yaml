@@ -1,9 +1,8 @@
 defaults:
 - data: zarr
 - dataloader: native_grid
-- datamodule: single
 - diagnostics: evaluation
-- hardware: example
+- system: example
 - graph: multi_scale
 - model: graphtransformer
 - training: default
@@ -50,8 +49,8 @@ data:
   timestep: 6h
 
 diagnostics:
-  plot:
-    callbacks: []
+  # plot:
+  #   callbacks: []
   log:
     mlflow:
       enabled: False

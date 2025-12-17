@@ -13,6 +13,7 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
+from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -20,10 +21,10 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.truncation import BaseTruncation
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -39,7 +40,6 @@ class BaseGraphModel(nn.Module):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -49,6 +49,8 @@ class BaseGraphModel(nn.Module):
             Model configuration
         data_indices : dict
             Data indices
+        statistics : dict
+            Data statistics
         graph_data : HeteroData
             Graph definition
         """
@@ -56,7 +58,6 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self._truncation_data = truncation_data  # todo needs to be a dict as well ; we leave it for now
 
         model_config = DotDict(model_config)
         self._graph_name_data = (
@@ -81,8 +82,10 @@ class BaseGraphModel(nn.Module):
         # build networks
         self._build_networks(model_config)
 
-        # build truncation
-        self.truncation = BaseTruncation(self._truncation_data)
+        # build residual connection
+        self.residual = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.residual[dataset_name] = instantiate(model_config.model.residual, graph=graph_data[dataset_name])
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -96,6 +99,8 @@ class BaseGraphModel(nn.Module):
         self.num_input_channels_prognostic = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
+        self.input_dim = {}
+        self.input_dim_latent = {}
 
         for dataset_name, dataset_indices in data_indices.items():
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
@@ -103,6 +108,17 @@ class BaseGraphModel(nn.Module):
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
+            self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
+            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
+
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        return (
+            self.multi_step * self.num_input_channels[dataset_name]
+            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+        )
+
+    def _calculate_input_dim_latent(self, dataset_name: str) -> int:
+        return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
@@ -178,25 +194,6 @@ class BaseGraphModel(nn.Module):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
-    @property
-    def input_dim(self) -> dict[str, int]:
-        # Multi-dataset: create dictionary for input_dim
-        input_dim = {}
-        for dataset_name in self.num_input_channels.keys():
-            input_dim[dataset_name] = (
-                self.multi_step * self.num_input_channels[dataset_name]
-                + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-            )
-        return input_dim
-
-    @property
-    def input_dim_latent(self) -> dict[str, int]:
-        # Multi-dataset: create dictionary for input_dim_latent
-        input_dim_latent = {}
-        for dataset_name in self.node_attributes.keys():
-            input_dim_latent[dataset_name] = self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
-        return input_dim_latent
-
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
@@ -239,9 +236,9 @@ class BaseGraphModel(nn.Module):
 
     def predict_step(
         self,
-        batch: torch.Tensor,
-        pre_processors: nn.Module,
-        post_processors: nn.Module,
+        batch: dict[str, torch.Tensor],
+        pre_processors: nn.ModuleDict,
+        post_processors: nn.ModuleDict,
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
@@ -275,32 +272,43 @@ class BaseGraphModel(nn.Module):
             Model output (after post-processing)
         """
         with torch.no_grad():
+            dataset_names = list(batch.keys())
 
-            assert (
-                len(batch.shape) == 4
-            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
-            # Dimensions are
-            # batch, timesteps, grid, variables
-            x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+            for dataset_name in dataset_names:
+                assert (
+                    len(batch[dataset_name].shape) == 4
+                ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
+                # Dimensions are: batch, timesteps, grid, variables
+
+            x = {}
+            for dataset_name in dataset_names:
+                x[dataset_name] = batch[dataset_name][
+                    :, 0:multi_step, None, ...
+                ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
-            grid_shard_shapes = None
+            grid_shard_shapes = {}
             if model_comm_group is not None:
-                shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
-                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+                for dataset_name in dataset_names:
+                    shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
+                    grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
+                    x[dataset_name] = shard_tensor(x[dataset_name], -2, shard_shapes, model_comm_group)
 
-            x = pre_processors(x, in_place=False)
+            for dataset_name in dataset_names:
+                x[dataset_name] = pre_processors(x[dataset_name], in_place=False)
 
             # Perform forward pass
             y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
 
             # Apply post-processing
-            y_hat = post_processors(y_hat, in_place=False)
+            for dataset_name in dataset_names:
+                y_hat[dataset_name] = post_processors(y_hat[dataset_name], in_place=False)
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
-                y_hat = gather_tensor(y_hat, -2, self.truncation(y_hat, -2, grid_shard_shapes), model_comm_group)
+                for dataset_name in dataset_names:
+                    y_hat_shard_shapes = apply_shard_shapes(y_hat[dataset_name], -2, grid_shard_shapes[dataset_name])
+                    y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
 
         return y_hat
 
