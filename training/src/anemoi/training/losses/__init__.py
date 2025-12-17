@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 from .combined import CombinedLoss
+from .energy import EnergyScore
+from .energy import GroupedEnergyScore
 from .huber import HuberLoss
 from .kcrps import AlmostFairKernelCRPS
 from .kcrps import KernelCRPS
@@ -15,18 +17,26 @@ from .logcosh import LogCoshLoss
 from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
+from .multivariate_kcrps import GroupedMultivariateKernelCRPS
+from .multivariate_kcrps import MultivariateKernelCRPS
 from .rmse import RMSELoss
+from .variogram import VariogramScore
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
     "AlmostFairKernelCRPS",
     "CombinedLoss",
+    "EnergyScore",
+    "GroupedEnergyScore",
+    "GroupedMultivariateKernelCRPS",
     "HuberLoss",
     "KernelCRPS",
     "LogCoshLoss",
     "MAELoss",
     "MSELoss",
+    "MultivariateKernelCRPS",
     "RMSELoss",
+    "VariogramScore",
     "WeightedMSELoss",
     "get_loss_function",
 ]
