@@ -11,12 +11,13 @@ system:
     loss_matrices_path: "anemoi-integration-tests/training/assets/"
 
 training:
+  ensemble_size_per_device: 2
   training_loss:
-    loss_matrices: [ "o96_smoothing_o96.npz", null]
+    loss_matrices: [ "n320_smoothing_n320.npz", null]
     weights: [1.0, 1.0]
   validation_metrics:
     multiscale:
-      loss_matrices: ["o96_smoothing_o96.npz", null]
+      loss_matrices: ["n320_smoothing_n320.npz", null]
       weights: [1.0, 1.0]
 
 dataloader:
@@ -33,6 +34,3 @@ graph:
 
 model:
   num_channels: 256
-
-training:
-  ensemble_size_per_device: 1
