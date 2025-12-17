@@ -10,6 +10,7 @@
 import pytest
 import torch
 
+from pytest_mock import MockerFixture
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
@@ -55,7 +56,7 @@ def test_multi_scale(
     loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     per_scale_loss: BaseLoss,
     weights: torch.Tensor,
-    mocker,
+    mocker: MockerFixture,
 ) -> None:
     """Test multiscale loss with different per-scale losses and weights."""
     smoothing_matrix = SparseProjector(
