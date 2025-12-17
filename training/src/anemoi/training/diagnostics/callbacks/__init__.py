@@ -14,10 +14,12 @@ from collections.abc import Iterable
 from datetime import timedelta
 from typing import Any
 
+from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from pydantic import BaseModel
 from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.callbacks import TQDMProgressBar
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
@@ -62,7 +64,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         return []
 
     checkpoint_settings = {
-        "dirpath": config.hardware.paths.checkpoints,
+        "dirpath": config.system.output.checkpoints.root,
         "verbose": False,
         # save weights, optimizer states, LR-schedule states, hyperparameters etc.
         # https://pytorch-lightning.readthedocs.io/en/stable/common/checkpointing_basic.html#contents-of-a-checkpoint
@@ -84,7 +86,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         else:
             target = key
         ckpt_frequency_save_dict[target] = (
-            config.hardware.files.checkpoint[key],
+            config.system.output.checkpoints[key],
             frequency,
             n_saved,
         )
@@ -139,6 +141,46 @@ def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
     return callbacks
 
 
+def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
+    """Get progress bar callback.
+
+    Instantiated from `config.diagnostics.progress_bar`. If not set, defaults to TQDMProgressBar.
+
+    Example config:
+        progress_bar:
+          _target_: pytorch_lightning.callbacks.TQDMProgressBar
+          refresh_rate: 1
+          process_position: 0
+
+    Parameters
+    ----------
+    config : DictConfig
+        Job configuration
+
+    Returns
+    -------
+    list[Callback]
+        List containing the progress bar callback, or empty list if disabled.
+    """
+    if not config.diagnostics.enable_progress_bar:
+        LOGGER.info("Progress bar disabled.")
+        return []
+
+    progress_bar_cfg = nestedget(config, "diagnostics.progress_bar", None)
+    if progress_bar_cfg is not None:
+        try:
+            progress_bar = instantiate(progress_bar_cfg)
+            LOGGER.info("Using progress bar: %s", type(progress_bar))
+        except InstantiationException:
+            LOGGER.warning("Failed to instantiate progress bar callback from config: %s", progress_bar_cfg)
+            progress_bar = TQDMProgressBar(refresh_rate=1, process_position=0)
+    else:
+        LOGGER.info("Using default progress bar: TQDMProgressBar.")
+        progress_bar = TQDMProgressBar(refresh_rate=1, process_position=0)
+
+    return [progress_bar]
+
+
 def get_callbacks(config: DictConfig) -> list[Callback]:
     """Setup callbacks for PyTorch Lightning trainer.
 
@@ -182,13 +224,13 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.callbacks)
 
     # Plotting callbacks
-    if config["training"]["model_task"] != "anemoi.training.train.tasks.GraphInterpolator":
-        trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
-    else:
-        LOGGER.info("Plotting callbacks have been temporarily deactivated for the TimeInterpolator")
+    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
 
     # Extend with config enabled callbacks
     trainer_callbacks.extend(_get_config_enabled_callbacks(config))
+
+    # Progress bar callback
+    trainer_callbacks.extend(_get_progress_bar_callback(config))
 
     # Parent UUID callback
     # Check variable order callback
