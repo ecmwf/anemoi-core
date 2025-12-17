@@ -2,7 +2,7 @@
 defaults:
   - scalers: global
 
-# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
+# resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
