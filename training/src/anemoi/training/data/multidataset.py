@@ -9,7 +9,6 @@
 
 import datetime
 import logging
-import datetime
 import os
 import random
 from functools import cached_property
@@ -22,8 +21,8 @@ from torch.utils.data import IterableDataset
 
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.utils.dates import frequency_to_seconds
 from anemoi.training.utils.usable_indices import get_usable_indices
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -75,12 +74,14 @@ class MultiDataset(IterableDataset):
                 data_reader=data_reader,
                 grid_indices=grid_indices[name],
                 timestep=timestep,
-                label=f"{label}_{name}",
             )
 
         # relative_date_indices are computed in terms of data frequency
         # data_relative_date_indices are in terms of the specific dataset
-        self.data_relative_date_indices = np.array([self.timeincrement * idx for idx in relative_date_indices], dtype=np.int64)
+        self.data_relative_date_indices = np.array(
+            [self.timeincrement * idx for idx in relative_date_indices],
+            dtype=np.int64,
+        )
 
         LOGGER.info(
             "MultiDataset initialized with %d datasets (%s), %d valid indices each",
@@ -88,6 +89,26 @@ class MultiDataset(IterableDataset):
             ", ".join(self.dataset_names),
             len(self.valid_date_indices),
         )
+
+        # lazy init model and reader group info, will be set by the DDPGroupStrategy:
+        self.model_comm_group_rank = 0
+        self.model_comm_num_groups = 1
+        self.model_comm_group_id = 0
+        self.global_rank = 0
+
+        self.reader_group_rank = 0
+        self.reader_group_size = 1
+
+        self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
+        self.sample_comm_group_id = 0
+
+        self.ens_comm_group_rank = 0
+        self.ens_comm_num_groups = 1
+        self.ens_comm_group_id = 0
+
+        # additional state vars (lazy init)
+        self.n_samples_per_worker = 0
+        self.chunk_index_range: np.ndarray | None = None
 
     def _collect(self, attr_name: str) -> dict:
         """Helper method to collect attributes from all datasets."""
@@ -196,9 +217,10 @@ class MultiDataset(IterableDataset):
             )
             if valid_date_indices_ref is None:
                 valid_date_indices_ref = valid_date_indices
-            assert np.array_equal(valid_date_indices_ref, valid_date_indices), (
-                "Datasets have different valid_date_indices, cannot synchronize samples"
-            )
+            assert np.array_equal(
+                valid_date_indices_ref,
+                valid_date_indices,
+            ), "Datasets have different valid_date_indices, cannot synchronize samples"
         return valid_date_indices_ref
 
     def set_comm_group_info(
@@ -283,7 +305,7 @@ class MultiDataset(IterableDataset):
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all datasets for this worker."""
         self.worker_id = worker_id
-        
+
         # Divide this equally across shards (one shard per group!)
         shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
         shard_start = self.sample_comm_group_id * shard_size
@@ -325,8 +347,8 @@ class MultiDataset(IterableDataset):
         start = index + self.data_relative_date_indices[0]
         end = index + self.data_relative_date_indices[-1] + 1
         timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
-        steps = slice(start, end, timeincrement)
-        return {name: dataset.get_sample(steps) for name, dataset in self.datasets.items()}
+        time_steps = slice(start, end, timeincrement)
+        return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
