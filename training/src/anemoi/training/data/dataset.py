@@ -126,7 +126,6 @@ class NativeGridDataset(BaseAnemoiReader):
     """Native grid dataset"""
 
 
-
 class TrajectoryDataset(BaseAnemoiReader):
     """Trajectory dataset"""
 
