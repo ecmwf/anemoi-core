@@ -1,27 +1,32 @@
 defaults:
 - data: zarr
 - dataloader: native_grid
-- diagnostics: evaluation
+- diagnostics: evaluation_ens
 - system: example
 - graph: multi_scale
-- model: graphtransformer
-- training: default
+- model: graphtransformer_ens
+- training: ensemble
 - _self_
 
 config_validation: False
 
-training:
-  model_task: anemoi.training.train.tasks.GraphForecaster
-  max_epochs: 1
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# hardware:
+#   num_gpus_per_node: 1
 
-model:
-  num_channels: 128
-
-dataloader:
-  limit_batches:
-    training: 20
-    validation: 20
-    test: 20
+diagnostics:
+  # plot:
+  #   callbacks: []
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: None
+    wandb:
+      enabled: False
+      entity: example
 
 system:
   input:
@@ -39,20 +44,20 @@ system:
     num_nodes: 1
     num_gpus_per_model: 1
 
+model:
+  num_channels: 128
+dataloader:
+  limit_batches:
+    training: 20
+    validation: 20
+
+training:
+  ensemble_size_per_device: 2
+  max_epochs: 1
+
 data:
   resolution: o96  # Global resolution setting used in hardware file paths
   # Time frequency requested from dataset
   frequency: 6h
   # Time step of model (must be multiple of frequency)
   timestep: 6h
-
-diagnostics:
-  plot:
-    callbacks: []
-  log:
-    mlflow:
-      enabled: False
-      tracking_uri: None
-    wandb:
-      enabled: False
-      entity: example
