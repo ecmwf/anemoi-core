@@ -10,14 +10,6 @@ system:
     truncation_inv: null
     loss_matrices_path: "anemoi-integration-tests/training/assets/"
 
-training:
-  training_loss:
-    loss_matrices: [ "o96_smoothing_o96.npz", null]
-    weights: [1.0, 1.0]
-  validation_metrics:
-    multiscale:
-      loss_matrices: ["o96_smoothing_o96.npz", null]
-      weights: [1.0, 1.0]
 
 dataloader:
   training:
@@ -36,3 +28,10 @@ model:
 
 training:
   ensemble_size_per_device: 1
+  training_loss:
+    loss_matrices: [ "o96_smoothing_o96.npz", null]
+    weights: [1.0, 1.0]
+  validation_metrics:
+    multiscale:
+      loss_matrices: ["o96_smoothing_o96.npz", null]
+      weights: [1.0, 1.0]
