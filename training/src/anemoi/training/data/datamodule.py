@@ -247,10 +247,19 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
             metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
-            variable_types = data_indices[dataset_name].data.input.todict()
+
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,
                 "output": data_indices[dataset_name].model.output.name_to_index,
             }
             metadata["metadata_inference"][dataset_name]["data_indices"] = name_to_index
+
+            input_data_indices = data_indices[dataset_name].data.input.todict()
+            input_index_to_name = {v: k for k, v in input_data_indices["name_to_index"].items()}
+            variable_types = {
+                "forcing": [input_index_to_name[int(index)] for index in input_data_indices["forcing"]],
+                "target": [input_index_to_name[int(index)] for index in input_data_indices["target"]],
+                "prognostic": [input_index_to_name[int(index)] for index in input_data_indices["prognostic"]],
+                "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
+            }
             metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types
