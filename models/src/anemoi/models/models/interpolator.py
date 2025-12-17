@@ -180,7 +180,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
             shapes = {
                 "variables": self.input_dim[dataset],
-                "timesteps": len(input_rel_date_indices),
+                "input_timesteps": len(input_rel_date_indices),
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }

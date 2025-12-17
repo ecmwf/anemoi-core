@@ -266,13 +266,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
 
         return x_out_dict
-    
+
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],
-                "timesteps": self.multi_step,
-                "ensemble": None,  # TODO update this!
+                "input_timesteps": self.multi_step,
+                "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
             md_dict["metadata_inference"][dataset]["shapes"] = shapes

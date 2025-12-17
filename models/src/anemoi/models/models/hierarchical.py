@@ -330,7 +330,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],
-                "timesteps": self.multi_step,
+                "input_timesteps": self.multi_step,
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
