@@ -926,6 +926,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 pl_module.data_indices.data.output.full,
             ]
             loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
+            loss = torch.sum(loss)
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
