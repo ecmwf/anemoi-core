@@ -124,7 +124,7 @@ class BaseAnemoiReader(ABC):
 
 class NativeGridDataset(BaseAnemoiReader):
     """Native grid dataset"""
-    pass
+
 
 
 class TrajectoryDataset(BaseAnemoiReader):
