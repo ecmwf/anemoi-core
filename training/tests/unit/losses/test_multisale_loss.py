@@ -55,7 +55,7 @@ def test_multi_scale(
     loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     per_scale_loss: BaseLoss,
     weights: torch.Tensor,
-    mocker: pytest.MockerFixture,
+    mocker,
 ) -> None:
     """Test multiscale loss with different per-scale losses and weights."""
     smoothing_matrix = SparseProjector(
