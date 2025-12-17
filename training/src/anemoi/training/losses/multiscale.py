@@ -172,7 +172,7 @@ class MultiscaleLossWrapper(BaseLoss):
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
-        squash: bool = True,  # noqa: ARG002
+        squash: bool = True,
         grid_shard_slice: tuple | None = None,
         model_comm_group: ProcessGroup | None = None,
         model_comm_group_size: int | None = None,
@@ -225,7 +225,7 @@ class MultiscaleLossWrapper(BaseLoss):
                 self.loss(
                     y_pred_ens_tmp,
                     y_tmp,
-                    squash=True,
+                    squash=squash,
                     grid_shard_slice=grid_shard_slice,
                     group=model_comm_group,
                 ),
