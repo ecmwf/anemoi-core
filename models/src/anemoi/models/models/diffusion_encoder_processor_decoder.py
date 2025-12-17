@@ -45,7 +45,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         graph_data: HeteroData,
         truncation_data: dict,
     ) -> None:
-        # print('JE SUIS CONFIG LOCALE', DotDict(model_config).model)
         model_config_local = DotDict(model_config)
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
@@ -570,8 +569,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
             truncation_data=truncation_data,
 
         )
-        print('CONFIG DANS DIFF ENC PROCC DEC',model_config
-              )
+
     # -------------------------------------------------------------------------
     # Forward inconditionnel
     # -------------------------------------------------------------------------
