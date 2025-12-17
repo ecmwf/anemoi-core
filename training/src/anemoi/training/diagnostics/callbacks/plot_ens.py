@@ -340,12 +340,12 @@ class PlotLoss(_PlotLoss):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
     ) -> None:
-        first_member_batch = {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}
+        batch_without_ensemble_dim = {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}
         super().on_validation_batch_end(
             trainer,
             pl_module,
             outputs,
-            first_member_batch,
+            batch_without_ensemble_dim,
             batch_idx,
         )
 
