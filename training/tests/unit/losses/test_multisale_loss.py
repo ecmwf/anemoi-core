@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -110,5 +110,3 @@ def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
     assert torch.allclose(loss, loss_kcrps), "Loss for single/original scale should be equal to the kcrps"
 
 
-if __name__ == "__main__":
-    pytest.main([__file__])
