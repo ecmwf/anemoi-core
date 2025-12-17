@@ -47,8 +47,8 @@ data:
   timestep: 6h
 
 diagnostics:
-  plot:
-    callbacks: []
+  # plot:
+  #   callbacks: []
   log:
     mlflow:
       enabled: False
