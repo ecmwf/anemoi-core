@@ -1,0 +1,128 @@
+variable_specification: 
+   REFC:
+     name : Composite reflectivity 
+     level: entire atmosphere 
+   pres_0g:
+     name : Surface pressure
+     level: surface
+   height_500hPa:
+     name : Geopotential height 
+     level: 500 
+   ugrd_925:
+     name : U component of wind
+     level: 925 
+   ugrd_850:
+     name : U component of wind
+     level: 850 
+   ugrd_500: 
+     name : U component of wind
+     level: 500  
+   ugrd_200:
+     name : U component of wind
+     level: 200  
+   vgrd_925:
+     name : V component of wind
+     level: 925 
+   vgrd_850:
+     name : V component of wind
+     level: 850 
+   vgrd_500: 
+     name : V component of wind
+     level: 500  
+   vgrd_200:
+     name : V component of wind
+     level: 200  
+   temp_925:
+     name : Temperature
+     level: 925 
+   temp_850:
+     name : Temperature
+     level: 850 
+   temp_500: 
+     name : Temperature
+     level: 500  
+   temp_200:
+     name : Temperature
+     level: 200  
+   sphum_925:
+     name : Specific humidity
+     level: 925 
+   sphum_850:
+     name : Specific humidity
+     level: 850 
+   sphum_500: 
+     name : Specific humidity
+     level: 500  
+   sphum_200:
+     name : Specific humidity
+     level: 200  
+   clmr_925:
+     name : Cloud mixing ratio
+     level: 925 
+   clmr_850:
+     name : Cloud mixing ratio
+     level: 850 
+   clmr_500: 
+     name : Cloud mixing ratio
+     level: 500  
+   clmr_200:
+     name : Cloud mixing ratio
+     level: 200  
+   icmr_925:
+     name : Ice water mixing ratio
+     level: 925 
+   icmr_850:
+     name : Ice water mixing ratio
+     level: 850 
+   icmr_500: 
+     name : Ice water mixing ratio
+     level: 500  
+   icmr_200:
+     name : Ice water mixing ratio
+     level: 200  
+   rwmr_925:
+     name : Rain mixing ratio
+     level: 925 
+   rwmr_850:
+     name : Rain mixing ratio
+     level: 850 
+   rwmr_500: 
+     name : Rain mixing ratio
+     level: 500  
+   rwmr_200:
+     name : Rain mixing ratio
+     level: 200  
+   snmr_925:
+     name : Snow mixing ratio
+     level: 925 
+   snmr_850:
+     name :  Snow mixing ratio
+     level: 850 
+   snmr_500: 
+     name :  Snow mixing ratio
+     level: 500  
+   snmr_200:
+     name :  Snow mixing ratio
+     level: 200  
+   grle_925:
+     name : Graupel (snow pellets)
+     level: 925 
+   grle_850:
+     name :  Graupel (snow pellets)
+     level: 850 
+   grle_500: 
+     name :  Graupel (snow pellets)
+     level: 500  
+   grle_200:
+     name :  Graupel (snow pellets)
+     level: 200  
+   temp_sfc:
+     name :  Temperature 
+     level:  surface  
+   tcdc:
+     name : Total Cloud Cover 
+     level: entire atmosphere 
+     stepType: instant
+
+
+
