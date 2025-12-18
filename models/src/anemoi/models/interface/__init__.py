@@ -165,13 +165,17 @@ class AnemoiModelInterface(torch.nn.Module):
         self.forward = self.model.forward
 
     def predict_step(
-        self, batch: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, gather_out: bool = True, **kwargs
-    ) -> torch.Tensor:
+        self,
+        batch: dict[str, torch.Tensor],
+        model_comm_group: Optional[ProcessGroup] = None,
+        gather_out: bool = True,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Input batched data.
         model_comm_group : Optional[ProcessGroup], optional
             model communication group, specifies which GPUs work together
@@ -180,7 +184,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Predicted data.
         """
         # Prepare kwargs for model's predict_step

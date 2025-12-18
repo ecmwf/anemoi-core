@@ -287,22 +287,23 @@ class BaseGraphModel(nn.Module):
                 ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
-            grid_shard_shapes = {}
+            grid_shard_shapes = None
             if model_comm_group is not None:
+                grid_shard_shapes = {}
                 for dataset_name in dataset_names:
                     shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
                     grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
                     x[dataset_name] = shard_tensor(x[dataset_name], -2, shard_shapes, model_comm_group)
 
             for dataset_name in dataset_names:
-                x[dataset_name] = pre_processors(x[dataset_name], in_place=False)
+                x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
 
             # Perform forward pass
             y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
 
             # Apply post-processing
             for dataset_name in dataset_names:
-                y_hat[dataset_name] = post_processors(y_hat[dataset_name], in_place=False)
+                y_hat[dataset_name] = post_processors[dataset_name](y_hat[dataset_name], in_place=False)
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
