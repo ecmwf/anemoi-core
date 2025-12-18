@@ -15,7 +15,6 @@ import einops
 import torch
 from hydra.utils import instantiate
 from torch import Tensor
-from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
