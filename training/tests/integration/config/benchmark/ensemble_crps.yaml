@@ -13,12 +13,12 @@ system:
 training:
   ensemble_size_per_device: 1
   training_loss:
-    loss_matrices: [ "n320_smoothing_n320.npz", null]
-    weights: [1.0, 1.0]
+    loss_matrices: [ null]
+    weights: [1.0]
   validation_metrics:
     multiscale:
-      loss_matrices: ["n320_smoothing_n320.npz", null]
-      weights: [1.0, 1.0]
+      loss_matrices: [null]
+      weights: [1.0]
 
 dataloader:
   training:
