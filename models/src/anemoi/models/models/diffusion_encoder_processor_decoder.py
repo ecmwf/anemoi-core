@@ -589,6 +589,24 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             grid_shard_shapes=grid_shard_shapes,
         )
 
+    def fill_metadata(self, md_dict) -> None:
+        for dataset in self.input_dim.keys():
+            shapes = {
+                "variables": self.input_dim[dataset],
+                "input_timesteps": self.multi_step,
+                "ensemble": 1,
+                "grid": None,  # grid size is dynamic
+            }
+            md_dict["metadata_inference"][dataset]["shapes"] = shapes
+
+            rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
+            input_rel_date_indices = rel_date_indices[:-1]
+            output_rel_date_indices = rel_date_indices[-1]
+            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
+            md_dict["metadata_inference"][dataset]["timesteps"][
+                "output_relative_date_indices"
+            ] = output_rel_date_indices
+
 
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     """Diffusion model for tendency prediction."""

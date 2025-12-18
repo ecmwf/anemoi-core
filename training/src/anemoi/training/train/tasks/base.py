@@ -178,6 +178,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for mask in self.output_mask.values():
             combined_supporting_arrays.update(mask.supporting_arrays)
 
+        metadata["metadata_inference"]["task"] = self._get_task_type_from_config(config)
+
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -321,6 +323,22 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """Get the loss name for multi-dataset cases."""
         # For multi-dataset, use a generic name or combine dataset names
         return "multi_dataset"
+
+    def _get_task_type_from_config(self, config) -> str:
+        task_class_name = str(config.training.model_task).split(".")[-1]
+
+        TASK_TYPE_MAP = {
+            "GraphForecaster": "forecaster",
+            "GraphEnsForecaster": "forecaster",
+            "GraphDiffusionForecaster": "forecaster",
+            "GraphDiffusionTendForecaster": "forecaster",
+            "GraphInterpolator": "time-interpolator",
+        }
+
+        try:
+            return TASK_TYPE_MAP[task_class_name]
+        except KeyError:
+            raise ValueError(f"Unknown task type: {task_class_name}")
 
     def _check_sharding_support(self) -> None:
         self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())

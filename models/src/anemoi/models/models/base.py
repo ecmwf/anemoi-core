@@ -312,3 +312,8 @@ class BaseGraphModel(nn.Module):
                     y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
 
         return y_hat
+
+    @abstractmethod
+    def fill_metadata(self, md_dict) -> None:
+        """To be implemented in subclasses to fill model-specific metadata."""
+        pass
