@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.11.2](https://github.com/ecmwf/anemoi-core/compare/models-0.11.1...models-0.11.2) (2025-12-18)
+
+
+### Features
+
+* **models:** Triton gt more shapes ([#752](https://github.com/ecmwf/anemoi-core/issues/752)) ([0608acf](https://github.com/ecmwf/anemoi-core/commit/0608acf0f66498e33c54f1cf45e297b082bf34a4))
+
+
+### Bug Fixes
+
+* Correct for dimensions of skipped connection in conditioning ([4551e51](https://github.com/ecmwf/anemoi-core/commit/4551e5169354373340d006ea8a9f4ec7065aa2e2))
+* Fix-pytest-triton-error ([#740](https://github.com/ecmwf/anemoi-core/issues/740)) ([00b38c9](https://github.com/ecmwf/anemoi-core/commit/00b38c9fd721b7e22aa4603c325f0e69b48cc713))
+* **residual:** Fix conditioning on skipped connection ([#742](https://github.com/ecmwf/anemoi-core/issues/742)) ([4551e51](https://github.com/ecmwf/anemoi-core/commit/4551e5169354373340d006ea8a9f4ec7065aa2e2))
+
 ## [0.11.1](https://github.com/ecmwf/anemoi-core/compare/models-0.11.0...models-0.11.1) (2025-12-08)
 
 
