@@ -18,7 +18,7 @@ diagnostics:
       offline: False
       experiment_name: 'dev_uncond_diffusion'
       project_name: 'uncond-diffusion'
-      run_name: 'uncond_v1_test'
+      run_name: 'uncond_v0_test_x=0'
       tracking_uri: 'https://mlflow.ecmwf.int'
       authentication: True
       terminal: False
@@ -74,12 +74,13 @@ model:
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
-    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/outputs_incond/
+    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/outputs_incond_x_0/
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
     graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
   num_gpus_per_node: 4
   num_gpus_per_model: 2
+  # num_nodes: 2
 training:
   max_epochs: 20
   model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster

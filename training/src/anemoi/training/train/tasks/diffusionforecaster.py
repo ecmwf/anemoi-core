@@ -16,6 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from .forecaster import GraphForecaster
+from lightning_utilities.core.rank_zero import rank_zero_info
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -234,7 +235,7 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         )
 
         self.rho = config.model.model.diffusion.rho
-
+        rank_zero_info("[DEBUG] : Je passe dans graph unconditional diffusion dans diffusionforecasetr.py")
 
     # -------------------------------------------------------------------------
     # FORWARD : identical to conditional version
