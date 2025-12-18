@@ -76,11 +76,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
     def _assemble_input(
-        self, x: torch.Tensor, batch_size: int, grid_shard_shapes=None, model_comm_group=None, dataset_name: str = None
+        self,
+        x: torch.Tensor,
+        batch_size: int,
+        grid_shard_shapes: dict | None,
+        model_comm_group=None,
+        dataset_name: str = None,
     ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
-        grid_shard_shapes = grid_shard_shapes[dataset_name]
+        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
 
@@ -158,7 +163,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x: Tensor,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: dict[str, list] | None = None,
         **kwargs,
     ) -> Tensor:
         """Forward pass of the model.
@@ -194,7 +199,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         batch_size = batch_sizes[0]
         ensemble_size = ensemble_sizes[0]
-        in_out_sharded = grid_shard_shapes is not None
+        in_out_sharded = bool(grid_shard_shapes)
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # Process each dataset through its corresponding encoder
