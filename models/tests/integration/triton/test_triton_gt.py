@@ -106,36 +106,52 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     assert edge_attr.grad is not None and torch.isfinite(edge_attr.grad).all()
 
 
+def qk_norm_func(x, eps=1e-5):
+    return x / torch.sqrt((x * x).sum(dim=-1, keepdim=True) + eps)
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d",
+    "n_src,n_dst,h,d,qk_norm",
     [
-        (4, 10, 2, 4),
-        (4, 10, 6, 4),
-        (4, 10, 2, 6),
-        (4, 10, 6, 6),
+        (4, 10, 2, 4, False),
+        (4, 10, 6, 4, False),
+        (4, 10, 2, 6, False),
+        (4, 10, 6, 6, False),
+        (4, 10, 2, 4, True),
     ],
 )
-def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int):
+def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int, qk_norm :bool):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
+        
+    #norm=torch.nn.LayerNorm(d, bias=False)
+    norm = qk_norm_func
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
     # Custom implementation
-    query = torch.randn((n_dst, h, d), requires_grad=True)
-    key = torch.randn((n_src, h, d), requires_grad=True)
+    query_triton = torch.randn((n_dst, h, d), requires_grad=True)
+    key_triton = torch.randn((n_src, h, d), requires_grad=True)
     value = torch.randn((n_src, h, d), requires_grad=True)
     edge_attr = torch.randn((m, h, d), requires_grad=True)
+    
+    query_ref = torch.clone(query_triton)
+    key_ref = torch.clone(key_triton)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    #if qk_norm:
+    #    query_triton = norm(query_triton)
+    #    key_triton = norm(key_triton)
+    out_triton = GraphTransformerFunction.apply(query_triton, key_triton, value, edge_attr_csc, csc, reverse, qk_norm)
 
     # Reference pyg implementation
     gt_ref = GraphTransformerConv(out_channels=d)
-    out_ref = gt_ref.forward(query, key, value, edge_attr, edge_index)
+    if qk_norm:
+            query_ref = norm(query_ref)
+            key_ref = norm(key_ref)
+    out_ref = gt_ref.forward(query_ref, key_ref, value, edge_attr, edge_index)
 
     tolerance = 1e-5
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)

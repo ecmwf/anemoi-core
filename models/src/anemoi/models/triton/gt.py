@@ -91,6 +91,7 @@ def _gt_fwd(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    qk_norm: tl.constexpr # Bool
 ):
     pid = tl.program_id(0)
     dst_idx = pid
@@ -118,6 +119,11 @@ def _gt_fwd(
         return
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    
+    if qk_norm:
+        # Compute L2 norm over head dimension
+        q = q / tl.sqrt(tl.sum(q * q, axis=1, keep_dims=True) + 1e-5)
+        
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
     m_i = tl.full((H_pad,), value=-float("inf"), dtype=tl.float32)  # running max for stability
@@ -126,6 +132,9 @@ def _gt_fwd(
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
+    if qk_norm:
+        # remove the 1/sqrt(d) factor when doing qk_norm bc it should be scaled by sqrt(d)
+        qk_scale: tl.constexpr = 1.0
 
     # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
@@ -136,6 +145,9 @@ def _gt_fwd(
 
         src_off = src_idx * H * C + H_C_off
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        if qk_norm:
+            # Compute L2 norm over head dimension
+            k = k / tl.sqrt(tl.sum(k * k, axis=1, keep_dims=True) + 1e-5)
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         k_e = k + e
@@ -388,7 +400,7 @@ class GraphTransformerFunction(torch.autograd.Function):
             )
 
     @staticmethod
-    def forward(ctx, q, k, v, e, csc, reverse):
+    def forward(ctx, q, k, v, e, csc, reverse, qk_norm):
         """Args:
         q: [N_dst, H, C]
         k: [N_src, H, C]
@@ -396,6 +408,7 @@ class GraphTransformerFunction(torch.autograd.Function):
         e: [num_edges, H, C]
         csc: (row, colptr)
         reverse: (rowptr, edge_ids, edge_dst)
+        qk_norm: bool
         """
         row, colptr = csc
         rowptr, edge_ids, edge_dst = reverse
@@ -420,8 +433,16 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
+        
+        def qk_norm_func(x, eps=1e-5):
+            return x / torch.sqrt((x * x).sum(dim=-1, keepdim=True) + eps)
+        if qk_norm:
+            norm = qk_norm_func
+            q = norm(q)
+            k = norm(k)
+            qk_norm=False
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype)
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm)
 
         # Save tensors for backward
         ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
