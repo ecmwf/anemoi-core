@@ -199,7 +199,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         batch_size = batch_sizes[0]
         ensemble_size = ensemble_sizes[0]
-        in_out_sharded = bool(grid_shard_shapes)
+        in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # Process each dataset through its corresponding encoder
