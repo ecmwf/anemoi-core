@@ -8,7 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import torch
-from anemoi.graphs.generate.transforms import sincos_to_latlon_rad, latlon_rad_to_sincos
+
+from anemoi.graphs.generate.transforms import latlon_rad_to_sincos
+from anemoi.graphs.generate.transforms import sincos_to_latlon_rad
 
 NUM_POINTS = 40
 
@@ -24,9 +26,9 @@ def test_latlon_rad_to_sincos():
     assert sincos.device == coords.device
     assert sincos.requires_grad == coords.requires_grad
 
-    assert torch.all((sincos[:, :2] >= -1) & (sincos[:, :2] <= 1)) # sin(lat), sin(lon)
-    assert torch.all((sincos[:, 2] >= 0) & (sincos[:, 2] <= 1)) # cos(lat)
-    assert torch.all((sincos[:, 3] >= -1) & (sincos[:, 3] <= 1)) # cos(lon)
+    assert torch.all((sincos[:, :2] >= -1) & (sincos[:, :2] <= 1))  # sin(lat), sin(lon)
+    assert torch.all((sincos[:, 2] >= 0) & (sincos[:, 2] <= 1))  # cos(lat)
+    assert torch.all((sincos[:, 3] >= -1) & (sincos[:, 3] <= 1))  # cos(lon)
 
 
 def test_sincos_to_latlon_rad():
