@@ -78,6 +78,33 @@ def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexp
 
 
 @triton.jit
+def _rms_norm(x):
+    """ Normalises x in-place, optionally returns inverse_rms"""
+    eps: tl.constexpr = 0.0
+    C: tl.constexpr = x.shape[-1]
+    inv_rms = tl.rsqrt(tl.sum(x*x, axis=1, keep_dims=True)/C + eps)
+    x = x * inv_rms
+    return x, inv_rms
+
+@triton.jit
+def _rms_norm_bwd(x, grad_out, inv_rms):
+    """ computes grad_x given x and grad_out"""
+    C = x.shape[-1]
+    
+    #to recompute inv_rms instead
+    #eps: tl.constexpr = 0.0
+    #inv_rms = tl.sum(x*x, axis=1, keep_dims=True)/C + eps
+        
+    # first term
+    grad_x = grad_out * inv_rms 
+    # second term
+    dot = (grad_out * x).sum(dim=-1, keepdim=True)
+    grad_x -= (x * inv_rms**3) * (dot / C)
+    
+    return grad_x
+    
+
+@triton.jit
 def _gt_fwd(
     Q_ptr,  # [N_dst, H, C]
     K_ptr,  # [N_src, H, C]
@@ -127,7 +154,7 @@ def _gt_fwd(
     if norm == 2: #QK norm
         eps: tl.constexpr = 1e-5
         # Compute L2 norm over head dimension
-        q = q / tl.sqrt(tl.sum(q * q, axis=1, keep_dims=True) + eps)
+        q = q * tl.rsqrt(tl.sum(q * q, axis=1, keep_dims=True) + eps)
         
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
@@ -160,7 +187,7 @@ def _gt_fwd(
             # TODO optionally add weight
         if norm == 2: #qk norm
             # Compute L2 norm over head dimension
-            k = k / tl.sqrt(tl.sum(k * k, axis=1, keep_dims=True) + eps)
+            k = k * tl.rsqrt(tl.sum(k * k, axis=1, keep_dims=True) + eps)
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         k_e = k + e
@@ -220,10 +247,14 @@ def _gt_bwd_dst_pass(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    norm: tl.constexpr # int, 0: no normalisation, 1: rms normalisation, 2: qk normalisation
 ):
     dst_idx = tl.program_id(0)
     if dst_idx >= N_dst:
         return
+    
+    # qk norm not implemented yet
+    assert norm == 0 or norm == 1 
 
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
@@ -250,6 +281,17 @@ def _gt_bwd_dst_pass(
     Dj = tl.sum(d_out * out, axis=-1)  # [H]
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    
+    # Q is saved unnormalised,
+    # if normalisation was done in the fwd pass, we have to normalise it here
+    if norm == 1: #rms norm
+        eps: tl.constexpr = 0.0
+        #q_unnorm=tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        q_unnorm = q
+        #tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        inv_rms = tl.rsqrt(tl.sum(q*q, axis=1, keep_dims=True)/C + eps)
+        q = q * inv_rms
+        # TODO optionally add weight 
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
@@ -263,6 +305,8 @@ def _gt_bwd_dst_pass(
         src = tl.load(ROW_ptr + e_idx)
         src_off = src * H * C + H_C_off
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        if norm == 1:
+            k = k * tl.rsqrt(tl.sum(k*k, axis=1, keep_dims=True)/C + eps)
 
         ke = k + e
         # score and alpha using saved M
@@ -281,6 +325,22 @@ def _gt_bwd_dst_pass(
         # move to next edge
         edge_ptr += H * C
         e_idx += 1
+
+
+    #As a last step, optionally apply normalisation
+    if norm == 1: # rms norm
+        #inv_rms is saved from normalisng q earlier
+        #dq_in = dq
+        #dot = tl.sum((dq_in * q_unnorm), axis=1, keep_dims=True)
+        #dq = dq_in * inv_rms #first term
+        #dq -= (q_unnorm * (inv_rms*inv_rms*inv_rms))* (dot / C) # second term
+        
+        # first term
+        grad_x = dq * inv_rms 
+        # second term
+        dot = tl.sum((dq * q_unnorm), axis=1, keep_dims=True)
+        grad_x -= (q_unnorm * inv_rms*inv_rms*inv_rms) * (dot / C)
+        dq = grad_x
 
     # store D_j and dQ
     tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
@@ -312,10 +372,14 @@ def _gt_bwd_src_pass(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    norm: tl.constexpr # int, 0: no normalisation, 1: rms normalisation, 2: qk normalisation
 ):
     src_idx = tl.program_id(0)
     if src_idx >= N_src:
         return
+    
+    # qk norm not implemented yet
+    assert norm == 0 or norm == 1 
 
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
@@ -334,6 +398,15 @@ def _gt_bwd_src_pass(
     # src-side k, v (shared for all edges)
     src_off = src_idx * H * C + H_C_off
     k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    # K is saved unnormalised,
+    # if normalisation was done in the fwd pass, we recompute it here
+    if norm == 1: #rms norm
+        eps: tl.constexpr = 0.0
+        k_unnorm = k
+        inv_rms = tl.rsqrt(tl.sum(k*k, axis=1, keep_dims=True)/C + eps) #save for later
+        k = k * inv_rms
+        # TODO optionally add weight 
+    
     v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     accK = tl.zeros((H_pad, C_pad), dtype=tl.float32)
@@ -351,6 +424,8 @@ def _gt_bwd_src_pass(
         # get saved tensors for dst node
         dst_off = dst * H * C + H_C_off
         q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        if norm == 1:
+            q = q * tl.rsqrt(tl.sum(q*q, axis=1, keep_dims=True)/C + eps)
         d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
@@ -382,6 +457,16 @@ def _gt_bwd_src_pass(
 
         accK += dK_edge
         accV += dV_edge
+        
+    #As a last step, optionally apply normalisation
+    if norm == 1: # rms norm
+        
+        # First term
+        grad_x = accK * inv_rms
+        # Second term
+        dot = tl.sum((accK * k_unnorm), axis=1, keep_dims=True)
+        grad_x -= (k_unnorm * (inv_rms*inv_rms*inv_rms))* (dot / C)
+        accK = grad_x
 
     # write final accumulated per-src grads
     tl.store(
@@ -468,6 +553,62 @@ class GraphTransformerFunction(torch.autograd.Function):
         ctx.out_dtype = out_dtype
 
         
+        # save an unormalised copy
+        # we need this to compute the gradients in the bacward pass
+        # an unnormalised q and k always get saved in the ctx
+        # if normalisation is used, it will be renormalised in the bw pass
+        q_unnorm = torch.clone(q)
+        k_unnorm = torch.clone(k)
+        assert norm =="qk" or norm =="rms" or norm == "" or norm =="ln"
+        norm_triton=0
+        ctx.norm = norm
+        ctx.fused = FUSED
+        if norm != "":
+            if FUSED:
+                if norm == "rms":
+                    norm_triton = 1
+                elif norm == "qk":
+                    norm_triton = 2
+                elif norm == "ln":
+                    raise NotImplementedError("Cant tile LayerNorm")
+
+
+            if not FUSED:
+                if norm == "qk":
+                    norm_func = qk_norm_func
+                elif norm == "rms":
+                    norm_func = torch.compile(torch.nn.RMSNorm(C).to(q.device))
+                elif norm == "ln":
+                    norm_func = torch.compile(torch.nn.LayerNorm(C, bias=False).to(q.device))
+                    
+                q = norm_func(q)
+                k = norm_func(k)
+                
+                norm="" # do not normalise again inside triton kernel
+
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, norm_triton)
+
+        # Save tensors for backward
+        ctx.save_for_backward(q_unnorm, k_unnorm, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
+        return out
+
+    @staticmethod
+    def backward(ctx, d_out):
+        d_out = d_out.contiguous()
+        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+
+        N_dst, H, C = q.shape
+        N_src = k.shape[0]
+
+        # Allocate grads and intermediates
+        dQ = torch.empty_like(q)
+        dK = torch.empty_like(k)
+        dV = torch.empty_like(v)
+        dE = torch.empty_like(e)
+        D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
+        
+        norm = ctx.norm
+        FUSED = ctx.fused
         assert norm =="qk" or norm =="rms" or norm == "" or norm =="ln"
         norm_triton=0
         if norm != "":
@@ -487,37 +628,17 @@ class GraphTransformerFunction(torch.autograd.Function):
                     norm_func = torch.compile(torch.nn.RMSNorm(C).to(q.device))
                 elif norm == "ln":
                     norm_func = torch.compile(torch.nn.LayerNorm(C, bias=False).to(q.device))
+                # not sure if i want this in the bwd pass
                 q = norm_func(q)
                 k = norm_func(k)
                 norm="" # do not normalise again inside triton kernel
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, norm_triton)
-
-        # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
-        return out
-
-    @staticmethod
-    def backward(ctx, d_out):
-        d_out = d_out.contiguous()
-        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
-
-        N_dst, H, C = q.shape
-        N_src = k.shape[0]
-
-        # Allocate grads and intermediates
-        dQ = torch.empty_like(q)
-        dK = torch.empty_like(k)
-        dV = torch.empty_like(v)
-        dE = torch.empty_like(e)
-        D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
-
         # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
+        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype, norm_triton)
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
-            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype
+            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype, norm_triton
         )
 
-        return dQ, dK, dV, dE, None, None
+        return dQ, dK, dV, dE, None, None, None, None
