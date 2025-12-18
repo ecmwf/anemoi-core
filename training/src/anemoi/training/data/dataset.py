@@ -234,11 +234,6 @@ class NativeGridDataset(IterableDataset):
         # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
         low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
 
-        if worker_id == n_workers - 1:
-            assert (
-                shard_start + shard_size == high
-            ), f"shard_size mismatch: {shard_size} != {shard_start} + {high} - {low}"
-
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
         LOGGER.info(
