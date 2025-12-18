@@ -91,7 +91,7 @@ def _gt_fwd(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
-    qk_norm: tl.constexpr # Bool
+    norm: tl.constexpr # int, 0: no normalisation, 1: rms normalisation, 2: qk normalisation
 ):
     pid = tl.program_id(0)
     dst_idx = pid
@@ -119,10 +119,15 @@ def _gt_fwd(
         return
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    
-    if qk_norm:
+   
+    if norm == 1: #rms norm
+        eps: tl.constexpr = 0.0
+        q = q * tl.rsqrt(tl.sum(q*q, axis=1, keep_dims=True)/C + eps)
+        # TODO optionally add weight 
+    if norm == 2: #QK norm
+        eps: tl.constexpr = 1e-5
         # Compute L2 norm over head dimension
-        q = q / tl.sqrt(tl.sum(q * q, axis=1, keep_dims=True) + 1e-5)
+        q = q / tl.sqrt(tl.sum(q * q, axis=1, keep_dims=True) + eps)
         
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
@@ -131,10 +136,13 @@ def _gt_fwd(
     # helpers to avoid repeated computations/indexing:
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
-    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
-    if qk_norm:
+
+    #if norm==2:
+    #TODO check if this is needed
         # remove the 1/sqrt(d) factor when doing qk_norm bc it should be scaled by sqrt(d)
-        qk_scale: tl.constexpr = 1.0
+    #    qk_scale: tl.constexpr = 1.0
+    #else:
+    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
     # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
@@ -145,9 +153,14 @@ def _gt_fwd(
 
         src_off = src_idx * H * C + H_C_off
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        if qk_norm:
+        
+        #TODO epsilon should be configurable from func params
+        if norm == 1: #rms norm
+            k = k * tl.rsqrt(tl.sum(k*k, axis=1, keep_dims=True)/C + eps)
+            # TODO optionally add weight
+        if norm == 2: #qk norm
             # Compute L2 norm over head dimension
-            k = k / tl.sqrt(tl.sum(k * k, axis=1, keep_dims=True) + 1e-5)
+            k = k / tl.sqrt(tl.sum(k * k, axis=1, keep_dims=True) + eps)
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         k_e = k + e
@@ -389,6 +402,26 @@ def _gt_bwd_src_pass(
 
 # TODO(Jan): single bwd pass for non-bipartite graphs
 
+def qk_norm_func(x, eps=1e-5):
+    return x / torch.sqrt((x * x).sum(dim=-1, keepdim=True) + eps)
+
+#def rms_norm_func(x, weight=None, eps=None):
+#    """
+#    x: Tensor of shape (..., d)
+#    weight: Optional tensor of shape (d,) or broadcastable to x
+#    eps: Numerical stability constant
+#    """
+#    # Compute mean square along last dimension
+#    if eps is None:
+#        eps = 0.0
+#    rms = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + eps)
+#    y = x / rms
+#
+#    if weight is not None:
+#        y = y * weight
+#
+#    return y
+
 
 class GraphTransformerFunction(torch.autograd.Function):
     """Custom autograd for GraphTransformer using Triton kernels."""
@@ -400,7 +433,7 @@ class GraphTransformerFunction(torch.autograd.Function):
             )
 
     @staticmethod
-    def forward(ctx, q, k, v, e, csc, reverse, qk_norm):
+    def forward(ctx, q, k, v, e, csc, reverse, norm, FUSED):
         """Args:
         q: [N_dst, H, C]
         k: [N_src, H, C]
@@ -408,7 +441,7 @@ class GraphTransformerFunction(torch.autograd.Function):
         e: [num_edges, H, C]
         csc: (row, colptr)
         reverse: (rowptr, edge_ids, edge_dst)
-        qk_norm: bool
+        norm: str = defines if q & k are normalised, and how either 'rms', 'qk' or None/''
         """
         row, colptr = csc
         rowptr, edge_ids, edge_dst = reverse
@@ -433,16 +466,32 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
-        
-        def qk_norm_func(x, eps=1e-5):
-            return x / torch.sqrt((x * x).sum(dim=-1, keepdim=True) + eps)
-        if qk_norm:
-            norm = qk_norm_func
-            q = norm(q)
-            k = norm(k)
-            qk_norm=False
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm)
+        
+        assert norm =="qk" or norm =="rms" or norm == "" or norm =="ln"
+        norm_triton=0
+        if norm != "":
+            if FUSED:
+                if norm == "rms":
+                    norm_triton = 1
+                elif norm == "qk":
+                    norm_triton = 2
+                elif norm == "ln":
+                    raise NotImplementedError("Cant tile LayerNorm")
+
+
+            if not FUSED:
+                if norm == "qk":
+                    norm_func = qk_norm_func
+                elif norm == "rms":
+                    norm_func = torch.compile(torch.nn.RMSNorm(C).to(q.device))
+                elif norm == "ln":
+                    norm_func = torch.compile(torch.nn.LayerNorm(C, bias=False).to(q.device))
+                q = norm_func(q)
+                k = norm_func(k)
+                norm="" # do not normalise again inside triton kernel
+
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, norm_triton)
 
         # Save tensors for backward
         ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)

@@ -111,22 +111,21 @@ def qk_norm_func(x, eps=1e-5):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d,qk_norm",
+    "n_src,n_dst,h,d,norm",
     [
-        (4, 10, 2, 4, False),
-        (4, 10, 6, 4, False),
-        (4, 10, 2, 6, False),
-        (4, 10, 6, 6, False),
-        (4, 10, 2, 4, True),
+        (4, 10, 2, 4, ""),
+        (4, 10, 6, 4, ""),
+        (4, 10, 2, 6, ""),
+        (4, 10, 6, 6, ""),
+        (4, 10, 2, 4, "qk"),
+        (4, 10, 2, 4, "rms"),
     ],
 )
-def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int, qk_norm :bool):
+def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int, norm :str):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
         
-    #norm=torch.nn.LayerNorm(d, bias=False)
-    norm = qk_norm_func
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
@@ -144,13 +143,18 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     #if qk_norm:
     #    query_triton = norm(query_triton)
     #    key_triton = norm(key_triton)
-    out_triton = GraphTransformerFunction.apply(query_triton, key_triton, value, edge_attr_csc, csc, reverse, qk_norm)
+    FUSED=True
+    out_triton = GraphTransformerFunction.apply(query_triton, key_triton, value, edge_attr_csc, csc, reverse, norm, FUSED)
 
     # Reference pyg implementation
     gt_ref = GraphTransformerConv(out_channels=d)
-    if qk_norm:
-            query_ref = norm(query_ref)
-            key_ref = norm(key_ref)
+    if norm == "qk":
+            query_ref = qk_norm_func(query_ref)
+            key_ref = qk_norm_func(key_ref)
+    if norm == "rms":
+            query_ref = torch.nn.RMSNorm(d)(query_ref)
+            key_ref = torch.nn.RMSNorm(d)(key_ref)
+        
     out_ref = gt_ref.forward(query_ref, key_ref, value, edge_attr, edge_index)
 
     tolerance = 1e-5
