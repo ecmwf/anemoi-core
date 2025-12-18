@@ -53,48 +53,119 @@ storage:
 
 sources:
   regional_core:
-    kind: zarr
-    dataset: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-ai-grib2-files/                        # Path/URL to the limited-area reanalysis (e.g. CERra cutout)
+    kind: grib_sequence
+    path_template: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-ai-grib2-files/                  # Path/URL or template to the RRFS GRIB2 files
+    loader:
+      engine: cfgrib
+      backend_kwargs:
+        filter_by_keys:
+          typeOfLevel: isobaricInhPa
+        encoding: {}
+      chunks:
+        time: 1
+    regrid:
+      method: bilinear
+      destination_grid: ${dataset.domain}
     variables:
       state:
-        - "t"
-        - "u"
-        - "v"
-        - "q"
+        - "REFC"
+        - "ugrd_925"
+        - "ugrd_850"
+        - "ugrd_500"
+        - "ugrd_200"
+        - "vgrd_925"
+        - "vgrd_850"
+        - "vgrd_500"
+        - "vgrd_200"
+        - "temp_925"
+        - "temp_850"
+        - "temp_500"
+        - "temp_200"
+        - "sphum_925"
+        - "sphum_850"
+        - "sphum_500"
+        - "sphum_200"
+        - "clmr_925"
+        - "clmr_850"
+        - "clmr_500"
+        - "clmr_200"
+        - "icmr_925"
+        - "icmr_850"
+        - "icmr_500"
+        - "icmr_200"
+        - "rwmr_925"
+        - "rwmr_850"
+        - "rwmr_500"
+        - "rwmr_200"
+        - "snmr_925"
+        - "snmr_850"
+        - "snmr_500"
+        - "snmr_200"
+        - "grle_925"
+        - "grle_850"
+        - "grle_500"
+        - "grle_200"
+        - "height_500hPa"
       surface:
-        - "2t"
-        - "10u"
-        - "10v"
-        - "msl"
+        - "pres_0g"
+        - "temp_sfc"
+        - "tcdc"
       diagnostics:
-        - "tp"
-        - "mrms_dbz"                    # From raw mrms_ref3d; rename prior to/within ingest
+        []
+    variables_metadata:
+      REFC: {name: "Composite reflectivity", level: "entire atmosphere"}
+      pres_0g: {name: "Surface pressure", level: "surface"}
+      height_500hPa: {name: "Geopotential height", level: 500}
+      ugrd_925: {name: "U component of wind", level: 925}
+      ugrd_850: {name: "U component of wind", level: 850}
+      ugrd_500: {name: "U component of wind", level: 500}
+      ugrd_200: {name: "U component of wind", level: 200}
+      vgrd_925: {name: "V component of wind", level: 925}
+      vgrd_850: {name: "V component of wind", level: 850}
+      vgrd_500: {name: "V component of wind", level: 500}
+      vgrd_200: {name: "V component of wind", level: 200}
+      temp_925: {name: "Temperature", level: 925}
+      temp_850: {name: "Temperature", level: 850}
+      temp_500: {name: "Temperature", level: 500}
+      temp_200: {name: "Temperature", level: 200}
+      sphum_925: {name: "Specific humidity", level: 925}
+      sphum_850: {name: "Specific humidity", level: 850}
+      sphum_500: {name: "Specific humidity", level: 500}
+      sphum_200: {name: "Specific humidity", level: 200}
+      clmr_925: {name: "Cloud mixing ratio", level: 925}
+      clmr_850: {name: "Cloud mixing ratio", level: 850}
+      clmr_500: {name: "Cloud mixing ratio", level: 500}
+      clmr_200: {name: "Cloud mixing ratio", level: 200}
+      icmr_925: {name: "Ice water mixing ratio", level: 925}
+      icmr_850: {name: "Ice water mixing ratio", level: 850}
+      icmr_500: {name: "Ice water mixing ratio", level: 500}
+      icmr_200: {name: "Ice water mixing ratio", level: 200}
+      rwmr_925: {name: "Rain mixing ratio", level: 925}
+      rwmr_850: {name: "Rain mixing ratio", level: 850}
+      rwmr_500: {name: "Rain mixing ratio", level: 500}
+      rwmr_200: {name: "Rain mixing ratio", level: 200}
+      snmr_925: {name: "Snow mixing ratio", level: 925}
+      snmr_850: {name: "Snow mixing ratio", level: 850}
+      snmr_500: {name: "Snow mixing ratio", level: 500}
+      snmr_200: {name: "Snow mixing ratio", level: 200}
+      grle_925: {name: "Graupel mixing ratio", level: 925}
+      grle_850: {name: "Graupel mixing ratio", level: 850}
+      grle_500: {name: "Graupel mixing ratio", level: 500}
+      grle_200: {name: "Graupel mixing ratio", level: 200}
+      temp_sfc: {name: "Temperature", level: "surface"}
+      tcdc: {name: "Total Cloud Cover", level: "entire atmosphere"}
     grid:
       projection: latlon
       resolution_deg: 0.027               # Native horizontal resolution of the regional product
 
-  global_boundary:
-    kind: zarr
-    dataset: ???                        # Path/URL to the lower-resolution global dataset (ERA5, AIFS, etc.)
-    purpose: boundary_forcing
-    regrid:
-      method: bilinear
-      destination_grid: ${dataset.domain}
-    sampling:
-      # Limit sampling to a margin around the regional box to keep boundary context only
-      mode: cutout
-      buffer_deg:
-        lat: ${dataset.domain.boundary_buffer_deg.lat}
-        lon: ${dataset.domain.boundary_buffer_deg.lon}
-
 recipe:
   cutout:
     # First entry is the high-resolution limited-area dataset
-    - dataset: ${sources.regional_core.dataset}
+    - dataset: ${sources.regional_core.path_template}
       thinning: 1                        # Optional sub-sampling factor for dev runs; set to 1 for full resolution
       role: core
-    # Second entry supplies lateral boundary values from the global dataset
-    - dataset: ${sources.global_boundary.dataset}
+    # Second entry reuses the same GRIB source to supply lateral boundary values
+    - dataset: ${sources.regional_core.path_template}
       role: boundary
   adjust: all                            # Align calendars/metadata between the two sources
   min_distance_km: 0                     # Keeps every grid point from the regional core
