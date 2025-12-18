@@ -160,17 +160,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def forward(
         self,
-        x: Tensor,
+        x: dict[str, Tensor],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, list] | None = None,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, Tensor]:
         """Forward pass of the model.
 
         Parameters
         ----------
-        x : Tensor
+        x : dict[str, Tensor]
             Input data
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
@@ -179,7 +179,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Returns
         -------
-        Tensor
+        dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
         # Multi-dataset case
