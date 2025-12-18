@@ -330,7 +330,7 @@ def benchmark_config(
         overrides = []
         base_config = "lam"
     elif test_case == "ensemble_crps":
-        overrides = ["model=graphtransformer", "graph=multi_scale"]
+        overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
         base_config = "ensemble_crps"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
