@@ -11,7 +11,7 @@ system:
     loss_matrices_path: "anemoi-integration-tests/training/assets/"
 
 training:
-  ensemble_size_per_device: 2
+  ensemble_size_per_device: 1
   training_loss:
     loss_matrices: [ "n320_smoothing_n320.npz", null]
     weights: [1.0, 1.0]
