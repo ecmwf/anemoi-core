@@ -67,3 +67,36 @@ jobs:
       with:
         report-title: "Test report Anemoi Models (python ${{ matrix.python-version }} on ${{ matrix.platform }})"
         custom-pytest: pytest ./models
+
+  all-checks-passed:
+    name: All checks passed
+    if: always()
+    needs: [quality, pytest]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check all job statuses
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const eventName = context.eventName;
+
+            // Check quality and pytest jobs
+            const qualityResult = '${{ needs.quality.result }}';
+            const pytestResult = '${{ needs.pytest.result }}';
+
+            core.info(`Quality job status: ${qualityResult}`);
+            core.info(`Pytest job status: ${pytestResult}`);
+
+            if (qualityResult !== 'success') {
+              core.setFailed('Quality job did not succeed');
+              return;
+            }
+
+            if (pytestResult !== 'success') {
+              core.setFailed('Pytest job did not succeed');
+              return;
+            }
+
+
+            core.info('All checks passed ✓');
