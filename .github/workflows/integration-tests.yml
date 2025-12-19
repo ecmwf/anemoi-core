@@ -1,4 +1,4 @@
-name: ci-integration-tests
+name: nightly-ci-integration-tests
 on:
   schedule:
     - cron: "0 23 * * *"  # every day at 22pm on default(main) branch
