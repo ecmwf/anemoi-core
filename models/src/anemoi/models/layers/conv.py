@@ -105,16 +105,9 @@ class GraphTransformerConv(MessagePassing):
         edge_attr: OptTensor,
         edge_index: Adj,
         size: Optional[Size] = None,
-        norm: str = "",
     ):
         dim_size = query.shape[0]
         heads = query.shape[1]
-        
-        #TODO(cathal) this is here for the fused gt kernel pytest, i should move it
-        if norm == "rms":
-            norm=torch.nn.RMSNorm(self.out_channels)
-            query = torch.nn.RMSNorm(self.out_channels)(query)
-            key = torch.nn.RMSNorm(self.out_channels)(key)
 
         out = self.propagate(
             edge_index=edge_index,
