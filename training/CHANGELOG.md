@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.2](https://github.com/ecmwf/anemoi-core/compare/training-0.8.1...training-0.8.2) (2025-12-18)
+
+
+### Features
+
+* Multi-scale loss implementations (including multi-scale kcrps) ([#388](https://github.com/ecmwf/anemoi-core/issues/388)) ([17cb84d](https://github.com/ecmwf/anemoi-core/commit/17cb84d276b0fef25f3aa23f325b353ba8f3d0c4))
+
+
+### Bug Fixes
+
+* **docs,schemas:** Update hardware reference in docstrings, documentation and schemas ([#737](https://github.com/ecmwf/anemoi-core/issues/737)) ([4872c7c](https://github.com/ecmwf/anemoi-core/commit/4872c7cba8e9ffabce48ef353b75c73d6c166a9f))
+* Fix check for checkpoint path in the dry run case. ([#755](https://github.com/ecmwf/anemoi-core/issues/755)) ([0f82efa](https://github.com/ecmwf/anemoi-core/commit/0f82efac816d1ed6a04c5b50e50ded14c9197379))
+* Mlflow-export-import new inputs format ([#748](https://github.com/ecmwf/anemoi-core/issues/748)) ([7bca8e8](https://github.com/ecmwf/anemoi-core/commit/7bca8e89c19b51c5b8f0bb7e367b1be1ed4c302f))
+* Progress bar with lightning==2.6.0 ([#739](https://github.com/ecmwf/anemoi-core/issues/739)) ([e7453ae](https://github.com/ecmwf/anemoi-core/commit/e7453aecf0007d5faa7c2faa34c5f97ab04bb89e))
+* **training:** Add missing rad2deg in plot sample ([#744](https://github.com/ecmwf/anemoi-core/issues/744)) ([a5fedb3](https://github.com/ecmwf/anemoi-core/commit/a5fedb3affd989ea3502b91a43085694bef34291))
+* Update the CLI to generate a MLFlow run ID. ([#758](https://github.com/ecmwf/anemoi-core/issues/758)) ([88bf1e5](https://github.com/ecmwf/anemoi-core/commit/88bf1e5b59e2bd88ccee7c46125a52dbefc3ff71))
+* Wrong model for ens in benchmarking tests ([#760](https://github.com/ecmwf/anemoi-core/issues/760)) ([a0d9984](https://github.com/ecmwf/anemoi-core/commit/a0d99848839addbb5cad011b8938c7971151e6ed))
+
+## [0.8.1](https://github.com/ecmwf/anemoi-core/compare/training-0.8.0...training-0.8.1) (2025-12-08)
+
+
+### Features
+
+* Edge pre mlp for gt conv ([#695](https://github.com/ecmwf/anemoi-core/issues/695)) ([c72a789](https://github.com/ecmwf/anemoi-core/commit/c72a789217f3ec13575a2f339cfe331732648cd9))
+* Noise injector refactor ([#724](https://github.com/ecmwf/anemoi-core/issues/724)) ([e1000af](https://github.com/ecmwf/anemoi-core/commit/e1000af21525632555d1b7065fb6e808bcdf32cc))
+
+
+### Bug Fixes
+
+* **training:** Handle CombinedLoss in print_variable_scaling ([#723](https://github.com/ecmwf/anemoi-core/issues/723)) ([b650c59](https://github.com/ecmwf/anemoi-core/commit/b650c59ac975f63c29f4ce1bbc2c438b988f3a5a))
+
 ## [0.8.0](https://github.com/ecmwf/anemoi-core/compare/training-0.7.0...training-0.8.0) (2025-12-05)
 
 
