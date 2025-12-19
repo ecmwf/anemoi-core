@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.3](https://github.com/ecmwf/anemoi-core/compare/training-0.8.2...training-0.8.3) (2025-12-19)
+
+
+### Bug Fixes
+
+* **tests:** Expand losses test suite ([#754](https://github.com/ecmwf/anemoi-core/issues/754)) ([e6b7dbb](https://github.com/ecmwf/anemoi-core/commit/e6b7dbb3b200a4117fd51de02b201e6669414317))
+* **training:** Convert warm_start_path to pathlib.Path object ([#751](https://github.com/ecmwf/anemoi-core/issues/751)) ([59f033c](https://github.com/ecmwf/anemoi-core/commit/59f033c7d87006004b58ecfd50308ccaca695127))
+
 ## [0.8.2](https://github.com/ecmwf/anemoi-core/compare/training-0.8.1...training-0.8.2) (2025-12-18)
 
 
