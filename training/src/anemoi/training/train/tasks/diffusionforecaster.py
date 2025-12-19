@@ -247,7 +247,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         assert y_pred_state is not None, "y_pred_state must be provided for tendency-based diffusion models."
         assert y_state is not None, "y_state must be provided for tendency-based diffusion models."
-        
+
         # Prepare states for metrics computation
         y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred_state,
