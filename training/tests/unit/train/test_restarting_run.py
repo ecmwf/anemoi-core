@@ -263,7 +263,7 @@ def test_warm_start_file_not_found(
 
     assert trainer.start_from_checkpoint is True
     assert trainer.run_id == run_id
-    with pytest.raises(AssertionError, match=r"Warm start checkpoint not found"):
+    with pytest.raises(FileNotFoundError, match=r"Warm start checkpoint not found"):
         _ = trainer.last_checkpoint
 
 
