@@ -53,12 +53,6 @@ repos:
   rev: v1.0.2
   hooks:
   - id: sphinx-lint
-# For now, we use it. But it does not support a lot of sphinx features
-- repo: https://github.com/dzhu/rstfmt
-  rev: v0.0.14
-  hooks:
-  - id: rstfmt
-    exclude: '(cli|schemas)/.*' # Because we use argparse and pydantic sphinx directives
 - repo: https://github.com/b8raoult/pre-commit-docconvert
   rev: "0.1.5"
   hooks:
