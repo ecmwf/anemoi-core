@@ -127,7 +127,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        validation_mode: bool = False,
+        **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         y_pred_ens = {}
         for dataset_name in y_pred:
@@ -137,7 +137,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 shapes=[y_pred[dataset_name].shape] * self.ens_comm_subgroup_size,
                 mgroup=self.ens_comm_subgroup,
             )
-        return super().compute_loss_metrics(y_pred_ens, y, *args, **kwargs)
+        return super().compute_loss_metrics(y_pred_ens, y, **kwargs)
 
     def _rollout_step(
         self,
@@ -219,7 +219,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 
-            loss, y_pred_ens_group = checkpoint(
+            loss, metrics_next, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
@@ -229,13 +229,4 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
             x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred_ens_group,
-                    y,
-                    self.grid_shard_slice,
-                    rollout_step,
-                )
-
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else []
+            yield loss, metrics_next, y_pred_ens_group

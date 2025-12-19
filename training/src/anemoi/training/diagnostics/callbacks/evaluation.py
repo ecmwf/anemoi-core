@@ -155,7 +155,7 @@ class RolloutEvalEns(RolloutEval):
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
         """
         loss = torch.zeros(
-            pl_module.loss.num_scales,
+            1,
             dtype=next(iter(batch.values())).dtype,
             device=pl_module.device,
             requires_grad=False,
