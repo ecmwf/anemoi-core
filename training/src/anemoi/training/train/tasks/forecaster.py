@@ -11,24 +11,20 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    from collections.abc import Mapping
 
-    from torch_geometric.data import HeteroData
+    import torch
 
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphForecaster(BaseGraphModule):
+class GraphForecaster(BaseRolloutGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
 
     def __init__(
@@ -180,37 +176,16 @@ class GraphForecaster(BaseGraphModule):
             y = batch[:, fc_times, ...]
             y = y[..., self.data_indices.data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, metrics_next = checkpoint(
+
+            loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                rollout_step,
-                validation_mode,
+                step=rollout_step,
+                validation_mode=validation_mode,
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
-
-    def _step(
-        self,
-        batch: torch.Tensor,
-        validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
-
-        for loss_next, metrics_next, y_preds_next in self.rollout_step(
-            batch,
-            rollout=self.rollout,
-            validation_mode=validation_mode,
-        ):
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_preds_next)
-
-        loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds

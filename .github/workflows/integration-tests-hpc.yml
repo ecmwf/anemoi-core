@@ -5,7 +5,7 @@ on:
   schedule:
     - cron: "0 22 * * *"  # every day at 22pm on default(main) branch
   workflow_dispatch:
-
+  merge_group:
 
 jobs:
   check_date:
@@ -52,7 +52,7 @@ jobs:
             #SBATCH --qos=ng
             #SBATCH --gpus=1
             #SBATCH --gres=gpu:1
-            #SBATCH --mem=30G
+            #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
   benchmark-tests:
     runs-on: hpc

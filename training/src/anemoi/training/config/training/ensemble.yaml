@@ -2,7 +2,7 @@
 defaults:
   - scalers: global
 
-# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
+# resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
@@ -53,10 +53,9 @@ ensemble_size_per_device: 4
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPEnsGroupStrategy
-  num_gpus_per_ensemble: ${hardware.num_gpus_per_ensemble}
-  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  num_gpus_per_ensemble: ${system.hardware.num_gpus_per_ensemble}
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
-
 
 # loss functions
 
@@ -87,7 +86,7 @@ validation_metrics:
   # loss class to initialise, can be anything subclassing torch.nn.Module
   fkcrps:
     _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-    scalers: ['node_weights']
+    scalers: ["node_weights"]
     ignore_nans: False
     alpha: 1.0
 
@@ -116,13 +115,13 @@ validation_metrics:
 variable_groups:
   default: sfc
   pl:
-     param: [q, t, u, v, w, z]
+    param: [q, t, u, v, w, z]
 
 metrics:
-- z_500
-- t_850
-- u_850
-- v_850
+  - z_500
+  - t_850
+  - u_850
+  - v_850
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
