@@ -179,7 +179,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         """Training / validation step."""
         LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
 
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(self.loss.num_scales, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
