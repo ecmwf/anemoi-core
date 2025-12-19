@@ -17,10 +17,18 @@ from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
+
+
+def reduce_to_last_dim(x: np.ndarray) -> np.ndarray:
+    if x.ndim > 1:
+        return x.sum(axis=tuple(range(x.ndim - 1)))
+    return x
 
 
 def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dict[str, float]:
