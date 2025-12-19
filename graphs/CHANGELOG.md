@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.1...graphs-0.8.2) (2025-12-19)
+
+
+### Features
+
+* **graphs:** Add utility function to transform between sincos and latlon_rad ([#761](https://github.com/ecmwf/anemoi-core/issues/761)) ([4e962d5](https://github.com/ecmwf/anemoi-core/commit/4e962d5c0afa5d51bada78a580ef71378cb13e20))
+
 ## [0.8.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.0...graphs-0.8.1) (2025-12-08)
 
 
