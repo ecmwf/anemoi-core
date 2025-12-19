@@ -532,7 +532,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        # Handle multi-dataset case
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
 
         return self.loss[dataset_name](

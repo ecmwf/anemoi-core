@@ -111,9 +111,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
             )
 
-    def _calculate_input_dim(self):
-        base_input_dim = super()._calculate_input_dim()
-        return base_input_dim + self.num_output_channels  # input + noised targets
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        base_input_dim = super()._calculate_input_dim(dataset_name)
+        return base_input_dim + self.num_output_channels[dataset_name]  # input + noised targets
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()
@@ -125,6 +125,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=bse)
+        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
+
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
@@ -209,13 +211,26 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         y_noised: torch.Tensor,
         sigma: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: Optional[dict[str, list]] = None,
         **kwargs,
     ) -> torch.Tensor:
         # Multi-dataset case
         dataset_names = list(x.keys())
 
-        batch_size, ensemble_size = x[dataset_names[0]].shape[0], x[dataset_names[0]].shape[2]
+        # Extract and validate batch sizes across datasets
+        batch_sizes = [x[dataset_name].shape[0] for dataset_name in dataset_names]
+        ensemble_sizes = [x[dataset_name].shape[2] for dataset_name in dataset_names]
+
+        # Assert all datasets have the same batch and ensemble sizes
+        assert all(
+            bs == batch_sizes[0] for bs in batch_sizes
+        ), f"Batch sizes must be the same across datasets: {batch_sizes}"
+        assert all(
+            es == ensemble_sizes[0] for es in ensemble_sizes
+        ), f"Ensemble sizes must be the same across datasets: {ensemble_sizes}"
+
+        batch_size = batch_sizes[0]
+        ensemble_size = ensemble_sizes[0]
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
@@ -271,30 +286,46 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         x_latent = sum(dataset_latents.values())
 
+        # Processor
+        shard_shapes_hidden = shard_shapes_hidden_dict[dataset_names[0]]
+        assert all(
+            shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
+        ), "All datasets must have the same shard shapes for the hidden graph."
+        proc_kwargs = processor_kwargs[dataset_names[0]]
+        assert all(
+            proc_kwargs == processor_kwargs[dataset_name] for dataset_name in dataset_names
+        ), "All datasets must have the same processor kwargs."
+
         x_latent_proc = self.processor(
             x=x_latent,
             batch_size=bse,
             shard_shapes=shard_shapes_hidden,
             model_comm_group=model_comm_group,
-            **processor_kwargs,
+            **proc_kwargs,  # processor is shared across datasets
         )
 
+        # Processor skip connection
         x_latent_proc = x_latent_proc + x_latent
 
-        x_out = self.decoder(
-            (x_latent_proc, x_data_latent),
-            batch_size=bse,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_data),
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=True,  # x_latent always comes sharded
-            x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-            keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
-            **bwd_mapper_kwargs,
-        )
+        # Decoder
+        x_out_dict = {}
+        for dataset_name in dataset_names:
+            x_out = self.decoder[dataset_name](
+                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                batch_size=bse,
+                shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=True,  # x_latent always comes sharded
+                x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+                **bwd_mapper_kwargs[dataset_name],
+            )
 
-        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
+            x_out_dict[dataset_name] = self._assemble_output(
+                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x_out.dtype
+            )
 
-        return x_out
+        return x_out_dict
 
     def fwd_with_preconditioning(
         self,

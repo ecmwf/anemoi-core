@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
+from torch_geometric.data import dataset
 
 from .base import BaseGraphModule
 
@@ -64,11 +65,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
                 ...,
                 self.data_indices[dataset_name].data.input.full,
             ]  # (bs, multi_step, latlon, nvar)
-            msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {rollout + self.multi_step}"
-            )
-            assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
@@ -78,7 +74,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         for dataset_name, dataset_batch in batch.items():
             y[dataset_name] = dataset_batch[
                 :,
-                self.multi_step + rollout_step,
+                self.multi_step,
                 ...,
                 self.data_indices[dataset_name].data.output.full,
             ]
@@ -100,6 +96,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         y: torch.Tensor,
         weights: torch.Tensor | None = None,
         grid_shard_slice: slice | None = None,
+        dataset_name: str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the diffusion loss with noise weighting.
@@ -122,11 +119,13 @@ class BaseDiffusionForecaster(BaseGraphModule):
         torch.Tensor
             Computed loss with noise weighting applied
         """
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
         assert weights is not None, f"{self.__class__.__name__} must be provided for diffusion loss computation."
-        return self.loss(
+
+        return self.loss[dataset_name](
             y_pred,
             y,
-            weights=weights,
+            weights=weights[dataset_name],
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )
@@ -166,9 +165,6 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         ----------
         batch : torch.Tensor
             Normalized batch to use for rollout (assumed to be already preprocessed).
-        rollout : Optional[int], optional
-            Number of times to rollout for, by default None
-            If None, will use self.rollout
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
@@ -178,20 +174,22 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict, torch.Tensor]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
         # get noise level and associated loss weights
-        sigma, noise_weights = self._get_noise_level(
-            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
-            sigma_max=self.model.model.sigma_max,
-            sigma_min=self.model.model.sigma_min,
-            sigma_data=self.model.model.sigma_data,
-            rho=self.rho,
-            device=x.device,
-        )
+        sigma, noise_weights = {}, {}
+        for dataset_name in x.keys():
+            sigma[dataset_name], noise_weights[dataset_name] = self._get_noise_level(
+                shape=(x[dataset_name].shape[0],) + (1,) * (x[dataset_name].ndim - 2),
+                sigma_max=self.model.model.sigma_max,
+                sigma_min=self.model.model.sigma_min,
+                sigma_data=self.model.model.sigma_data,
+                rho=self.rho,
+                device=x[dataset_name].device,
+            )
 
         # get noised targets
         y_noised = {name: self._noise_target(y, sigma[name]) for name, y in y.items()}
