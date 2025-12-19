@@ -356,6 +356,9 @@ diagnostics:
     interval: 100
   enable_checkpointing: False
   enable_progress_bar: true
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
   print_memory_summary: false
   benchmark_profiler:
     # Use anemoi-profile to profile the training process

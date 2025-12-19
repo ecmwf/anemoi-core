@@ -270,6 +270,22 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     "Deactivate autocast for the kernel CRPS calculation"
 
 
+class MultiScaleLossSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
+    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
+    weights: list[float]
+    keep_batch_sharded: bool
+    loss_matrices_path: str
+    loss_matrices: list[str | None]
+
+    @field_validator("weights")
+    @classmethod
+    def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
+        if "loss_matrices" in info.data:
+            assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
+        return v
+
+
 class HuberLossSchema(BaseLossSchema):
     delta: float = 1.0
     "Threshold for Huber loss."
@@ -303,7 +319,14 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = BaseLossSchema | HuberLossSchema | CombinedLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema
+LossSchemas = (
+    BaseLossSchema
+    | HuberLossSchema
+    | CombinedLossSchema
+    | AlmostFairKernelCRPSSchema
+    | KernelCRPSSchema
+    | MultiScaleLossSchema
+)
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):

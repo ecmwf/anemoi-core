@@ -73,6 +73,10 @@ class RolloutEval(Callback):
             self._log(pl_module, loss, metrics, batch.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
+
+        loss_scales = loss
+        loss = loss_scales.sum()
+
         pl_module.log(
             f"val_r{self.rollout}_{getattr(pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower())}",
             loss,
@@ -84,18 +88,36 @@ class RolloutEval(Callback):
             sync_dist=False,
             rank_zero_only=True,
         )
+        if loss_scales.numel() > 1:
+            for scale in range(loss_scales.numel()):
+                pl_module.log(
+                    f"val_r{self.rollout}_{getattr(pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower())}",
+                    loss_scales[scale],
+                    on_epoch=True,
+                    on_step=True,
+                    prog_bar=False,
+                    logger=pl_module.logger_enabled,
+                    batch_size=bs,
+                    sync_dist=False,
+                    rank_zero_only=True,
+                )
+
         for mname, mvalue in metrics.items():
-            pl_module.log(
-                f"val_r{self.rollout}_" + mname,
-                mvalue,
-                on_epoch=True,
-                on_step=False,
-                prog_bar=False,
-                logger=pl_module.logger_enabled,
-                batch_size=bs,
-                sync_dist=False,
-                rank_zero_only=True,
-            )
+            for scale in range(mvalue.numel()):
+
+                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
+
+                pl_module.log(
+                    f"val_r{self.rollout}_" + mname + "_scale_" + str(scale),
+                    log_val,
+                    on_epoch=True,
+                    on_step=False,
+                    prog_bar=False,
+                    logger=pl_module.logger_enabled,
+                    batch_size=bs,
+                    sync_dist=False,
+                    rank_zero_only=True,
+                )
 
     def on_validation_batch_end(
         self,
@@ -132,7 +154,7 @@ class RolloutEvalEns(RolloutEval):
         batch: torch.Tensor
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
         """
-        loss = torch.zeros(1, dtype=batch.dtype, device=pl_module.device, requires_grad=False)
+        loss = torch.zeros(pl_module.loss.num_scales, dtype=batch.dtype, device=pl_module.device, requires_grad=False)
         assert (
             batch.shape[1] >= self.rollout + pl_module.multi_step
         ), f"Batch length ({batch.shape[1]}) not sufficient for requested rollout length!"

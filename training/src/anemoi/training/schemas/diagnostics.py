@@ -459,6 +459,17 @@ class BenchmarkProfilerSchema(BaseModel):
     "Memory snapshot if torch.cuda._record_memory_history is available."
 
 
+class ProgressBarSchema(BaseModel):
+    target_: Literal[
+        "pytorch_lightning.callbacks.TQDMProgressBar",
+        "pytorch_lightning.callbacks.RichProgressBar",
+        "anemoi.training.diagnostics.profilers.ProfilerProgressBar",
+    ] = Field(alias="_target_")
+    "TQDMProgressBar object from pytorch lightning."
+    refresh_rate: PositiveInt = Field(default=1)
+    "Refresh rate of the progress bar."
+
+
 class DiagnosticsSchema(BaseModel):
     plot: PlotSchema | None = None
     "Plot schema."
@@ -472,6 +483,8 @@ class DiagnosticsSchema(BaseModel):
     "Log schema."
     enable_progress_bar: bool
     "Activate progress bar."
+    progress_bar: ProgressBarSchema | None = Field(default=None)
+    "Progress bar schema."
     print_memory_summary: bool
     "Print the memory summary."
     enable_checkpointing: bool
