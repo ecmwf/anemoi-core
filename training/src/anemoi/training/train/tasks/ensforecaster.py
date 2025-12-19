@@ -147,12 +147,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(
-                y_pred_ens,
-                y,
-                step=step,
-                grid_shard_slice=self.grid_shard_slice
-            )
+            metrics_next = self._compute_metrics(y_pred_ens, y, step=step, grid_shard_slice=self.grid_shard_slice)
 
         return loss, metrics_next, y_pred_ens
 
