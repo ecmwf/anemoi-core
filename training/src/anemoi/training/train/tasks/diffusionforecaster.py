@@ -203,6 +203,70 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
 
+    def compute_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        validation_mode: bool = False,
+        y_pred_state: torch.Tensor | None = None,
+        y_state: torch.Tensor | None = None,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+        """Compute loss and metrics for the given predictions and targets.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        step : int, optional
+            Current step
+        validation_mode : bool, optional
+            Whether to compute validation metrics
+        y_pred_state : torch.Tensor, optional
+            Predicted states (for validation metrics) if they differ from y_pred (e.g., tendency-based models)
+        y_state : torch.Tensor, optional
+            Target states (for validation metrics) if they differ from y (e.g., tendency-based models)
+        **kwargs
+            Additional arguments to pass to loss computation
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
+            Loss, metrics dictionary (if validation_mode), and full predictions
+        """
+        # Prepare tensors for loss/metrics computation
+        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred,
+            y,
+            validation_mode,
+        )
+
+        loss = self._compute_loss(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
+
+        assert y_pred_state is not None, "y_pred_state must be provided for tendency-based diffusion models."
+        assert y_state is not None, "y_state must be provided for tendency-based diffusion models."
+        
+        # Prepare states for metrics computation
+        y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred_state,
+            y_state,
+            validation_mode,
+        )
+
+        # Compute metrics if in validation mode
+        metrics_next = {}
+        if validation_mode:
+            metrics_next = self._compute_metrics(
+                y_pred_state_full,
+                y_state_full,
+                grid_shard_slice=grid_shard_slice,
+                **kwargs,
+            )
+
+        return loss, metrics_next, y_pred_state_full
+
     def _step(
         self,
         batch: torch.Tensor,
