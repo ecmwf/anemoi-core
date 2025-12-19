@@ -937,7 +937,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch.shape[0],
+            batch_size=batch_size,
             sync_dist=True,
         )
 
