@@ -18,6 +18,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.layers.graph_providers import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 
@@ -35,21 +36,24 @@ class MultiscaleLossWrapper(BaseLoss):
         keep_batch_sharded: bool,
         loss_matrices_path: Path | str | None = None,
         loss_matrices: list[Path | str] | None = None,
+        autocast: bool = False,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
         Parameters
         ----------
-        loss_matrices_path : Path | str
-            Path to the directory containing smoothing matrices
-        loss_matrices : list[Path | str] | None
-            Filenames of the smoothing matrices (must preserve grid size)
+        per_scale_loss : BaseLoss
+            Loss to be used at each scale
         weights : list[float]
             Per-scale loss weights
         keep_batch_sharded : bool
             Whether to keep the batch sharded during loss computation
-        per_scale_loss : BaseLoss
-            Loss to be used at each scale
+        loss_matrices_path : Path | str | None
+            Path to the directory containing smoothing matrices
+        loss_matrices : list[Path | str] | None
+            Filenames of the smoothing matrices (must preserve grid size)
+        autocast : bool
+            Whether to use automatic mixed precision for the projections
         """
         super().__init__()
 
@@ -64,6 +68,7 @@ class MultiscaleLossWrapper(BaseLoss):
         self.keep_batch_sharded = keep_batch_sharded
         self.supports_sharding = True
         self.mloss = None
+        self.projector = SparseProjector(autocast=autocast)
 
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         """Update the scaler values for the internal loss.
@@ -83,7 +88,7 @@ class MultiscaleLossWrapper(BaseLoss):
         self,
         loss_matrices_path: Path | str,
         loss_matrices: list[Path | str] | None,
-    ) -> list[SparseProjector | None]:
+    ) -> list[ProjectionGraphProvider | None]:
         """Load smoothing matrices for multi-scale loss computation.
 
         These matrices apply spatial smoothing while preserving grid size.
@@ -101,13 +106,12 @@ class MultiscaleLossWrapper(BaseLoss):
                 smoothing_matrices.append(None)
                 LOGGER.info("Loss smoothing: %s", None)
             else:
-                projector = SparseProjector.from_file(
-                    Path(loss_matrices_path, filename),
+                provider = ProjectionGraphProvider(
+                    file_path=Path(loss_matrices_path, filename),
                     row_normalize=False,
-                    transpose=False,
                 )
-                smoothing_matrices.append(projector)
-                LOGGER.info("Loss smoothing: %s", projector.projection_matrix.shape)
+                smoothing_matrices.append(provider)
+                LOGGER.info("Loss smoothing: %s", provider.get_edges().shape)
 
         return smoothing_matrices
 
@@ -154,11 +158,12 @@ class MultiscaleLossWrapper(BaseLoss):
 
         return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
 
-    def _apply_projector(self, batch: torch.Tensor, projector: SparseProjector) -> torch.Tensor:
+    def _apply_projector(self, batch: torch.Tensor, provider: ProjectionGraphProvider) -> torch.Tensor:
         """Apply sparse projector to a batch, handling multi-dimensional inputs."""
         input_shape = batch.shape
         batch = batch.reshape(-1, *input_shape[-2:])
-        batch = projector(batch)
+        projection_matrix = provider.get_edges(device=batch.device)
+        batch = self.projector(batch, projection_matrix)
         return batch.reshape(*input_shape[:-2] + batch.shape[-2:])
 
     def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -198,11 +203,11 @@ class MultiscaleLossWrapper(BaseLoss):
         loss_inc = []
         y_preds_ens = []
         y_ens = []
-        for i, projector in enumerate(self.smoothing_matrices):
+        for i, provider in enumerate(self.smoothing_matrices):
             LOGGER.debug(
                 "Loss: %s %s",
                 i,
-                projector.projection_matrix.shape if projector is not None else None,
+                provider.get_edges().shape if provider is not None else None,
             )
 
             # smooth the predictions and the truth for loss computation
