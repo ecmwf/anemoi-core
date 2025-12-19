@@ -17,6 +17,9 @@ from functools import cached_property
 import numpy as np
 from torch_geometric.data import HeteroData
 
+from anemoi.training.utils.balanced_partition import get_balanced_partition_sizes
+from anemoi.training.utils.balanced_partition import get_partition_range
+
 LOGGER = logging.getLogger(__name__)
 
 ArrayIndex = slice | int | Sequence[int]
@@ -34,21 +37,16 @@ class BaseGridIndices(ABC):
 
     def get_shard_slice(self, reader_group_rank: int) -> slice:
         """Get the grid shard slice according to the reader rank."""
-        assert (
-            0 <= reader_group_rank < self.reader_group_size
-        ), f"Invalid reader group rank {reader_group_rank}, expected in [0, {self.reader_group_size})"
-        start = sum(self.shard_shapes[:reader_group_rank])
-        end = start + self.shard_shapes[reader_group_rank]
+        start, end = get_partition_range(
+            partition_sizes=self.shard_shapes,
+            partition_id=reader_group_rank,
+        )
 
         return slice(start, end)
 
     @cached_property
     def shard_shapes(self) -> list:
-        # equivalent to torch.tensor_split(torch.arange(self.grid_size), self.reader_group_size)
-        mod = self.grid_size % self.reader_group_size
-        return [self.grid_size // self.reader_group_size + 1] * mod + [self.grid_size // self.reader_group_size] * (
-            self.reader_group_size - mod
-        )
+        return get_balanced_partition_sizes(self.grid_size, self.reader_group_size)
 
     @property
     def supporting_arrays(self) -> dict:
