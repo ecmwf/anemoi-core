@@ -245,19 +245,19 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         loss = self._compute_loss(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
-        assert y_pred_state is not None, "y_pred_state must be provided for tendency-based diffusion models."
-        assert y_state is not None, "y_state must be provided for tendency-based diffusion models."
-
-        # Prepare states for metrics computation
-        y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
-            y_pred_state,
-            y_state,
-            validation_mode,
-        )
-
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
+            assert y_pred_state is not None, "y_pred_state must be provided for tendency-based diffusion models."
+            assert y_state is not None, "y_state must be provided for tendency-based diffusion models."
+
+            # Prepare states for metrics computation
+            y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
+                y_pred_state,
+                y_state,
+                validation_mode,
+            )
+
             metrics_next = self._compute_metrics(
                 y_pred_state_full,
                 y_state_full,
@@ -265,7 +265,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 **kwargs,
             )
 
-        return loss, metrics_next, y_pred_state_full
+        return loss, metrics_next, y_pred_state_full if validation_mode else None
 
     def _step(
         self,
