@@ -154,7 +154,12 @@ class RolloutEvalEns(RolloutEval):
         batch: torch.Tensor
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
         """
-        loss = torch.zeros(pl_module.loss.num_scales, dtype=next(iter(batch.values())).dtype, device=pl_module.device, requires_grad=False)
+        loss = torch.zeros(
+            pl_module.loss.num_scales,
+            dtype=next(iter(batch.values())).dtype,
+            device=pl_module.device,
+            requires_grad=False,
+        )
         batch_shape = next(iter(batch.values())).shape
         assert (
             batch_shape[1] >= self.rollout + pl_module.multi_step
