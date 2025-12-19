@@ -698,7 +698,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             val_loss,
             on_epoch=True,
             on_step=True,
-            prog_bar=False,
+            prog_bar=True,
             logger=self.logger_enabled,
             batch_size=batch.shape[0],
             sync_dist=True,
