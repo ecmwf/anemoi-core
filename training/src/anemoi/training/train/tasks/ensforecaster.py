@@ -178,8 +178,15 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             None
         """
         # Stack the analysis nens_per_device times along an ensemble dimension
-        x = self._get_input(batch)  # shape == (bs, ms, 1, latlon, nvar)
+        x = batch[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.data.input.full,
+        ]  # (bs, ms, ens_dummy, latlon, nvar)
+
         x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
+        LOGGER.debug("Shapes: x.shape = %s", list(x.shape))
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
@@ -188,11 +195,18 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             f"got ({x.shape[1]}, {x.shape[2]})!"
         )
 
+        msg = (
+            "Batch length not sufficient for requested multi_step length!"
+            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
+        )
+        assert batch.shape[1] >= rollout + self.multi_step, msg
+
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
 
-            y = self._get_target(batch, rollout_step)[:, :, 0, ...]  # remove ens dim
+            y = batch[:, self.multi_step + rollout_step, 0, :, self.data_indices.data.output.full]
+            LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 
             loss, y_pred_ens_group = checkpoint(
