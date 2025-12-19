@@ -301,11 +301,15 @@ class AnemoiTrainer(ABC):
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
-        warm_start_path = self.config.system.input.warm_start
+        raw_path = self.config.system.input.warm_start
+        if not raw_path:
+            return None
 
-        if warm_start_path:
+        warm_start_path = Path(raw_path)
+
+        if not warm_start_path.is_file():
             msg = f"Warm start checkpoint not found: {warm_start_path}"
-            assert Path.is_file(warm_start_path), msg
+            raise FileNotFoundError(msg)
         return warm_start_path
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:

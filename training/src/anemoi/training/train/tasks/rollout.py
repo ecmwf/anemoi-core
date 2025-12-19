@@ -183,7 +183,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict, list]:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(self.loss.num_scales, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 

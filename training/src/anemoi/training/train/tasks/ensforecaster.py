@@ -127,8 +127,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        *args,
-        **kwargs,
+        validation_mode: bool = False,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         y_pred_ens = {}
         for dataset_name in y_pred:
@@ -220,15 +219,23 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 
-            loss, metrics_next, y_pred_ens_group = checkpoint(
+            loss, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                step=rollout_step,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
 
             x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
 
-            yield loss, metrics_next, y_pred_ens_group
+            metrics_next = {}
+            if validation_mode:
+                metrics_next = self.calculate_val_metrics(
+                    y_pred_ens_group,
+                    y,
+                    self.grid_shard_slice,
+                    rollout_step,
+                )
+
+            yield loss, metrics_next, y_pred_ens_group if validation_mode else []
