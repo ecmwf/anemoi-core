@@ -20,34 +20,32 @@ LOGGER = logging.getLogger(__name__)
 
 
 def prepare_mlflow_run_id(
-    config_name: str,
+    config: dict,
     owner: str = getpass.getuser(),
     run_name: str | None = None,
-    output: Path = Path("./mlflow_metadata.json"),
 ) -> None:
     """Prepare MLflow run metadata.
 
     Parameters
     ----------
-    config_name : str
-        Name of the training configuration.
+    config : dict
+        Training configuration.
     owner : str
         Owner of the training run.
     run_name : str or None
         MLflow run name.
-    output : Path
-        Output file path for MLflow metadata.
+
+    Returns
+    -------
+    run_id : str
+        The MLflow run ID.
+    experiment_id : str
+        The MLflow experiment ID.
     """
     import mlflow
-    from hydra import compose
-    from hydra import initialize
 
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
     from anemoi.utils.mlflow.client import AnemoiMlflowClient
-
-    # Load configuration and resolve schema
-    with initialize(version_base=None, config_path="./"):
-        config = compose(config_name=config_name)
 
     # Create MLflow client and get experiment
     client = AnemoiMlflowClient(config.diagnostics.log.mlflow.tracking_uri, authentication=True)
@@ -66,7 +64,7 @@ def prepare_mlflow_run_id(
         except ValueError as e:
             msg = "Invalid run_id provided."
             raise ValueError(msg) from e
-        return
+        return None
 
     # Create a new run attached to the experiment
     run_name = run_name if run_name is not None else config.diagnostics.log.mlflow.run_name
@@ -87,16 +85,7 @@ def prepare_mlflow_run_id(
         clean_params=False,
     )
 
-    # Dump run ID in output file
-    LOGGER.info("Saving run id in file in %s.", output)
-    mlflow_metadata = {
-        "run_id": run_id,
-        "experiment_id": experiment_id,
-        "experiment_name": config.diagnostics.log.mlflow.experiment_name,
-        "tracking_uri": config.diagnostics.log.mlflow.tracking_uri,
-    }
-    with Path.open(output, "w") as fp:
-        json.dump(mlflow_metadata, fp)
+    return run_id, experiment_id
 
 
 class MlFlow(Command):
@@ -284,12 +273,30 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "prepare":
-            prepare_mlflow_run_id(
-                config_name=args.config_name,
+            from hydra import compose
+            from hydra import initialize
+
+            # Load configuration and resolve schema
+            with initialize(version_base=None, config_path="./"):
+                config = compose(config_name=args.config_name)
+
+            run_id, experiment_id = prepare_mlflow_run_id(
+                config=config,
                 owner=args.owner,
                 run_name=args.run_name,
-                output=args.output,
             )
+
+            # Dump run ID in output file
+            LOGGER.info("Saving run id in file in %s.", args.output)
+            mlflow_metadata = {
+                "run_id": run_id,
+                "experiment_id": experiment_id,
+                "experiment_name": config.diagnostics.log.mlflow.experiment_name,
+                "tracking_uri": config.diagnostics.log.mlflow.tracking_uri,
+            }
+
+            with Path.open(args.output, "w") as fp:
+                json.dump(mlflow_metadata, fp)
             return
         return
 

@@ -15,6 +15,7 @@ import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.training.commands.mlflow import prepare_mlflow_run_id
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.train.train import AnemoiTrainer
@@ -230,3 +231,29 @@ def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_
 def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
     cfg, _ = diffusion_config
     BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_dry_run(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
+    cfg, url = gnn_config
+
+    # Override graph attribute
+    cfg["system"]["input"]["graph"] = "existing"
+
+    # Override config for MLFlow logging using an dry run ID
+    cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
+    cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = "https://mlflow-test.ecmwf.int"
+    cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
+
+    # Generate a dry run ID and set it in the config
+    run_id, _ = prepare_mlflow_run_id(
+        config=cfg,
+    )
+    cfg["training"]["run_id"] = run_id
+
+    # Get data
+    get_test_archive(url)
+
+    # Run training
+    AnemoiTrainer(cfg).train()
