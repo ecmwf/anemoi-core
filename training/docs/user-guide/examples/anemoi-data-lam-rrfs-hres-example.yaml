@@ -34,18 +34,18 @@ dates:
 
 time:
   coverage:
-    start: "2018-01-01T00:00:00"
-    end: "2020-12-31T18:00:00"
+    start: "2024-05-05T00:00:00"
+    end: "2024-05-12T23:00:00"
   splits:
     train:
-      start: "2018-01-01T00:00:00"
-      end: "2019-12-31T18:00:00"
+      start: "2024-05-05T00:00:00"
+      end: "2024-05-10T23:00:00"
     validation:
-      start: "2020-01-01T00:00:00"
-      end: "2020-06-30T18:00:00"
+      start: "2024-05-11T00:00:00"
+      end: "2024-05-11T23:00:00"
     test:
-      start: "2020-07-01T00:00:00"
-      end: "2020-12-31T18:00:00"
+      start: "2024-05-12T00:00:00"
+      end: "2024-05-12T23:00:00"
 
 storage:
   path: ${oc.env:ANEMOI_DATA_ROOT,./data}/${dataset.name}.zarr
