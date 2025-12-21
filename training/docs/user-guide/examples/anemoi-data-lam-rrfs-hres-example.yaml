@@ -1,219 +1,32 @@
-# Example Hydra configuration for creating a limited-area / regional dataset
-# with `anemoi-data create`. Fields marked with `???` are user-specific and
-# must be replaced before running the command.
+# Anemoi-datasets recipe for RRFS GRIB2 using shortest-lead valid-time links.
+# This expects preprocessed symlinks like:
+#   /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.vYYYYMMDDHH.grib2
+# created from the shortest lead (0-5h) of each cycle.
 
-dataset:
-  name: central-us-3km-2018-2020-6h
-  description: >
-    Example limited-area dataset combining a regional reanalysis (CERra-like)
-    with ERA5 global boundary forcing on a 0.25 deg grid. Designed for training a
-    regional AI weather model with Anemoi.
-  frequency: 1h                         # Target time step of the output dataset
-  timestep: 1h                          # Model time step; must be a multiple of frequency
+name: rrfs-conus-3km-20240505-20240512-1h
 
-  # Spatial domain selection for the limited-area (Lambert conformal or lat/lon)
-  domain:
-    grid: latlon
-    lat:
-      min: 25.0
-      max: 40.0
-    lon:
-      min: -105.0
-      max: -90.0
-    # Optional buffer appended when sampling from the global forcing dataset to capture boundary cells
-    boundary_buffer_deg:
-      lat: 3.0
-      lon: 3.0
+description: >
+  RRFS CONUS GRIB2 collapsed to a single valid-time axis using shortest lead
+  forecasts (0-5h). One file per valid time.
 
-# anemoi-datasets expects a top-level dates block
 dates:
   start: "2024-05-05T00:00:00"
   end: "2024-05-12T23:00:00"
-  frequency: "1h"
-  group_by: monthly
+  frequency: 1h
 
-time:
-  coverage:
-    start: "2024-05-05T00:00:00"
-    end: "2024-05-12T23:00:00"
-  splits:
-    train:
-      start: "2024-05-05T00:00:00"
-      end: "2024-05-10T23:00:00"
-    validation:
-      start: "2024-05-11T00:00:00"
-      end: "2024-05-11T23:00:00"
-    test:
-      start: "2024-05-12T00:00:00"
-      end: "2024-05-12T23:00:00"
+input:
+  join:
+    - pipe:
+        - grib:
+            path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+            param: [ugrd, vgrd, temp, sphum, clmr, icmr, rwmr, snmr, grle, height]
+            levelist: [925, 850, 500, 200]
+            typeOfLevel: isobaricInhPa
+        - rename:
+            param: "{param}_{levelist}"
+    - grib:
+        path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+        param: [pres_0g, temp_sfc, tcdc, REFC]
 
-storage:
-  path: ${oc.env:ANEMOI_DATA_ROOT,./data}/${dataset.name}.zarr
-  chunking:
-    time: 4
-    node: 4096
-    variable: 16
-  compressor:
-    cname: zstd
-    clevel: 7
-    shuffle: bitshuffle
-
-sources:
-  regional_core:
-    kind: grib_sequence
-    path_template: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-ai-grib2-files/rrfs.{date:%Y%m%d}/{cycle:02d}/rrfs.t{cycle:02d}z.prslev.f{lead:03d}.conus.grib2
-    iterator:
-      dates:
-        start: "2024-05-05"
-        end: "2024-05-12"
-      cycles: [0, 6, 12, 18]          # Adjust to the cycles present in your archive
-      lead_hours: range(0, 6, 1)      # Use shortest-available lead (0–5 h) from each cycle for canonical valid times
-    loader:
-      engine: cfgrib
-      backend_kwargs:
-        filter_by_keys:
-          typeOfLevel: isobaricInhPa
-        encoding: {}
-      chunks:
-        time: 1
-    regrid:
-      method: bilinear
-      destination_grid: ${dataset.domain}
-    variables:
-      state:
-        - "REFC"
-        - "ugrd_925"
-        - "ugrd_850"
-        - "ugrd_500"
-        - "ugrd_200"
-        - "vgrd_925"
-        - "vgrd_850"
-        - "vgrd_500"
-        - "vgrd_200"
-        - "temp_925"
-        - "temp_850"
-        - "temp_500"
-        - "temp_200"
-        - "sphum_925"
-        - "sphum_850"
-        - "sphum_500"
-        - "sphum_200"
-        - "clmr_925"
-        - "clmr_850"
-        - "clmr_500"
-        - "clmr_200"
-        - "icmr_925"
-        - "icmr_850"
-        - "icmr_500"
-        - "icmr_200"
-        - "rwmr_925"
-        - "rwmr_850"
-        - "rwmr_500"
-        - "rwmr_200"
-        - "snmr_925"
-        - "snmr_850"
-        - "snmr_500"
-        - "snmr_200"
-        - "grle_925"
-        - "grle_850"
-        - "grle_500"
-        - "grle_200"
-        - "height_500hPa"
-      surface:
-        - "pres_0g"
-        - "temp_sfc"
-        - "tcdc"
-      diagnostics:
-        []
-    variables_metadata:
-      REFC: {name: "Composite reflectivity", level: "entire atmosphere"}
-      pres_0g: {name: "Surface pressure", level: "surface"}
-      height_500hPa: {name: "Geopotential height", level: 500}
-      ugrd_925: {name: "U component of wind", level: 925}
-      ugrd_850: {name: "U component of wind", level: 850}
-      ugrd_500: {name: "U component of wind", level: 500}
-      ugrd_200: {name: "U component of wind", level: 200}
-      vgrd_925: {name: "V component of wind", level: 925}
-      vgrd_850: {name: "V component of wind", level: 850}
-      vgrd_500: {name: "V component of wind", level: 500}
-      vgrd_200: {name: "V component of wind", level: 200}
-      temp_925: {name: "Temperature", level: 925}
-      temp_850: {name: "Temperature", level: 850}
-      temp_500: {name: "Temperature", level: 500}
-      temp_200: {name: "Temperature", level: 200}
-      sphum_925: {name: "Specific humidity", level: 925}
-      sphum_850: {name: "Specific humidity", level: 850}
-      sphum_500: {name: "Specific humidity", level: 500}
-      sphum_200: {name: "Specific humidity", level: 200}
-      clmr_925: {name: "Cloud mixing ratio", level: 925}
-      clmr_850: {name: "Cloud mixing ratio", level: 850}
-      clmr_500: {name: "Cloud mixing ratio", level: 500}
-      clmr_200: {name: "Cloud mixing ratio", level: 200}
-      icmr_925: {name: "Ice water mixing ratio", level: 925}
-      icmr_850: {name: "Ice water mixing ratio", level: 850}
-      icmr_500: {name: "Ice water mixing ratio", level: 500}
-      icmr_200: {name: "Ice water mixing ratio", level: 200}
-      rwmr_925: {name: "Rain mixing ratio", level: 925}
-      rwmr_850: {name: "Rain mixing ratio", level: 850}
-      rwmr_500: {name: "Rain mixing ratio", level: 500}
-      rwmr_200: {name: "Rain mixing ratio", level: 200}
-      snmr_925: {name: "Snow mixing ratio", level: 925}
-      snmr_850: {name: "Snow mixing ratio", level: 850}
-      snmr_500: {name: "Snow mixing ratio", level: 500}
-      snmr_200: {name: "Snow mixing ratio", level: 200}
-      grle_925: {name: "Graupel mixing ratio", level: 925}
-      grle_850: {name: "Graupel mixing ratio", level: 850}
-      grle_500: {name: "Graupel mixing ratio", level: 500}
-      grle_200: {name: "Graupel mixing ratio", level: 200}
-      temp_sfc: {name: "Temperature", level: "surface"}
-      tcdc: {name: "Total Cloud Cover", level: "entire atmosphere"}
-    grid:
-      projection: latlon
-      resolution_deg: 0.027               # Native horizontal resolution of the regional product
-
-recipe:
-  cutout:
-    # First entry is the high-resolution limited-area dataset
-    - dataset: ${sources.regional_core.path_template}
-      thinning: 1                        # Optional sub-sampling factor for dev runs; set to 1 for full resolution
-      role: core
-    # Second entry reuses the same GRIB source to supply lateral boundary values
-    - dataset: ${sources.regional_core.path_template}
-      role: boundary
-  adjust: all                            # Align calendars/metadata between the two sources
-  min_distance_km: 0                     # Keeps every grid point from the regional core
-  write_cutout_mask: true                # Persist mask to identify which nodes belong to the regional vs boundary source
-
-features:
-  forcing:
-    - "cos_latitude"
-    - "cos_longitude"
-    - "sin_latitude"
-    - "sin_longitude"
-    - "cos_julian_day"
-    - "sin_julian_day"
-    - "lsm"
-    - "z"
-  diagnostics:
-    - "tp"
-
-normalizer:
-  default: mean-std
-  std:
-    - "tp"
-  none:
-    - "cos_latitude"
-    - "cos_longitude"
-    - "sin_latitude"
-    - "sin_longitude"
-    - "cos_julian_day"
-    - "sin_julian_day"
-    - "lsm"
-    - "z"
-
-outputs:
-  metadata:
-    created_by: anemoi-data example
-    notes:
-      - "Regional nodes flagged via cutout_mask attribute"
-      - "Global boundary nodes retained for inflow/outflow conditioning"
+# output is provided on the command line as the second argument to
+# `anemoi-datasets create`.
