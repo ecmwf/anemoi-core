@@ -27,8 +27,8 @@ dataset:
 
 # anemoi-datasets expects a top-level dates block
 dates:
-  start: "2018-01-01T00:00:00"
-  end: "2020-12-31T18:00:00"
+  start: "2024-05-05T00:00:00"
+  end: "2024-05-12T23:00:00"
   frequency: "1h"
   group_by: monthly
 
@@ -61,13 +61,13 @@ storage:
 sources:
   regional_core:
     kind: grib_sequence
-    path_template: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-ai-grib2-files/                  # Path/URL or template to the RRFS GRIB2 files
+    path_template: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-ai-grib2-files/rrfs.{date:%Y%m%d}/{cycle:02d}/rrfs.t{cycle:02d}z.prslev.f{lead:03d}.conus.grib2
     iterator:
       dates:
-        start: "2018-01-01"
-        end: "2020-12-31"
+        start: "2024-05-05"
+        end: "2024-05-12"
       cycles: [0, 6, 12, 18]          # Adjust to the cycles present in your archive
-      lead_hours: range(0, 49, 1)     # Adjust to the forecast length you have
+      lead_hours: range(0, 6, 1)      # Use shortest-available lead (0–5 h) from each cycle for canonical valid times
     loader:
       engine: cfgrib
       backend_kwargs:
