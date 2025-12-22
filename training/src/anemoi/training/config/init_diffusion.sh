@@ -19,7 +19,7 @@ load_puv
 export HYDRA_FULL_ERROR=1
 export OMP_NUM_THREADS=4
 export NCCL_ASYNC_ERROR_HANDLING=1
-
+export PYTHONPATH=/home/users/u101957/code/anemoi-core/models/src/anemoi/models:$PYTHONPATH
 cd /home/users/u101957/code/anemoi/anemoi-core/training/src/anemoi/training/config
 
 # Important: on force la visibilité "0,1,2,3" (recommandé dans l'exemple MeluXina)

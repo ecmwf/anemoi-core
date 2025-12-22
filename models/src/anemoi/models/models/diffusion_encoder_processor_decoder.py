@@ -45,7 +45,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         graph_data: HeteroData,
         truncation_data: dict,
     ) -> None:
-
         model_config_local = DotDict(model_config)
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels

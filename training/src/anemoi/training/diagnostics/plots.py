@@ -11,7 +11,8 @@ from lightning_utilities.core.rank_zero import rank_zero_info
 
 import logging
 from dataclasses import dataclass
-
+from lightning_utilities.core.rank_zero import rank_zero_info
+import torch 
 import datashader as dsh
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt

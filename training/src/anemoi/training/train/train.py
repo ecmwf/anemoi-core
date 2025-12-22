@@ -219,7 +219,7 @@ class AnemoiTrainer(ABC):
             "statistics_tendencies": self.datamodule.statistics_tendencies,
             "supporting_arrays": self.supporting_arrays,
         }
-
+        print('JE SUIS LA CONFIG DANS LE FICHIER TRAIN', self.config, self.config.training)
         model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 

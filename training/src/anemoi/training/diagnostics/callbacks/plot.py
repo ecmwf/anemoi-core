@@ -1033,6 +1033,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         epoch: int,
     ) -> None:
         logger = trainer.logger
+        print('JE PASSE PAR PLOT SAMPLE UNCOccNDITIONNAL ')
 
         # Build dictionary of indices and parameters to be plotted
         diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
