@@ -10,11 +10,9 @@
 
 import pytest
 import torch
-from hydra.errors import InstantiationException
 from omegaconf import DictConfig
 
 from anemoi.training.losses import AlmostFairKernelCRPS
-from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import HuberLoss
 from anemoi.training.losses import KernelCRPS
 from anemoi.training.losses import LogCoshLoss
@@ -25,8 +23,6 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
-from anemoi.training.losses.filtering import FilteringLossWrapper
-from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 
 
@@ -316,92 +312,6 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
     assert "test" not in loss.scaler
 
 
-def test_combined_loss() -> None:
-    """Test the combined loss function."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
-                ],
-                "scalers": ["test"],
-                "loss_weights": [1.0, 0.5],
-            },
-        ),
-        scalers={"test": (-1, torch.ones(2))},
-    )
-    assert isinstance(loss.losses[0], MSELoss)
-    assert "test" in loss.losses[0].scaler
-
-    assert isinstance(loss.losses[1], MAELoss)
-    assert "test" in loss.losses[1].scaler
-
-
-def test_combined_loss_invalid_loss_weights() -> None:
-    """Test the combined loss function with invalid loss weights."""
-    with pytest.raises(InstantiationException):
-        get_loss_function(
-            DictConfig(
-                {
-                    "_target_": "anemoi.training.losses.combined.CombinedLoss",
-                    "losses": [
-                        {"_target_": "anemoi.training.losses.MSELoss"},
-                        {"_target_": "anemoi.training.losses.MAELoss"},
-                    ],
-                    "scalers": ["test"],
-                    "loss_weights": [1.0, 0.5, 1],
-                },
-            ),
-            scalers={"test": (-1, torch.ones(2))},
-        )
-
-
-def test_combined_loss_equal_weighting() -> None:
-    """Test equal weighting when not given."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
-                ],
-            },
-        ),
-        scalers={},
-    )
-    assert all(weight == 1.0 for weight in loss.loss_weights)
-
-
-def test_combined_loss_seperate_scalers() -> None:
-    """Test that scalers are passed to the correct loss function."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
-                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
-                ],
-                "scalers": ["test", "test2"],
-                "loss_weights": [1.0, 0.5],
-            },
-        ),
-        scalers={"test": (-1, torch.ones(2)), "test2": (-1, torch.ones(2))},
-    )
-    assert isinstance(loss, CombinedLoss)
-
-    assert isinstance(loss.losses[0], MSELoss)
-    assert "test" in loss.losses[0].scaler
-    assert "test2" not in loss.losses[0].scaler
-
-    assert isinstance(loss.losses[1], MAELoss)
-    assert "test" not in loss.losses[1].scaler
-    assert "test2" in loss.losses[1].scaler
-
-
 def test_logfft2dist_loss() -> None:
     """Test that loss function can be instantiated."""
     loss = get_loss_function(
@@ -448,117 +358,3 @@ def test_fcl_loss() -> None:
     wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
     with pytest.raises(AssertionError):
         loss.calculate_difference(*wrong_shaped_pred_output_pair)
-
-
-def test_filtered_loss() -> None:
-    from anemoi.models.data_indices.collection import IndexCollection
-
-    """Test that loss function can be instantiated."""
-    data_config = {"data": {"forcing": [], "diagnostic": []}}
-    name_to_index = {"tp": 0, "other_var": 1}
-    data_indices = IndexCollection(DictConfig(data_config["data"]), name_to_index)
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
-                "predicted_variables": ["tp"],
-                "target_variables": ["tp"],
-                "loss": {
-                    "_target_": "anemoi.training.losses.spatial.LogFFT2Distance",
-                    "x_dim": 710,
-                    "y_dim": 640,
-                    "scalers": [],
-                },
-            },
-        ),
-        data_indices=data_indices,
-    )
-    assert isinstance(loss, FilteringLossWrapper)
-    assert isinstance(loss.loss, FunctionalLoss)
-    assert hasattr(loss.loss, "y_dim")
-    assert hasattr(loss.loss, "x_dim")
-
-    loss.set_data_indices(data_indices)
-    assert hasattr(loss, "predicted_indices")
-
-    assert loss.predicted_variables == ["tp"]
-
-    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
-    loss_value = loss(*right_shaped_pred_output_pair, squash=False)
-    assert loss_value.shape[0] == len(
-        name_to_index.keys(),
-    ), "Loss output with squash=False should match length of all variables"
-    assert (
-        torch.nonzero(loss_value)[0].tolist() == loss.predicted_indices
-    ), "Filtered out variables should have zero loss"
-    loss_total = loss(*right_shaped_pred_output_pair, squash=True)
-    assert (
-        loss_total == loss_value[0]
-    ), "Loss output with squash=True should be the value of loss for predicted variables"
-    # test instantiation with a str loss
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
-                "predicted_variables": ["tp"],
-                "target_variables": ["tp"],
-                "loss": "anemoi.training.losses.MSELoss",
-            },
-        ),
-        data_indices=data_indices,
-    )
-    loss.set_data_indices(data_indices)
-
-    assert isinstance(loss, FilteringLossWrapper)
-    assert isinstance(loss.loss, FunctionalLoss)
-
-
-@pytest.fixture
-def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Fixture for loss inputs."""
-    tensor_shape = [1, 2, 4, 1]
-
-    pred = torch.zeros(tensor_shape)
-    pred[0, :, 0, 0] = torch.tensor([1.0, 1.0])
-    target = torch.zeros(tensor_shape[1:])
-
-    # With only one "grid point" differing by 1 in all
-    # variables, the loss should be 1.0
-
-    loss_result = torch.tensor([1.0])
-    return pred, target, loss_result
-
-
-def test_multi_scale(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> None:
-    per_scale_loss = AlmostFairKernelCRPS()
-    multiscale_loss = MultiscaleLossWrapper(
-        per_scale_loss=per_scale_loss,
-        weights=[1.0],
-        keep_batch_sharded=False,
-    )
-
-    pred, target, loss_result = loss_inputs_multiscale
-    loss = multiscale_loss(pred, target)
-
-    assert isinstance(loss, torch.Tensor)
-    assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
-
-
-def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
-
-    tensor_shape = [1, 2, 4, 5]
-    pred = torch.randn(tensor_shape)
-    target = torch.randn(tensor_shape[1:])
-
-    per_scale_loss = AlmostFairKernelCRPS()
-    multiscale_loss = MultiscaleLossWrapper(
-        per_scale_loss=per_scale_loss,
-        weights=[1.0],
-        keep_batch_sharded=False,
-    )
-
-    loss = multiscale_loss(pred, target)
-    loss_kcrps = per_scale_loss(pred, target)
-
-    assert isinstance(loss, torch.Tensor)
-    assert torch.allclose(loss, loss_kcrps), "Loss for single/original scale should be equal to the kcrps"
