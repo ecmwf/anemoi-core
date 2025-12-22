@@ -92,7 +92,7 @@ class NativeGridDataset:
         """Return dataset resolution."""
         return self.data.resolution
 
-    def get_sample(self, time_indices, reader_group_rank: int) -> torch.Tensor:
+    def get_sample(self, time_indices: int | list[int] | slice, reader_group_rank: int) -> torch.Tensor:
         # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
         # data[start...] will be replaced with data[self.relative_date_indices + i]
 

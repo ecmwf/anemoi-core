@@ -197,7 +197,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             )
             assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
 
-        for dataset_name in batch.keys():
+        for dataset_name in self.dataset_names:
             x[dataset_name] = torch.cat(
                 [x[dataset_name]] * self.nens_per_device,
                 dim=2,
@@ -206,7 +206,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
             assert (
                 len(x[dataset_name].shape) == 5
-            ), f"Expected a 5-dimensional tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
+            ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
             assert (x[dataset_name].shape[1] == self.multi_step) and (
                 x[dataset_name].shape[2] == self.nens_per_device
             ), (

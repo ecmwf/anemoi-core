@@ -32,6 +32,7 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
+from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -324,7 +325,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # For multi-dataset, use a generic name or combine dataset names
         return "multi_dataset"
 
-    def _get_task_type_from_config(self, config) -> str:
+    def _get_task_type_from_config(self, config: dict) -> str:
         task_class_name = str(config.training.model_task).split(".")[-1]
 
         TASK_TYPE_MAP = {
@@ -370,7 +371,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 ", ".join(unsupported_metrics),
             )
 
-    def _build_metrics_for_dataset(self, validation_metrics_configs, scalers, data_indices) -> torch.nn.ModuleDict:
+    def _build_metrics_for_dataset(
+        self,
+        validation_metrics_configs: dict,
+        scalers: dict,
+        data_indices: IndexCollection,
+    ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
                 metric_name: get_loss_function(val_metric_config, scalers=scalers, data_indices=data_indices)
@@ -397,10 +403,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def _update_scaler_for_dataset(
         self,
         name: str,
-        scaler_builder,
+        scaler_builder: BaseScaler,
         callback: AvailableCallbacks,
-        loss_obj,
-        metrics_dict,
+        loss_obj: torch.nn.Module,
+        metrics_dict: dict,
         dataset_name: str | None = None,
     ) -> None:
         """Update a single scaler for loss and metrics objects."""
@@ -735,10 +741,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         batch: dict,
         device: torch.device,
-        dataloader_idx: int = 0,
+        _dataloader_idx: int = 0,
     ) -> dict:
         """Transfer batch to device, handling dictionary batches."""
-        # Multi-dataset dictionary batch
         transferred_batch = {}
         for dataset_name, dataset_batch in batch.items():
             transferred_batch[dataset_name] = (
@@ -782,7 +787,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         pass
 
-    def allgather_batch(self, batch: torch.Tensor, grid_indices, grid_dim: int) -> torch.Tensor:
+    def allgather_batch(self, batch: torch.Tensor, grid_indices: dict, grid_dim: int) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
 
         Parameters

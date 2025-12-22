@@ -377,7 +377,7 @@ class MultiDataset(IterableDataset):
             self.worker_id,
             shuffled_chunk_indices[:10],
         )
-        # TODO: improve this...
+        # TODO(): improve this...
         for i in shuffled_chunk_indices:
             yield self.get_sample(i)
 

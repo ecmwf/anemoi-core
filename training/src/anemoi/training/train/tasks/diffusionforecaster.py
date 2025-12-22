@@ -180,7 +180,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
         # get noise level and associated loss weights
         sigma, noise_weights = {}, {}
-        for dataset_name in x.keys():
+        for dataset_name in self.dataset_names:
             sigma[dataset_name], noise_weights[dataset_name] = self._get_noise_level(
                 shape=(x[dataset_name].shape[0],) + (1,) * (x[dataset_name].ndim - 2),
                 sigma_max=self.model.model.sigma_max,
