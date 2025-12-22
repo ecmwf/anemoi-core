@@ -28,7 +28,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
             return model_name_to_index
         return trainer.datamodule.data_indices.name_to_index
 
-    def _compare_variables(self, trainer: pl.Trainer, model_name_to_index, data_name_to_index) -> None:  # type: ignore[misc]
+    def _compare_variables(self, trainer: pl.Trainer, model_name_to_index: dict, data_name_to_index: dict) -> None:  # type: ignore[misc]
         """Compare variables between model and data indices."""
         for dataset_name, data_indices in trainer.datamodule.data_indices.items():
             data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
