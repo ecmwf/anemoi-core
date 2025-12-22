@@ -51,7 +51,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.num_target_forcings = (
             len(model_config.training.target_forcing.data) + model_config.training.target_forcing.time_fraction
         )
-        self.input_times = len(model_config.training.explicit_times.input)
+        self.input_times = model_config.training.explicit_times.input
+        self.output_times = model_config.training.explicit_times.target
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -62,15 +63,28 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.latent_skip = model_config.model.latent_skip
 
     # Overwrite base class
-    def _calculate_input_dim(self):
+    def _calculate_input_dim(self, dataset_name: str) -> int:
         return (
-            self.input_times * self.num_input_channels
-            + self.node_attributes.attr_ndims[self._graph_name_data]
+            len(self.input_times) * self.num_input_channels[dataset_name]
+            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
             + self.num_target_forcings
         )
 
-    def _assemble_input(self, x, target_forcing, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
+    def _assemble_input(
+        self,
+        x,
+        target_forcing,
+        batch_size,
+        grid_shard_shapes: dict | None = None,
+        model_comm_group=None,
+        dataset_name: str = None,
+    ):
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
+        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
+
+        x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
+
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
@@ -90,11 +104,11 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
-        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
-
         return x_data_latent, x_skip, shard_shapes_data
 
-    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
+    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype, dataset_name: str):
+        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+
         x_out = (
             einops.rearrange(
                 x_out,
@@ -108,9 +122,10 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
         # residual connection (just for the prognostic variables)
         if x_skip is not None:
-            x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
+            # residual connection (just for the prognostic variables)
+            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
-        for bounding in self.boundings:
+        for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
         return x_out
@@ -124,28 +139,62 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> Tensor:
-        batch_size = x.shape[0]
-        ensemble_size = x.shape[2]
+        dataset_names = list(x.keys())
+
+        # Extract and validate batch sizes across datasets
+        batch_sizes = [x[dataset_name].shape[0] for dataset_name in dataset_names]
+        ensemble_sizes = [x[dataset_name].shape[2] for dataset_name in dataset_names]
+
+        # Assert all datasets have the same batch and ensemble sizes
+        assert all(
+            bs == batch_sizes[0] for bs in batch_sizes
+        ), f"Batch sizes must be the same across datasets: {batch_sizes}"
+        assert all(
+            es == ensemble_sizes[0] for es in ensemble_sizes
+        ), f"Ensemble sizes must be the same across datasets: {ensemble_sizes}"
+
+        batch_size = batch_sizes[0]
+        ensemble_size = ensemble_sizes[0]
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
-        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x, target_forcing, batch_size, grid_shard_shapes, model_comm_group
-        )
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        # Process each dataset through its corresponding encoder
+        dataset_latents = {}
+        x_skip_dict = {}
+        x_data_latent_dict = {}
+        shard_shapes_data_dict = {}
+        shard_shapes_hidden_dict = {}
+        for dataset_name in dataset_names:
+            x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
+                x[dataset_name], target_forcing[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name
+            )
+            x_data_latent_dict[dataset_name] = x_data_latent
+            x_skip_dict[dataset_name] = x_skip
+            shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+            x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
+            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
-        # Run encoder
-        x_data_latent, x_latent = self.encoder(
-            (x_data_latent, x_hidden_latent),
-            batch_size=batch_size,
-            shard_shapes=(shard_shapes_data, shard_shapes_hidden),
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-            x_dst_is_sharded=False,  # x_latent does not come sharded
-            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-        )
+            # Run encoder
+            x_data_latent, x_latent = self.encoder[dataset_name](
+                (x_data_latent, x_hidden_latent),
+                batch_size=batch_size,
+                shard_shapes=(shard_shapes_data_dict[dataset_name], shard_shapes_hidden_dict[dataset_name]),
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                x_dst_is_sharded=False,  # x_latent does not come sharded
+                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            )
+            dataset_latents[dataset_name] = x_latent
+
+        # Combine all dataset latents
+        x_latent = sum(dataset_latents.values())
+
+        # Processor
+        shard_shapes_hidden = shard_shapes_hidden_dict[dataset_names[0]]
+        assert all(
+            shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
+        ), "All datasets must have the same shard shapes for the hidden graph."
 
         x_latent_proc = self.processor(
             x_latent,
@@ -158,25 +207,34 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         if self.latent_skip:
             x_latent_proc = x_latent_proc + x_latent
 
-        # Run decoder
-        x_out = self.decoder(
-            (x_latent_proc, x_data_latent),
-            batch_size=batch_size,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_data),
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=True,  # x_latent always comes sharded
-            x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-            keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
-        )
+        # Decode
+        x_out_dict = {}
+        for dataset_name in dataset_names:
+            x_out = self.decoder[dataset_name](
+                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                batch_size=batch_size,
+                shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=True,  # x_latent always comes sharded
+                x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+            )
 
-        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
-
-        return x_out
+            x_out_dict[dataset_name] = self._assemble_output(
+                x_out,
+                x_skip_dict[dataset_name],
+                batch_size,
+                ensemble_size,
+                x[dataset_name].dtype,
+                dataset_name
+            )
+        
+        return x_out_dict
 
     def fill_metadata(self, md_dict):
         for dataset in self.input_dim.keys():
-            input_rel_date_indices = self.model_config.training.explicit_times.input
-            output_rel_date_indices = self.model_config.training.explicit_times.output
+            input_rel_date_indices = self.input_times
+            output_rel_date_indices = self.output_times
 
             shapes = {
                 "variables": self.input_dim[dataset],
