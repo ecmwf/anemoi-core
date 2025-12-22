@@ -182,7 +182,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
-        # Multi-dataset case
         dataset_names = list(x.keys())
 
         # Extract and validate batch sizes across datasets
