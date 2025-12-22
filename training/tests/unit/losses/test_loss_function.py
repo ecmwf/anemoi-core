@@ -23,6 +23,8 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 
 
@@ -427,10 +429,10 @@ def test_filtered_loss() -> None:
 @pytest.fixture
 def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs."""
-    tensor_shape = [1, 1, 4, 2, 3]  # (batch, output_steps, ens, latlon, vars)
+    tensor_shape = [1, 1, 2, 4, 1]  # (batch, output_steps, ens, latlon, vars)
 
     pred = torch.zeros(tensor_shape)
-    pred[0, 0, :, 0] = torch.tensor([1.0, 0.0, 0.0])
+    pred[0, 0, :, 0] = torch.tensor([1.0])
     target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
 
     # With only one "grid point" differing by 1 in all

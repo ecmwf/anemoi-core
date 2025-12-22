@@ -6,6 +6,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 
+
 def _row_normalize_weights(edge_index: torch.Tensor, weights: torch.Tensor, num_target_nodes: int) -> torch.Tensor:
     total = torch.zeros(num_target_nodes, device=weights.device)
     norm = total.scatter_add_(0, edge_index[1].long(), weights)
