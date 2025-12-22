@@ -17,6 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.utils.enums import TensorDim
+
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
