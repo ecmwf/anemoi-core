@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.utils.enums import TensorDim
+
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -69,7 +71,9 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
     def get_target(self, batch: torch.Tensor) -> torch.Tensor:
         """Get target tensor shape for diffusion model."""
-        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
+        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full].unsqueeze(
+            TensorDim.TIME,
+        )  # (bs, 1, ens, latlon, nvar)
         LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
         return y
 
@@ -169,7 +173,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, 1, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
@@ -183,11 +187,8 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
         # get noised targets
         y_noised = self._noise_target(y, sigma)
-
         # prediction, fwd_with_preconditioning
-        y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
-
-        # Use checkpoint for compute_loss_metrics
+        y_pred = self(x, y_noised, sigma)  # shape is (bs, time, ens, latlon, nvar)
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
@@ -342,8 +343,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 output_pre_processor=self.model.pre_processors,
             )
 
-        # compute_loss_metrics
-        loss, metrics, y_pred = checkpoint(
+        loss, metrics = checkpoint(
             self.compute_loss_metrics,
             tendency_pred,
             tendency_target,

@@ -17,6 +17,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
+from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -132,7 +133,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
-            dim=1,
+            dim=TensorDim.ENSEMBLE_DIM,
             shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
             mgroup=self.ens_comm_subgroup,
         )
@@ -207,8 +208,11 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
+            LOGGER.debug("SHAPE: y_pred.shape = %s", list(y_pred.shape))
 
-            y = batch[:, self.multi_step + rollout_step, 0, :, self.data_indices.data.output.full]
+            y = batch[:, self.multi_step + rollout_step, 0, :, self.data_indices.data.output.full].unsqueeze(
+                TensorDim.TIME,
+            )  # add time dim
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 

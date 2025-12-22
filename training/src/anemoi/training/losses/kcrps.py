@@ -84,12 +84,12 @@ class KernelCRPS(BaseLoss):
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
-        y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
-        y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
+        y_target = einops.rearrange(y_target, "bs t latlon v -> bs t v latlon")
+        y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
 
         kcrps_ = self._kernel_crps(y_pred, y_target)
 
-        kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs 1 latlon v")
+        kcrps_ = einops.rearrange(kcrps_, "bs t v latlon -> bs t 1 latlon v")
         kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
         return self.reduce(kcrps_, squash=squash, squash_mode="sum", group=group if is_sharded else None)
@@ -133,7 +133,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         Parameters
         ----------
         preds : torch.Tensor
-            Predicted ensemble, shape (batch_size, n_vars, latlon, ens_size)
+            Predicted ensemble, shape (batch_size, output_steps, n_vars, latlon, ens_size)
         targets : torch.Tensor
             Ground truth, shape (batch_size, n_vars, latlon)
         alpha : float
@@ -153,7 +153,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         diag = torch.eye(ens_size, dtype=torch.bool, device=preds.device)
         err_r = einops.repeat(
             torch.abs(preds - targets.unsqueeze(dim=-1)),
-            "batch var latlon ens -> batch var latlon n ens",
+            "batch t var latlon ens -> batch t var latlon n ens",
             n=ens_size,
         )
 
@@ -179,8 +179,8 @@ class AlmostFairKernelCRPS(BaseLoss):
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
-        y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
-        y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
+        y_target = einops.rearrange(y_target, "bs t latlon v -> bs t v latlon")
+        y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
 
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
@@ -188,7 +188,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         else:
             kcrps_ = self._kernel_crps(y_pred, y_target, alpha=self.alpha)
 
-        kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs 1 latlon v")
+        kcrps_ = einops.rearrange(kcrps_, "bs t v latlon -> bs t 1 latlon v")
         kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
         return self.reduce(kcrps_, squash=squash, squash_mode="sum", group=group if is_sharded else None)
