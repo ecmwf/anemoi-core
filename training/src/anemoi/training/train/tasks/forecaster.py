@@ -19,6 +19,10 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     import torch
+    from torch_geometric.data import HeteroData
+
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 
 LOGGER = logging.getLogger(__name__)
@@ -129,7 +133,7 @@ class GraphForecaster(BaseRolloutGraphModule):
             ]
         return x
 
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
@@ -170,7 +174,6 @@ class GraphForecaster(BaseRolloutGraphModule):
         assert batch.shape[1] >= required_time_steps, msg
 
         for rollout_step in range(rollout or self.rollout):
-            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
             fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
             y = batch[:, fc_times, ...]

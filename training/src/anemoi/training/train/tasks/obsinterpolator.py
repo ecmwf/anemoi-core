@@ -15,7 +15,7 @@ from operator import itemgetter
 import torch
 from einops import rearrange
 from omegaconf import DictConfig
-from torch.utils.checkpoint import checkpoint
+from torch import Tensor
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -37,7 +37,6 @@ class ObsGraphInterpolator(BaseGraphModule):
         *,
         config: DictConfig,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -65,7 +64,6 @@ class ObsGraphInterpolator(BaseGraphModule):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
@@ -81,21 +79,13 @@ class ObsGraphInterpolator(BaseGraphModule):
             if len(config.training.known_future_variables)
             else []
         )
-        self.known_future_variables = (
-            list(
-                itemgetter(*config.training.known_future_variables)(
-                    data_indices.data.input.name_to_index,
-                ),
-            )
-            if len(config.training.known_future_variables)
-            else []
-        )
         if isinstance(self.known_future_variables, int):
             self.known_future_variables = [self.known_future_variables]
-        self.multi_step = getattr(self.config["training"], "multistep_input", 1)
+        self.multi_step = self.config.training.multistep_input
         boundary_times = config.training.explicit_times.input
         self.boundary_times = [t + self.multi_step - 1 for t in boundary_times]
         interp_times = config.training.explicit_times.target
+        self.multi_out = len(interp_times)
         self.interp_times = [t + self.multi_step - 1 for t in interp_times]
         sorted_indices = sorted(
             set(range(self.multi_step)).union(
@@ -108,64 +98,53 @@ class ObsGraphInterpolator(BaseGraphModule):
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
-        del batch_idx
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
-
+    ) -> tuple[Tensor, Mapping[str, Tensor], Tensor]:
         batch = self.model.pre_processors(batch)
+        b, _, e, g, _ = batch.shape
         present, future = itemgetter(*self.boundary_times)(self.imap)
+
         obs = {var.item() for var in self.data_indices.data.input.full}.difference(
             set(self.known_future_variables),
         )
-        x_init = batch[:, : self.multi_step][..., list(obs)]
-        x_init_nwp = batch[:, 1][..., self.known_future_variables]
-        x_init = rearrange(x_init, "batch time ens grid var -> batch ens grid (var time)")
-        x_future = batch[:, future][..., self.known_future_variables]  # adding future known vars to the input
-        x_bound = torch.cat([x_init, x_init_nwp, x_future], dim=-1)
-        target_forcing = torch.empty(
-            batch.shape[0],
-            batch.shape[2],
-            batch.shape[3],
-            len(self.known_future_variables) + 1,
-            device=self.device,
+        x_init = batch[:, : self.multi_step, ..., list(obs)]  # here only past steps are used for observed vars
+        x_init_nwp = batch[:, itemgetter(*self.boundary_times)(self.imap)][
+            ...,
+            self.known_future_variables,
+        ]  # bounds are derived from variables we know in the future
+        x_init = rearrange(x_init, "b t e g v -> b e g (v t)")
+        x_init_nwp = rearrange(x_init_nwp, "b t e g v -> b e g (v t)")
+        x_bound = torch.cat([x_init, x_init_nwp], dim=-1)
+        # time-ratio forcing for each interp time
+        num_interp = len(self.interp_times)
+        ratios = torch.tensor(
+            [(t - present) / (future - present) for t in self.interp_times],
+            device=batch.device,
             dtype=batch.dtype,
         )
-        for interp_step in self.interp_times:
-            # get the forcing information for the target interpolation time:
-            target_forcing[..., : len(self.known_future_variables)] = batch[
-                :,
-                self.imap[interp_step],
-                :,
-                :,
-                self.known_future_variables,
-            ]
-            target_forcing[..., -1] = (interp_step - future) / (future - present)
-            x_with_intermediate_forcings = torch.cat([x_bound, target_forcing], dim=-1).unsqueeze(dim=1)
-            y_pred = self(x_with_intermediate_forcings)
-            y = batch[:, self.imap[interp_step], ...]
-            loss += checkpoint(self.loss, y_pred, y, use_reentrant=False)
+        ratios = ratios.reshape(1, 1, 1, num_interp).expand(b, e, g, num_interp)  # broadcast to (b,e,g,num_interp)
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred,
-                    y,
-                    interp_step - 1,
-                )
-            metrics.update(metrics_next)
-            y_preds.extend(y_pred)
+        x_full = torch.cat(
+            [
+                x_bound,  # static wrt interp
+                ratios,  # normalized delta-time forcing
+            ],
+            dim=-1,
+        ).unsqueeze(
+            1,
+        )  # fake time dimension
 
-        loss *= 1.0 / len(self.interp_times)
-        return loss, metrics, y_preds
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(
-            x,
+        y_pred = self(x_full)
+        y = batch[:, itemgetter(*self.interp_times)(self.imap)]
+        loss = self._compute_loss(
+            y_pred,
+            y,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_slice=self.grid_shard_slice,
         )
+
+        metrics = {}
+        if validation_mode:
+            metrics = self._compute_metrics(y_pred, y)
+
+        return loss, metrics, y_pred

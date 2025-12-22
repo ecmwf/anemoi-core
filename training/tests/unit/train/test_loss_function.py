@@ -517,14 +517,14 @@ def test_filtered_loss() -> None:
 @pytest.fixture
 def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs."""
-    tensor_shape = [1, 2, 4, 1]
+    tensor_shape = [1, 1, 4, 2, 3]  # (batch, output_steps, ens, latlon, vars)
 
     pred = torch.zeros(tensor_shape)
-    pred[0, :, 0, 0] = torch.tensor([1.0, 1.0])
-    target = torch.zeros(tensor_shape[1:])
+    pred[0, 0, :, 0] = torch.tensor([1.0, 0.0, 0.0])
+    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
 
     # With only one "grid point" differing by 1 in all
-    # variables, the loss should be 1.0
+    # ensemble members, the loss should be 1.0
 
     loss_result = torch.tensor([1.0])
     return pred, target, loss_result
@@ -546,10 +546,9 @@ def test_multi_scale(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, t
 
 
 def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
-
-    tensor_shape = [1, 2, 4, 5]
+    tensor_shape = [1, 1, 4, 2, 3]  # (batch, output_steps, ens, latlon, vars)
     pred = torch.randn(tensor_shape)
-    target = torch.randn(tensor_shape[1:])
+    target = torch.randn([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])
 
     per_scale_loss = AlmostFairKernelCRPS()
     multiscale_loss = MultiscaleLossWrapper(

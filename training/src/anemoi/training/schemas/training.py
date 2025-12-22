@@ -375,7 +375,7 @@ class BaseTrainingSchema(BaseModel):
     """Number of input steps for the model.
     E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
     k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
-    multistep_output: PositiveInt = Field(example=1)
+    multistep_output: PositiveInt = Field(example=1, default=1)
     """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
     k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)]."""
     accum_grad_batches: PositiveInt = Field(default=1)

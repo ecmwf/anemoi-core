@@ -75,11 +75,6 @@ class GraphInterpolator(BaseGraphModule):
         self.multi_out = len(self.interp_times)
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
-        self.num_gpus_per_model = config.hardware.num_gpus_per_model
-
-        self.lr = config.hardware.num_nodes * config.hardware.num_gpus_per_node * config.training.lr.rate
-
-        LOGGER.info("Base (config) learning rate: %e -- Effective learning rate: %e", config.training.lr.rate, self.lr)
 
     def _step(
         self,
@@ -102,7 +97,7 @@ class GraphInterpolator(BaseGraphModule):
         ]  # (bs, time, ens, latlon, nvar)
 
         y_pred = self(x_bound)  # has shape (bs, time, ens, latlon, nvar)
-        y = batch[:, itemgetter(*self.interp_times)(self.imap)][:, :, 0, :, self.data_indices.data.output.full]
+        y = batch[:, itemgetter(*self.interp_times)(self.imap)][..., self.data_indices.data.output.full]
         loss = self._compute_loss(
             y_pred,
             y,
@@ -110,14 +105,10 @@ class GraphInterpolator(BaseGraphModule):
             grid_shard_slice=self.grid_shard_slice,
         )
         metrics = {}
-        for interp_step in self.interp_times:
-            y_pred_step = y_pred[:, interp_step - 1, ...]
-            y_step = y[:, interp_step - 1, ...]
-            metrics_step = self._compute_metrics(
-                y_pred=y_pred_step,
-                y=y_step,
-                rollout_step=interp_step - 1,
+        if validation_mode:
+            metrics = self._compute_metrics(
+                y_pred=y_pred,
+                y=y,
                 grid_shard_slice=self.grid_shard_slice,
             )
-            metrics.update(metrics_step)
         return loss, metrics, y_pred

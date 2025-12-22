@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.utils.enums import TensorDim
+
 from .forecaster import GraphForecaster
 
 if TYPE_CHECKING:
@@ -162,13 +164,13 @@ class GraphDiffusionForecaster(GraphForecaster):
                 x,
                 y_noised,
                 sigma,
-            )  # shape is (bs, ens, latlon, nvar)
+            )  # shape is (bs, time, ens, latlon, nvar)
 
             # Use checkpoint for compute_loss_metrics
             loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
-                y,
+                y.unsqueeze(TensorDim.TIME),  # add time dim,
                 step=rollout_step,
                 validation_mode=validation_mode,
                 weights=noise_weights,
@@ -387,7 +389,9 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             y = None
             if validation_mode:
                 # metrics calculation and plotting expects normalised states
-                y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
+                y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full].unsqueeze(
+                    TensorDim.TIME,
+                )
 
             # compute_loss_metrics
             loss, metrics_next = checkpoint(

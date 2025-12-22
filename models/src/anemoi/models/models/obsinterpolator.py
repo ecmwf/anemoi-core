@@ -28,7 +28,6 @@ class AnemoiModelObsInterpolator(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -53,7 +52,6 @@ class AnemoiModelObsInterpolator(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
-            truncation_data=truncation_data,
         )
 
     def _calculate_input_dim(self):
