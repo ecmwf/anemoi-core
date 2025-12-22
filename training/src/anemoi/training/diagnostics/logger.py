@@ -15,10 +15,8 @@ from typing import Any
 
 import pytorch_lightning as pl
 from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
 LOGGER = logging.getLogger(__name__)
 
