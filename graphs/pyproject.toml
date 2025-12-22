@@ -32,7 +32,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -52,7 +51,7 @@ dependencies = [
   "typeguard>=4",
 ]
 
-optional-dependencies.all = [ "anemoi-graphs[anemoi,tri,hex,healpix]" ]
+optional-dependencies.all = [ "anemoi-graphs[anemoi,healpix,hex,tri]" ]
 optional-dependencies.anemoi = [ "anemoi-datasets>=0.5.21" ]
 optional-dependencies.dev = [ "anemoi-graphs[docs,tests]" ]
 
@@ -60,7 +59,8 @@ optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
   "requests",
-  "sphinx<8.2",       # Fixed until nbsphinx updates
+  "sphinx<8.2; python_version<'3.11'",   # Fixed until nbsphinx updates
+  "sphinx>=8.2; python_version>='3.11'",
   "sphinx-argparse",
   "sphinx-rtd-theme",
   "termcolor",

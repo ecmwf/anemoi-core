@@ -38,6 +38,8 @@ class MapperConfig:
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
     shard_strategy: str = "edges"
+    graph_attention_backend: str = "pyg"
+    edge_pre_mlp: bool = False
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
@@ -204,9 +206,9 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         batch_size = 1
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
-        out_heads = mapper.forward_with_heads_sharding(x, batch_size, shard_shapes)
+        out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_shapes)
 
-        out_edges = mapper.forward_with_edge_sharding(x, batch_size, shard_shapes)
+        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes)
 
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4
@@ -310,9 +312,9 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
         )
 
-        out_heads = mapper.forward_with_heads_sharding(x, batch_size, shard_shapes)
+        out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_shapes)
 
-        out_edges = mapper.forward_with_edge_sharding(x, batch_size, shard_shapes)
+        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes)
 
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4

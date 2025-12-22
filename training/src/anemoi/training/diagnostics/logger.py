@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 import pytorch_lightning as pl
+from hydra.utils import instantiate
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -82,32 +84,15 @@ def get_mlflow_logger(
     LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
     log_model = getattr(diagnostics_config.log.mlflow, "log_model", LOG_MODEL)
 
-    logger = AnemoiMLflowLogger(
-        experiment_name=diagnostics_config.log.mlflow.experiment_name,
-        project_name=diagnostics_config.log.mlflow.project_name,
-        tracking_uri=tracking_uri,
-        save_dir=save_dir,
-        run_name=diagnostics_config.log.mlflow.run_name,
-        run_id=run_id,
-        fork_run_id=fork_run_id,
-        log_model=log_model,
-        offline=offline,
-        resumed=resumed,
-        forked=forked,
-        log_hyperparams=log_hyperparams,
-        authentication=diagnostics_config.log.mlflow.authentication,
-        on_resume_create_child=diagnostics_config.log.mlflow.on_resume_create_child,
-        max_params_length=max_params_length,
-    )
-    config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
-    logger.log_hyperparams(
-        config_params,
-        expand_keys=diagnostics_config.log.mlflow.expand_hyperparams,
+    logger = instantiate(
+        logger_config,
+        run_id=config.training.run_id,
+        fork_run_id=config.training.fork_run_id,
     )
 
-    if diagnostics_config.log.mlflow.terminal:
-        logger.log_terminal_output(artifact_save_dir=artifact_save_dir)
-    if diagnostics_config.log.mlflow.system:
+    if logger.log_terminal:
+        logger.log_terminal_output(artifact_save_dir=config.system.output.plots)
+    if logger.log_system:
         logger.log_system_metrics()
 
     return logger
@@ -137,7 +122,10 @@ def get_tensorboard_logger(diagnostics_config: Any, paths: Any, **kwargs) -> pl.
 
     from pytorch_lightning.loggers import TensorBoardLogger
 
-    return TensorBoardLogger(save_dir=save_dir, log_graph=False)
+    return TensorBoardLogger(
+        save_dir=config.system.output.logs.tensorboard,
+        log_graph=False,
+    )
 
 
 def get_wandb_logger(
@@ -174,8 +162,6 @@ def get_wandb_logger(
         LOGGER.debug("Weights & Biases logging is disabled.")
         return None
 
-    save_dir = paths.logs.wandb
-
     try:
         from pytorch_lightning.loggers.wandb import WandbLogger
     except ImportError as err:
@@ -186,7 +172,7 @@ def get_wandb_logger(
         project=diagnostics_config.log.wandb.project,
         entity=diagnostics_config.log.wandb.entity,
         id=run_id,
-        save_dir=save_dir,
+        save_dir=config.system.output.logs.wandb,
         offline=diagnostics_config.log.wandb.offline,
         log_model=diagnostics_config.log.wandb.log_model,
         resume=run_id is not None,

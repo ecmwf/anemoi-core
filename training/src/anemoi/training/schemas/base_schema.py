@@ -10,7 +10,9 @@
 
 import logging
 import sys
+from pathlib import Path
 from typing import Any
+from typing import Union
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -32,9 +34,8 @@ from anemoi.utils.schemas.errors import convert_errors
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
 from .data import DataSchema
 from .dataloader import DataLoaderSchema
-from .datamodule import DataModuleSchema
 from .diagnostics import DiagnosticsSchema
-from .hardware import HardwareSchema
+from .system import SystemSchema
 from .training import TrainingSchema
 
 _object_setattr = _model_construction.object_setattr
@@ -42,19 +43,65 @@ _object_setattr = _model_construction.object_setattr
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseSchema(BaseModel):
+def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[SystemSchema, DictConfig]:
+    output_config = config_system.output
+    root_output_path = Path(output_config.root) if output_config.root else Path()
+    # OutputSchema
+    if output_config.plots:
+        config_system.output.plots = root_output_path / output_config.plots
+    if output_config.profiler:
+        config_system.output.profiler = root_output_path / output_config.profiler
+
+    # LogsSchema
+    config_system.output.logs.root = (
+        root_output_path / output_config.logs.root if output_config.logs.root else root_output_path
+    )
+    base = config_system.output.logs.root
+
+    # LogsSchema
+    output_config.logs.wandb = base / "wandb" if output_config.logs.wandb is None else base / output_config.logs.wandb
+    output_config.logs.mlflow = (
+        base / "mlflow" if output_config.logs.mlflow is None else base / output_config.logs.mlflow
+    )
+    output_config.logs.tensorboard = (
+        base / "tensorboard" if output_config.logs.tensorboard is None else base / output_config.logs.tensorboard
+    )
+
+    # CheckPointSchema
+    output_config.checkpoints.root = (
+        root_output_path / output_config.checkpoints.root if output_config.checkpoints.root else root_output_path
+    )
+
+    return config_system
+
+
+class SchemaCommonMixin:
+    """Shared logic for schema objects."""
+
+    def model_dump(self, by_alias: bool = False) -> dict:
+        dumped_model = super().model_dump(by_alias=by_alias)
+        return DictConfig(dumped_model)
+
+    def model_post_init(self, _: Any) -> None:
+        expand_paths(self.system)
+        if self.diagnostics.log.mlflow.enabled and (
+            self.system.output.logs.mlflow != self.diagnostics.log.mlflow.save_dir
+        ):
+            LOGGER.info("adjusting save_dir path to match output mlflow logs")
+            self.diagnostics.log.mlflow.save_dir = str(self.system.output.logs.mlflow)
+
+
+class BaseSchema(SchemaCommonMixin, BaseModel):
     """Top-level schema for the training configuration."""
 
     data: DataSchema
     """Data configuration."""
     dataloader: DataLoaderSchema
     """Dataloader configuration."""
-    datamodule: DataModuleSchema
-    """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
-    hardware: HardwareSchema
-    """Hardware configuration."""
+    system: SystemSchema
+    """System configuration, including filesystem and hardware specification."""
     graph: BaseGraphSchema
     """Graph configuration."""
     model: ModelSchema
@@ -67,26 +114,7 @@ class BaseSchema(BaseModel):
     @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> Self:
         if not self.dataloader.read_group_size:
-            self.dataloader.read_group_size = self.hardware.num_gpus_per_model
-        return self
-
-    @model_validator(mode="after")
-    def check_log_paths_available_for_loggers(self) -> Self:
-        logger = []
-        if self.diagnostics.log.wandb.enabled and (not self.hardware.paths.logs or not self.hardware.paths.logs.wandb):
-            logger.append("wandb")
-        if self.diagnostics.log.mlflow.enabled and (
-            not self.hardware.paths.logs or not self.hardware.paths.logs.mlflow
-        ):
-            logger.append("mlflow")
-        if self.diagnostics.log.tensorboard.enabled and (
-            not self.hardware.paths.logs or not self.hardware.paths.logs.tensorboard
-        ):
-            logger.append("tensorboard")
-
-        if logger:
-            msg = ", ".join(logger) + " logging path(s) not provided."
-            raise PydanticCustomError("logger_path_missing", msg)  # noqa: EM101
+            self.dataloader.read_group_size = self.system.hardware.num_gpus_per_model
         return self
 
     @model_validator(mode="after")
@@ -106,22 +134,17 @@ class BaseSchema(BaseModel):
                 error,
                 msg,
             )
-
-    def model_dump(self, by_alias: bool = False) -> dict:
-        dumped_model = super().model_dump(by_alias=by_alias)
-        return DictConfig(dumped_model)
+        return self
 
 
-class UnvalidatedBaseSchema(PydanticBaseModel):
+class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     data: Any
     """Data configuration."""
     dataloader: Any
     """Dataloader configuration."""
-    datamodule: Any
-    """Datamodule configuration."""
     diagnostics: Any
     """Diagnostics configuration such as logging, plots and metrics."""
-    hardware: Any
+    system: Any
     """Hardware configuration."""
     graph: Any
     """Graph configuration."""
@@ -131,10 +154,6 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Training configuration."""
     config_validation: bool = False
     """Flag to disable validation of the configuration"""
-
-    def model_dump(self, by_alias: bool = False) -> dict:
-        dumped_model = super().model_dump(by_alias=by_alias)
-        return DictConfig(dumped_model)
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:

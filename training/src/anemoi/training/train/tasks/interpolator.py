@@ -18,7 +18,6 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 LOGGER = logging.getLogger(__name__)
@@ -32,7 +31,6 @@ class GraphInterpolator(BaseGraphModule):
         *,
         config: DictConfig,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -60,7 +58,6 @@ class GraphInterpolator(BaseGraphModule):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
@@ -78,6 +75,7 @@ class GraphInterpolator(BaseGraphModule):
 
         self.use_time_fraction = config.training.target_forcing.time_fraction
 
+        self.multi_step = 1
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
@@ -88,23 +86,12 @@ class GraphInterpolator(BaseGraphModule):
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
-        del batch_idx
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
-
-        batch = self.model.pre_processors(batch)
-
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
             ...,
@@ -132,12 +119,11 @@ class GraphInterpolator(BaseGraphModule):
             y_pred = self(x_bound, target_forcing)
             y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]
 
-            loss_step, metrics_next = checkpoint(
+            loss_step, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                interp_step - 1,
-                training_mode=True,
+                step=interp_step - 1,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
@@ -150,9 +136,4 @@ class GraphInterpolator(BaseGraphModule):
         return loss, metrics, y_preds
 
     def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
-        return self.model(
-            x,
-            target_forcing=target_forcing,
-            model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
-        )
+        return super().forward(x, target_forcing=target_forcing)

@@ -36,7 +36,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
         them with an edge.
     scale_resolutions : int, list[int], optional
         Defines the refinement levels at which edges are computed. If an integer is provided, edges are computed for all
-        levels up to and including that level. For instance, `scale_resolutions=4` includes edges at levels 1 through 4,
+        levels up to and including that level. For instance, `scale_resolutions=4` includes edges at levels 0 through 4,
         whereas `scale_resolutions=[4]` only includes edges at level 4.
 
     Methods
@@ -54,7 +54,12 @@ class MultiScaleEdges(BaseEdgeBuilder):
     """
 
     def __init__(
-        self, source_name: str, target_name: str, x_hops: int, scale_resolutions: int | list[int] | None, **kwargs
+        self,
+        source_name: str,
+        target_name: str,
+        x_hops: int,
+        scale_resolutions: int | list[int] | None = None,
+        **kwargs,
     ):
         super().__init__(source_name, target_name)
         assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
@@ -62,12 +67,12 @@ class MultiScaleEdges(BaseEdgeBuilder):
         assert x_hops > 0, "Number of x_hops must be positive"
         self.x_hops = x_hops
         if isinstance(scale_resolutions, int):
-            assert scale_resolutions > 0, "The scale_resolutions argument only supports positive integers."
+            assert scale_resolutions >= 0, "The scale_resolutions argument only supports non-negative integers."
             scale_resolutions = list(range(1, scale_resolutions + 1))
         assert not isinstance(scale_resolutions, str), "The scale_resolutions argument is not valid."
         assert (
-            scale_resolutions is None or min(scale_resolutions) > 0
-        ), "The scale_resolutions argument only supports positive integers."
+            scale_resolutions is None or min(scale_resolutions) >= 0
+        ), "The scale_resolutions argument only supports non-negative integers."
         self.scale_resolutions = scale_resolutions
 
     @staticmethod

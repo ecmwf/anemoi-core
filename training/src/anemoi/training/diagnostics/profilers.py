@@ -308,7 +308,7 @@ class BenchmarkProfiler(Profiler):
 
     @rank_zero_only
     def create_output_path(self) -> None:
-        self.dirpath = Path(self.config.hardware.paths.profiler)
+        self.dirpath = Path(self.config.system.output.profiler)
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def broadcast_profiler_path(self, string_var: str, src_rank: int) -> str:
@@ -662,10 +662,11 @@ class ProfilerProgressBar(TQDMProgressBar):
         List to store training rates (it/s).
     """
 
-    def __init__(self):
+    def __init__(self, refresh_rate: int = 1):
         super().__init__()
         self.validation_rates = []
         self.training_rates = []
+        self._refresh_rate = refresh_rate
 
     def _extract_rate(self, pbar: _tqdm) -> float:
         """Extracts the iteration rate from the progress bar.
@@ -691,7 +692,6 @@ class ProfilerProgressBar(TQDMProgressBar):
         batch_idx: int,
     ) -> None:
         """Appends the rate from the progress bar to the list of 'training_rates'."""
-        batch_idx + 1
         super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         if self.train_progress_bar.format_dict["n"] != 0:
             self.training_rates.append(self._extract_rate(self.train_progress_bar))
