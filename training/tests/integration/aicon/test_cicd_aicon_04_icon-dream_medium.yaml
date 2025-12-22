@@ -355,6 +355,9 @@ diagnostics:
     interval: 100
   enable_checkpointing: False
   enable_progress_bar: true
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
   print_memory_summary: false
   benchmark_profiler:
     # Use anemoi-profile to profile the training process
@@ -383,7 +386,7 @@ dataloader:
   prefetch_factor: 1
   pin_memory: True
   read_group_size: ${system.hardware.num_gpus_per_model}
-  #dataset: ${hardware.paths.data}/${hardware.files.dataset}
+  #dataset: ${system.input.dataset}
   batch_size:
     training: 1
     validation: 1

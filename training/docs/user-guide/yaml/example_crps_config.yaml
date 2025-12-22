@@ -10,9 +10,9 @@ defaults:
 
 config_validation: True
 
-# Changes in hardware
+# Changes in system
 system:
-  files:
+  input:
     truncation: ${data.resolution}-O32-linear.mat.npz
     truncation_inv: O32-${data.resolution}-linear.mat.npz
   hardware:

@@ -49,3 +49,20 @@ def edge_index_to_csc(edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = No
         return (row, colptr), perm, (rowptr, edge_id_per_src, edge_dst)
 
     return (row, colptr), perm
+
+
+def is_triton_available():
+    """Checks if triton is available.
+
+    Triton is supported if the triton library is installed and if Anemoi is running on GPU.
+    """
+    try:
+        import triton  # noqa: F401
+    except ImportError:
+        triton_available = False
+    else:
+        triton_available = True
+
+    gpus_present = torch.cuda.is_available()
+
+    return triton_available and gpus_present
