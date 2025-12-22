@@ -52,6 +52,15 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+TASK_TYPE_MAP = {
+    "GraphForecaster": "forecaster",
+    "GraphEnsForecaster": "forecaster",
+    "GraphDiffusionForecaster": "forecaster",
+    "GraphDiffusionTendForecaster": "forecaster",
+    "GraphInterpolator": "time-interpolator",
+}
+
+
 class BaseGraphModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 
@@ -328,18 +337,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def _get_task_type_from_config(self, config: dict) -> str:
         task_class_name = str(config.training.model_task).split(".")[-1]
 
-        TASK_TYPE_MAP = {
-            "GraphForecaster": "forecaster",
-            "GraphEnsForecaster": "forecaster",
-            "GraphDiffusionForecaster": "forecaster",
-            "GraphDiffusionTendForecaster": "forecaster",
-            "GraphInterpolator": "time-interpolator",
-        }
-
         try:
             return TASK_TYPE_MAP[task_class_name]
-        except KeyError:
-            raise ValueError(f"Unknown task type: {task_class_name}")
+        except KeyError as exc:
+            err_msg = f"Unknown task type: {task_class_name}"
+            raise ValueError(err_msg) from exc
 
     def _check_sharding_support(self) -> None:
         self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())
