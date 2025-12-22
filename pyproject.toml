@@ -11,9 +11,9 @@
 requires = [ "setuptools>=60", "setuptools-scm>=8" ]
 
 [project]
-name = "anemoi-training" 
+name = "anemoi-core"
 
-description = "A package to hold various functions to support training of ML models."
+description = "A package to hold various functions to support training and inference of ML models."
 keywords = [ "ai", "tools", "training" ]
 
 license = { file = "LICENSE" }
@@ -41,8 +41,9 @@ dynamic = [ "version" ]
 dependencies = [
   "anemoi-datasets>=0.5.13",
   "anemoi-graphs>=0.5.2",
-  "anemoi-models[migrations]",
+  "anemoi-models[migrations]>=0.9.5",
   "anemoi-transform>=0.1.11",
+  "anemoi-training>=0.3",
   "anemoi-utils[mlflow,provenance]>=0.4.37",
   "datashader>=0.16.3,<0.17; python_version<'3.10'",
   "datashader>=0.17; python_version>='3.10'",
@@ -110,6 +111,15 @@ scripts.".anemoi-training-train" = "anemoi.training.commands.train:main"
 # Add subcommand in the `commands` directory
 scripts.anemoi-training = "anemoi.training.__main__:main"
 
+[tool.uv.sources]
+anemoi-mf = { path = "../anemoi-mf", editable = true }
+mlflow-export-import = { git = "https://github.com/mlflow/mlflow-export-import/" }
+
+### Tmp
+anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", branch = "main" }    # hot-fix for anemoi-datasets ZipBase class #377
+anemoi-models = { path = "/home/users/u102751/code/anemoi/anemoi-core/models", editable = true }    # for debugging
+anemoi-inference = {path = "/home/users/u102751/code/anemoi/anemoi-inference", editable = true }
+anemoi-training = {path = "/home/users/u102751/code/anemoi/anemoi-core/training", editable = true}
 [tool.setuptools_scm]
 root = ".."
 version_scheme = "post-release"

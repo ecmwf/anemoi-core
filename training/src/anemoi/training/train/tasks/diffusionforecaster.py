@@ -68,14 +68,14 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
         #     truncation_data=None               # mettre None si inutilisé
         # ) #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
     
-        self.model.model = AnemoiDiffusionModelEncProcDecUnconditional(
-            model_config=config.model.model.diffusion,
-            data_indices=data_indices.data,
-            statistics=statistics,
-            graph_data=graph_data,
-            truncation_data=None, #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
+        # self.model.model = AnemoiDiffusionModelEncProcDecUnconditional(
+        #     model_config=config.model.model.diffusion,
+        #     data_indices=data_indices.data,
+        #     statistics=statistics,
+        #     graph_data=graph_data,
+        #     truncation_data=None, #une liste d’indices de variables qui doivent être tronquées / limitées / rescalées lors de l’échantillonnage afin de respecter certaines contraintes physiques (ex : vent max, humidité >= 0, température > -100°C)
 
-        )
+        # )
 
     # -------------------------------------------------------------------------
     # FORWARD : identical to conditional version

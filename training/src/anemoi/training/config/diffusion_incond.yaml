@@ -71,11 +71,11 @@ dataloader:
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
-    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/outputs_incond/
+    output: /project/home/p200177/DE_371/avritj/experiments_anemoi
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
     graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
   num_gpus_per_node: 4
   num_gpus_per_model: 2
 training:
-  max_epochs: 2
+  max_epochs: 20

@@ -72,6 +72,7 @@ class ConditionalLayerNorm(nn.Module):
         Tensor
             The output tensor.
         """
+        print("dans conditional layer norm : cond",cond)
         scale = self.scale(cond)
         bias = self.bias(cond)
         out = self.norm(x)

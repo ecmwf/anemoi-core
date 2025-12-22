@@ -277,14 +277,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         grid_shard_shapes: Optional[list] = None,
     ) -> torch.Tensor:
         """Forward pass with pre-conditioning of EDM diffusion model."""
-        print('JE PASSE PAR LA 1')
 
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         # rank_zero_info(f"[DEBUG] dans fwd : {x}")
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )  # calls forward ...
-        print('JE PASSE PAR LA 2')
 
         D_x = c_skip * y_noised + c_out * pred
 
@@ -514,18 +512,21 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         if noise_scheduler_params is not None:
             noise_scheduler_config.update(noise_scheduler_params)
 
-        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}")
-
+        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") #param de steps (dont sdedit) est dedans
+        print("noise_scheduler_config : ", noise_scheduler_config)
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
 
         if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
             raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
-
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
+        # print("actual_schedule type :", actual_schedule_type) : karras
+        # print("noise scheduler config :", noise_scheduler_config) : {'sigma_max': 100.0, 'sigma_min': 0.02, 'rho': 7.0, 'num_steps': 50}
         scheduler = scheduler_cls(**noise_scheduler_config)
+        # print("scheduler :", scheduler) : scheduler : <anemoi.models.samplers.diffusion_samplers.KarrasScheduler object at 0x14fd162cacd0>
         sigmas = scheduler.get_schedule(x.device, torch.float64)
-
+        # print("sigmas dans smaple enc proc dec", sigmas, sigmas.shape) : bruit décroissant (100 -> 0.02)
+        # print("si je prends un sigma un peu au hsard :", sigmas[-1]) : 0.02
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
         shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
@@ -537,9 +538,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
-
-        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}")
-
+        
+        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}") #param de sdedit est dedans.
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
         # rank_zero_info(f"[DEBUG] actual sampler utilisé : {actual_sampler} ")
@@ -548,11 +548,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
-
-        x_no_cond=torch.zeros_like(x)
+        if diffusion_sampler_config['SDEdit']:
+            num_steps = len(sigmas) #total number of denoising steps when not using sdedit
+            init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
+            y_init = y_init * init_sigma + x
+            sigmas = sigmas[num_steps - num_steps_sdedit]
+            print('longueur de sigma : ', sigmas, len(sigmas))
         # rank_zero_info(f"[DEBUG] dans sample d encprodec x no cond: {x_no_cond}")
         return sampler_instance.sample(
-            x_no_cond,
+            x,
             y_init,
             sigmas,
             self.fwd_with_preconditioning,
@@ -603,18 +607,14 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         - y_noised : target bruité
         - sigma : niveau de bruit
         """
-
+        print('dans le forward uncond : x', x)
         batch_size = x.shape[0]
         in_out_sharded = grid_shard_shapes is not None
 
-        # -------------------------------------------------------------------------
-        # Vérification sharding (comme dans le conditionnel)
-        # -------------------------------------------------------------------------
+      
         self._assert_valid_sharding(batch_size, 1, in_out_sharded, model_comm_group)
 
-        # -------------------------------------------------------------------------
-        # Noise conditioning (identique au conditionnel)
-        # -------------------------------------------------------------------------
+        print("on passe bien dans le forward de uncond")
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
         shape_c_data = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
         shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
@@ -626,18 +626,12 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         processor_kwargs = {"cond": c_hidden}
         bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
 
-        # -------------------------------------------------------------------------
-        # Assemblage des entrées
-        # -------------------------------------------------------------------------
         x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
             x, y_noised, batch_size, grid_shard_shapes, model_comm_group
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
-        # -------------------------------------------------------------------------
-        # Encodeur
-        # -------------------------------------------------------------------------
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
@@ -697,6 +691,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         Forward pass avec préconditionnement EDM diffusion.
         Identique au parent mais pour usage inconditionnel.
         """
+        print("dans le fwd uncond : x ", x)
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes

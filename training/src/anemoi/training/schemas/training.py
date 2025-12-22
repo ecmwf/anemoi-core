@@ -377,7 +377,7 @@ class ForecasterEnsSchema(ForecasterSchema):
 #     "Training objective."
     
 class UncondDiffusionForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster"]
+    model_task: Literal["anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster"] = Field(..., alias="model_task",)
     resume_from_checkpoint: Optional[str] = None
     load_weights_only: bool = False   # si nécessaire
     

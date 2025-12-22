@@ -620,9 +620,8 @@ def plot_predicted_multilevel_flat_sample(
     pc_lat, pc_lon = equirectangular_projection(latlons)
     if colormaps is None:
         colormaps = {}
-    x_zeros = np.zeros_like(x)
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        xt = (x_zeros if x.ndim == 1 else x_zeros[..., variable_idx]).reshape(-1) * int(output_only)
+        xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
         yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
@@ -634,8 +633,6 @@ def plot_predicted_multilevel_flat_sample(
                 cmap = colormaps[key].get_cmap()
                 continue
         ax = axs[plot_idx, :] if n_plots_x > 1 else axs
-        rank_zero_info(f"[DEBUG] : dans plot predicted multilvel, on a x = xzeros, donc xt = {xt}")
-        rank_zero_info("v222222222222222222222222222222222222")
         plot_flat_sample(
             fig=fig,
             ax=ax,

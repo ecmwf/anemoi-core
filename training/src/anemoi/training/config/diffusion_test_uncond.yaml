@@ -5,8 +5,8 @@ defaults:
 - datamodule: single
 - hardware: example
 - graph: existing_graph
-- model: graphtransformer_diffusion
-- training: diffusion
+- model: graphtransformer_diffusionuncond
+- training: diffusion_uncond
 - _self_
 
 
