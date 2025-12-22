@@ -104,9 +104,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout = max(rollout_value, val_rollout)
 
         multi_step = self.config.training.multistep_input
-        multi_out = (
-            self.config.training.multistep_output if hasattr(self.config.training, "multistep_output") else 1
-        )  # backward compatibility
+        multi_out = self.config.training.multistep_output # defaults to 1
         time_range = multi_step + rollout * multi_out
         return [self.timeincrement * mstep for mstep in range(time_range)]
 
