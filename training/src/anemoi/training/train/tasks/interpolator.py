@@ -104,7 +104,9 @@ class GraphInterpolator(BaseGraphModule):
 
             # get the forcing information for the target interpolation time:
             if num_tfi >= 1:
-                target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][:, self.imap[interp_step], :, :, self.target_forcing_indices[dataset_name]]
+                target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][
+                    :, self.imap[interp_step], :, :, self.target_forcing_indices[dataset_name],
+                ]
 
             if self.use_time_fraction:
                 target_forcing[dataset_name][..., -1] = (interp_step - self.boundary_times[-2]) / (
@@ -135,7 +137,9 @@ class GraphInterpolator(BaseGraphModule):
             y_pred = self(x_bound, target_forcing)
             y = {}
             for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[:, self.imap[interp_step], :, :, self.data_indices[dataset_name].data.output.full]
+                y[dataset_name] = dataset_batch[
+                    :, self.imap[interp_step], :, :, self.data_indices[dataset_name].data.output.full,
+                ]
 
             loss_step, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
+
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:

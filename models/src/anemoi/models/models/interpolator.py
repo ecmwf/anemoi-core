@@ -166,7 +166,12 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         shard_shapes_hidden_dict = {}
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                x[dataset_name], target_forcing[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name
+                x[dataset_name],
+                target_forcing[dataset_name],
+                batch_size,
+                grid_shard_shapes,
+                model_comm_group,
+                dataset_name,
             )
             x_data_latent_dict[dataset_name] = x_data_latent
             x_skip_dict[dataset_name] = x_skip
@@ -221,14 +226,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out,
-                x_skip_dict[dataset_name],
-                batch_size,
-                ensemble_size,
-                x[dataset_name].dtype,
-                dataset_name
+                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
             )
-        
+
         return x_out_dict
 
     def fill_metadata(self, md_dict):
