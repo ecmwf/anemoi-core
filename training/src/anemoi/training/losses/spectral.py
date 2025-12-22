@@ -7,6 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+"""Spectral-domain losses.
+
+This module consolidates spectral losses that were historically split across
+`spatial.py` and `spectral.py`.
+
+Notes
+-----
+* These losses operate on tensors whose *spatial* dimension is flattened
+  (i.e. `(..., grid, variables)`), and internally reshape to 2D grids for FFT2D.
+* For backwards compatibility, legacy class names (e.g. ``LogFFT2Distance``)
+  are kept.
+"""
+
+from __future__ import annotations
 
 import logging
 from typing import Literal
@@ -19,10 +33,24 @@ from anemoi.models.layers.spectral_transforms import FFT2D
 from anemoi.models.layers.spectral_transforms import SHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _ensure_without_scalers_has_2(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
+    """Temporary fix for https://github.com/ecmwf/anemoi-core/issues/725.
+
+    Some pipelines pass numeric scaler indices and rely on excluding scaler index 2
+    by default. Ensure this exclusion is present for numeric lists.
+    """
+    if without_scalers is None:
+        return [2]
+    if len(without_scalers) == 0:
+        return [2]
+    if not isinstance(without_scalers[0], str) and 2 not in without_scalers:
+        without_scalers.append(2)  # type: ignore[arg-type]
+    return without_scalers
 
 
 class SpectralLoss(BaseLoss):
@@ -32,71 +60,65 @@ class SpectralLoss(BaseLoss):
 
     def __init__(
         self,
-        transform: Literal["fft2d", "sht"],
+        transform: Literal["fft2d", "sht"] = "fft2d",
+        *,
+        x_dim: int | None = None,
+        y_dim: int | None = None,
         ignore_nans: bool = False,
+        scalers: list | None = None,
         **kwargs,
     ) -> None:
-        """Spectral Loss Base.
+        """Create a spectral loss.
 
         Parameters
         ----------
-        transform : Literal["fft2d", "sht"]
-            type of spectral transform to use
-        ignore_nans : bool
-            whether to ignore NaNs in the loss computation
-        kwargs : dict
-            additional arguments for the spectral transform
+        transform
+            Spectral transform type.
+        x_dim, y_dim
+            2D grid shape (required for FFT2D). Stored on the loss instance for
+            backwards compatibility and for test assertions.
+        ignore_nans
+            Whether to ignore NaNs in the loss computation.
+        scalers
+            Kept for Hydra/config backwards compatibility. This module does not
+            consume this argument directly (scaling is handled by BaseLoss).
+        kwargs
+            Additional arguments for the spectral transform.
         """
         super().__init__(ignore_nans)
+
+        # Backwards-compatibility: older configs pass scalers to the loss ctor.
+        _ = scalers  # intentionally unused
+        kwargs.pop("scalers", None)
+
+        if x_dim is not None:
+            kwargs.setdefault("x_dim", x_dim)
+        if y_dim is not None:
+            kwargs.setdefault("y_dim", y_dim)
+
         if transform == "fft2d":
             self.transform = FFT2D(**kwargs)
+            # expose dims on the loss (legacy API + tests)
+            self.x_dim = int(kwargs.get("x_dim"))
+            self.y_dim = int(kwargs.get("y_dim"))
         elif transform == "sht":
             self.transform = SHT()
         else:
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
 
-
-class FunctionalSpectralLoss(FunctionalLoss, SpectralLoss):
-    """Base class for functional spectral losses.
-
-    Combines spectral transformation with functional loss computation,
-    by simply transforming the inputs before passing them to the functional loss.
-    """
-
-    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Calculate the difference between predicted and target in spectral domain."""
-        return super().calculate_difference(pred, target)
-
-    def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs) -> torch.Tensor:
-        """Compute the functional spectral loss between predicted and target data."""
-        pred_spectral = self.transform(pred)
-        target_spectral = self.transform(target)
-        return super().forward(pred_spectral, target_spectral, without_scalers=-2, **kwargs)
+    def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
+        """Transform to spectral domain and flatten spectral dimensions."""
+        x_spec = self.transform(x)
+        # Be robust to any number of leading dims (batch, time, ensemble, ...)
+        return einops.rearrange(x_spec, "... y x v -> ... (y x) v")
 
 
-class SpectralL2Loss(FunctionalSpectralLoss):
-    r"""Standard Fourier-domain loss.
+class SpectralL2Loss(SpectralLoss):
+    r"""L2 loss in spectral domain.
 
-    Implements a loss based on the difference in the spectral domain, expressed as:
     .. math::
-        \mathrm{FourierLoss}(X, \hat X)
-            = \lVert F - \hat F \rVert_p^2
-    By default uses L2 loss in spectral domain.
-    """
-
-    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return (pred - target) ** 2
-
-
-class LogSpectralDistance(SpectralLoss):
-    r"""Log Spectral Distance (LSD).
-
-    The log spectral distance is used to compute the difference between spectra of two fields.
-    It is also called log spectral distortion. When it is expressed in discrete space with L2 norm, it is defined as:
-    .. math::
-        D_{LS}={\left\{ \frac{1}{N} \sum_{n=1}^N \left[ \log P(n) - \log\hat{P}(n)\right]^2\right\\}}^{1/2} ,
-    where P(n) and ^P(n) are the power spectral densities of the true and predicted fields respectively.
+        \lVert F - \hat F \rVert_2^2
     """
 
     def forward(
@@ -110,52 +132,60 @@ class LogSpectralDistance(SpectralLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        is_sharded = grid_shard_slice is not None
+        group = group if is_sharded else None
 
+        pred_spectral = self._to_spectral_flat(pred)
+        target_spectral = self._to_spectral_flat(target)
+
+        diff = torch.abs(pred_spectral - target_spectral) ** 2
+
+        result = self.scale(
+            diff,
+            scaler_indices,
+            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            grid_shard_slice=grid_shard_slice,
+        )
+        return self.reduce(result, squash=squash, group=group)
+
+
+class LogSpectralDistance(SpectralLoss):
+    r"""Log Spectral Distance (LSD)."""
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+    ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
 
-        # temporary fix for https://github.com/ecmwf/anemoi-core/issues/725
-        if without_scalers is not None and 2 not in without_scalers and not isinstance(without_scalers[0], str):
-            without_scalers.append(2)
-        elif without_scalers is None:
-            without_scalers = [2]
+        pred_spectral = self._to_spectral_flat(pred)
+        target_spectral = self._to_spectral_flat(target)
 
-        # transform to spectral domain (NOTE: LSD is pointwise in spectral space so we can flatten)
-        pred_spectral = einops.rearrange(self.transform(pred), " b e y x v -> b e (y x) v")
-        target_spectral = einops.rearrange(self.transform(target), " b e y x v -> b e (y x) v")
+        power_pred = torch.abs(pred_spectral) ** 2
+        power_tgt = torch.abs(target_spectral) ** 2
 
-        power_spectra_real = torch.abs(pred_spectral) ** 2
-        power_spectra_pred = torch.abs(target_spectral) ** 2
-
-        log_diff = torch.log(power_spectra_real + eps) - torch.log(power_spectra_pred + eps)
+        log_diff = torch.log(power_tgt + eps) - torch.log(power_pred + eps)
 
         result = self.scale(
             log_diff**2,
             scaler_indices,
-            without_scalers=without_scalers,
+            without_scalers=_ensure_without_scalers_has_2(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-
         return torch.sqrt(self.reduce(result, squash=squash, group=group) + eps)
 
 
 class FourierCorrelationLoss(SpectralLoss):
-    r"""Fourier Correlation Loss (FCL).
-
-    Implements the loss proposed in [1]_ and expressed as:
-
-    .. math::
-        \mathrm{FCL}(X, \hat X)
-            = 1 - \frac{1}{2} \; \frac{ P\bigl[F \,\hat F^* + F^*\,\hat F\bigr] }
-                                    {\, \sqrt{ P\lvert F\rvert^2 \; P\lvert \hat F \rvert^2 }\, }
-
-    References
-    ----------
-    .. [1] Yan, C.-W. et al. (2024).
-        Fourier Amplitude and Correlation Loss: Beyond Using L2 Loss
-        for Skillful Precipitation Nowcasting. arXiv:2410.23159.
-    """
+    r"""Fourier Correlation Loss (FCL)."""
 
     def forward(
         self,
@@ -168,36 +198,41 @@ class FourierCorrelationLoss(SpectralLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
-
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
 
-        # temporary fix for https://github.com/ecmwf/anemoi-core/issues/725
-        if without_scalers is not None and 2 not in without_scalers and not isinstance(without_scalers[0], str):
-            without_scalers.append(2)
-        elif without_scalers is None:
-            without_scalers = [2]
+        pred_spectral = self._to_spectral_flat(pred)
+        target_spectral = self._to_spectral_flat(target)
 
-        # transform to spectral domain (NOTE: FCL is pointwise in spectral space so we can flatten)
-        pred_spectral = einops.rearrange(self.transform(pred), " b e y x v -> b e (y x) v")
-        target_spectral = einops.rearrange(self.transform(target), " b e y x v -> b e (y x) v")
+        cross = torch.real(pred_spectral * torch.conj(target_spectral))
 
-        # compute the cross power spectrum and numerator
-        cross_power_spectrum = torch.real(pred_spectral * torch.conj(target_spectral))
-        cross_power_spectrum = self.scale(
-            cross_power_spectrum,
+        cross = self.scale(
+            cross,
             scaler_indices,
-            without_scalers=without_scalers,
+            without_scalers=_ensure_without_scalers_has_2(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        numerator = 0.5 * torch.sum(cross_power_spectrum, dim=TensorDim.GRID.value, keepdim=True)
+        numerator = 0.5 * torch.sum(cross, dim=TensorDim.GRID.value, keepdim=True)
 
-        # compute the normalization using the amplitudes
-        denominator = torch.sqrt(
+        denom = torch.sqrt(
             torch.sum(torch.abs(pred_spectral) ** 2, dim=TensorDim.GRID.value, keepdim=True)
             * torch.sum(torch.abs(target_spectral) ** 2, dim=TensorDim.GRID.value, keepdim=True)
             + eps,
         )
 
-        return self.reduce(1 - numerator / denominator, squash=squash, group=group)
+        return self.reduce(1 - numerator / denom, squash=squash, group=group)
+
+
+class LogFFT2Distance(LogSpectralDistance):
+    """Backwards compatible alias for log spectral distance on FFT2D grids."""
+
+    def __init__(
+        self,
+        x_dim: int,
+        y_dim: int,
+        ignore_nans: bool = False,
+        scalers: list | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(transform="fft2d", x_dim=x_dim, y_dim=y_dim, ignore_nans=ignore_nans, scalers=scalers, **kwargs)
