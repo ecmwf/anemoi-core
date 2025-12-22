@@ -15,10 +15,8 @@ from typing import Any
 
 import pytorch_lightning as pl
 from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +49,6 @@ def get_mlflow_logger(
 
     from anemoi.training.diagnostics.mlflow import LOG_MODEL
     from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
-    from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
     resumed = run_id is not None
     forked = fork_run_id is not None
