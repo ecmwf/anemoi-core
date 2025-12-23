@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from typing import Literal
 
-from anemoi.training.schemas.schema_utils import DatasetDict
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -22,6 +21,7 @@ from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
 
+from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 

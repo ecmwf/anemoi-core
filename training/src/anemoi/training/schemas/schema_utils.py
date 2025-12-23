@@ -7,7 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import TypeAlias, TypeVar, Literal
+from typing import Literal
+from typing import TypeAlias
+from typing import TypeVar
 
 T = TypeVar("T")
 DatasetDict: TypeAlias = dict[Literal["dataset"], dict[str, T]]
