@@ -5,7 +5,7 @@ defaults:
 - system: example
 - graph: multi_scale
 - model: graphtransformer
-- training: multi_debug
+- training: multi
 - _self_
 
 config_validation: False
