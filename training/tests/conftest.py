@@ -9,7 +9,7 @@
 
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import pytest
@@ -19,9 +19,6 @@ from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
-
-if TYPE_CHECKING:
-    from anemoi.training.data.datamodule import AnemoiDatasetsDataModule  # noqa: TC004
 
 
 def _get_config_path() -> str:
@@ -62,7 +59,7 @@ def config(request: SubRequest) -> DictConfig:
 
 
 @pytest.fixture
-def datamodule() -> AnemoiDatasetsDataModule:
+def datamodule():  # noqa: ANN201
     """Lazy-load AnemoiDatasetsDataModule to avoid expensive import at test collection time."""
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
