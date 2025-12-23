@@ -55,30 +55,24 @@ grid_indices:
 dataset: ${system.input.dataset}
 
 training:
-  datasets:
-    data: # user-defined key in data
-      dataset: ${dataloader.dataset}
-      start: 2000
-      end: 2019
-      frequency: ${data.frequency}
-      drop: []
+  dataset: ${dataloader.dataset}
+  start: 2000
+  end: 2019
+  frequency: ${data.frequency}
+  drop: []
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
 
 validation:
-  datasets:
-    data: # user-defined key
-      dataset: ${dataloader.dataset}
-      start: 2021
-      end: 2021
-      frequency: ${data.frequency}
-      drop: []
+  dataset: ${dataloader.dataset}
+  start: 2021
+  end: 2021
+  frequency: ${data.frequency}
+  drop: []
 
 test:
-  datasets:
-    data: # user-defined key
-      dataset: ${dataloader.dataset}
-      start: 2022
-      end: 2022
-      frequency: ${data.frequency}
-      drop: []
+  dataset: ${dataloader.dataset}
+  start: 2022
+  end: 2022
+  frequency: ${data.frequency}
+  drop: []
