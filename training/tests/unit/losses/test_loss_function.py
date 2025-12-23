@@ -380,27 +380,6 @@ def test_fcl_loss() -> None:
         _ = loss(*wrong, squash=True)
 
 
-def test_sht_transform_raises_not_implemented() -> None:
-    """Any spectral loss using SHT should raise NotImplementedError at runtime."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.spectral.LogSpectralDistance",
-                "transform": "sht",
-                # x_dim/y_dim are irrelevant for SHT, but leaving them out keeps it clean.
-            },
-        ),
-    )
-
-    # SpectralTransform expects for now [batch, ensemble, points, variables]
-    # TODO (Ophelia): edit this when multi ouptuts get merged
-    pred = torch.zeros((2, 1, 16, 3))
-    target = torch.zeros_like(pred)
-
-    with pytest.raises(NotImplementedError, match="not implemented yet"):
-        _ = loss(pred, target, squash=True)
-
-
 def test_octahedral_sht_loss() -> None:
     def _octahedral_expected_points(nlat: int) -> int:
         half = [4 * (i + 1) + 16 for i in range(nlat // 2)]
