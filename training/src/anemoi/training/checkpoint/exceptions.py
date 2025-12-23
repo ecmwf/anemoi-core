@@ -183,6 +183,11 @@ class CheckpointValidationError(CheckpointError):
         details: dict[str, Any] | None = None,
     ):
         """Initialize checkpoint validation error."""
+        # Build detailed message including validation errors
+        detailed_message = message
+        if validation_errors:
+            detailed_message += "\nValidation errors:\n  • " + "\n  • ".join(validation_errors)
+
         error_details = {}
 
         if validation_errors:
@@ -192,7 +197,7 @@ class CheckpointValidationError(CheckpointError):
         if details:
             error_details.update(details)
 
-        super().__init__(message, error_details)
+        super().__init__(detailed_message, error_details)
         self.validation_errors = validation_errors or []
 
 
