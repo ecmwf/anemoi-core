@@ -4,7 +4,6 @@ frequency: 6h
 # Time step of model (must be multiple of frequency)
 timestep: 6h
 
-
 # features that are not part of the forecast state
 # but are used as forcing to generate the forecast state
 forcing:
