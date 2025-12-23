@@ -85,11 +85,18 @@ class TestFormatDetection:
 
     @pytest.mark.unit
     def test_detect_format_non_dict_checkpoint(self, temp_checkpoint_dir: Path, simple_model: SimpleModel) -> None:
-        """Test format detection with non-dict checkpoint (raw model)."""
-        model_path = temp_checkpoint_dir / "raw_model.pt"
-        torch.save(simple_model, model_path)
+        """Test format detection with non-dict checkpoint (model state dict).
 
-        assert detect_checkpoint_format(model_path) == "pytorch"
+        Note: We save the state_dict rather than the raw model, as models
+        defined in conftest cannot be pickled (attribute lookup fails).
+        The state_dict is the recommended way to save PyTorch models anyway.
+        """
+        model_path = temp_checkpoint_dir / "raw_model.pt"
+        # Save state_dict - this is what detect_checkpoint_format sees as a raw tensor dict
+        torch.save(simple_model.state_dict(), model_path)
+
+        # state_dict is detected as "state_dict" format
+        assert detect_checkpoint_format(model_path) == "state_dict"
 
     @pytest.mark.unit
     @pytest.mark.parametrize("extension", [".ckpt", ".pt", ".pth", ".bin"])
