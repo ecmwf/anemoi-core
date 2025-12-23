@@ -84,6 +84,12 @@ def build_mock_config(
 def trainer_factory() -> AnemoiTrainer:
     def _make_trainer(mock_config: MagicMock) -> AnemoiTrainer:
         with (
+            patch("anemoi.training.train.train.OmegaConf.to_object", return_value=mock_config),
+            patch(
+                "anemoi.training.train.train.DictConfig",
+                return_value=mock_config,
+            ),
+            patch("anemoi.training.train.train.UnvalidatedBaseSchema", return_value=mock_config),
             patch(
                 "anemoi.training.train.train.LOGGER",
             ),

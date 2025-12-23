@@ -375,8 +375,8 @@ LossSchemas = (
     | CombinedLossSchema
     | AlmostFairKernelCRPSSchema
     | KernelCRPSSchema
-    | SpectralLossSchema
-)
+    | MultiScaleLossSchema
+) | SpectralLossSchema
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):

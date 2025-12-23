@@ -1,25 +1,12 @@
-# (C) Copyright 2025- Anemoi contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation
-# nor does it submit to any jurisdiction.
-
-import logging
-
-import pytest
 import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
-from anemoi.training.losses.multiscale import MultiscaleLossWrapper
-from anemoi.training.losses.variable_mapper import LossVariableMapper
-from anemoi.training.utils.index_space import IndexSpace
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.filtering import FilteringLossWrapper
 
 
 def test_instantiation_with_filtering() -> None:
@@ -28,103 +15,51 @@ def test_instantiation_with_filtering() -> None:
     data_config = {"forcing": ["forcing"], "diagnostic": [], "target": ["imerg"]}
     name_to_index = {"tp": 0, "forcing": 1, "imerg": 2}
     data_indices = IndexCollection(DictConfig(data_config), name_to_index)
+
     loss = get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.MSELoss",
                 "predicted_variables": ["tp"],
-                "target_variables": ["imerg"],
-                "scalers": ["grid_uniform", "dynamic"],
-            },
-        ),
-        scalers={
-            "grid_uniform": (3, torch.ones(4)),
-            "dynamic": (4, torch.tensor([2.0, 7.0, 11.0])),
-        },
-        data_indices=data_indices,
-    )
-
-    assert isinstance(loss, LossVariableMapper)
-    assert IndexSpace.MODEL_OUTPUT in loss.predicted_indices_by_layout
-    assert loss.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [0]
-    assert loss.target_indices_by_layout[IndexSpace.DATA_FULL] == [2]
-    torch.testing.assert_close(loss.loss.scaler.tensors["dynamic"][1], torch.tensor([2.0]))
-
-    pred = torch.ones((1, 1, 1, 4, 1))
-    target = torch.zeros((1, 1, 1, 4, len(name_to_index)))
-    target[..., 2] = 3.0
-
-    loss_total = loss(
-        pred,
-        target,
-        pred_layout=IndexSpace.MODEL_OUTPUT,
-        target_layout=IndexSpace.DATA_FULL,
-    )
-
-    torch.testing.assert_close(loss_total, torch.tensor(32.0))
-
-    loss.update_scaler("dynamic", torch.tensor([13.0, 17.0, 19.0]), override=True)
-    torch.testing.assert_close(loss.loss.scaler.tensors["dynamic"][1], torch.tensor([13.0]))
-
-
-def test_instantiation_with_filtering_requires_layout_kwargs() -> None:
-    from anemoi.models.data_indices.collection import IndexCollection
-
-    data_indices = IndexCollection(
-        DictConfig({"forcing": [], "diagnostic": [], "target": ["imerg"]}),
-        {"tp": 0, "imerg": 1},
-    )
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.MSELoss",
-                "predicted_variables": ["tp"],
-                "target_variables": ["imerg"],
-            },
-        ),
-        data_indices=data_indices,
-    )
-
-    pred = torch.ones((1, 1, 1, 2, 1))
-    target = torch.zeros((1, 1, 1, 2, 2))
-
-    with pytest.raises(ValueError, match="requires both 'pred_layout' and 'target_layout'"):
-        loss(pred, target)
-
-
-def test_print_variable_scaling() -> None:
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.losses.scalers.scalers import create_scalers
-    from anemoi.training.losses.utils import print_variable_scaling
-    from anemoi.utils.config import DotDict
-
-    data_config = {"data": {"forcing": ["f1"], "target": [], "prognostic": ["f2"], "diagnostic": ["tp", "imerg"]}}
-    name_to_index = {"tp": 0, "imerg": 1, "f1": 2, "f2": 3}
-    data_indices = IndexCollection(DictConfig(data_config), name_to_index)
-    metadata_extractor = ExtractVariableGroupAndLevel(
-        DotDict(
-            {
-                "default": "sfc",
-            },
-        ),
-    )
-    scalers, _ = create_scalers(
-        DotDict(
-            {
-                "general_variable": {
-                    "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",
-                    "weights": {
-                        "default": 1,
-                        "tp": 0.1,
-                        "imerg": 100,
-                        "f2": 0.5,
-                    },
+                "target_variables": ["tp"],
+                "loss": {
+                    "_target_": "anemoi.training.losses.spectral.LogFFT2Distance",
+                    "x_dim": 710,
+                    "y_dim": 640,
+                    "scalers": [],
                 },
             },
         ),
         data_indices=data_indices,
         metadata_extractor=metadata_extractor,
     )
+    assert isinstance(loss, FilteringLossWrapper)
+    assert isinstance(loss.loss, BaseLoss)
+    assert hasattr(loss.loss, "y_dim")
+    assert hasattr(loss.loss, "x_dim")
+
+    loss.set_data_indices(data_indices)
+    assert hasattr(loss, "predicted_indices")
+
+    assert loss.predicted_variables == ["tp"]
+    # tensors are of size (batch, output_steps, ens, latlon, vars)
+    right_shaped_pred_output_pair = (
+        torch.ones((6, 1, 710 * 640, 2)),
+        torch.zeros((6, 1, 710 * 640, 2)),
+    )
+    loss_value = loss(*right_shaped_pred_output_pair, squash=False)
+    assert loss_value.shape[0] == len(
+        name_to_index.keys(),
+    ), "Loss output with squash=False should match length of all variables"
+    assert (
+        torch.nonzero(loss_value)[0].tolist() == loss.predicted_indices
+    ), "Filtered out variables should have zero loss"
+    loss_total = loss(*right_shaped_pred_output_pair, squash=True)
+    assert (
+        loss_total == loss_value[0]
+    ), "Loss output with squash=True should be the value of loss for predicted variables"
+
+    # test instantiation with a str loss
     loss = get_loss_function(
         DictConfig(
             {

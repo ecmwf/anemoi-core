@@ -23,17 +23,22 @@ Notes
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from typing import Literal
 
 import einops
 import torch
-from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.layers.spectral_transforms import FFT2D
 from anemoi.models.layers.spectral_transforms import SHT
+from anemoi.models.layers.spectral_transforms import CartesianSHT
+from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,7 +65,7 @@ class SpectralLoss(BaseLoss):
 
     def __init__(
         self,
-        transform: Literal["fft2d", "sht"] = "fft2d",
+        transform: Literal["fft2d", "sht", "cartesian_sht", "octahedral_sht"] = "fft2d",
         *,
         x_dim: int | None = None,
         y_dim: int | None = None,
@@ -103,6 +108,10 @@ class SpectralLoss(BaseLoss):
             self.y_dim = int(kwargs.get("y_dim"))
         elif transform == "sht":
             self.transform = SHT()
+        elif transform == "cartesian_sht":
+            self.transform = CartesianSHT(**kwargs)
+        elif transform == "octahedral_sht":
+            self.transform = OctahedralSHT(**kwargs)
         else:
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
@@ -235,4 +244,11 @@ class LogFFT2Distance(LogSpectralDistance):
         scalers: list | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(transform="fft2d", x_dim=x_dim, y_dim=y_dim, ignore_nans=ignore_nans, scalers=scalers, **kwargs)
+        super().__init__(
+            transform="fft2d",
+            x_dim=x_dim,
+            y_dim=y_dim,
+            ignore_nans=ignore_nans,
+            scalers=scalers,
+            **kwargs,
+        )

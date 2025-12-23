@@ -102,6 +102,7 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
 
 @skip_if_offline
 @typechecked
+@pytest.mark.slow
 def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
     BaseSchema(**aicon_config_with_tmp_dir)
 
