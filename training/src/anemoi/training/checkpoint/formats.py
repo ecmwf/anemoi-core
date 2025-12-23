@@ -85,9 +85,6 @@ def detect_checkpoint_format(
             if checkpoint and all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
                 return "state_dict"
 
-            # Default to pytorch for structured checkpoints
-            return "pytorch"
-
         except (OSError, RuntimeError, pickle.UnpicklingError, EOFError) as e:
             # If we can't load it (file corruption, empty file, etc.), default to lightning
             import logging
@@ -101,6 +98,9 @@ def detect_checkpoint_format(
                 e,
             )
             return "lightning"
+        else:
+            # Default to pytorch for structured checkpoints that don't match specific patterns
+            return "pytorch"
 
     # Default to lightning for unknown extensions
     import logging

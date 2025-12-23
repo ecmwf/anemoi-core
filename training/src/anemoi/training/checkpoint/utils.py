@@ -14,8 +14,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from pathlib import Path  # noqa: TC003 - Path used at runtime
+from typing import TYPE_CHECKING
 from typing import Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Optional import for async HTTP operations (remote checkpoint downloads)
 try:
@@ -296,7 +299,7 @@ def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
         # Extract metadata (non-tensor data)
         metadata = {}
         for key, value in checkpoint.items():
-            if not isinstance(value, (torch.Tensor, dict)) or key in [
+            if not isinstance(value, torch.Tensor | dict) or key in [
                 "epoch",
                 "global_step",
                 "iteration",

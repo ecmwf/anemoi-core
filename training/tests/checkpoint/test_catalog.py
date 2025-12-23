@@ -98,32 +98,34 @@ class TestComponentCatalog:
             ("MockS3Source", MockS3Source),
         ]
 
-        with patch("anemoi.training.checkpoint.catalog.importlib.import_module") as mock_import:
-            with patch("anemoi.training.checkpoint.catalog.inspect.getmembers") as mock_getmembers:
-                # Mock getmembers to filter by inspect.isclass
-                def getmembers_side_effect(obj, predicate=None):
-                    if predicate is None:
-                        return mock_module_members
-                    # Filter by the predicate (inspect.isclass)
-                    return [(name, cls) for name, cls in mock_module_members if predicate(cls)]
+        with (
+            patch("anemoi.training.checkpoint.catalog.importlib.import_module") as mock_import,
+            patch("anemoi.training.checkpoint.catalog.inspect.getmembers") as mock_getmembers,
+        ):
+            # Mock getmembers to filter by inspect.isclass
+            def getmembers_side_effect(_obj: object, predicate: object = None) -> list:
+                if predicate is None:
+                    return mock_module_members
+                # Filter by the predicate (inspect.isclass)
+                return [(name, cls) for name, cls in mock_module_members if predicate(cls)]
 
-                mock_getmembers.side_effect = getmembers_side_effect
-                mock_import.return_value = mock_module
+            mock_getmembers.side_effect = getmembers_side_effect
+            mock_import.return_value = mock_module
 
-                # Test discovery
-                components = ComponentCatalog._discover_components(
-                    "anemoi.training.checkpoint.sources",
-                    "MockCheckpointSource",
-                )
+            # Test discovery
+            components = ComponentCatalog._discover_components(
+                "anemoi.training.checkpoint.sources",
+                "MockCheckpointSource",
+            )
 
-                # Should find the concrete implementations
-                assert "mock_local" in components
-                assert "mock_s3" in components
-                # Should not include the abstract base class
-                assert "mock_checkpoint" not in components
+            # Should find the concrete implementations
+            assert "mock_local" in components
+            assert "mock_s3" in components
+            # Should not include the abstract base class
+            assert "mock_checkpoint" not in components
 
-                assert components["mock_local"] == "anemoi.training.checkpoint.sources.MockLocalSource"
-                assert components["mock_s3"] == "anemoi.training.checkpoint.sources.MockS3Source"
+            assert components["mock_local"] == "anemoi.training.checkpoint.sources.MockLocalSource"
+            assert components["mock_s3"] == "anemoi.training.checkpoint.sources.MockS3Source"
 
     @patch("anemoi.training.checkpoint.catalog.importlib.import_module")
     def test_discover_components_import_error(self, mock_import: MagicMock) -> None:
@@ -179,39 +181,41 @@ class TestComponentCatalog:
             ("ConcreteABCSource", ConcreteABCSource),  # Should be included
         ]
 
-        with patch("anemoi.training.checkpoint.catalog.importlib.import_module") as mock_import:
-            with patch("anemoi.training.checkpoint.catalog.inspect.getmembers") as mock_getmembers:
-                # Mock getmembers to filter by inspect.isclass
-                def getmembers_side_effect(obj, predicate=None):
-                    if predicate is None:
-                        return mock_module_members
-                    # Filter by the predicate (inspect.isclass)
-                    return [(name, cls) for name, cls in mock_module_members if predicate(cls)]
+        with (
+            patch("anemoi.training.checkpoint.catalog.importlib.import_module") as mock_import,
+            patch("anemoi.training.checkpoint.catalog.inspect.getmembers") as mock_getmembers,
+        ):
+            # Mock getmembers to filter by inspect.isclass
+            def getmembers_side_effect(_obj: object, predicate: object = None) -> list:
+                if predicate is None:
+                    return mock_module_members
+                # Filter by the predicate (inspect.isclass)
+                return [(name, cls) for name, cls in mock_module_members if predicate(cls)]
 
-                mock_getmembers.side_effect = getmembers_side_effect
-                mock_import.return_value = mock_module
+            mock_getmembers.side_effect = getmembers_side_effect
+            mock_import.return_value = mock_module
 
-                # Test discovery - should find concrete classes but skip both types of abstract classes
-                components = ComponentCatalog._discover_components(
-                    "anemoi.training.checkpoint.sources",
-                    "BaseNamedSource",  # This matches BaseNamedSource
-                )
+            # Test discovery - should find concrete classes but skip both types of abstract classes
+            components = ComponentCatalog._discover_components(
+                "anemoi.training.checkpoint.sources",
+                "BaseNamedSource",  # This matches BaseNamedSource
+            )
 
-                # Should find concrete implementations but skip abstract ones
-                assert "concrete_named" in components
+            # Should find concrete implementations but skip abstract ones
+            assert "concrete_named" in components
 
-                # Now test with ABCSource as base
-                components_abc = ComponentCatalog._discover_components(
-                    "anemoi.training.checkpoint.sources",
-                    "ABCSource",  # This matches ABCSource
-                )
+            # Now test with ABCSource as base
+            components_abc = ComponentCatalog._discover_components(
+                "anemoi.training.checkpoint.sources",
+                "ABCSource",  # This matches ABCSource
+            )
 
-                # Should find the ABC-based concrete implementation
-                assert "concrete_abc" in components_abc
+            # Should find the ABC-based concrete implementation
+            assert "concrete_abc" in components_abc
 
-                # Verify paths are correct
-                assert components["concrete_named"] == "anemoi.training.checkpoint.sources.ConcreteNamedSource"
-                assert components_abc["concrete_abc"] == "anemoi.training.checkpoint.sources.ConcreteABCSource"
+            # Verify paths are correct
+            assert components["concrete_named"] == "anemoi.training.checkpoint.sources.ConcreteNamedSource"
+            assert components_abc["concrete_abc"] == "anemoi.training.checkpoint.sources.ConcreteABCSource"
 
     @patch("anemoi.training.checkpoint.catalog.ComponentCatalog._discover_components")
     def test_get_source_target_when_empty(self, mock_discover: MagicMock) -> None:
