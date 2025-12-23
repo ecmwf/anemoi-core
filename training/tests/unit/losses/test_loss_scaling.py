@@ -364,7 +364,8 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices, _, _ = fake_data
 
     metadata_extractor = ExtractVariableGroupAndLevel(config.training.variable_groups)
-    metric_range = get_metric_ranges(config, data_indices, metadata_extractor=metadata_extractor)
+    metrics_to_log = config.training.get("metrics", [])
+    metric_range = get_metric_ranges(metadata_extractor, data_indices.model.output, metrics_to_log=metrics_to_log)
 
     del metric_range["all"]
 
