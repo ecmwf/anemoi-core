@@ -44,7 +44,7 @@ def non_default_input_imputer():
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0, 2.0]),
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return InputImputer(config=config.data.imputer, data_indices=data_indices, statistics=statistics)
 
 
@@ -67,7 +67,7 @@ def default_input_imputer():
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0, 2.0]),
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return InputImputer(config=config.data.imputer, statistics=statistics, data_indices=data_indices)
 
 
@@ -123,7 +123,7 @@ def non_default_constant_imputer():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return ConstantImputer(config=config.data.imputer, statistics=None, data_indices=data_indices)
 
 
@@ -140,7 +140,7 @@ def default_constant_imputer():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return ConstantImputer(config=config.data.imputer, statistics=None, data_indices=data_indices)
 
 
@@ -175,7 +175,7 @@ def copy_imputer():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return CopyImputer(config=config.data.imputer, statistics=None, data_indices=data_indices)
 
 
