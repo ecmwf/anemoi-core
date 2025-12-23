@@ -26,8 +26,6 @@ def get_mlflow_logger(
     config: Any,
     **kwargs,
 ) -> None:
-    del kwargs
-
     if not diagnostics_config.log.mlflow.enabled:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
@@ -40,7 +38,7 @@ def get_mlflow_logger(
         "_target_",
         "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
-    logger_config["save_dir"] = logger_config.get("save_dir", str(config.system.output.logs.mlflow))
+    logger_config["save_dir"] = logger_config.get("save_dir", str(paths.output.logs.mlflow))
 
     logger = instantiate(
         logger_config,
@@ -49,7 +47,7 @@ def get_mlflow_logger(
     )
 
     if logger.log_terminal:
-        logger.log_terminal_output(artifact_save_dir=config.system.output.plots)
+        logger.log_terminal_output(artifact_save_dir=paths.output.get("plots"))
     if logger.log_system:
         logger.log_system_metrics()
 
@@ -70,18 +68,14 @@ def get_tensorboard_logger(diagnostics_config: Any, paths: Any, **kwargs) -> pl.
         Logger object, or None
 
     """
-    del kwargs
-
     if not diagnostics_config.log.tensorboard.enabled:
         LOGGER.debug("Tensorboard logging is disabled.")
         return None
 
-    save_dir = paths.logs.tensorboard
-
     from pytorch_lightning.loggers import TensorBoardLogger
 
     return TensorBoardLogger(
-        save_dir=config.system.output.logs.tensorboard,
+        save_dir=paths.output.logs.tensorboard,
         log_graph=False,
     )
 
@@ -114,8 +108,6 @@ def get_wandb_logger(
         If `wandb` is not installed
 
     """
-    del kwargs
-
     if not diagnostics_config.log.wandb.enabled:
         LOGGER.debug("Weights & Biases logging is disabled.")
         return None
@@ -130,7 +122,7 @@ def get_wandb_logger(
         project=diagnostics_config.log.wandb.project,
         entity=diagnostics_config.log.wandb.entity,
         id=run_id,
-        save_dir=config.system.output.logs.wandb,
+        save_dir=paths.output.logs.wandb,
         offline=diagnostics_config.log.wandb.offline,
         log_model=diagnostics_config.log.wandb.log_model,
         resume=run_id is not None,

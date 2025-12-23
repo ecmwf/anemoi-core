@@ -328,7 +328,7 @@ class AnemoiTrainer(ABC):
             "diagnostics_config": self.diagnostics_config,
             "run_id": self.my_config.run_id,
             "fork_run_id": self.my_config.fork_run_id,
-            "paths": self.config.hardware.paths,
+            "paths": self.config.system,
             "model": self.model_task,
             "config": self.config,
         }
