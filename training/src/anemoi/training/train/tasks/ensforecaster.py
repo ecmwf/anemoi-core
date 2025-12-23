@@ -127,8 +127,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        *args,
-        **kwargs,
+        step: int | None = None,
+        validation_mode: bool = False,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         y_pred_ens = {}
         for dataset_name in y_pred:
@@ -138,7 +138,19 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 shapes=[y_pred[dataset_name].shape] * self.ens_comm_subgroup_size,
                 mgroup=self.ens_comm_subgroup,
             )
-        return super().compute_loss_metrics(y_pred_ens, y, *args, **kwargs)
+        loss = self._compute_loss(
+            y_pred_ens,
+            y,
+            grid_dim=self.grid_dim,
+            grid_shard_shape=self.grid_shard_shapes,
+        )
+
+        # Compute metrics if in validation mode
+        metrics_next = {}
+        if validation_mode:
+            metrics_next = self._compute_metrics(y_pred_ens, y, step=step, grid_shard_slice=self.grid_shard_slice)
+
+        return loss, metrics_next, y_pred_ens
 
     def _rollout_step(
         self,
@@ -185,7 +197,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             )
             assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
 
-        for dataset_name in batch.keys():
+        for dataset_name in self.dataset_names:
             x[dataset_name] = torch.cat(
                 [x[dataset_name]] * self.nens_per_device,
                 dim=2,
@@ -194,7 +206,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
             assert (
                 len(x[dataset_name].shape) == 5
-            ), f"Expected a 5-dimensional tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
+            ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
             assert (x[dataset_name].shape[1] == self.multi_step) and (
                 x[dataset_name].shape[2] == self.nens_per_device
             ), (
@@ -229,6 +241,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 use_reentrant=False,
             )
 
-            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred_ens_group

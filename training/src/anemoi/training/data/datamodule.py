@@ -59,16 +59,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
 
-        # if self.config.training.get("rollout", {}).get("max") is not None:
-        #     max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
-        #     mr_len = self.config.dataloader.model_run_info.length
-        #     if max_rollout_index >= mr_len:
-        #         msg = (
-        #             f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}. "
-        #             "Please adjust the training rollout max or model run length.",
-        #         )
-        #         raise ValueError(msg)
-
     @cached_property
     def statistics(self) -> dict:
         """Return statistics from all training datasets."""
@@ -199,3 +189,36 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         """Return test dataloader."""
         return self._get_dataloader(self.ds_test, "test")
+
+    def fill_metadata(self, metadata: dict) -> None:
+        """Fill metadata dictionary with dataset metadata."""
+        datasets_config = self.metadata.copy()
+        metadata["dataset"] = datasets_config
+        data_indices = self.data_indices.copy()
+        metadata["data_indices"] = data_indices
+
+        metadata["metadata_inference"]["dataset_names"] = self.dataset_names
+
+        timesteps = {
+            "relative_date_indices_training": self.relative_date_indices(),
+            "timestep": self.config.data.timestep,
+        }
+        for dataset_name in self.dataset_names:
+            metadata["metadata_inference"][dataset_name] = {}
+            metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
+
+            name_to_index = {
+                "input": data_indices[dataset_name].model.input.name_to_index,
+                "output": data_indices[dataset_name].model.output.name_to_index,
+            }
+            metadata["metadata_inference"][dataset_name]["data_indices"] = name_to_index
+
+            input_data_indices = data_indices[dataset_name].data.input.todict()
+            input_index_to_name = {v: k for k, v in input_data_indices["name_to_index"].items()}
+            variable_types = {
+                "forcing": [input_index_to_name[int(index)] for index in input_data_indices["forcing"]],
+                "target": [input_index_to_name[int(index)] for index in input_data_indices["target"]],
+                "prognostic": [input_index_to_name[int(index)] for index in input_data_indices["prognostic"]],
+                "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
+            }
+            metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types

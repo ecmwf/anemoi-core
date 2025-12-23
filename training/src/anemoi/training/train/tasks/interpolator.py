@@ -19,6 +19,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,60 +65,89 @@ class GraphInterpolator(BaseGraphModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
-        if len(config.training.target_forcing.data) >= 1:
-            self.target_forcing_indices = itemgetter(*config.training.target_forcing.data)(
-                data_indices.data.input.name_to_index,
-            )
-            if isinstance(self.target_forcing_indices, int):
-                self.target_forcing_indices = [self.target_forcing_indices]
-        else:
-            self.target_forcing_indices = []
+        target_forcing_config = get_multiple_datasets_config(config.training.target_forcing)
+        self.target_forcing_indices = {}
+        for dataset_name in self.dataset_names:
+            if len(target_forcing_config[dataset_name].data) >= 1:
+                self.target_forcing_indices[dataset_name] = itemgetter(*target_forcing_config[dataset_name].data)(
+                    data_indices[dataset_name].data.input.name_to_index,
+                )
+                if isinstance(self.target_forcing_indices[dataset_name], int):
+                    self.target_forcing_indices[dataset_name] = [self.target_forcing_indices[dataset_name]]
+            else:
+                self.target_forcing_indices[dataset_name] = []
 
+        self.num_tfi = {name: len(idxs) for name, idxs in self.target_forcing_indices.items()}
         self.use_time_fraction = config.training.target_forcing.time_fraction
 
-        self.multi_step = 1
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
 
-        self.rollout = 1
+    def get_target_forcing(self, batch: dict[str, torch.Tensor], interp_step: int) -> dict[str, torch.Tensor]:
+        batch_size = next(iter(batch.values())).shape[0]
+        ens_size = next(iter(batch.values())).shape[2]
+        grid_size = next(iter(batch.values())).shape[3]
+        batch_type = next(iter(batch.values())).dtype
 
-    def _step(
-        self,
-        batch: torch.Tensor,
-        validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        target_forcing = {}
+        for dataset_name, num_tfi in self.num_tfi.items():
+            target_forcing[dataset_name] = torch.empty(
+                batch_size,
+                ens_size,
+                grid_size,
+                num_tfi + self.use_time_fraction,
+                device=self.device,
+                dtype=batch_type,
+            )
 
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
-
-        x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, time, ens, latlon, nvar)
-
-        num_tfi = len(self.target_forcing_indices)
-        target_forcing = torch.empty(
-            batch.shape[0],
-            batch.shape[2],
-            batch.shape[3],
-            num_tfi + self.use_time_fraction,
-            device=self.device,
-            dtype=batch.dtype,
-        )
-        for interp_step in self.interp_times:
             # get the forcing information for the target interpolation time:
             if num_tfi >= 1:
-                target_forcing[..., :num_tfi] = batch[:, self.imap[interp_step], :, :, self.target_forcing_indices]
+                target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][
+                    :,
+                    self.imap[interp_step],
+                    :,
+                    :,
+                    self.target_forcing_indices[dataset_name],
+                ]
+
             if self.use_time_fraction:
-                target_forcing[..., -1] = (interp_step - self.boundary_times[-2]) / (
+                target_forcing[dataset_name][..., -1] = (interp_step - self.boundary_times[-2]) / (
                     self.boundary_times[-1] - self.boundary_times[-2]
                 )
 
+        return target_forcing
+
+    def _step(
+        self,
+        batch: dict[str, torch.Tensor],
+        validation_mode: bool = False,
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        metrics = {}
+        y_preds = []
+
+        x_bound = {}
+        for dataset_name in self.dataset_names:
+            x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, time, ens, latlon, nvar)
+
+        for interp_step in self.interp_times:
+            target_forcing = self.get_target_forcing(batch, interp_step)
+
             y_pred = self(x_bound, target_forcing)
-            y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]
+            y = {}
+            for dataset_name, dataset_batch in batch.items():
+                y[dataset_name] = dataset_batch[
+                    :,
+                    self.imap[interp_step],
+                    :,
+                    :,
+                    self.data_indices[dataset_name].data.output.full,
+                ]
 
             loss_step, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,

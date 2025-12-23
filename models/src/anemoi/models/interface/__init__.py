@@ -61,8 +61,8 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
         data_indices: dict,
         metadata: dict,
-        statistics_tendencies: dict = None,
-        supporting_arrays: dict = None,
+        statistics_tendencies: dict | None = None,
+        supporting_arrays: dict | None = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -75,6 +75,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
         self._build_model()
+        self._update_metadata()
 
     def _build_processors_for_dataset(
         self, dataset_name: str, statistics: dict, data_indices: dict, statistics_tendencies: dict = None
@@ -165,13 +166,17 @@ class AnemoiModelInterface(torch.nn.Module):
         self.forward = self.model.forward
 
     def predict_step(
-        self, batch: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, gather_out: bool = True, **kwargs
-    ) -> torch.Tensor:
+        self,
+        batch: dict[str, torch.Tensor],
+        model_comm_group: Optional[ProcessGroup] = None,
+        gather_out: bool = True,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Input batched data.
         model_comm_group : Optional[ProcessGroup], optional
             model communication group, specifies which GPUs work together
@@ -180,7 +185,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Predicted data.
         """
         # Prepare kwargs for model's predict_step
@@ -200,3 +205,6 @@ class AnemoiModelInterface(torch.nn.Module):
 
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)
+
+    def _update_metadata(self) -> None:
+        self.model.fill_metadata(self.metadata)

@@ -241,10 +241,8 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
-            self.data_indices.compare_variables(
-                model._ckpt_model_name_to_index,
-                self.data_indices.name_to_index,
-            )  # TODO for multi dataset
+            for data_indices in self.data_indices.values():
+                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -301,11 +299,15 @@ class AnemoiTrainer(ABC):
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
-        warm_start_path = self.config.system.input.warm_start
+        raw_path = self.config.system.input.warm_start
+        if not raw_path:
+            return None
 
-        if warm_start_path:
+        warm_start_path = Path(raw_path)
+
+        if not warm_start_path.is_file():
             msg = f"Warm start checkpoint not found: {warm_start_path}"
-            assert Path.is_file(warm_start_path), msg
+            raise FileNotFoundError(msg)
         return warm_start_path
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
@@ -338,18 +340,33 @@ class AnemoiTrainer(ABC):
     @cached_property
     def metadata(self) -> dict:
         """Metadata and provenance information."""
-        return map_config_to_primitives(
-            {
-                "version": "2.0",
-                "config": convert_to_omegaconf(self.config),
-                "seed": self.initial_seed,
-                "run_id": self.run_id,
-                "dataset": self.datamodule.metadata,
-                "data_indices": self.datamodule.data_indices,
-                "provenance_training": gather_provenance_info(),
-                "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
-            },
-        )
+        metadata_inference = {
+            "seed": self.initial_seed,
+            "run_id": self.run_id,
+            "dataset_names": None,  # will be populated in DataModule
+            "task": None,  # will be populated in BaseGraphModule
+        }
+        # Store metadata needed in inference in a separate dict "metadata_inference"
+        # For each group, we add a dictionary with:
+        # - data_indices, containing name_to_index mappings
+        # - variable_types, specifyting forcing/diagnostics/prognostic/target splits
+        # - shapes, specifying the shape of the input tensor (for dimensions where the size is fixed)
+        # - timesteps, specifying the time steps used during training for input and output
+
+        md_dict = {
+            "version": "2.0",
+            "config": convert_to_omegaconf(self.config),
+            "seed": self.initial_seed,
+            "run_id": self.run_id,
+            "dataset": None,  # will be populated in DataModule
+            "data_indices": None,  # will be populated in DataModule
+            "provenance_training": gather_provenance_info(),
+            "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
+            "metadata_inference": metadata_inference,
+            "uuid": None,  # will be populated in checkpoint callback
+        }
+        self.datamodule.fill_metadata(md_dict)
+        return map_config_to_primitives(md_dict)
 
     @cached_property
     def supporting_arrays(self) -> dict:
@@ -469,7 +486,7 @@ class AnemoiTrainer(ABC):
         if self.config.diagnostics.log.mlflow.enabled:
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
-                self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints).is_dir()
+                self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints.root).is_dir()
             )
             self.start_from_checkpoint = (
                 False if (self.dry_run and not bool(self.config.training.fork_run_id)) else self.start_from_checkpoint

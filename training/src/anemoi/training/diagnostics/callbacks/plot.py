@@ -44,6 +44,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.tasks import GraphInterpolator
 
@@ -992,7 +993,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                     ...,
                     data_indices.data.output.full,
                 ]
-                loss = self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy()
+                loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
                     parameter_names,

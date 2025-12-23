@@ -91,7 +91,7 @@ class BaseAnemoiReader(ABC):
         """Return trajectory IDs if available."""
         return None
 
-    def get_sample(self, time_indices: slice, grid_shard_indices: np.ndarray | None = None) -> torch.Tensor:
+    def get_sample(self, time_indices: slice | int | list[int], grid_shard_indices: np.ndarray | None = None) -> torch.Tensor:
         """Get a sample from the dataset."""
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory

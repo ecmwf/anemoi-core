@@ -32,6 +32,7 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
+from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -49,6 +50,15 @@ if TYPE_CHECKING:
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+TASK_TYPE_MAP = {
+    "GraphForecaster": "forecaster",
+    "GraphEnsForecaster": "forecaster",
+    "GraphDiffusionForecaster": "forecaster",
+    "GraphDiffusionTendForecaster": "forecaster",
+    "GraphInterpolator": "time-interpolator",
+}
 
 
 class BaseGraphModule(pl.LightningModule, ABC):
@@ -177,6 +187,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         combined_supporting_arrays = supporting_arrays.copy()
         for mask in self.output_mask.values():
             combined_supporting_arrays.update(mask.supporting_arrays)
+
+        metadata["metadata_inference"]["task"] = self._get_task_type_from_config(config)
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
@@ -322,6 +334,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # For multi-dataset, use a generic name or combine dataset names
         return "multi_dataset"
 
+    def _get_task_type_from_config(self, config: dict) -> str:
+        task_class_name = str(config.training.model_task).split(".")[-1]
+
+        try:
+            return TASK_TYPE_MAP[task_class_name]
+        except KeyError as exc:
+            err_msg = f"Unknown task type: {task_class_name}"
+            raise ValueError(err_msg) from exc
+
     def _check_sharding_support(self) -> None:
         self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())
         self.metrics_support_sharding = all(
@@ -352,7 +373,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 ", ".join(unsupported_metrics),
             )
 
-    def _build_metrics_for_dataset(self, validation_metrics_configs, scalers, data_indices) -> torch.nn.ModuleDict:
+    def _build_metrics_for_dataset(
+        self,
+        validation_metrics_configs: dict,
+        scalers: dict,
+        data_indices: IndexCollection,
+    ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
                 metric_name: get_loss_function(val_metric_config, scalers=scalers, data_indices=data_indices)
@@ -379,10 +405,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def _update_scaler_for_dataset(
         self,
         name: str,
-        scaler_builder,
+        scaler_builder: BaseScaler,
         callback: AvailableCallbacks,
-        loss_obj,
-        metrics_dict,
+        loss_obj: torch.nn.Module,
+        metrics_dict: dict,
         dataset_name: str | None = None,
     ) -> None:
         """Update a single scaler for loss and metrics objects."""
@@ -514,7 +540,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        # Handle multi-dataset case
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
 
         return self.loss[dataset_name](
@@ -575,8 +600,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
-            Loss and metrics dictionary (if validation_mode)
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
+            Loss, metrics dictionary (if validation_mode), and full predictions
         """
         # Prepare tensors for loss/metrics computation
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -718,10 +743,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         batch: dict,
         device: torch.device,
-        dataloader_idx: int = 0,
+        _dataloader_idx: int = 0,
     ) -> dict:
         """Transfer batch to device, handling dictionary batches."""
-        # Multi-dataset dictionary batch
         transferred_batch = {}
         for dataset_name, dataset_batch in batch.items():
             transferred_batch[dataset_name] = (
@@ -765,7 +789,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         pass
 
-    def allgather_batch(self, batch: torch.Tensor, grid_indices, grid_dim: int) -> torch.Tensor:
+    def allgather_batch(self, batch: torch.Tensor, grid_indices: dict, grid_dim: int) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
 
         Parameters
@@ -839,7 +863,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for metric_name, metric in metrics_dict.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(y_pred_postprocessed, y_postprocessed)
+                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(
+                    y_pred_postprocessed,
+                    y_postprocessed,
+                    grid_shard_slice=grid_shard_slice,
+                    model_comm_group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_shapes=self.grid_shard_shapes,
+                )
                 continue
 
             for mkey, indices in val_metric_ranges.items():
@@ -857,17 +889,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     scaler_indices=[..., indices],
                     grid_shard_slice=grid_shard_slice,
                     group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_shapes=self.grid_shard_shapes,
                 )
 
         return metrics
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         del batch_idx
-
-        train_loss, *_ = self._step(batch)
-
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
+
+        train_loss, *_ = self._step(batch)
+        train_loss = train_loss.sum()
 
         self.log(
             "train_" + self._get_loss_name() + "_loss",
@@ -894,11 +929,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         del batch_idx
 
-        with torch.no_grad():
-            val_loss, metrics, *args = self._step(batch, validation_mode=True)
-
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
+
+        with torch.no_grad():
+            val_loss_scales, metrics, *args = self._step(batch, validation_mode=True)
+        val_loss = val_loss_scales.sum()
 
         self.log(
             "val_" + self._get_loss_name() + "_loss",
@@ -911,17 +947,34 @@ class BaseGraphModule(pl.LightningModule, ABC):
             sync_dist=True,
         )
 
+        if val_loss_scales.numel() > 1:
+            for scale in range(val_loss_scales.numel()):
+                self.log(
+                    "val_" + self.loss.name + "_loss" + "_scale_" + str(scale),
+                    val_loss_scales[scale],
+                    on_epoch=True,
+                    on_step=True,
+                    prog_bar=False,
+                    logger=self.logger_enabled,
+                    batch_size=batch_size,
+                    sync_dist=True,
+                )
+
         for mname, mvalue in metrics.items():
-            self.log(
-                "val_" + mname,
-                mvalue,
-                on_epoch=True,
-                on_step=False,
-                prog_bar=False,
-                logger=self.logger_enabled,
-                batch_size=batch_size,
-                sync_dist=True,
-            )
+            for scale in range(mvalue.numel()):
+
+                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
+
+                self.log(
+                    "val_" + mname + "_scale_" + str(scale),
+                    log_val,
+                    on_epoch=True,
+                    on_step=False,
+                    prog_bar=False,
+                    logger=self.logger_enabled,
+                    batch_size=batch_size,
+                    sync_dist=True,
+                )
 
         return val_loss, *args
 

@@ -43,7 +43,7 @@ class EnsemblePlotMixin:
         pl_module: pl.LightningModule,
         output: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
-    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    ) -> tuple[dict[torch.Tensor], tuple[torch.Tensor, list[dict[str, torch.Tensor]]]]:
         """Handle ensemble batch and output structure.
 
         Returns

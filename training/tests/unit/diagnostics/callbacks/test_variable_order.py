@@ -47,8 +47,10 @@ def name_to_index_rename_permute() -> dict:
 @pytest.fixture
 def fake_trainer(mocker: Any, name_to_index: dict) -> AnemoiTrainer:
     trainer = mocker.Mock(spec=AnemoiTrainer)
-    trainer.datamodule.data_indices.name_to_index = name_to_index
-    trainer.datamodule.data_indices.compare_variables = types.MethodType(
+    data_indices = {"data": mocker.Mock(spec=IndexCollection)}
+    data_indices["data"].name_to_index = name_to_index
+    trainer.datamodule.data_indices = data_indices
+    trainer.datamodule.data_indices["data"].compare_variables = types.MethodType(
         IndexCollection.compare_variables,
         trainer.datamodule.data_indices,
     )
@@ -58,7 +60,7 @@ def fake_trainer(mocker: Any, name_to_index: dict) -> AnemoiTrainer:
 @pytest.fixture
 def fake_pl_module(mocker: Any, name_to_index: dict) -> MagicMock:
     pl_module = mocker.Mock()
-    pl_module._ckpt_model_name_to_index = name_to_index
+    pl_module._ckpt_model_name_to_index = {"data": name_to_index}
     return pl_module
 
 
@@ -80,17 +82,17 @@ def test_on_epoch(
     name_to_index: dict,
 ) -> None:
     """Test all epoch functions with "working" indices."""
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index}
     callback.on_train_start(fake_trainer, fake_pl_module)
     callback.on_validation_start(fake_trainer, fake_pl_module)
     callback.on_test_start(fake_trainer, fake_pl_module)
 
     assert (
-        fake_trainer.datamodule.data_indices.compare_variables(
+        fake_trainer.datamodule.data_indices["data"].compare_variables(
             fake_pl_module._ckpt_model_name_to_index,
-            name_to_index,
+            {"data": name_to_index},
         )
         is None
     )
@@ -106,9 +108,9 @@ def test_on_epoch_permute(
 
     Expecting errors in all cases.
     """
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index_permute
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_permute
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_permute
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index_permute}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_permute}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_permute}
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
         callback.on_train_start(fake_trainer, fake_pl_module)
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
@@ -120,8 +122,8 @@ def test_on_epoch_permute(
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
 
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
-        fake_trainer.datamodule.data_indices.compare_variables(
-            fake_pl_module._ckpt_model_name_to_index,
+        fake_trainer.datamodule.data_indices["data"].compare_variables(
+            fake_pl_module._ckpt_model_name_to_index["data"],
             name_to_index_permute,
         )
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
@@ -137,15 +139,15 @@ def test_on_epoch_rename(
 
     Expecting passes in all cases.
     """
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index_rename
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_rename
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index_rename}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_rename}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_rename}
     callback.on_train_start(fake_trainer, fake_pl_module)
     callback.on_validation_start(fake_trainer, fake_pl_module)
     callback.on_test_start(fake_trainer, fake_pl_module)
 
-    fake_trainer.datamodule.data_indices.compare_variables(
-        fake_pl_module._ckpt_model_name_to_index,
+    fake_trainer.datamodule.data_indices["data"].compare_variables(
+        fake_pl_module._ckpt_model_name_to_index["data"],
         name_to_index_rename,
     )
 
@@ -160,15 +162,15 @@ def test_on_epoch_rename_permute(
 
     Expects all passes (but warnings).
     """
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index_rename_permute
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_rename_permute
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename_permute
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index_rename_permute}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_rename_permute}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_rename_permute}
     callback.on_train_start(fake_trainer, fake_pl_module)
     callback.on_validation_start(fake_trainer, fake_pl_module)
     callback.on_test_start(fake_trainer, fake_pl_module)
 
-    fake_trainer.datamodule.data_indices.compare_variables(
-        fake_pl_module._ckpt_model_name_to_index,
+    fake_trainer.datamodule.data_indices["data"].compare_variables(
+        fake_pl_module._ckpt_model_name_to_index["data"],
         name_to_index_rename_permute,
     )
 
@@ -183,9 +185,9 @@ def test_on_epoch_partial_rename_permute(
 
     Expects all errors.
     """
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index_partial_rename_permute
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_partial_rename_permute
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_partial_rename_permute
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index_partial_rename_permute}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_partial_rename_permute}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_partial_rename_permute}
     with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
         callback.on_train_start(fake_trainer, fake_pl_module)
     with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
@@ -194,8 +196,8 @@ def test_on_epoch_partial_rename_permute(
         callback.on_test_start(fake_trainer, fake_pl_module)
 
     with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
-        fake_trainer.datamodule.data_indices.compare_variables(
-            fake_pl_module._ckpt_model_name_to_index,
+        fake_trainer.datamodule.data_indices["data"].compare_variables(
+            fake_pl_module._ckpt_model_name_to_index["data"],
             name_to_index_partial_rename_permute,
         )
 
@@ -209,9 +211,9 @@ def test_on_epoch_wrong_validation(
     name_to_index_rename: dict,
 ) -> None:
     """Test all epoch functions with "working" indices, but different validation indices."""
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_permute
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_permute}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_rename}
     callback.on_train_start(fake_trainer, fake_pl_module)
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
         callback.on_validation_start(fake_trainer, fake_pl_module)
@@ -221,8 +223,8 @@ def test_on_epoch_wrong_validation(
     callback.on_test_start(fake_trainer, fake_pl_module)
 
     assert (
-        fake_trainer.datamodule.data_indices.compare_variables(
-            fake_pl_module._ckpt_model_name_to_index,
+        fake_trainer.datamodule.data_indices["data"].compare_variables(
+            fake_pl_module._ckpt_model_name_to_index["data"],
             name_to_index,
         )
         is None
