@@ -17,7 +17,7 @@ from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC0
 
 
 class DatasetDataSchema(PydanticBaseModel):
-    """A class used to represent the configuration of a single dataset"""
+    """A class used to represent the configuration of a single dataset."""
 
     forcing: list[str] = Field(default_factory=list)
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
