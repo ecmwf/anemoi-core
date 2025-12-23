@@ -2,7 +2,6 @@ format: zarr
 # Time frequency requested from dataset
 frequency: 6h
 
-
 # features that are not part of the forecast state
 # but are used as forcing to generate the forecast state
 forcing:
