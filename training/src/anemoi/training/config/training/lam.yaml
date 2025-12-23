@@ -8,15 +8,18 @@ run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
 load_weights_only: False # only load model weights, do not restore optimiser states etc.
-update_ds_stats_on_ckpt_load:
-  states: False # rebuild state processors from current dataset when loading a checkpoint
-  tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
 
 # run in deterministic mode ; slows down
 deterministic: False
 
 # miscellaneous
 precision: 16-mixed
+
+# multistep input
+# 1 = single step scheme, X(t-1) used to predict X(t)
+# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
+# Deepmind use k = 2 in their model
+multistep_input: 2
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
@@ -57,14 +60,14 @@ loss_gradient_scaling: False
 training_loss:
   datasets:
     data: # user-defined key in data
-      # loss class to initialise
-      _target_: anemoi.training.losses.MSELoss
-      # Scalers to include in loss calculation
-      # A selection of available scalers are listed in training/scalers/scalers.yaml
-      # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-      # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
-      ignore_nans: False
+    # loss class to initialise
+    _target_: anemoi.training.losses.MSELoss
+    # Scalers to include in loss calculation
+    # A selection of available scalers are listed in training/scalers/scalers.yaml
+    # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
+    # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+    scalers: ['pressure_level', 'general_variable', 'node_weights']
+    ignore_nans: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
@@ -82,7 +85,7 @@ validation_metrics:
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
         # Use the `scale_validation_metrics` section to variable scale.
-        scalers: ["node_weights", "time_steps"]
+        scalers: ["node_weights"]
         # other kwargs
         ignore_nans: True
 

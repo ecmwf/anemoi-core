@@ -45,7 +45,19 @@ optimizer:
     betas: [0.9, 0.95]
 
 # select model
-training_method: anemoi.training.train.methods.SingleTraining
+model_task: anemoi.training.train.tasks.GraphInterpolator
+
+# Instead of inferred using multistep and timeincrement, specify time indices explicitly
+explicit_times:
+  input: [0, 6]
+  target: [1, 2, 3, 4, 5]
+
+target_forcing:
+  datasets:
+    data: # user-defined key in data #forcing parameters for the target time to include as input
+      data: #of which come from the dataset
+        - "insolation"
+  time_fraction: True
 
 # select strategy
 strategy:
