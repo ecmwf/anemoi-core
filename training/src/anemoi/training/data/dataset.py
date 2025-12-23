@@ -92,7 +92,9 @@ class BaseAnemoiReader(ABC):
         return None
 
     def get_sample(
-        self, time_indices: slice | int | list[int], grid_shard_indices: np.ndarray | None = None,
+        self,
+        time_indices: slice | int | list[int],
+        grid_shard_indices: np.ndarray | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
         if isinstance(grid_shard_indices, slice):
