@@ -89,12 +89,9 @@ class TestCheckpointError:
         custom_error = CustomCheckpointError("Custom error")
 
         # Should be catchable as CheckpointError
-        try:
+        with pytest.raises(CheckpointError) as exc_info:
             raise custom_error
-        except CheckpointError as e:
-            assert e.message == "Custom error"
-        else:
-            pytest.fail("Exception should have been caught as CheckpointError")
+        assert exc_info.value.message == "Custom error"
 
 
 class TestCheckpointNotFoundError:
@@ -549,27 +546,22 @@ class TestExceptionHierarchy:
         ]
 
         for exc in exceptions_to_test:
-            try:
+            # Verify each exception can be caught as CheckpointError
+            with pytest.raises(CheckpointError) as exc_info:
                 raise exc
-            except CheckpointError as caught:
-                # Should catch all types as CheckpointError
-                assert isinstance(caught, CheckpointError)
-                assert caught.message  # All should have message attribute
-            else:
-                pytest.fail(f"Failed to catch {type(exc).__name__} as CheckpointError")
+            # Should catch all types as CheckpointError
+            assert isinstance(exc_info.value, CheckpointError)
+            assert exc_info.value.message  # All should have message attribute
 
     @pytest.mark.unit
     def test_exception_specific_catching(self) -> None:
         """Test catching specific exception types."""
         # Test that specific exception types can still be caught specifically
-        try:
-            msg = "/missing.ckpt"
-            raise CheckpointNotFoundError(msg)
-        except CheckpointNotFoundError as e:
-            assert isinstance(e, CheckpointNotFoundError)
-            assert hasattr(e, "path")
-        except CheckpointError:
-            pytest.fail("Should have caught CheckpointNotFoundError specifically")
+        path = "/missing.ckpt"
+        with pytest.raises(CheckpointNotFoundError) as exc_info:
+            raise CheckpointNotFoundError(path)
+        assert isinstance(exc_info.value, CheckpointNotFoundError)
+        assert hasattr(exc_info.value, "path")
 
     @pytest.mark.unit
     def test_exception_details_consistency(self) -> None:
@@ -616,11 +608,10 @@ class TestErrorContextPreservation:
         """Test proper error chaining with 'raise from'."""
         original = ValueError("Original error")
 
-        try:
-            msg = "/test.ckpt"
-            raise CheckpointLoadError(msg, original) from original
-        except CheckpointLoadError as e:
-            assert e.__cause__ is original
+        path = "/test.ckpt"
+        with pytest.raises(CheckpointLoadError) as exc_info:
+            raise CheckpointLoadError(path, original) from original
+        assert exc_info.value.__cause__ is original
 
     @pytest.mark.unit
     def test_error_details_aggregation(self) -> None:
@@ -666,7 +657,7 @@ class TestErrorEdgeCases:
         """Test error handling with None message."""
         # This should not normally happen, but test robustness
         try:
-            error = CheckpointError(None)  # type: ignore
+            error = CheckpointError(None)  # type: ignore[arg-type]
         except TypeError:
             # This is acceptable - string message should be required
             pass
@@ -739,7 +730,7 @@ class TestErrorEdgeCases:
 
         # Should be able to pickle and unpickle
         pickled = pickle.dumps(error)
-        unpickled = pickle.loads(pickled)
+        unpickled = pickle.loads(pickled)  # noqa: S301
 
         assert isinstance(unpickled, CheckpointError)
         assert unpickled.message == error.message

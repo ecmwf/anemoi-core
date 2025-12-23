@@ -267,9 +267,10 @@ def network_urls() -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def cleanup_temp_files(tmp_path: Path) -> None:
+def _cleanup_temp_files(tmp_path: Path) -> None:
     """Automatically cleanup temporary files after each test."""
     # Cleanup happens automatically with tmp_path, but we can add custom cleanup here if needed
+    _ = tmp_path  # Use the parameter to prevent unused argument warnings
 
 
 # Parameterized fixtures for testing multiple formats

@@ -216,7 +216,7 @@ class CheckpointPipeline:
         """
         instantiated = []
         for i, stage in enumerate(stages):
-            if isinstance(stage, (dict, DictConfig)):
+            if isinstance(stage, dict | DictConfig):
                 # Use Hydra to instantiate from config
                 try:
                     instantiated_stage = instantiate(stage)
@@ -555,7 +555,7 @@ class CheckpointPipeline:
         ...     'param': 'value'
         ... })
         """
-        if isinstance(stage, (dict, DictConfig)):
+        if isinstance(stage, dict | DictConfig):
             try:
                 stage = instantiate(stage)
             except Exception as e:

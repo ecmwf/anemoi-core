@@ -23,18 +23,18 @@ from anemoi.training.checkpoint import PipelineStage
 class SimpleModel(nn.Module):
     """Simple model for testing."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = nn.Linear(10, 5)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(x)
 
 
 class TestCheckpointContext:
     """Test CheckpointContext dataclass."""
 
-    def test_context_initialization_empty(self):
+    def test_context_initialization_empty(self) -> None:
         """Test context initialization with no arguments."""
         context = CheckpointContext()
 
@@ -46,14 +46,15 @@ class TestCheckpointContext:
         assert context.metadata == {}
         assert context.config is None
 
-    def test_context_initialization_with_values(self):
+    def test_context_initialization_with_values(self, tmp_path: Path) -> None:
         """Test context initialization with values."""
         model = SimpleModel()
         optimizer = torch.optim.Adam(model.parameters())
         config = DictConfig({"key": "value"})
+        checkpoint_path = tmp_path / "checkpoint.pt"
 
         context = CheckpointContext(
-            checkpoint_path=Path("/tmp/checkpoint.pt"),
+            checkpoint_path=checkpoint_path,
             checkpoint_data={"epoch": 10},
             model=model,
             optimizer=optimizer,
@@ -61,21 +62,22 @@ class TestCheckpointContext:
             config=config,
         )
 
-        assert context.checkpoint_path == Path("/tmp/checkpoint.pt")
+        assert context.checkpoint_path == checkpoint_path
         assert context.checkpoint_data == {"epoch": 10}
         assert context.model == model
         assert context.optimizer == optimizer
         assert context.metadata == {"training": True}
         assert context.config == config
 
-    def test_context_path_conversion(self):
+    def test_context_path_conversion(self, tmp_path: Path) -> None:
         """Test that string paths are converted to Path objects."""
-        context = CheckpointContext(checkpoint_path="/tmp/checkpoint.pt")
+        checkpoint_path = str(tmp_path / "checkpoint.pt")
+        context = CheckpointContext(checkpoint_path=checkpoint_path)
 
         assert isinstance(context.checkpoint_path, Path)
-        assert context.checkpoint_path == Path("/tmp/checkpoint.pt")
+        assert context.checkpoint_path == Path(checkpoint_path)
 
-    def test_update_metadata(self):
+    def test_update_metadata(self) -> None:
         """Test updating metadata."""
         context = CheckpointContext()
 
@@ -88,7 +90,7 @@ class TestCheckpointContext:
         context.update_metadata(accuracy=0.95)  # Add new
         assert context.metadata == {"epoch": 10, "loss": 0.1, "accuracy": 0.95}
 
-    def test_get_metadata(self):
+    def test_get_metadata(self) -> None:
         """Test getting metadata with defaults."""
         context = CheckpointContext(metadata={"epoch": 5})
 
@@ -96,7 +98,7 @@ class TestCheckpointContext:
         assert context.get_metadata("missing") is None
         assert context.get_metadata("missing", "default") == "default"
 
-    def test_has_checkpoint_data(self):
+    def test_has_checkpoint_data(self) -> None:
         """Test checking for checkpoint data."""
         context = CheckpointContext()
         assert not context.has_checkpoint_data()
@@ -107,10 +109,11 @@ class TestCheckpointContext:
         context.checkpoint_data = {"state_dict": {}}
         assert context.has_checkpoint_data()
 
-    def test_context_repr(self):
+    def test_context_repr(self, tmp_path: Path) -> None:
         """Test context string representation."""
+        checkpoint_path = tmp_path / "checkpoint.pt"
         context = CheckpointContext(
-            checkpoint_path=Path("/tmp/checkpoint.pt"),
+            checkpoint_path=checkpoint_path,
             model=SimpleModel(),
             metadata={"epoch": 5, "loss": 0.1},
         )
@@ -122,7 +125,7 @@ class TestCheckpointContext:
         assert "model=SimpleModel" in repr_str
         assert "metadata_keys=['epoch', 'loss']" in repr_str
 
-    def test_context_fields_mutable(self):
+    def test_context_fields_mutable(self) -> None:
         """Test that context fields are mutable."""
         context = CheckpointContext()
 
@@ -141,7 +144,7 @@ class TestCheckpointContext:
 class TestPipelineStage:
     """Test PipelineStage abstract base class."""
 
-    def test_cannot_instantiate_abstract(self):
+    def test_cannot_instantiate_abstract(self) -> None:
         """Test that abstract class cannot be instantiated."""
         with pytest.raises(TypeError) as exc_info:
             PipelineStage()
@@ -149,7 +152,7 @@ class TestPipelineStage:
         assert "Can't instantiate abstract class" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_concrete_implementation(self):
+    async def test_concrete_implementation(self) -> None:
         """Test concrete implementation of PipelineStage."""
 
         class ConcreteStage(PipelineStage):
@@ -165,7 +168,7 @@ class TestPipelineStage:
         assert result.metadata["processed"] is True
 
     @pytest.mark.asyncio
-    async def test_stage_callable(self):
+    async def test_stage_callable(self) -> None:
         """Test that stage can be called directly."""
 
         class CallableStage(PipelineStage):
@@ -181,7 +184,7 @@ class TestPipelineStage:
 
         assert result.metadata["called"] is True
 
-    def test_stage_repr(self):
+    def test_stage_repr(self) -> None:
         """Test stage string representation."""
 
         class MyCustomStage(PipelineStage):
@@ -194,23 +197,22 @@ class TestPipelineStage:
         assert repr_str == "MyCustomStage()"
 
     @pytest.mark.asyncio
-    async def test_stage_error_propagation(self):
+    async def test_stage_error_propagation(self) -> None:
         """Test that errors are propagated from process method."""
+        error_msg = "Test error"
 
         class ErrorStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
-                raise ValueError("Test error")
+            async def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
+                raise ValueError(error_msg)
 
         stage = ErrorStage()
         context = CheckpointContext()
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match=error_msg):
             await stage.process(context)
 
-        assert "Test error" in str(exc_info.value)
-
     @pytest.mark.asyncio
-    async def test_stage_modifies_context(self):
+    async def test_stage_modifies_context(self) -> None:
         """Test that stages can modify context in place."""
 
         class ModifyingStage(PipelineStage):
