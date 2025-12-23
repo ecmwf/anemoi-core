@@ -30,7 +30,6 @@ import einops
 import torch
 
 from anemoi.models.layers.spectral_transforms import FFT2D
-from anemoi.models.layers.spectral_transforms import SHT
 from anemoi.models.layers.spectral_transforms import CartesianSHT
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
@@ -49,12 +48,10 @@ def _ensure_without_scalers_has_2(without_scalers: list[str] | list[int] | None)
     Some pipelines pass numeric scaler indices and rely on excluding scaler index 2
     by default. Ensure this exclusion is present for numeric lists.
     """
-    if without_scalers is None:
-        return [2]
-    if len(without_scalers) == 0:
-        return [2]
-    if not isinstance(without_scalers[0], str) and 2 not in without_scalers:
-        without_scalers.append(2)  # type: ignore[arg-type]
+    if without_scalers is None or len(without_scalers) == 0:
+        return [TensorDim.GRID.value]
+    if not isinstance(without_scalers[0], str) and TensorDim.GRID.value not in without_scalers:
+        without_scalers.append(TensorDim.GRID.value)
     return without_scalers
 
 
@@ -65,7 +62,7 @@ class SpectralLoss(BaseLoss):
 
     def __init__(
         self,
-        transform: Literal["fft2d", "sht", "cartesian_sht", "octahedral_sht"] = "fft2d",
+        transform: Literal["fft2d", "cartesian_sht", "octahedral_sht"] = "fft2d",
         *,
         x_dim: int | None = None,
         y_dim: int | None = None,
@@ -106,8 +103,6 @@ class SpectralLoss(BaseLoss):
             # expose dims on the loss (legacy API + tests)
             self.x_dim = int(kwargs.get("x_dim"))
             self.y_dim = int(kwargs.get("y_dim"))
-        elif transform == "sht":
-            self.transform = SHT()
         elif transform == "cartesian_sht":
             self.transform = CartesianSHT(**kwargs)
         elif transform == "octahedral_sht":

@@ -108,7 +108,7 @@ class SHT(SpectralTransform):
         torch.Tensor
             Data transformed to the spectral domain.
         """
-        msg = "Spherical harmonics transform is not implemented yet."
+        msg = "Each spherical harmonics transform subclass " "should implement the __call__ method."
         raise NotImplementedError(msg)
 
 
