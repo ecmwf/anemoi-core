@@ -27,6 +27,8 @@ from typing_extensions import Self
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
+from anemoi.training.schemas.schema_utils import DatasetDict
+
 
 class GradientClip(BaseModel):
     """Gradient clipping configuration."""
@@ -327,6 +329,7 @@ class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
 
 StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
 
+VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]]
 
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
@@ -359,15 +362,15 @@ class BaseTrainingSchema(BaseModel):
     "Strategy to use."
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
-    training_loss: LossSchemas
+    training_loss: DatasetDict[LossSchemas]
     "Training loss configuration."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
-    scalers: dict[str, ScalerSchema]
+    scalers: DatasetDict[dict[str, ScalerSchema]]
     "Scalers to use in the computation of the loss and validation scores."
-    validation_metrics: dict[str, LossSchemas]
+    validation_metrics: DatasetDict[dict[str, LossSchemas]]
     "List of validation metrics configurations."
-    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str | int]]]
+    variable_groups: DatasetDict[dict[str, VariableGroupType]]
     "Groups for variable loss scaling"
     max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
@@ -379,7 +382,7 @@ class BaseTrainingSchema(BaseModel):
     "Optimizer configuration."
     recompile_limit: PositiveInt = 32
     "How many times torch.compile will recompile a function for a given input shape."
-    metrics: list[str]
+    metrics: DatasetDict[list[str]]
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
