@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -6,61 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
-
-# (C) Copyright 2022 The torch-harmonics Authors. All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# 3. Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
-# (C) Copyright 2023 Matthew Price, Jason McEwen and contributors (S2FFT).
-#
-# Differentiable and accelerated spherical harmonic and Wigner transforms,
-# Journal of Computational Physics, 2024, arXiv:2311.14670.
-#
-# MIT License
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 
 import numpy as np
 import torch
@@ -97,14 +42,14 @@ def clenshaw_curtiss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndar
 
         n1 = n - 1
         N = np.arange(1, n1, 2)
-        l = len(N)
-        m = n1 - l
+        num_odd = len(N)
+        m = n1 - num_odd
 
         v = np.concatenate([2 / N / (N - 2), 1 / N[-1:], np.zeros(m)])
         v = 0 - v[:-1] - v[-1:0:-1]
 
         g0 = (-1) * np.ones(n1)
-        g0[l] = g0[l] + n1
+        g0[num_odd] = g0[num_odd] + n1
         g0[m] = g0[m] + n1
         g = g0 / (n1**2 - 1 + (n1 % 2))
         wcc = np.fft.ifft(v + g).real
@@ -141,29 +86,27 @@ def legpoly(
 
     norm_factor = 1.0 if norm == "ortho" else np.sqrt(4 * np.pi)
     norm_factor = 1.0 / norm_factor if inverse else norm_factor
-
-    # Initial values to start the recursion
     vdm[0, 0, :] = norm_factor / np.sqrt(4 * np.pi)
 
     # Fill the diagonal and the lower diagonal
-    for l in range(1, nmax):
-        vdm[l - 1, l, :] = np.sqrt(2 * l + 1) * x * vdm[l - 1, l - 1, :]
-        vdm[l, l, :] = np.sqrt((2 * l + 1) * (1 + x) * (1 - x) / 2 / l) * vdm[l - 1, l - 1, :]
+    for n in range(1, nmax):
+        vdm[n - 1, n, :] = np.sqrt(2 * n + 1) * x * vdm[n - 1, n - 1, :]
+        vdm[n, n, :] = np.sqrt((2 * n + 1) * (1 + x) * (1 - x) / 2 / n) * vdm[n - 1, n - 1, :]
 
     # Fill the remaining values on the upper triangle and multiply b
-    for l in range(2, nmax):
-        for m in range(0, l - 1):
-            vdm[m, l, :] = (
-                x * np.sqrt((2 * l - 1) / (l - m) * (2 * l + 1) / (l + m)) * vdm[m, l - 1, :]
-                - np.sqrt((l + m - 1) / (l - m) * (2 * l + 1) / (2 * l - 3) * (l - m - 1) / (l + m)) * vdm[m, l - 2, :]
+    for n in range(2, nmax):
+        for m in range(0, n - 1):
+            vdm[m, n, :] = (
+                x * np.sqrt((2 * n - 1) / (n - m) * (2 * n + 1) / (n + m)) * vdm[m, n - 1, :]
+                - np.sqrt((n + m - 1) / (n - m) * (2 * n + 1) / (2 * n - 3) * (n - m - 1) / (n + m)) * vdm[m, n - 2, :]
             )
 
     if norm == "schmidt":
-        for l in range(0, nmax):
+        for num in range(0, nmax):
             if inverse:
-                vdm[:, l, :] = vdm[:, l, :] * np.sqrt(2 * l + 1)
+                vdm[:, num, :] = vdm[:, num, :] * np.sqrt(2 * num + 1)
             else:
-                vdm[:, l, :] = vdm[:, l, :] / np.sqrt(2 * l + 1)
+                vdm[:, num, :] = vdm[:, num, :] / np.sqrt(2 * num + 1)
 
     vdm = vdm[:mmax, :lmax]
 

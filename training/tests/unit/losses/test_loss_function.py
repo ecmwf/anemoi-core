@@ -313,48 +313,151 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
 
 
 def test_logfft2dist_loss() -> None:
-    """Test that loss function can be instantiated."""
+    """Test that LogFFT2Distance can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.spatial.LogFFT2Distance",
+                "_target_": "anemoi.training.losses.spectral.LogFFT2Distance",
                 "x_dim": 710,
                 "y_dim": 640,
                 "scalers": [],
             },
         ),
     )
-    assert isinstance(loss, FunctionalLoss)
+    assert isinstance(loss, BaseLoss)
     assert hasattr(loss, "x_dim")
     assert hasattr(loss, "y_dim")
 
-    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
-    loss_value = loss.calculate_difference(*right_shaped_pred_output_pair)
-    assert loss_value.shape == torch.Size((6, 1, 710 * 640, 2)), "Loss output shape should match input shape"
-    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    # pred/target are (batch, steps, grid, vars)
+    # TODO (Ophelia): edit this when multi ouptuts get merged
+    right = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+
+    # squash=False -> per-variable loss
+    loss_value = loss(*right, squash=False)
+    assert isinstance(loss_value, torch.Tensor)
+    assert loss_value.ndim == 1 and loss_value.shape[0] == 2, "Expected per-variable loss (n_vars,)"
+
+    # squash=True -> single aggregated loss
+    loss_total = loss(*right, squash=True)
+    assert isinstance(loss_total, torch.Tensor)
+    assert loss_total.numel() == 1, "Expected a single aggregated loss value"
+
+    # wrong grid size should fail (FFT2D reshape/assert)
+    wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
     with pytest.raises(AssertionError):
-        loss.calculate_difference(*wrong_shaped_pred_output_pair)
+        _ = loss(*wrong, squash=True)
 
 
 def test_fcl_loss() -> None:
-    """Test that loss function can be instantiated and behaves as expected."""
+    # TODO (Ophelia): edit this when multi ouptuts get merged
+    """Test that FourierCorrelationLoss can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.spatial.FourierCorrelationLoss",
+                "_target_": "anemoi.training.losses.spectral.FourierCorrelationLoss",
                 "x_dim": 710,
                 "y_dim": 640,
                 "scalers": [],
             },
         ),
     )
-    assert isinstance(loss, FunctionalLoss)
+    assert isinstance(loss, BaseLoss)
     assert hasattr(loss, "x_dim")
     assert hasattr(loss, "y_dim")
 
-    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
-    loss_value = loss.calculate_difference(*right_shaped_pred_output_pair)
-    assert loss_value.shape == torch.Size((6, 1, 710 * 640, 2)), "Loss output shape should match input shape"
-    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    right = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+
+    loss_value = loss(*right, squash=False)
+    assert isinstance(loss_value, torch.Tensor)
+    assert loss_value.ndim == 1 and loss_value.shape[0] == 2, "Expected per-variable loss (n_vars,)"
+
+    loss_total = loss(*right, squash=True)
+    assert isinstance(loss_total, torch.Tensor)
+    assert loss_total.numel() == 1, "Expected a single aggregated loss value"
+
+    wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
     with pytest.raises(AssertionError):
-        loss.calculate_difference(*wrong_shaped_pred_output_pair)
+        _ = loss(*wrong, squash=True)
+
+
+def test_sht_transform_raises_not_implemented() -> None:
+    """Any spectral loss using SHT should raise NotImplementedError at runtime."""
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.LogSpectralDistance",
+                "transform": "sht",
+                # x_dim/y_dim are irrelevant for SHT, but leaving them out keeps it clean.
+            },
+        ),
+    )
+
+    # SpectralTransform expects for now [batch, ensemble, points, variables]
+    # TODO (Ophelia): edit this when multi ouptuts get merged
+    pred = torch.zeros((2, 1, 16, 3))
+    target = torch.zeros_like(pred)
+
+    with pytest.raises(NotImplementedError, match="not implemented yet"):
+        _ = loss(pred, target, squash=True)
+
+
+def test_octahedral_sht_loss() -> None:
+    def _octahedral_expected_points(nlat: int) -> int:
+        half = [4 * (i + 1) + 16 for i in range(nlat // 2)]
+        nlon = half + half[::-1]
+        return int(sum(nlon))
+
+    nlat = 8
+    nvars = 3
+    expected_points = _octahedral_expected_points(nlat)
+
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.SpectralL2Loss",
+                "transform": "octahedral_sht",
+                "y_dim": nlat,
+                "scalers": [],
+            },
+        ),
+    )
+    pred = torch.zeros((2, 1, expected_points, nvars))
+    target = torch.zeros_like(pred)
+    out = loss(pred, target, squash=False)
+    assert out.shape == (nvars,), "squash=False should return per-variable loss"
+    out_total = loss(pred, target, squash=True)
+    assert out_total.numel() == 1, "squash=True should return a single aggregated loss"
+    pred_wrong = torch.zeros((2, 1, expected_points + 1, nvars))
+    target_wrong = torch.zeros_like(pred_wrong)
+    with pytest.raises(AssertionError):
+        _ = loss(pred_wrong, target_wrong, squash=True)
+
+
+def test_cartesian_sht_loss() -> None:
+    nlat = 8
+    nlon = 16
+    nvars = 3
+    expected_points = nlat * nlon
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.SpectralL2Loss",
+                "transform": "cartesian_sht",
+                "x_dim": nlon,
+                "y_dim": nlat,
+                "grid": "legendre-gauss",
+                "scalers": [],
+            },
+        ),
+    )
+
+    pred = torch.zeros((2, 1, expected_points, nvars))
+    target = torch.zeros_like(pred)
+    out = loss(pred, target, squash=False)
+    assert out.shape == (nvars,)
+    out_total = loss(pred, target, squash=True)
+    assert out_total.numel() == 1
+    pred_wrong = torch.zeros((2, 1, expected_points + 1, nvars))
+    target_wrong = torch.zeros_like(pred_wrong)
+    with pytest.raises(AssertionError):
+        _ = loss(pred_wrong, target_wrong, squash=True)

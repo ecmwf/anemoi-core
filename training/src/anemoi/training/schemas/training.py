@@ -308,20 +308,13 @@ class CombinedLossSchema(BaseLossSchema):
 
 
 LossSchemas = (
-    (
     BaseLossSchema
-   
     | HuberLossSchema
-   
     | CombinedLossSchema
-   
     | AlmostFairKernelCRPSSchema
-   
     | KernelCRPSSchema
     | MultiScaleLossSchema
-)
-    | SpectralLossSchema
-)
+) | SpectralLossSchema
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
