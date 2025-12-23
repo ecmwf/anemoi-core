@@ -37,13 +37,13 @@ training:
       -  :class:`AnemoiDatasetsDataModule`
       -  :class:`AnemoiEnsDatasetsDataModule`
 
-****************************
- Changes in hardware config
-****************************
+**************************
+ Changes in System config
+**************************
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml
-   :start-after: # Changes in hardware
+   :start-after: # Changes in system
    :end-before: num_gpus_per_ensemble:
 
 The `truncation` and `truncation_inv` can be used in the deterministic
@@ -102,8 +102,16 @@ A different model class is used for CRPS training.
       inject_noise: True
 
 Each ensemble member samples random noise at every time step. The noise
-is embedded and added to the latent space of the processor using a
+is embedded and injected into the latent space of the processor using a
 conditional layer norm.
+
+Optionally, noise can be generated on a coarser grid and projected to
+the processor grid using a sparse projection matrix. This is configured
+via the ``noise_matrix`` parameter, which should point to a ``.npz``
+file created with ``anemoi-graphs export_to_sparse`` (see
+:ref:`usage-create_sparse_matrices`). Additional options
+``transpose_noise_matrix``, ``row_normalize_noise_matrix``, and
+``autocast`` control how the projection matrix is applied.
 
 .. code:: yaml
 

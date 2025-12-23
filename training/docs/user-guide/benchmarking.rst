@@ -438,7 +438,7 @@ a jupyter notebook and run:
 
    # Run anemoi-training profile to generate the traces and get the run_id
    run_id = "b0cc5f6fa6c0476aa1264ad7aacafb4d/"
-   tracepath = cfg.hardware.paths.profiler + run_id
+   tracepath = cfg.system.output.profiler + run_id
    analyzer = TraceAnalysis(trace_dir=tracepath)
 
 

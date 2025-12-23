@@ -31,7 +31,7 @@ class TestMultiScaleEdgesInit:
         with pytest.raises(AssertionError):
             MultiScaleEdges("test_nodes", "test_nodes", x_hops, None)
 
-    @pytest.mark.parametrize("scale_resolutions", [0, -1, [0], [-1], "invalid"])
+    @pytest.mark.parametrize("scale_resolutions", [-1, [-1, 0], "invalid"])
     def test_fail_init_invalid_scale_resolutions(self, scale_resolutions):
         """Test MultiScaleEdges initialization with invalid scale_resolutions."""
         with pytest.raises(AssertionError):

@@ -217,6 +217,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
     ) -> None:
         """Initialize GraphTransformerBaseMapper.
 
@@ -257,6 +258,8 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             Strategy to shard tensors, by default "edges"
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -286,6 +289,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             layer_kernels=self.layer_factory,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
         )
 
         self.offload_layers(cpu_offload)
@@ -544,6 +548,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
     ) -> None:
         """Initialize GraphTransformerForwardMapper.
 
@@ -581,6 +586,8 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             Strategy to shard tensors, by default "edges"
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -600,6 +607,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
         )
 
         self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
@@ -652,6 +660,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
 
@@ -694,6 +703,8 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             Strategy to shard tensors, by default "edges"
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -713,6 +724,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
         )
 
         self.node_data_extractor = nn.Sequential(

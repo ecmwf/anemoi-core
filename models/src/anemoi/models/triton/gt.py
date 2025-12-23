@@ -7,10 +7,74 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import torch
-import triton
-import triton.language as tl
+
+# check if triton is installed
+# If pytorch is installed on CPU then torch is not available
+try:
+    import triton
+    import triton.language as tl
+except ImportError:
+    raise ValueError(
+        "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
+    )
+
+
+@triton.jit
+def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
+    """Pads H and C to the nearest power of 2 if needed.
+
+    This is required to support non-square numbers of heads and/or channels.
+    Returns a mask for H, H*C and an offset for accessing into a 2D H*C matrix, ignoring padded values
+
+    masking apparently has a price, so if H and C are already powers of 2, nothing is returned
+    If H is already a power of 2 but C is not, a simpler H*C mask is returned
+
+    This function assumes a matrix layout of shape [H,C] for mask_H_C and H_C_off
+    """
+
+    # default mask (assume no padded values)
+    H_mask = True
+    H_C_mask = True
+
+    if H == H_pad and C == C_pad:
+        H_C_off = tl.arange(0, H * C)
+
+    elif H == H_pad:  # just C is not square, we can avoid mask_H
+        C_pad_off = tl.arange(0, C_pad)[None, :]  # (1, C_pad)
+        H_off = tl.arange(0, H)[:, None]  # (H, 1)
+
+        # 2D mask for H * C
+        # e.g 1 2 X X
+        #     5 6 X X
+        #     X X X X
+        # But this kernel loads in 1d, hence we reshape to 1d
+        # shape (H_pad, 1) & shape (1, C_pad) => shape (H_pad, C_pad) => shape (H_pad * C_pad, )
+        H_C_mask_2d = (C_pad_off < C) & (H_off < H)  # (H, C_pad)
+        H_C_mask = tl.reshape(H_C_mask_2d, (H * C_pad,))
+        H_C_off = tl.reshape(H_off * C + C_pad_off, (H * C_pad,))
+
+    else:  # H and C both not square
+        H_pad_off = tl.arange(0, H_pad)[:, None]
+        C_pad_off = tl.arange(0, C_pad)[None, :]
+
+        # mask for H
+        H_mask = tl.arange(0, H_pad) < H
+
+        # 2D mask for H * C
+        # e.g 1 2 X X
+        #     5 6 X X
+        #     X X X X
+        # But this kernel loads in 1d, hence we reshape to 1d
+        # shape (H_pad, 1) & shape (1, C_pad) => shape (H_pad, C_pad) => shape (H_pad * C_pad, )
+        H_C_mask_2d = (C_pad_off < C) & (H_pad_off < H)  # (H, C_pad)
+        H_C_mask = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
+
+        # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
+        # Therefore we make our own range, using unpadded major dimension (C)
+        H_C_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
+
+    return H_mask, H_C_mask, H_C_off
 
 
 @triton.jit
@@ -33,38 +97,46 @@ def _gt_fwd(
     if dst_idx >= N_dst:
         return
 
+    H_pad: tl.constexpr = triton.next_power_of_2(H)
+    C_pad: tl.constexpr = triton.next_power_of_2(C)
+    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
+
     dst_start = dst_idx * H * C
-    dst_off = dst_start + tl.arange(0, H * C)
+    dst_off = dst_start + H_C_off
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
-        zeros = tl.zeros((H,), dtype=tl.float32)  # m initialised as torch.float32
-        tl.store(M_ptr + dst_idx * H + tl.arange(0, H), zeros)
-        zeros = tl.zeros((H * C,), dtype=out_dtype)
-        tl.store(OUT_ptr + dst_off, zeros)
+        zeros = tl.zeros((H_pad,), dtype=tl.float32)  # m initialised as torch.float32
+        M_off = M_ptr + dst_idx * H + tl.arange(0, H_pad)
+        tl.store(M_off, zeros, mask=H_mask)
+        zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
+        OUT_off = OUT_ptr + dst_off
+        tl.store(OUT_off, zeros, mask=H_C_mask)
         return
 
-    q = tl.load(Q_ptr + dst_off).to(tl.float32).reshape((H, C))
-    acc = tl.zeros((H, C), dtype=tl.float32)  # output accumulator, pending normalization by l_i
-    l_i = tl.zeros((H,), dtype=tl.float32)  # sum of attention weights
-    m_i = tl.full((H,), value=-float("inf"), dtype=tl.float32)  # running max for stability
+    q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
+    l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
+    m_i = tl.full((H_pad,), value=-float("inf"), dtype=tl.float32)  # running max for stability
 
     # helpers to avoid repeated computations/indexing:
-    qk_scale = 1 / tl.sqrt(float(C))
-    edge_ptr = E_ptr + neigh_start * H * C + tl.arange(0, H * C)  # pointer to first edge_attr
+    edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
+    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
-    for _ in range(num_edges):  # iterate over incident edges
-        e = tl.load(edge_ptr).to(tl.float32).reshape((H, C))
+    # for _ in tl.range(num_edges, warp_specialize=True):
+    for _ in range(num_edges):
+        e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         # src neighbor index: rowptr[e_idx]
         src_idx = tl.load(ROW_ptr + e_idx)
-        src_off = src_idx * H * C + tl.arange(0, H * C)
-        k = tl.load(K_ptr + src_off).to(tl.float32).reshape((H, C))
-        v = tl.load(V_ptr + src_off).to(tl.float32).reshape((H, C))
+
+        src_off = src_idx * H * C + H_C_off
+        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         k_e = k + e
         v_e = v + e
@@ -93,16 +165,17 @@ def _gt_fwd(
     tl.store(
         OUT_ptr + dst_off,
         acc.to(out_dtype).reshape(
-            H * C,
+            H_pad * C_pad,
         ),
+        mask=H_C_mask,
     )
 
     # store m_i + log(l_i) for backward
     m_start = dst_idx * H
-    m_off = m_start + tl.arange(0, H)
+    m_off = m_start + tl.arange(0, H_pad)
 
     m_i += tl.log(l_i)
-    tl.store(M_ptr + m_off, m_i)
+    tl.store(M_ptr + m_off, m_i, mask=H_mask)
 
 
 @triton.jit
@@ -127,8 +200,11 @@ def _gt_bwd_dst_pass(
     if dst_idx >= N_dst:
         return
 
-    qk_scale = 1.0 / tl.sqrt(float(C))
-    dst_off = dst_idx * H * C + tl.arange(0, H * C)
+    H_pad: tl.constexpr = triton.next_power_of_2(H)
+    C_pad: tl.constexpr = triton.next_power_of_2(C)
+    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
+
+    dst_off = dst_idx * H * C + H_C_off
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
@@ -136,38 +212,40 @@ def _gt_bwd_dst_pass(
 
     if num_edges == 0:
         # store D_j = <d_out, out> = 0 and dQ = 0
-        zeros = tl.zeros((H,), dtype=out_dtype)
-        tl.store(D_ptr + dst_idx * H + tl.arange(0, H), zeros)
-        zeros = tl.zeros((H * C,), dtype=out_dtype)
-        tl.store(D_Q_ptr + dst_off, zeros)
+        zeros = tl.zeros((H_pad,), dtype=out_dtype)
+        tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), zeros, mask=H_mask)
+        zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
+        tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
         return
 
-    d_out = tl.load(D_OUT_ptr + dst_off).to(tl.float32).reshape((H, C))
-    out = tl.load(OUT_ptr + dst_off).to(tl.float32).reshape((H, C))
+    d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    out = tl.load(OUT_ptr + dst_off, H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     # D_j = <d_out, out> for one-pass computation of dQ
     Dj = tl.sum(d_out * out, axis=-1)  # [H]
 
-    q = tl.load(Q_ptr + dst_off).to(tl.float32).reshape((H, C))
-    dq = tl.zeros((H, C), dtype=tl.float32)
+    q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
-    edge_ptr = E_ptr + neigh_start * H * C + tl.arange(0, H * C)  # pointer to first edge_attr
+    edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
+    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
+    # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
-        e = tl.load(edge_ptr).to(tl.float32).reshape((H, C))
+        e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         src = tl.load(ROW_ptr + e_idx)
-        src_off = src * H * C + tl.arange(0, H * C)
-        k = tl.load(K_ptr + src_off).to(tl.float32).reshape((H, C))
+        src_off = src * H * C + H_C_off
+        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         ke = k + e
         # score and alpha using saved M
-        m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H)).to(tl.float32)
+        m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
         s_ij = tl.sum(q * ke, axis=-1) * qk_scale
         alpha_ij = tl.exp(s_ij - m_j)
 
-        v = tl.load(V_ptr + src_off).to(tl.float32).reshape((H, C))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         ve = v + e
 
         dalpha = tl.sum(d_out * ve, axis=-1)
@@ -180,12 +258,13 @@ def _gt_bwd_dst_pass(
         e_idx += 1
 
     # store D_j and dQ
-    tl.store(D_ptr + dst_idx * H + tl.arange(0, H), Dj.to(out_dtype))
+    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
     tl.store(
         D_Q_ptr + dst_off,
         dq.to(out_dtype).reshape(
-            H * C,
+            H_pad * C_pad,
         ),
+        mask=H_C_mask,
     )
 
 
@@ -213,59 +292,67 @@ def _gt_bwd_src_pass(
     if src_idx >= N_src:
         return
 
+    H_pad: tl.constexpr = triton.next_power_of_2(H)
+    C_pad: tl.constexpr = triton.next_power_of_2(C)
+    _, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
+
     start = tl.load(ROWPTR_ptr + src_idx)
     end = tl.load(ROWPTR_ptr + src_idx + 1)
     num_edges = end - start
 
     if num_edges == 0:
-        zeros = tl.zeros((H * C,), dtype=out_dtype)
-        tl.store(D_K_ptr + src_idx * H * C + tl.arange(0, H * C), zeros)
-        tl.store(D_V_ptr + src_idx * H * C + tl.arange(0, H * C), zeros)
+        zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
+        tl.store(D_K_ptr + src_idx * H * C + H_C_off, zeros, mask=H_C_mask)
+        tl.store(D_V_ptr + src_idx * H * C + H_C_off, zeros, mask=H_C_mask)
         return
 
     # src-side k, v (shared for all edges)
-    src_off = src_idx * H * C + tl.arange(0, H * C)
-    k = tl.load(K_ptr + src_off).to(tl.float32).reshape((H, C))
-    v = tl.load(V_ptr + src_off).to(tl.float32).reshape((H, C))
+    src_off = src_idx * H * C + H_C_off
+    k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
-    accK = tl.zeros((H, C), dtype=tl.float32)
-    accV = tl.zeros((H, C), dtype=tl.float32)
+    accK = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+    accV = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+
+    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
     # note that edges aren't necessarily contiguous in memory here, use EDGE_IDS_ptr
     for i in range(num_edges):
+        # for i in tl.range(0, num_edges, warp_specialize=True):
         # indexing into edge list + corresponding dst node
         e_idx = tl.load(EDGE_IDS_ptr + start + i)
         dst = tl.load(EDGE_DST_ptr + e_idx)
 
         # get saved tensors for dst node
-        dst_off = dst * H * C + tl.arange(0, H * C)
-        q = tl.load(Q_ptr + dst_off).to(tl.float32).reshape((H, C))
-        d_out = tl.load(D_OUT_ptr + dst_off).to(tl.float32).reshape((H, C))
-        m_j = tl.load(M_ptr + dst * H + tl.arange(0, H)).to(tl.float32)
-        Dj = tl.load(D_ptr + dst * H + tl.arange(0, H)).to(tl.float32)
+        dst_off = dst * H * C + H_C_off
+        q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
+        Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
 
-        e_off = e_idx * H * C + tl.arange(0, H * C)
-        e = tl.load(E_ptr + e_off).to(tl.float32).reshape((H, C))
+        e_off = e_idx * H * C + H_C_off
+        e = tl.load(E_ptr + e_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         ke = k + e
         ve = v + e
 
         # some recomputations from dst-pass
-        s_ij = tl.sum(q * ke, axis=-1) * (1.0 / tl.sqrt(float(C)))
+        s_ij = tl.sum(q * ke, axis=-1) * qk_scale
         alpha_ij = tl.exp(s_ij - m_j)
         dalpha = tl.sum(d_out * ve, axis=-1)
         dS = alpha_ij * (dalpha - Dj)
 
         # per-edge k, v contributions, summing up to per-edge e contribution
         dV_edge = alpha_ij[:, None] * d_out
-        dK_edge = dS[:, None] * q * (1.0 / tl.sqrt(float(C)))
+        dK_edge = dS[:, None] * q * qk_scale
         dE_edge = dV_edge + dK_edge
 
         tl.store(
             D_E_ptr + e_off,
             dE_edge.to(out_dtype).reshape(
-                H * C,
+                H_pad * C_pad,
             ),
+            mask=H_C_mask,
         )
 
         accK += dK_edge
@@ -275,14 +362,16 @@ def _gt_bwd_src_pass(
     tl.store(
         D_K_ptr + src_off,
         accK.to(out_dtype).reshape(
-            H * C,
+            H_pad * C_pad,
         ),
+        mask=H_C_mask,
     )
     tl.store(
         D_V_ptr + src_off,
         accV.to(out_dtype).reshape(
-            H * C,
+            H_pad * C_pad,
         ),
+        mask=H_C_mask,
     )
 
 
@@ -291,6 +380,12 @@ def _gt_bwd_src_pass(
 
 class GraphTransformerFunction(torch.autograd.Function):
     """Custom autograd for GraphTransformer using Triton kernels."""
+
+    def __init__(self):
+        if not torch.cuda.is_available():
+            raise ValueError(
+                "Error. The 'triton' backend was selected for the GraphTransformer but 'torch.cuda.is_available()' returned 'False'. The 'triton' backend is currently only supported on GPUs. To run on other device types, please select a different backend for the GraphTransformer in the models config. If you intend to run on GPUs, please ensure your torch install supports running on GPUs."
+            )
 
     @staticmethod
     def forward(ctx, q, k, v, e, csc, reverse):

@@ -15,7 +15,7 @@ from anemoi.models.migrations import MigrationMetadata
 metadata = MigrationMetadata(
     versions={
         "migration": "1.0.0",
-        "anemoi-models": "%NEXT_ANEMOI_MODELS_VERSION%",
+        "anemoi-models": "0.11.0",
     },
 )
 # <-- END DO NOT CHANGE

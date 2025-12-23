@@ -13,8 +13,11 @@ import pytest
 import torch
 
 from anemoi.models.layers.conv import GraphTransformerConv
-from anemoi.models.triton.gt import GraphTransformerFunction
 from anemoi.models.triton.utils import edge_index_to_csc
+from anemoi.models.triton.utils import is_triton_available
+
+if is_triton_available():
+    from anemoi.models.triton.gt import GraphTransformerFunction
 
 
 @pytest.fixture(autouse=True)
@@ -38,16 +41,14 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
     return edge_index, edge_index.shape[1]
 
 
-def max_abs_diff(a: torch.Tensor, b: torch.Tensor) -> float:
-    """Compute maximum absolute difference between two tensors."""
-    return (a - b).abs().max().item()
-
-
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
     [
         (4, 10, 2, 4),
+        (4, 10, 6, 4),  # tests num_heads != pow_of_2
+        (4, 10, 2, 6),  # tests  num_channels != pow_of_2
+        (4, 10, 6, 6),  # tests num_heads * num_channels != pow_of_2
     ],
 )
 def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
@@ -110,9 +111,47 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     "n_src,n_dst,h,d",
     [
         (4, 10, 2, 4),
+        (4, 10, 6, 4),
+        (4, 10, 2, 6),
+        (4, 10, 6, 6),
     ],
 )
-def test_graph_transformer_vs_reference(n_src: int, n_dst: int, h: int, d: int):
+def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int):
+    """Test that triton GraphTransformerFunction matches reference implementation."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    edge_index, m = build_bipartite_graph(n_src, n_dst)
+    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+
+    # Custom implementation
+    query = torch.randn((n_dst, h, d), requires_grad=True)
+    key = torch.randn((n_src, h, d), requires_grad=True)
+    value = torch.randn((n_src, h, d), requires_grad=True)
+    edge_attr = torch.randn((m, h, d), requires_grad=True)
+
+    edge_attr_csc = edge_attr[perm]
+    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+
+    # Reference pyg implementation
+    gt_ref = GraphTransformerConv(out_channels=d)
+    out_ref = gt_ref.forward(query, key, value, edge_attr, edge_index)
+
+    tolerance = 1e-5
+    torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "n_src,n_dst,h,d",
+    [
+        (4, 10, 2, 4),
+        (4, 10, 6, 4),
+        (4, 10, 2, 6),
+        (4, 10, 6, 6),
+    ],
+)
+def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
@@ -145,15 +184,9 @@ def test_graph_transformer_vs_reference(n_src: int, n_dst: int, h: int, d: int):
     grads_ref = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
 
     # Compare outputs and gradients
-    output_diff = max_abs_diff(out_triton, out_ref)
-    dq_diff = max_abs_diff(grads_triton[0], grads_ref[0])
-    dk_diff = max_abs_diff(grads_triton[1], grads_ref[1])
-    dv_diff = max_abs_diff(grads_triton[2], grads_ref[2])
-    de_diff = max_abs_diff(grads_triton[3], grads_ref[3])
-
     tolerance = 1e-5
-    assert output_diff < tolerance, f"Output diff {output_diff} exceeds tolerance {tolerance}"
-    assert dq_diff < tolerance, f"Query gradient diff {dq_diff} exceeds tolerance {tolerance}"
-    assert dk_diff < tolerance, f"Key gradient diff {dk_diff} exceeds tolerance {tolerance}"
-    assert dv_diff < tolerance, f"Value gradient diff {dv_diff} exceeds tolerance {tolerance}"
-    assert de_diff < tolerance, f"Edge attr gradient diff {de_diff} exceeds tolerance {tolerance}"
+    torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
+    torch.testing.assert_close(grads_triton[0], grads_ref[0], atol=tolerance, rtol=0)  # queries
+    torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
+    torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
+    torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges

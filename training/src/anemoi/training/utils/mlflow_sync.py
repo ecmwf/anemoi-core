@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import mlflow.entities
+from mlflow_export_import.common import utils
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
@@ -70,7 +71,10 @@ try:
     from mlflow_export_import.run.run_data_importer import _log_metrics
 
 except ImportError:
-    msg = "The 'mlflow-export-import' package is not installed. Please install it from https://github.com/mlflow/mlflow-export-import"
+    msg = (
+        "The 'mlflow-export-import' package is not installed."
+        "You can install it doing pip install anemoi-training[mlflowsync]"
+    )
     raise ImportError(msg) from None
 
 LOGGER = logging.getLogger(__name__)
@@ -146,6 +150,7 @@ class MlFlowSync:
         experiment_name: str = "anemoi_debug",
         export_deleted_runs: bool = False,
         log_level: str = "INFO",
+        log_model: bool = False,
     ) -> None:
         self.source_tracking_uri = source_tracking_uri
         self.dest_tracking_uri = dest_tracking_uri
@@ -153,6 +158,7 @@ class MlFlowSync:
         self.experiment_name = experiment_name
         self.export_deleted_runs = export_deleted_runs
         self.log_level = log_level
+        self.log_model = log_model
 
         LOGGER.setLevel(self.log_level)
 
@@ -388,8 +394,32 @@ class MlFlowSync:
             "params": params,
             "metrics": _get_metrics_with_steps(src_mlflow_client, run),
             "tags": tags,
-            "inputs": _inputs_to_dict(run.inputs),
+            "inputs": {
+                "dataset_inputs": _inputs_to_dict(run.inputs),
+            },
         }
+
+        src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
+
+        if self.log_model:
+            from mlflow_export_import.logged_model.import_logged_model import import_logged_model
+
+            for model in src_run_dct["inputs"]["model_inputs"]:
+                model_path = (
+                    run.data.params["config.diagnostics.log.mlflow.save_dir"]
+                    + "/"
+                    + run.info.run_id
+                    + "/"
+                    + model["model_id"]
+                )
+                import_logged_model(
+                    input_dir=model_path,
+                    experiment_name="test",
+                    run_id=run.info_run_id,
+                    mlflow_client=src_mlflow_client,
+                    model_type="input",
+                    step=model["step"],
+                )
 
         try:
             LOGGER.info("Starting to export run data")
@@ -412,7 +442,9 @@ class MlFlowSync:
 
             traceback.print_exc()
             LOGGER.exception(
-                "Importing run %s of experiment %s failed",
+                "Importing run %s of experiment %s failed."
+                "Make sure you're using the latest version of mlflow_export_import"
+                "Please install it from https://github.com/mlflow/mlflow-export-import",
                 dst_run_id,
                 self.experiment_name,
             )

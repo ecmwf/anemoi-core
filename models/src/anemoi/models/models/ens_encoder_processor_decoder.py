@@ -87,7 +87,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_data_latent = torch.cat(
                 (
                     x_data_latent,
-                    einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble grid) vars"),
+                    einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars"),
                 ),
                 dim=-1,
             )
@@ -125,18 +125,22 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     ) -> torch.Tensor:
         """Forward operator.
 
-        Args:
-            x: torch.Tensor
-                Input tensor, shape (bs, m, e, n, f)
-            fcstep: int
-                Forecast step
-            model_comm_group: Optional[ProcessGroup], optional
-                Model communication group
-            grid_shard_shapes : list, optional
-                Shard shapes of the grid, by default None
-            **kwargs: Additional keyword arguments
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor, shape (bs, m, e, n, f)
+        fcstep : int
+            Forecast step
+        model_comm_group : ProcessGroup, optional
+            Model communication group
+        grid_shard_shapes : list, optional
+            Shard shapes of the grid, by default None
+        **kwargs
+            Additional keyword arguments
 
-        Returns:
+        Returns
+        -------
+        torch.Tensor
             Output tensor
         """
         batch_size, ensemble_size = x.shape[0], x.shape[2]
@@ -164,8 +168,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         x_latent_proc, latent_noise = self.noise_injector(
             x=x_latent,
-            noise_ref=x_hidden_latent,
-            shard_shapes=shard_shapes_hidden,
+            batch_size=batch_size,
+            ensemble_size=ensemble_size,
+            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            shard_shapes_ref=shard_shapes_hidden,
             model_comm_group=model_comm_group,
         )
 
