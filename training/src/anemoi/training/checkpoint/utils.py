@@ -238,15 +238,18 @@ def _check_tensor_validity(name: str, tensor: torch.Tensor, validation_errors: l
     if torch.isnan(tensor).any():
         validation_errors.append(f"Tensor '{name}' contains NaN values")
     if torch.isinf(tensor).any():
-        validation_errors.append(f"Tensor '{name}' contains Inf values")
+        validation_errors.append(f"Tensor '{name}' contains infinite values")
 
 
 def _validate_nested_tensors(parent_key: str, nested_dict: dict, validation_errors: list[str]) -> None:
-    """Validate tensors in nested dictionaries."""
+    """Validate tensors in nested dictionaries (recursive)."""
     for sub_key, sub_value in nested_dict.items():
+        full_key = f"{parent_key}.{sub_key}"
         if isinstance(sub_value, torch.Tensor):
-            full_key = f"{parent_key}.{sub_key}"
             _check_tensor_validity(full_key, sub_value, validation_errors)
+        elif isinstance(sub_value, dict):
+            # Recurse into nested dictionaries
+            _validate_nested_tensors(full_key, sub_value, validation_errors)
 
 
 def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
@@ -315,7 +318,8 @@ def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
 
         return metadata  # noqa: TRY300
 
-    except (OSError, RuntimeError, KeyError, TypeError) as e:
+    except Exception as e:
+        # Catch all torch.load failures including UnpicklingError, RuntimeError, etc.
         raise CheckpointLoadError(checkpoint_path, e, {"operation": "extract_metadata"}) from e
 
 
