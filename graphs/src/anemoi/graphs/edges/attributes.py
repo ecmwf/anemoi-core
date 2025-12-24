@@ -23,6 +23,7 @@ from torch_geometric.utils import scatter
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import NodesAxis
+from anemoi.graphs.utils import camel_to_snake
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import haversine_distance
 
@@ -35,8 +36,9 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
     node_attr_name: str = None
     norm_by_group: bool = False
 
-    def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
+    def __init__(self, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
+        self.name = name or camel_to_snake(self.__class__.__name__)
         self.norm = norm
         self.dtype = dtype
         self.device = get_distributed_device()
@@ -119,9 +121,11 @@ class DirectionalHarmonics(EdgeDirection):
         Compute directional harmonics from edge directions.
     """
 
-    def __init__(self, order: int = 3, norm: str | None = None, dtype: str = "float32") -> None:
+    def __init__(
+        self, name: str | None = None, order: int = 3, norm: str | None = None, dtype: str = "float32"
+    ) -> None:
         self.order = order
-        super().__init__(norm=norm, dtype=dtype)
+        super().__init__(name, norm=norm, dtype=dtype)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Get the 2D direction vectors [dx, dy]
@@ -178,8 +182,8 @@ class Azimuth(BasePositionalBuilder):
 class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
     """Base class for boolean edge attributes."""
 
-    def __init__(self) -> None:
-        super().__init__(norm=None, dtype="bool")
+    def __init__(self, name: str | None = None) -> None:
+        super().__init__(name, norm=None, dtype="bool")
 
 
 class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
@@ -187,9 +191,9 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
 
     nodes_axis: NodesAxis | None = None
 
-    def __init__(self, node_attr_name: str) -> None:
+    def __init__(self, node_attr_name: str, name: str | None = None) -> None:
         self.node_attr_name = node_attr_name
-        super().__init__()
+        super().__init__(name)
         if self.nodes_axis is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
 
@@ -274,6 +278,7 @@ class RadialBasisFeatures(EdgeLength):
 
     def __init__(
         self,
+        name: str | None = None,
         r_scale: float | None = None,
         centers: list[float] | None = None,
         sigma: float = 0.2,
@@ -304,7 +309,7 @@ class RadialBasisFeatures(EdgeLength):
         ), f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
 
         self.sigma = sigma
-        super().__init__(norm=norm, dtype=dtype)
+        super().__init__(name, norm=norm, dtype=dtype)
 
     def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
         """Aggregate edge features with per-node scaling and per-target-node normalization.
@@ -365,9 +370,9 @@ class GaussianDistanceWeights(EdgeLength):
 
     norm_by_group: bool = True  # normalise the gaussian weights by target node
 
-    def __init__(self, sigma: float = 1.0, norm: str = "l1", **kwargs) -> None:
+    def __init__(self, name: str | None = None, sigma: float = 1.0, norm: str = "l1", **kwargs) -> None:
         self.sigma = sigma
-        super().__init__(norm=norm)
+        super().__init__(name, norm=norm)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         dists = super().compute(x_i, x_j)

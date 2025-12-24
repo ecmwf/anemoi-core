@@ -23,6 +23,7 @@ from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes import ICONCellGridNodes
 from anemoi.graphs.nodes import ICONMultimeshNodes
 from anemoi.graphs.nodes import ICONNodes
+from anemoi.graphs.nodes.attributes.area_weights import UniformWeights
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 
@@ -114,7 +115,7 @@ def test_node_builder_dependencies(monkeypatch, node_builder_cls: type[BaseNodeB
     nodes = ICONNodes("test_icon_nodes", "test.nc", 0, 0)
     node_builder = node_builder_cls("data_nodes", "test_icon_nodes")
     graph = HeteroData()
-    graph = nodes.register_attributes(graph, {})
+    graph = nodes.register_attributes(graph, [])
 
     node_builder.update_graph(graph)
 
@@ -131,10 +132,10 @@ class TestEdgeBuilderDependencies:
         monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
         nodes = ICONNodes("test_icon_nodes", "test.nc", 1, 0)
 
-        graph = nodes.update_graph(graph, {})
+        graph = nodes.update_graph(graph)
 
         data_nodes = ICONCellGridNodes("data", "test_icon_nodes")
-        graph = data_nodes.register_attributes(graph, {})
+        graph = data_nodes.register_attributes(graph, [])
 
         return graph
 
@@ -177,9 +178,9 @@ def test_register_attributes(
     """Test ICONNodes register correctly the weights."""
     monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
     nodes = ICONNodes("test_nodes", "test.nc", 0, 0)
-    config = {"test_attr": {"_target_": "anemoi.graphs.nodes.attributes.UniformWeights"}}
 
-    graph = nodes.register_attributes(graph_with_nodes, config)
+    attr = UniformWeights(name="test_attr")
+    graph = nodes.register_attributes(graph_with_nodes, [attr])
 
     assert graph["test_nodes"]["_grid_filename"] is not None
     assert isinstance(graph["test_nodes"]["_multi_mesh"], ICONMultiMesh)
