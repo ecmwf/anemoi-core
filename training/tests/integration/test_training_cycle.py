@@ -235,11 +235,9 @@ def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_dry_run(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
+@pytest.mark.mlflow
+def test_training_cycle_mlflow_dry_run(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = gnn_config
-
-    # Override graph attribute
-    cfg["system"]["input"]["graph"] = "existing"
 
     # Override config for MLFlow logging using an dry run ID
     cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
