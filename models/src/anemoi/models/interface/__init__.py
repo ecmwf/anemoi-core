@@ -169,6 +169,9 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
 
         # For the residual prediction
+        if not hasattr(self, "residual_normalizer"):
+            self.residual_normalizer = None
+        
         predict_kwargs["residual_normalizer"] = self.residual_normalizer
         predict_kwargs["data_indices"] = self.data_indices 
         

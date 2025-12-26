@@ -210,7 +210,6 @@ class GraphResidualForecaster(BaseGraphModule):
                 Δx̂_norm,
                 Δx_true_norm,
                 rollout_step,
-                training_mode,
                 validation_mode,
                 use_reentrant=False,
             )
@@ -228,10 +227,8 @@ class GraphResidualForecaster(BaseGraphModule):
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        del batch_idx
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
