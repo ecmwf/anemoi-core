@@ -296,6 +296,11 @@ class BaseDDPStrategySchema(BaseModel):
     "Number of GPUs per model."
     read_group_size: PositiveInt = Field(example=1)
     "Number of GPUs per reader group. Defaults to number of GPUs."
+    
+    # Added to profile whether they improve GPU sync
+    gradient_as_bucket_view: bool = False
+    static_graph: bool = False
+    find_unused_parameters: bool = True
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):

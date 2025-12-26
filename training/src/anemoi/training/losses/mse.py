@@ -13,11 +13,13 @@ import logging
 import torch
 
 from anemoi.training.losses.base import FunctionalLoss
+#from anemoi.training.losses.base import GraphCastBaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
 class MSELoss(FunctionalLoss):
+#class MSELoss(GraphCastBaseLoss):    
     """MSE loss."""
 
     name: str = "mse"
@@ -38,3 +40,7 @@ class MSELoss(FunctionalLoss):
             MSE loss
         """
         return torch.square(pred - target)
+    
+    
+    
+    

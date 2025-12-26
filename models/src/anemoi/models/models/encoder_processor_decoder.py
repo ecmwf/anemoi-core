@@ -100,7 +100,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         x_skip = x[:, -1, ...]
         x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
+        
+        # Commented out due to version differences. 
+        #x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
         x_skip = einops.rearrange(x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size)
 
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)

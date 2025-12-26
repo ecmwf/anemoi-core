@@ -805,6 +805,8 @@ class PlotLoss(BasePerBatchPlotCallback):
             # sort parameters by groups
             sort_by_parameter_group = np.argsort(group_inverse, kind="stable")
 
+
+
         # apply new order to parameters
         sorted_parameter_names = np.array(self.parameter_names)[sort_by_parameter_group]
         parameters_to_groups = parameters_to_groups[sort_by_parameter_group]
@@ -818,6 +820,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         cmap = "tab10" if len(unique_group_list) <= 10 else "tab20"
         if len(unique_group_list) > 20:
             LOGGER.warning("More than 20 groups detected, but colormap has only 20 colors.")
+        
         # if all groups have count 1 use black color
         bar_color_per_group = (
             np.tile("k", len(group_counts))
@@ -874,6 +877,8 @@ class PlotLoss(BasePerBatchPlotCallback):
             metadata_variables=self.metadata_variables,
         )
         self.parameter_names = [self.parameter_names[i] for i in argsort_indices]
+        
+
         if not isinstance(self.loss, BaseLoss):
             LOGGER.warning(
                 "Loss function must be a subclass of BaseLoss, or provide `squash`.",

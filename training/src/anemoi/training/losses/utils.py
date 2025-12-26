@@ -50,6 +50,6 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
 
     log_text += f"Total scaling sum: {scaling_sum:.4g}, "
     scaling_values["total_sum"] = scaling_sum
-    LOGGER.debug(log_text)
+    LOGGER.info(log_text)
 
     return scaling_values

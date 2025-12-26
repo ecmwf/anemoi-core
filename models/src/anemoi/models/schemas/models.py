@@ -55,7 +55,9 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec"
     )
     ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec"
-
+    
+    ANEMOI_RESIDUAL_ENC_PROC_DEC = "anemoi.models.models.residual_encoder_processor_decoder.AnemoiResidualModelEncProcDec"
+    ANEMOI_RESIDUAL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiResidualModelEncProcDec"
 
 class Model(BaseModel):
     target_: DefinedModels = Field(..., alias="_target_")

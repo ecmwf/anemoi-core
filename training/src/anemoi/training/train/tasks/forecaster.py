@@ -174,7 +174,7 @@ class GraphForecaster(BaseGraphModule):
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, metrics_next = checkpoint(
+            loss,  metrics_next = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,

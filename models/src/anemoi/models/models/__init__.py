@@ -14,6 +14,7 @@ from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
 from .interpolator import AnemoiModelEncProcDecInterpolator
+from .residual_encoder_processor_decoder import AnemoiResidualModelEncProcDec
 
 __all__ = [
     "BaseGraphModel",
@@ -23,4 +24,5 @@ __all__ = [
     "AnemoiDiffusionTendModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiModelEncProcDecInterpolator",
+    "AnemoiResidualModelEncProcDec",
 ]

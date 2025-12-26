@@ -663,6 +663,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         del batch_idx
 
         train_loss, _, _ = self._step(batch)
+        
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,
