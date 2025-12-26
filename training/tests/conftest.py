@@ -59,17 +59,28 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="enable tests marked as requiring multiple GPUs",
     )
+    parser.addoption(
+        "--mlflow",
+        action="store_true",
+        dest="mlflow",
+        default=False,
+        help="enable tests marked as requiring mlflow test server",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register the 'multigpu' marker to avoid warnings."""
     config.addinivalue_line("markers", "multigpu: mark tests as requiring multiple GPUs")
+    config.addinivalue_line("markers", "mlflow: mark tests as requiring mlflow test server")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Automatically skip @pytest.mark.multigpu tests unless --multigpu is used."""
-    if not config.getoption("--multigpu"):
-        skip_marker = pytest.mark.skip(reason="Skipping tests requiring multipe GPUs, use --multigpu to enable")
-        for item in items:
-            if item.get_closest_marker("multigpu"):
-                item.add_marker(skip_marker)
+    for option_name in ["multigpu", "mlflow"]:
+        if not config.getoption(f"--{option_name}"):
+            skip_marker = pytest.mark.skip(
+                reason=f"Skipping tests requiring {option_name}, use --{option_name} to enable",
+            )
+            for item in items:
+                if item.get_closest_marker(option_name):
+                    item.add_marker(skip_marker)

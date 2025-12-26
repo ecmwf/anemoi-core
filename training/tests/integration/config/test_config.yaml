@@ -2,6 +2,7 @@
 system:
   input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+    graph: first_graph_o48.pt
 
 dataloader:
   training:
