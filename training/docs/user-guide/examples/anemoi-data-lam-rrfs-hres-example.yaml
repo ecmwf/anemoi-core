@@ -20,47 +20,44 @@ input:
         - grib:
             path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
             param:
-              - REFC
-              - pres_0g
-              - height_500hPa
-              - ugrd_925
-              - ugrd_850
-              - ugrd_500
-              - ugrd_200
-              - vgrd_925
-              - vgrd_850
-              - vgrd_500
-              - vgrd_200
-              - temp_925
-              - temp_850
-              - temp_500
-              - temp_200
-              - sphum_925
-              - sphum_850
-              - sphum_500
-              - sphum_200
-              - clmr_925
-              - clmr_850
-              - clmr_500
-              - clmr_200
-              - icmr_925
-              - icmr_850
-              - icmr_500
-              - icmr_200
-              - rwmr_925
-              - rwmr_850
-              - rwmr_500
-              - rwmr_200
-              - snmr_925
-              - snmr_850
-              - snmr_500
-              - snmr_200
-              - grle_925
-              - grle_850
-              - grle_500
-              - grle_200
-              - temp_sfc
-              - tcdc
+              - UGRD
+              - VGRD
+              - TMP
+              - SPFH
+              - HGT
+              - CLMR
+              - ICMR
+              - RWMR
+              - SNMR
+              - GRLE
+            typeOfLevel: isobaricInhPa
+            levelist: [925, 850, 500, 200]
+        - rename:
+            param:
+              UGRD: ugrd
+              VGRD: vgrd
+              TMP: temp
+              SPFH: sphum
+              HGT: height
+              CLMR: clmr
+              ICMR: icmr
+              RWMR: rwmr
+              SNMR: snmr
+              GRLE: grle
+        - rename:
+            param: "{param}_{levelist}"
+        - grib:
+            path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+            param: [PRES, TMP, REFC]
+            typeOfLevel: surface
+        - rename:
+            param:
+              PRES: pres_0g
+              TMP: temp_sfc
+        - grib:
+            path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+            param: [REFC]
+            typeOfLevel: entire atmosphere (considered as a single layer)
     - regrid:
         matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
 
