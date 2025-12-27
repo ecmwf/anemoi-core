@@ -14,6 +14,9 @@ dates:
   end: "2024-05-05T23:00:00"
   frequency: 1h
 
+build:
+  variable_naming: "{param}"
+
 input:
   pipe:
     - join:
@@ -21,11 +24,11 @@ input:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
                 param:
-                  - ugrd
-                  - vgrd
-                  - tmp
-                  - spfh
-                  - hgt
+                  - u
+                  - v
+                  - t
+                  - q
+                  - gh
                   - clwmr
                   - icmr
                   - rwmr
@@ -35,18 +38,18 @@ input:
                 levelist: [925, 850, 500, 200]
             - rename:
                 param:
-                  ugrd: ugrd
-                  vgrd: vgrd
-                  tmp: temp
-                  spfh: sphum
-                  hgt: height
+                  u: ugrd
+                  v: vgrd
+                  t: temp
+                  q: sphum
+                  gh: height
                   clwmr: clmr
                   icmr: icmr
                   rwmr: rwmr
                   snmr: snmr
                   grle: grle
             - rename:
-                param: "{param}_{levelist}"
+                param: "{param}_{level}"
         - pipe:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
