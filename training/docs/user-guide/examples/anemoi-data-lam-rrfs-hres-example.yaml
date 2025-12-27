@@ -17,43 +17,45 @@ dates:
 input:
   pipe:
     - join:
-        - grib:
-            path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-            param:
-              - UGRD
-              - VGRD
-              - TMP
-              - SPFH
-              - HGT
-              - CLMR
-              - ICMR
-              - RWMR
-              - SNMR
-              - GRLE
-            typeOfLevel: isobaricInhPa
-            levelist: [925, 850, 500, 200]
-        - rename:
-            param:
-              UGRD: ugrd
-              VGRD: vgrd
-              TMP: temp
-              SPFH: sphum
-              HGT: height
-              CLMR: clmr
-              ICMR: icmr
-              RWMR: rwmr
-              SNMR: snmr
-              GRLE: grle
-        - rename:
-            param: "{param}_{levelist}"
-        - grib:
-            path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-            param: [PRES, TMP, REFC]
-            typeOfLevel: surface
-        - rename:
-            param:
-              PRES: pres_0g
-              TMP: temp_sfc
+        - pipe:
+            - grib:
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                param:
+                  - UGRD
+                  - VGRD
+                  - TMP
+                  - SPFH
+                  - HGT
+                  - CLMR
+                  - ICMR
+                  - RWMR
+                  - SNMR
+                  - GRLE
+                typeOfLevel: isobaricInhPa
+                levelist: [925, 850, 500, 200]
+            - rename:
+                param:
+                  UGRD: ugrd
+                  VGRD: vgrd
+                  TMP: temp
+                  SPFH: sphum
+                  HGT: height
+                  CLMR: clmr
+                  ICMR: icmr
+                  RWMR: rwmr
+                  SNMR: snmr
+                  GRLE: grle
+            - rename:
+                param: "{param}_{levelist}"
+        - pipe:
+            - grib:
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                param: [PRES, TMP]
+                typeOfLevel: surface
+            - rename:
+                param:
+                  PRES: pres_0g
+                  TMP: temp_sfc
         - grib:
             path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
             param: [REFC]
