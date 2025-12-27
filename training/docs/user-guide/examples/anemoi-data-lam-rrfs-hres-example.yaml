@@ -15,18 +15,21 @@ dates:
   frequency: 1h
 
 input:
-  join:
-    - pipe:
+  pipe:
+    - join:
+        - pipe:
+            - grib:
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                param: [ugrd, vgrd, temp, sphum, clmr, icmr, rwmr, snmr, grle, height]
+                levelist: [925, 850, 500, 200]
+                typeOfLevel: isobaricInhPa
+            - rename:
+                param: "{param}_{levelist}"
         - grib:
             path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-            param: [ugrd, vgrd, temp, sphum, clmr, icmr, rwmr, snmr, grle, height]
-            levelist: [925, 850, 500, 200]
-            typeOfLevel: isobaricInhPa
-        - rename:
-            param: "{param}_{levelist}"
-    - grib:
-        path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-        param: [pres_0g, temp_sfc, tcdc, REFC]
+            param: [pres_0g, temp_sfc, tcdc, REFC]
+    - regrid:
+        matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
 
 # output is provided on the command line as the second argument to
 # `anemoi-datasets create`.
