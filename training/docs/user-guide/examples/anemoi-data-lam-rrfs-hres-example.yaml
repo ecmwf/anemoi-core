@@ -53,16 +53,20 @@ input:
         - pipe:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-                param: [pres, tmp]
+                param: [sp, tmp]
                 typeOfLevel: surface
             - rename:
                 param:
-                  pres: pres_0g
+                  sp: pres_0g
                   tmp: temp_sfc
-        - grib:
-            path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-            param: [refc]
-            typeOfLevel: entire atmosphere (considered as a single layer)
+        - pipe:
+            - grib:
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                param: [smref]
+                typeOfLevel: surface
+            - rename:
+                param:
+                  smref: refc
     - regrid:
         matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
 
