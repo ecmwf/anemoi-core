@@ -90,9 +90,10 @@ def main():
         var_coord = list(data.coords["variable"].values)
         if args.var_name in var_coord:
             raise SystemExit(f"Variable '{args.var_name}' already exists.")
-        mask_da = mask_da.assign_coords(variable=var_coord + [args.var_name])
 
     new_data = xr.concat([data, mask_da], dim="variable")
+    if "variable" in data.coords:
+        new_data = new_data.assign_coords(variable=var_coord + [args.var_name])
     ds_out = ds.copy()
     ds_out["data"] = new_data
 
