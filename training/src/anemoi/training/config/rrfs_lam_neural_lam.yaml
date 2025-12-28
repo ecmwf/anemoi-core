@@ -2,7 +2,6 @@ defaults:
   - data: zarr
   - dataloader: native_grid
   - diagnostics: evaluation
-  - datamodule: single
   - system: example
   - graph: existing_graph
   - model: graphtransformer
