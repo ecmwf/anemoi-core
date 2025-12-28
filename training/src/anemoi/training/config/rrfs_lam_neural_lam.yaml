@@ -1,0 +1,62 @@
+defaults:
+  - data: zarr
+  - dataloader: native_grid
+  - diagnostics: evaluation
+  - datamodule: single
+  - hardware: example
+  - graph: existing_graph
+  - model: graphtransformer
+  - training: lam
+  - _self_
+
+config_validation: True
+
+data:
+  resolution: 3p0km
+  frequency: 1h
+  timestep: 1h
+  forcing: []
+  diagnostic: []
+
+hardware:
+  num_gpus_per_node: 1
+  paths:
+    data: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
+    output: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/
+    graph: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/
+  files:
+    dataset: test-20km-bcmask.zarr
+    graph: rrfs-3km-lam-graph-20km.pt
+
+dataloader:
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  num_workers:
+    training: 4
+    validation: 4
+    test: 4
+  training:
+    start: "2024-05-05T00:00:00"
+    end: "2024-05-05T23:00:00"
+    drop: [boundary_mask]
+  validation:
+    start: "2024-05-05T00:00:00"
+    end: "2024-05-05T18:00:00"
+    drop: [boundary_mask]
+  test:
+    start: "2024-05-05T19:00:00"
+    end: "2024-05-05T23:00:00"
+    drop: [boundary_mask]
+
+training:
+  metrics:
+    - height_500
+    - temp_850
+    - ugrd_850
+    - vgrd_850
+  variable_groups:
+    default: sfc
+    pl:
+      is_pressure_level: True
