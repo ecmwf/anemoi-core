@@ -86,17 +86,33 @@ def main():
 
     mask_da = mask_da.transpose(*data.dims)
 
+    var_coord = None
     if "variable" in data.coords:
         var_coord = list(data.coords["variable"].values)
-        if args.var_name in var_coord:
-            raise SystemExit(f"Variable '{args.var_name}' already exists.")
-        mask_da = mask_da.assign_coords(variable=[args.var_name])
 
-    new_data = xr.concat([data, mask_da], dim="variable", coords="minimal", compat="override")
-    if "variable" in data.coords:
+    if var_coord is not None and args.var_name in var_coord:
+        raise SystemExit(f"Variable '{args.var_name}' already exists.")
+
+    core_coords = {
+        time_dim: data[time_dim],
+        ens_dim: data[ens_dim],
+        node_dim: data[node_dim],
+    }
+    data_core = xr.DataArray(data.data, dims=data.dims, coords=core_coords)
+    mask_core = xr.DataArray(mask_da.data, dims=data.dims, coords=core_coords)
+
+    new_data = xr.concat([data_core, mask_core], dim="variable")
+    if var_coord is not None:
         new_data = new_data.assign_coords(variable=var_coord + [args.var_name])
+    else:
+        new_data = new_data.assign_coords(variable=np.arange(new_data.sizes["variable"]))
     ds_out = ds.copy()
     ds_out["data"] = new_data
+
+    for obj in (ds_out, ds_out["data"]):
+        vars_attr = obj.attrs.get("variables")
+        if isinstance(vars_attr, (list, tuple)):
+            obj.attrs["variables"] = list(vars_attr) + [args.var_name]
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     ds_out.to_zarr(args.output, mode="w")
