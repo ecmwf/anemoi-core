@@ -48,7 +48,7 @@ def main():
     dx_east = (lon_max - lon) * km_per_deg * cos_lat
     min_dist = np.minimum.reduce([dy_south, dy_north, dx_west, dx_east])
 
-    boundary = (min_dist <= args.boundary_km).astype(np.float32)
+    boundary = np.where(min_dist <= args.boundary_km, 1.0, np.nan).astype(np.float32)
 
     data = ds["data"]
     if "variable" not in data.dims:
@@ -124,7 +124,9 @@ def main():
         fill = 0.0
         if v == "stdev":
             fill = 1.0
-        if v in {"count", "has_nans"}:
+        if v == "has_nans":
+            fill = 1
+        if v == "count":
             fill = 0
 
         arr_np = np.array(arr)
