@@ -120,7 +120,7 @@ local_scheme = "no-local-version"
 git_describe_command = "git describe --dirty --tags --long --match 'training-*[0-9]*'"
 tag_regex = "^training-(?P<version>[vV]?[0-9]+[^-]*)"
 version_file = "src/anemoi/training/_version.py"
-fallback_version = "0.0.0"
+fallback_version = "0.8.9999"
 
 [tool.ruff]
 target-version = "py310"
