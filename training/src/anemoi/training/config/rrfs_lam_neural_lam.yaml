@@ -19,7 +19,7 @@ data:
   normalizer:
     default: "mean-std"
     std: []
-    min-max: {}
+    min-max: []
     max: []
     none: []
 
