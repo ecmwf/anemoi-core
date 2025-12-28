@@ -47,6 +47,11 @@ def main():
     dates = start + np.arange(n_time) * freq
 
     ds_out = ds.copy()
+    # Ensure "data" is a data variable (not a coordinate) before writing.
+    if "data" in ds_out.coords and "data" not in ds_out.data_vars:
+        ds_out = ds_out.reset_coords("data")
+    if "data" not in ds_out.data_vars:
+        ds_out["data"] = ds["data"]
 
     # Optional boundary mask
     if all(v is not None for v in [args.lon_min, args.lon_max, args.lat_min, args.lat_max, args.boundary_km]):
@@ -152,7 +157,19 @@ def main():
     ds_out.attrs["frequency"] = args.frequency
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    ds_out.to_zarr(args.output, mode="w")
+    data = ds_out["data"]
+    size_map = {dim: data.sizes[dim] for dim in data.dims}
+    chunks = []
+    for dim in data.dims:
+        if dim == time_dim:
+            chunks.append(1)
+        elif dim == "ensemble":
+            chunks.append(1)
+        elif dim == "variable":
+            chunks.append(size_map[dim])
+        else:
+            chunks.append(size_map[dim])
+    ds_out.to_zarr(args.output, mode="w", encoding={"data": {"chunks": tuple(chunks)}})
 
     # Force-update time/dates arrays in the zarr store to datetime64.
     g = zarr.open_group(args.output, mode="a")
