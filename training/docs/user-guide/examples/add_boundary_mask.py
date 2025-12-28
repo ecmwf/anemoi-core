@@ -25,7 +25,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    ds = xr.open_zarr(args.input)
+    ds = xr.open_zarr(args.input, consolidated=False)
     if "data" not in ds:
         raise SystemExit("Expected 'data' variable in the Zarr dataset.")
 
@@ -56,14 +56,24 @@ def main():
 
     time_dim = "time"
     ens_dim = "ensemble"
-    node_dim = "node"
+    if time_dim not in data.dims or ens_dim not in data.dims or "variable" not in data.dims:
+        raise SystemExit("Expected data dims to include time, variable, ensemble.")
 
-    if time_dim not in data.dims or ens_dim not in data.dims or node_dim not in data.dims:
-        raise SystemExit("Expected data dims: time, variable, ensemble, node.")
+    node_candidates = [d for d in data.dims if d not in {time_dim, ens_dim, "variable"}]
+    if len(node_candidates) != 1:
+        raise SystemExit(f"Could not infer node dimension from data dims: {data.dims}")
+    node_dim = node_candidates[0]
+
+    boundary_flat = boundary.reshape(-1)
+    if boundary_flat.size != data.sizes[node_dim]:
+        raise SystemExit(
+            f"Boundary mask size {boundary_flat.size} does not match data[{node_dim}] "
+            f"size {data.sizes[node_dim]}."
+        )
 
     mask_da = xr.DataArray(
         np.broadcast_to(
-            boundary.reshape(1, 1, -1),
+            boundary_flat.reshape(1, 1, -1),
             (data.sizes[time_dim], data.sizes[ens_dim], data.sizes[node_dim]),
         ),
         dims=(time_dim, ens_dim, node_dim),
@@ -73,6 +83,8 @@ def main():
             node_dim: data[node_dim],
         },
     ).expand_dims(variable=[args.var_name])
+
+    mask_da = mask_da.transpose(*data.dims)
 
     if "variable" in data.coords:
         var_coord = list(data.coords["variable"].values)
