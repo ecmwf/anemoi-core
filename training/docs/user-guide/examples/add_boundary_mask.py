@@ -127,11 +127,17 @@ def main():
         if v in {"count", "has_nans"}:
             fill = 0
 
-        pad_shape = list(arr.shape)
+        arr_np = np.array(arr)
         var_axis = arr.dims.index("variable")
+        pad_shape = list(arr_np.shape)
         pad_shape[var_axis] = 1
-        pad = np.full(pad_shape, fill, dtype=arr.dtype)
-        arr_new = xr.concat([arr, xr.DataArray(pad, dims=arr.dims, coords=arr.coords)], dim="variable")
+        pad = np.full(pad_shape, fill, dtype=arr_np.dtype)
+        arr_new_np = np.concatenate([arr_np, pad], axis=var_axis)
+
+        coords = {dim: arr.coords[dim] for dim in arr.dims if dim in arr.coords}
+        if var_coord is not None:
+            coords["variable"] = var_coord + [args.var_name]
+        arr_new = xr.DataArray(arr_new_np, dims=arr.dims, coords=coords)
         ds_out[v] = arr_new
 
     for obj in (ds_out, ds_out["data"]):
