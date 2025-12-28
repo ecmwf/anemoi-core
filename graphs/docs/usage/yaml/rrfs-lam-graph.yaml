@@ -7,7 +7,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-core-subdomain-20km-boundarymask.zarr
+      dataset: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/test-20km-bcmask.zarr
     attributes:
       boundary_mask:
         _target_: anemoi.graphs.nodes.attributes.NonzeroAnemoiDatasetVariable
