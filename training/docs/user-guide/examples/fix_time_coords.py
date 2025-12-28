@@ -16,6 +16,12 @@ def parse_args():
     parser.add_argument("output", type=Path, help="Output Zarr path")
     parser.add_argument("--start", required=True, help="Start datetime, e.g. 2024-05-05T00:00:00")
     parser.add_argument("--frequency", required=True, help="Frequency, e.g. 1h")
+    parser.add_argument(
+        "--time-unit",
+        default="ns",
+        choices=["s", "ns"],
+        help="Store time/dates as datetime64 with this unit (default: ns). Use 's' to avoid overflow in subset.",
+    )
     parser.add_argument("--lon-min", type=float)
     parser.add_argument("--lon-max", type=float)
     parser.add_argument("--lat-min", type=float)
@@ -63,7 +69,7 @@ def main():
             )
 
     # Force-update time/dates arrays in the zarr store to datetime64.
-    dt64 = dates.astype("datetime64[ns]")
+    dt64 = dates.astype(f"datetime64[{args.time_unit}]")
     for key in ("dates", "time"):
         if key in g:
             if g[key].dtype != dt64.dtype:
