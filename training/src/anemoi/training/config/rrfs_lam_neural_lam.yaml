@@ -38,16 +38,16 @@ dataloader:
     validation: 4
     test: 4
   training:
-    start: null
-    end: null
+    start: 0
+    end: 17
     drop: [boundary_mask]
   validation:
-    start: null
-    end: null
+    start: 18
+    end: 20
     drop: [boundary_mask]
   test:
-    start: null
-    end: null
+    start: 21
+    end: 23
     drop: [boundary_mask]
 
 training:
