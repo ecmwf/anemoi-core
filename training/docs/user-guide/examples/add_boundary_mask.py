@@ -106,8 +106,33 @@ def main():
         new_data = new_data.assign_coords(variable=var_coord + [args.var_name])
     else:
         new_data = new_data.assign_coords(variable=np.arange(new_data.sizes["variable"]))
-    ds_out = ds.copy()
-    ds_out["data"] = new_data
+
+    # Extend any per-variable stats arrays to avoid alignment errors.
+    var_dim_vars = [v for v in ds.data_vars if "variable" in ds[v].dims]
+    ds_out = ds.drop_vars(var_dim_vars)
+
+    for v in var_dim_vars:
+        if v == "data":
+            ds_out["data"] = new_data
+            continue
+
+        arr = ds[v]
+        if arr.dims.count("variable") != 1:
+            ds_out[v] = arr
+            continue
+
+        fill = 0.0
+        if v == "stdev":
+            fill = 1.0
+        if v in {"count", "has_nans"}:
+            fill = 0
+
+        pad_shape = list(arr.shape)
+        var_axis = arr.dims.index("variable")
+        pad_shape[var_axis] = 1
+        pad = np.full(pad_shape, fill, dtype=arr.dtype)
+        arr_new = xr.concat([arr, xr.DataArray(pad, dims=arr.dims, coords=arr.coords)], dim="variable")
+        ds_out[v] = arr_new
 
     for obj in (ds_out, ds_out["data"]):
         vars_attr = obj.attrs.get("variables")
