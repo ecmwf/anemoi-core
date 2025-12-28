@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+import zarr
 
 
 def parse_args():
@@ -49,6 +50,18 @@ def main():
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     ds_out.to_zarr(args.output, mode="w")
+
+    # Force-update the dates array in the zarr store to datetime64
+    g = zarr.open_group(args.output, mode="a")
+    if "dates" in g:
+        g["dates"][:] = dates.astype("datetime64[ns]")
+    else:
+        g.create_dataset("dates", data=dates.astype("datetime64[ns]"), overwrite=True)
+
+    g.attrs["start_date"] = str(dates[0])
+    g.attrs["end_date"] = str(dates[-1])
+    g.attrs["frequency"] = args.frequency
+
     print(f"Wrote {args.output}")
 
 
