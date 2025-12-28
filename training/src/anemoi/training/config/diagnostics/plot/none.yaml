@@ -1,0 +1,10 @@
+asynchronous: False
+datashader: False
+frequency:
+  batch: null
+  epoch: null
+parameters: []
+sample_idx: 0
+precip_and_related_fields: []
+colormaps: {}
+callbacks: []
