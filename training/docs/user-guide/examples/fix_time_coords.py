@@ -73,6 +73,7 @@ def main():
                 g[key][:] = dt64
         else:
             g.create_dataset(key, data=dt64, overwrite=True)
+        g[key].attrs["_ARRAY_DIMENSIONS"] = ["time"]
 
     g.attrs["start_date"] = str(dates[0])
     g.attrs["end_date"] = str(dates[-1])
