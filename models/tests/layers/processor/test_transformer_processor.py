@@ -14,6 +14,7 @@ from dataclasses import field
 import pytest
 import torch
 
+from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
@@ -59,6 +60,10 @@ def test_transformer_processor_init(transformer_processor, transformer_processor
         transformer_processor.chunk_size
         == transformer_processor_init.num_layers // transformer_processor_init.num_chunks
     )
+
+
+def test_all_blocks(transformer_processor):
+    assert all(isinstance(block, TransformerProcessorBlock) for block in transformer_processor.proc)
 
 
 def test_transformer_processor_forward(transformer_processor, transformer_processor_init):

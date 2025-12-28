@@ -29,6 +29,7 @@ class MigrationContext:
         self.attribute_paths: dict[str, str] = {}
         self.module_paths: dict[str, str] = {}
         self.deleted_attributes: list[str] = []
+        self.deleted_modules: list[str] = []
 
     def delete_attribute(self, path: str) -> None:
         """Indicate that an attribute has been deleted. Any class referencing this module will
@@ -40,6 +41,10 @@ class MigrationContext:
             Path to the attribute. For example ``pkg.mod.MyClass``.
         """
         self.deleted_attributes.append(path)
+
+    def delete_module(self, path: str) -> None:
+        """Mark a module for deletion."""
+        self.deleted_modules.append(path)
 
     def move_attribute(self, path_start: str, path_end: str) -> None:
         """Move and rename an attribute between modules.
@@ -76,6 +81,7 @@ class SerializedMigrationContext(TypedDict):
     attribute_paths: dict[str, str]
     module_paths: dict[str, str]
     deleted_attributes: list[str]
+    deleted_modules: list[str]
 
 
 def serialize_setup_callback(setup: Callable[[MigrationContext], None]) -> SerializedMigrationContext:
@@ -98,6 +104,7 @@ def serialize_setup_callback(setup: Callable[[MigrationContext], None]) -> Seria
         "attribute_paths": ctx.attribute_paths,
         "module_paths": ctx.module_paths,
         "deleted_attributes": ctx.deleted_attributes,
+        "deleted_modules": ctx.deleted_modules,
     }
 
 
@@ -112,6 +119,8 @@ class DeserializeMigrationContext:
             context.delete_attribute(deleted_attribute)
         for path_end, path_start in self._ctx["attribute_paths"].items():
             context.move_attribute(path_start, path_end)
+        for deleted_module in self._ctx["deleted_modules"].items():
+            context.delete_module(deleted_module)
         for path_end, path_start in self._ctx["module_paths"].items():
             context.move_module(path_start, path_end)
 

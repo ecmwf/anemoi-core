@@ -94,8 +94,11 @@ class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
             norm=norm,
             **kwargs,
         )
-        if self.scaling_mask_attribute_name not in self.nodes:
-            error_msg = f"scaling_mask_attribute_name {self.scaling_mask_attribute_name} not found in graph_object"
+        if self.scaling_mask_attribute_name not in self.nodes.node_attrs():
+            error_msg = f"{self.__class__.__module__}.{self.__class__.__name__}: "
+            error_msg += f"scaling_mask_attribute_name '{self.scaling_mask_attribute_name}' not found in graph_data - "
+            avail_masks = [k for k, v in self.nodes.items() if getattr(v, "dtype", None) == torch.bool]
+            error_msg += f"available boolean node attributes are: {avail_masks}"
             raise KeyError(error_msg)
 
     def reweight_attribute_values(self, values: torch.Tensor) -> torch.Tensor:

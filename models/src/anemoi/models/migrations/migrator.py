@@ -264,12 +264,12 @@ class MissingAttribute:
     """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class"""
 
 
-def _get_unpickler(replace_attrs: list[str] | bool = False):
+def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
     """Get the Unpickler
 
     Parameters
     ----------
-    replace_attrs : list[str] | bool, default False
+    replace_attrs : dict[str,list[str]] | bool, default False
         Replace the provided attrs by a ``MissingAttribute`` object. If False, Fill not
         try to replace attributes. If True, will replace every missing attribute. You can use
         * as a wildcard to be replaced by any attribute in a module.
@@ -289,11 +289,26 @@ def _get_unpickler(replace_attrs: list[str] | bool = False):
             try:
                 return super().find_class(module_name, global_name)
             except (ImportError, AttributeError) as e:
+
+                deleted_modules: list[str] = []
+                deleted_attributes: list[str] = []
+
+                # --- Normalize replace_attrs ---
+                if isinstance(replace_attrs, dict):
+                    deleted_modules = replace_attrs.get("deleted_modules", [])
+                    deleted_attributes = replace_attrs.get("deleted_attributes", [])
+
                 attr_name = f"{module_name}.{global_name}"
                 wild_name = f"{module_name}.*"
+
                 if replace_attrs is False:
                     raise e
-                if replace_attrs is True or attr_name in replace_attrs or wild_name in replace_attrs:
+                if (
+                    replace_attrs is True
+                    or attr_name in deleted_attributes
+                    or module_name in deleted_modules
+                    or wild_name in replace_attrs
+                ):
                     LOGGER.debug("Missing attribute %s.%s is checkpoint. Ignoring.", module_name, global_name)
                     return MissingAttribute
                 raise e
@@ -308,7 +323,7 @@ def _get_unpickler(replace_attrs: list[str] | bool = False):
     return UnpicklerWrapper
 
 
-def _load_ckpt(path: str | PathLike, replace_attrs: list[str] | bool = False) -> CkptType:
+def _load_ckpt(path: str | PathLike, replace_attrs: dict[str, list[str]] | bool = False) -> CkptType:
     """Loads a checkpoint
 
     Parameters
@@ -570,6 +585,11 @@ class Migrator:
         context : MigrationContext
             The context object
         """
+        for module_path in getattr(context, "deleted_modules", []):
+            if module_path in sys.modules:
+                LOGGER.debug("Delete module %s.", module_path)
+                del sys.modules[module_path]
+
         for module_path_end, module_path_start in context.module_paths.items():
             LOGGER.debug("Move module %s to %s.", module_path_start, module_path_end)
             sys.modules[module_path_start] = sys.modules[module_path_end]
@@ -614,13 +634,14 @@ class Migrator:
         compatible_migrations = self._grouped_migrations[-1]
         self._check_executed_migrations(ckpt, compatible_migrations)
         setups, ops = self._resolve_operations(ckpt, compatible_migrations)
-        replace_attrs: list[str] = []
+        replace_attrs: dict[str, list[str]] = {}
         if len(setups):
             context = MigrationContext()
             for setup in setups:
                 setup(context)
             self._resolve_context(context)
-            replace_attrs = context.deleted_attributes
+            replace_attrs["deleted_modules"] = context.deleted_modules
+            replace_attrs["deleted_attributes"] = context.deleted_attributes
         # Force reloading checkpoint without obfuscating import issues.
         ckpt = _load_ckpt(path, replace_attrs)
         ckpt["hyper_parameters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])

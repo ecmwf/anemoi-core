@@ -15,6 +15,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
@@ -69,6 +70,9 @@ class TestGNNProcessor:
         assert graphconv_processor.num_channels == graphconv_init.num_channels
         assert graphconv_processor.chunk_size == graphconv_init.num_layers // graphconv_init.num_chunks
         assert isinstance(graphconv_processor.trainable, TrainableTensor)
+
+    def test_all_blocks(self, graphconv_processor):
+        assert all(isinstance(block, GraphConvProcessorBlock) for block in graphconv_processor.proc)
 
     def test_forward(self, graphconv_processor, graphconv_init):
         batch_size = 1

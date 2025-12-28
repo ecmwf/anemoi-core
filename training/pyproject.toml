@@ -65,6 +65,7 @@ dependencies = [
 ]
 
 optional-dependencies.all = [  ]
+optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow", "strenum" ]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
   "pre-commit>=3.3.3",
@@ -73,9 +74,13 @@ optional-dependencies.docs = [
   "autodoc-pydantic",
   "nbsphinx",
   "pandoc",
-  "sphinx<8.2",       # Fixed until nbsphinx updates
+  "sphinx<8.2; python_version<'3.11'",   # Fixed until nbsphinx updates
+  "sphinx>=8.2; python_version>='3.11'",
   "sphinx-argparse",
   "sphinx-rtd-theme",
+]
+optional-dependencies.mlflowsync = [
+  "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import.git@master",
 ]
 optional-dependencies.plotting = [
   "distinctipy>=1",
@@ -88,6 +93,7 @@ optional-dependencies.profile = [
 ]
 optional-dependencies.tests = [
   "anemoi-graphs[tri]",      # required to load the gnn checkpoint as part of the tests
+  "anemoi-training[azure]",  # required to test the AzureMlflowLogger
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",

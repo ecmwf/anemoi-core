@@ -16,7 +16,7 @@ def test_clean_config_params() -> None:
         "model.num_channels": None,
         "data.frequency": None,
         "diagnostics.plot": None,
-        "hardware.num_gpus": None,
+        "system.hardware.num_gpus": None,
         "metadata.config.dataset": None,
         "metadata.dataset.sources/1.specific.forward.forward.attrs.variables_metadata.z_500.mars.expver": None,
         "metadata.dataset.specific.forward.forward.attrs.variables_metadata.z_500.mars.expver": None,

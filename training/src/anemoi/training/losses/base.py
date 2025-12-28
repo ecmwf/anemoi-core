@@ -61,6 +61,7 @@ class BaseLoss(nn.Module, ABC):
         self.sum_function = torch.nansum if ignore_nans else torch.sum
 
         self.supports_sharding = True
+        self.num_scales = 1
 
     @functools.wraps(ScaleTensor.add_scaler)
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
@@ -198,6 +199,7 @@ class BaseLoss(nn.Module, ABC):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -255,6 +257,7 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,  # noqa: ARG002
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 

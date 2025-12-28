@@ -35,7 +35,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -58,11 +57,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
-            truncation_data=truncation_data,
         )
 
         self.latent_skip = model_config.model.latent_skip
-        self.grid_skip = model_config.model.grid_skip
 
     # Overwrite base class
     def _calculate_input_dim(self):
@@ -93,16 +90,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
-        if self.grid_skip is not None:
-            x_skip = x[:, self.grid_skip, ...]
-            if self.truncation.A_down is not None or self.truncation.A_up is not None:
-                x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-                x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
-                x_skip = einops.rearrange(
-                    x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size
-                )
-        else:
-            x_skip = None
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
 
         return x_data_latent, x_skip, shard_shapes_data
 

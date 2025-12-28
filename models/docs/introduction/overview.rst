@@ -99,9 +99,10 @@ Processors
 ==========
 
 Additionally, the layers implement `Processors` which are used to
-process the data on the hidden grid. The `Processors` use a chunking
-strategy with `Chunks` that pass a subset of layers to `Blocks` to allow
-for more efficient processing of the data.
+process the data on the hidden grid. The `Processors` use a series of
+`Blocks` to process the data. These `Blocks` can be partitioned into
+checkpointed chunks via `num_chunks` to reduce memory usage during
+training.
 
 **************
  Data Indices

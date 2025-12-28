@@ -43,7 +43,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
 
         model_config_local = DotDict(model_config)
@@ -61,7 +60,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
-            truncation_data=truncation_data,
         )
 
         self.noise_embedder = instantiate(diffusion_config.noise_embedder)
@@ -554,27 +552,27 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
+        model_config_local = DotDict(model_config)
 
+        self.condition_on_residual = model_config_local.model.condition_on_residual
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
-            truncation_data=truncation_data,
         )
 
     def _calculate_input_dim(self):
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
         input_dim += self.num_output_channels  # noised targets
-        input_dim += len(self.data_indices.model.input.prognostic)  # truncated input state
+        if self.condition_on_residual:
+            input_dim += len(self.data_indices.model.input.prognostic)  # truncated input state
         return input_dim
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
-        x_trunc = x[:, -1, :, :, self._internal_input_idx]
-        x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)[..., self._internal_input_idx]
+        x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
 
         # Get node attributes
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
@@ -592,15 +590,18 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
                 node_attributes_data,
-                einops.rearrange(x_trunc, "bse grid vars -> (bse grid) vars"),
             ),
             dim=-1,  # feature dimension
         )
+        if self.condition_on_residual:
+            x_data_latent = torch.cat(
+                (x_data_latent, einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars")), dim=-1
+            )
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
-        return x_data_latent, None, shard_shapes_data
+        return x_data_latent, x_skip, shard_shapes_data
 
     def compute_tendency(
         self,
@@ -617,7 +618,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_t1 : torch.Tensor
             The state at time t1 with full input variables.
         x_t0 : torch.Tensor
-            The state at time t0 with full input variables.
+            The state at time t0 with prognostic input variables.
         pre_processors_state : callable
             Function to pre-process the state variables.
         pre_processors_tendencies : callable
@@ -634,24 +635,14 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
 
         if input_post_processor is not None:
-            x_t1 = input_post_processor(
-                x_t1[..., self.data_indices.data.output.full],
-                in_place=False,
-                data_index=self.data_indices.data.output.full,
-            )
-            x_t0 = input_post_processor(
-                x_t0[..., self.data_indices.data.output.full],
-                in_place=False,
-                data_index=self.data_indices.data.output.full,
-            )
-        else:
-            x_t1 = x_t1[..., self.data_indices.data.output.full]
-            x_t0 = x_t0[..., self.data_indices.data.output.full]
+            x_t1 = input_post_processor(x_t1, in_place=False, data_index=self.data_indices.data.output.full)
+            x_t0 = input_post_processor(x_t0, in_place=False, data_index=self.data_indices.data.output.prognostic)
 
-        tendency = pre_processors_tendencies(
-            x_t1 - x_t0,
+        tendency = x_t1.clone()
+        tendency[..., self.data_indices.model.output.prognostic] = pre_processors_tendencies(
+            x_t1[..., self.data_indices.model.output.prognostic] - x_t0,
             in_place=False,
-            data_index=self.data_indices.data.output.full,
+            data_index=self.data_indices.data.output.prognostic,
         )
         # diagnostic variables are taken from x_t1, normalised as full fields:
         tendency[..., self.data_indices.model.output.diagnostic] = pre_processors_state(
@@ -675,7 +666,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         Parameters
         ----------
         state_inp : torch.Tensor
-            The normalized input state tensor with full input variables.
+            The normalized input state tensor with prognostic input variables.
         tendency : torch.Tensor
             The normalized tendency tensor output from model.
         post_processors_state : callable
@@ -701,7 +692,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
 
         state_outp[..., self.data_indices.model.output.prognostic] += post_processors_state(
-            state_inp[..., self.data_indices.model.input.prognostic],
+            state_inp,
             in_place=False,
             data_index=self.data_indices.data.input.prognostic,
         )
@@ -816,7 +807,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         torch.Tensor
             Truncated tensor with same shape as input
         """
-        bs, ens, _, _ = x.shape
-        x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
-        x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
-        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
+        # x_skip.shape: (bs, ens, latlon, nvar)
+        return x_skip[..., self.data_indices.model.input.prognostic]

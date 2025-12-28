@@ -1,0 +1,936 @@
+{# (C) Copyright 2025 Anemoi contributors.
+
+This software is licensed under the terms of the Apache Licence Version 2.0
+which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+
+In applying this licence, ECMWF does not waive the privileges and immunities
+granted to it by virtue of its status as an intergovernmental organisation
+nor does it submit to any jurisdiction. #}
+
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Anemoi graph inspection</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #f7f7fb;
+            font-family: monospace;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 14px;
+            font-size: 12px;
+            border-radius: 8px;
+        }
+
+        #controlsWrapper {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 98vh;
+            overflow: hidden;
+            /* keep structure fixed */
+        }
+
+        .controls {
+            position: relative;
+            width: 220px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 14px;
+            border-radius: 10px;
+            border: 2px solid #ccc;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        .controls>div {
+            overflow-y: hidden;
+            overflow-x: hidden;
+            flex: 1;
+        }
+
+        button {
+            display: block;
+            width: 100%;
+            margin: 4px 0;
+            padding: 8px 12px;
+            background: #222;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: monospace;
+            transition: background 0.2s;
+            text-align: left;
+        }
+
+        button:hover {
+            background: #444;
+        }
+
+        button.active {
+            background: #0066cc;
+        }
+
+
+        label {
+            color: #222;
+            font-family: monospace;
+            font-size: 12px;
+            display: block;
+            margin-top: 6px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            display: block;
+            margin-top: 4px;
+        }
+
+        input[type="color"] {
+            margin-top: 4px;
+            width: 100%;
+            height: 28px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        input[type="checkbox"] {
+            width: 1em;
+            height: 1em;
+            border: 2px solid #666;
+            border-radius: 3px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        hr {
+            border: 0;
+            border-top: 3px solid #ccc;
+            margin: 5px 0;
+        }
+
+        /* Each row: label left, controls right */
+        .control-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            column-gap: 8px;
+        }
+
+        .control-row span:first-child {
+            text-align: left;
+        }
+
+        .control-right {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .control-row input[type="number"] {
+            width: 35px;
+            text-align: right;
+            margin: 0;
+        }
+
+        .control-row button {
+            padding: 2px 8px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="controlsWrapper">
+        <div class="controls">
+            <strong>Global controls</strong>
+            <hr>
+
+            <div class="control-row">
+                <span>Earth</span>
+                <div class="control-right">
+                    <input id="toggleMap" type="checkbox" checked />
+                </div>
+            </div>
+
+            <div class="control-row">
+                <span>Earth radius</span>
+                <div class="control-right">
+                    <input id="mapRadius" type="number" min="5" max="100" step="1" value="20" />
+                </div>
+            </div>
+
+            <div class="control-row">
+                <span>Global node scale</span>
+                <div class="control-right">
+                    <input id="scaleFactor" type="number" min="0.5" max="3.0" step="0.1" value="1.0" />
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <strong>Nodes</strong>
+            <hr>
+            <div id="nodeSetControls" style="overflow-y: auto;"></div>
+        </div>
+
+        <div class="controls">
+            <strong>Edges</strong>
+            <hr>
+            <div id="edgeSetControls" style="overflow-y: auto;" ;></div>
+        </div>
+    </div>
+    </div>
+    </div>
+
+    <div id="info">
+        Nodes: <span id="nodeCount">0</span><br>
+        FPS: <span id="fps">0</span><br>
+        Camera Dist: <span id="camDist">0</span><br>
+        Max Degree: <span id="maxDegree">0</span>
+    </div>
+
+    <div style="position: absolute; bottom: 10px; right: 10px; opacity: 0.5;">
+        <img src="https://anemoi.readthedocs.io/en/latest/_static/logo.png" alt="Anemoi Logo" style="height: 100px;">
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.125.2/build/three.min.js"></script>
+    <script>
+        // Minimal OrbitControls
+        THREE.OrbitControls = function (camera, domElement) {
+            this.camera = camera;
+            this.domElement = domElement;
+            let isDown = false, startX = 0, startY = 0;
+            let target = new THREE.Vector3();
+            let velocity = new THREE.Vector2(0, 0);
+            const damping = 0.1, rotSpeed = 0.002, panSpeed = 0.05, zoomSpeed = 0.1;
+            const minDistance = 5, maxDistance = 200;
+            this.update = function () {
+                const offset = camera.position.clone().sub(target);
+                const spherical = new THREE.Spherical().setFromVector3(offset);
+                spherical.theta -= velocity.x;
+                spherical.phi -= velocity.y;
+                spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, spherical.phi));
+                offset.setFromSpherical(spherical);
+                camera.position.copy(target.clone().add(offset));
+                camera.lookAt(target);
+                velocity.multiplyScalar(1 - damping);
+            };
+            domElement.addEventListener('mousedown', e => { isDown = true; startX = e.clientX; startY = e.clientY; });
+            domElement.addEventListener('mouseup', () => { isDown = false; });
+            domElement.addEventListener('mousemove', e => {
+                if (!isDown) return;
+                const dx = e.clientX - startX, dy = e.clientY - startY;
+                if (e.shiftKey) {
+                    const offset = camera.position.clone().sub(target);
+                    const up = camera.up.clone().normalize();
+                    const right = new THREE.Vector3().crossVectors(offset, up).normalize();
+                    const pan = right.multiplyScalar(-dx * panSpeed).add(up.multiplyScalar(dy * panSpeed));
+                    camera.position.add(pan); target.add(pan);
+                } else {
+                    velocity.x = dx * rotSpeed; velocity.y = dy * rotSpeed;
+                }
+                startX = e.clientX; startY = e.clientY;
+            });
+            domElement.addEventListener('wheel', e => {
+                e.preventDefault();
+                const dir = camera.position.clone().sub(target).normalize();
+                const dist = camera.position.distanceTo(target);
+                let zoomAmount = e.deltaY * zoomSpeed * (dist / 50);
+                zoomAmount = Math.min(Math.max(zoomAmount, -dist + minDistance), maxDistance - dist);
+                camera.position.add(dir.multiplyScalar(zoomAmount * 0.1));
+            }, { passive: false });
+        };
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf7f7fb);
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const distscale = 0.9;
+        camera.position.set(50*distscale, 55*distscale, -5*distscale);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+        // Lighting
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
+
+        // Globe
+        const textureLoader = new THREE.TextureLoader();
+        const earthTexture = textureLoader.load("https://upload.wikimedia.org/wikipedia/commons/0/04/Solarsystemscope_texture_8k_earth_daymap.jpg");
+        const mapInitialRadius = 20;
+        const geometry = new THREE.SphereGeometry(mapInitialRadius, 64, 64);
+        const material = new THREE.MeshBasicMaterial({ map: earthTexture, transparent: true, opacity: 0.3, depthWrite: true, depthTest: true });
+        const globe = new THREE.Mesh(geometry, material);
+        scene.add(globe);
+
+        // Utility
+        function latLonToXYZ(lat, lon, r = 30) {
+            const phi = (90 - lat) * Math.PI / 180, theta = (lon + 180) * Math.PI / 180;
+            return [-r * Math.sin(phi) * Math.cos(theta), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(theta)];
+        }
+
+        // === EMBEDDED DATA ===
+        // this will be rendered by Jinja template engine
+        const NODE_SETS = {{ nodes | tojson }};
+        const EDGE_SETS = {{ edges | tojson }};
+        // =========================================================
+
+        // Data processing
+        const POINTS = [], pointNameToSet = new Map(), pointNameToIndex = new Map();
+        NODE_SETS.forEach((s, setIdx) => s.points.forEach((p, idx) => {
+            POINTS.push(p);
+            pointNameToSet.set(p.name, setIdx);
+            pointNameToIndex.set(p.name, { setIdx, idx });
+        }));
+
+        // Degree map
+        const degreeMap = new Map(POINTS.map(p => [p.name, 0]));
+
+        // Track min and max degrees as we go
+        let maxDegree = 0;
+        let minDegree = Infinity;
+
+        EDGE_SETS.forEach(es => {
+            es.edges.forEach(([a, b]) => {
+                if (degreeMap.has(a)) {
+                    const newDeg = degreeMap.get(a) + 1;
+                    degreeMap.set(a, newDeg);
+                    if (newDeg > maxDegree) maxDegree = newDeg;
+                    if (newDeg < minDegree) minDegree = newDeg;
+                }
+                if (degreeMap.has(b)) {
+                    const newDeg = degreeMap.get(b) + 1;
+                    degreeMap.set(b, newDeg);
+                    if (newDeg > maxDegree) maxDegree = newDeg;
+                    if (newDeg < minDegree) minDegree = newDeg;
+                }
+            });
+        });
+
+        // Handle the case where some nodes have no edges
+        if (minDegree === Infinity) minDegree = 0;
+
+        document.getElementById('maxDegree').textContent = maxDegree;
+
+
+        // Selection state
+        let selectedNode = null;
+        let connectedNodes = new Set();
+
+        // Node shader
+        const pointGeometry = new THREE.SphereGeometry(0.01, 3, 2);
+        const pointMaterialTemplate = new THREE.ShaderMaterial({
+            uniforms: {
+                cameraPos: { value: camera.position },
+                minDist: { value: 30.0 },
+                maxDist: { value: 70.0 },
+                nearColor: { value: new THREE.Color(0xff0000) },
+                farColor: { value: new THREE.Color(0xffffff) },
+                dimTex: { value: null },
+                dimTexWidth: { value: 1.0 },
+                dimTexHeight: { value: 1.0 }
+            },
+            vertexShader: `
+    uniform vec3 cameraPos;
+    uniform float minDist;
+    uniform float maxDist;
+    varying float vAlpha;
+    varying vec3 vColor;
+    uniform vec3 nearColor;
+    uniform vec3 farColor;
+    uniform sampler2D dimTex;
+    uniform float dimTexWidth;
+    uniform float dimTexHeight;
+
+    void main(){
+        vec4 worldPos = modelMatrix * instanceMatrix * vec4(position, 1.0);
+        float dist = distance(cameraPos, worldPos.xyz);
+        float norm = clamp((dist - minDist) / (maxDist - minDist), 0.0, 1.0);
+        vColor = mix(nearColor, farColor, norm);
+
+        float idx = float(gl_InstanceID);
+        float u = mod(idx, dimTexWidth)/dimTexWidth + 0.5/dimTexWidth;
+        float v = floor(idx/dimTexWidth)/dimTexHeight + 0.5/dimTexHeight;
+        float dim = texture2D(dimTex, vec2(u,v)).r;
+
+        float fade = 1.0 - norm;
+        vAlpha = dim * fade;
+
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+    }
+  `,
+            fragmentShader: `
+    varying float vAlpha;
+    varying vec3 vColor;
+    void main(){
+        if(vAlpha < 0.01) discard;
+        gl_FragColor = vec4(vColor, vAlpha);
+    }
+  `,
+            transparent: true,
+            depthTest: true,
+            depthWrite: false
+        });
+
+
+
+        const nodeSetMeshes = [], baseScaleFactorRef = { value: 1.0 };
+        let totalNodeCount = 0;
+
+        const BASE_SCALE = 1.0;
+        function computeNodeScale(d) {
+            if (maxDegree === minDegree) return 1.0 * BASE_SCALE;
+            const n = (d - minDegree) / ((maxDegree / 4) - minDegree);
+            return (1 + n * 4) * BASE_SCALE;
+        }
+
+        function updateNodeScales() {
+            NODE_SETS.forEach((ns, i) => {
+                const mesh = nodeSetMeshes[i];
+                ns.points.forEach((p, j) => {
+                    const [x, y, z] = latLonToXYZ(...p.pos, ns.radius);
+                    const s = computeNodeScale(degreeMap.get(p.name)) * baseScaleFactorRef.value;
+                    const m = new THREE.Matrix4(); m.makeScale(s, s, s); m.setPosition(x, y, z);
+                    mesh.setMatrixAt(j, m);
+                });
+                mesh.instanceMatrix.needsUpdate = true;
+            });
+        }
+
+        // Edges with selection support (unchanged)
+        const edgeMaterial = new THREE.ShaderMaterial({
+            transparent: true,
+            uniforms: {
+                cameraPos: { value: camera.position },
+                minDist: { value: 10 },
+                maxDist: { value: 50 }
+            },
+            vertexShader: `
+        uniform vec3 cameraPos;
+        uniform float minDist;
+        uniform float maxDist;
+        varying float vAlpha;
+        attribute float edgeDimFactor;
+
+        void main(){
+            float dist=distance(cameraPos,position);
+            float norm=clamp((dist-minDist)/(maxDist-minDist),0.0,1.0);
+            vAlpha=(1.0-norm)*0.4*edgeDimFactor;
+            gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);
+        }
+    `,
+            fragmentShader: `
+        varying float vAlpha;
+        void main(){
+            gl_FragColor=vec4(0.3,0.3,0.3,vAlpha);
+            if(gl_FragColor.a<0.01)discard;
+        }
+    `,
+            depthTest: true,
+            depthWrite: false
+        });
+
+        const edgeSetMeshes = [];
+        const edgeSetData = [];  // Store edge metadata
+
+        function updateEdgePositions(i) {
+            const es = EDGE_SETS[i];
+            // Prepare storage on first call
+            let mesh = edgeSetMeshes[i];
+            if (!mesh) return;
+
+            // Use stored arrays if present
+            if (!mesh.userData._edgePositions || mesh.userData._edgeCount !== es.edges.length) {
+                // allocate fresh arrays sized for this edge count
+                const edgeCount = es.edges.length;
+                const posArray = new Float32Array(edgeCount * 2 * 3); // 2 vertices per edge, 3 components
+                const dimArray = new Float32Array(edgeCount * 2); // one dim per vertex (2 per edge)
+                mesh.userData._edgePositions = posArray;
+                mesh.userData._edgeDimFactors = dimArray;
+                mesh.userData._edgeCount = edgeCount;
+
+                // set attribute once
+                mesh.geometry.setAttribute('position', new THREE.Float32BufferAttribute(posArray, 3));
+                mesh.geometry.setAttribute('edgeDimFactor', new THREE.BufferAttribute(dimArray, 1));
+            }
+
+            const posArray = mesh.userData._edgePositions;
+            const dimFactors = mesh.userData._edgeDimFactors;
+
+            // Fill arrays using O(1) lookups
+            let pIdx = 0; // position array index
+            const edgeInfo = [];
+            for (let e = 0; e < es.edges.length; e++) {
+                const [a, b] = es.edges[e];
+                // look up point handles quickly via pointNameToIndex
+                const paIdx = pointNameToIndex.get(a);
+                const pbIdx = pointNameToIndex.get(b);
+                if (!paIdx || !pbIdx) {
+                    // if mapping doesn't exist (defensive), skip this edge
+                    // write zeros
+                    posArray[pIdx++] = 0; posArray[pIdx++] = 0; posArray[pIdx++] = 0;
+                    posArray[pIdx++] = 0; posArray[pIdx++] = 0; posArray[pIdx++] = 0;
+                    dimFactors[(e * 2)] = 1.0; dimFactors[(e * 2) + 1] = 1.0;
+                    edgeInfo.push({ a, b });
+                    continue;
+                }
+
+                // paIdx is {setIdx, idx} from earlier mapping
+                const paSet = paIdx.setIdx, paLocalIdx = paIdx.idx;
+                const pbSet = pbIdx.setIdx, pbLocalIdx = pbIdx.idx;
+
+                const pa = NODE_SETS[paSet].points[paLocalIdx];
+                const pb = NODE_SETS[pbSet].points[pbLocalIdx];
+
+                // compute xyz with the node set radius
+                const [xa, ya, za] = latLonToXYZ(...pa.pos, NODE_SETS[paSet].radius);
+                const [xb, yb, zb] = latLonToXYZ(...pb.pos, NODE_SETS[pbSet].radius);
+
+                posArray[pIdx++] = xa; posArray[pIdx++] = ya; posArray[pIdx++] = za;
+                posArray[pIdx++] = xb; posArray[pIdx++] = yb; posArray[pIdx++] = zb;
+
+                dimFactors[e * 2] = 1.0;     // default dim (will be updated by selection code)
+                dimFactors[e * 2 + 1] = 1.0;
+
+                edgeInfo.push({ a, b });
+            }
+
+            // Save edge metadata
+            edgeSetData[i] = edgeInfo;
+
+            // Mark attributes as updated (no re-allocation)
+            const posAttr = mesh.geometry.getAttribute('position');
+            posAttr.array.set(posArray);
+            posAttr.needsUpdate = true;
+
+            const dfAttr = mesh.geometry.getAttribute('edgeDimFactor');
+            dfAttr.array.set(dimFactors);
+            dfAttr.needsUpdate = true;
+        }
+
+        EDGE_SETS.forEach((es, i) => {
+            const g = new THREE.BufferGeometry();
+            const lines = new THREE.LineSegments(g, edgeMaterial.clone());
+            scene.add(lines);
+            edgeSetMeshes.push(lines);
+            updateEdgePositions(i);
+        });
+
+        // Create meshes with per-instance DataTexture if WebGL2; else fall back to attribute
+        const isWebGL2 = renderer.capabilities.isWebGL2;
+        if (!isWebGL2) {
+            console.log('WebGL2 not available: falling back to instanced attribute approach (may hit vertex attribute limits on some GPUs).');
+        }
+
+        // --- Large DataTexture safe NodeSet initialization ---
+        NODE_SETS.forEach((ns, i) => {
+            const mat = pointMaterialTemplate.clone();
+            mat.uniforms.nearColor.value.set(ns.color);
+            mat.uniforms.farColor.value.set(ns.color);
+
+            const mesh = new THREE.InstancedMesh(pointGeometry, mat, ns.points.length);
+
+            if (isWebGL2) {
+                const maxTexSize = renderer.capabilities.maxTextureSize;
+                const texWidth = Math.min(ns.points.length, maxTexSize);
+                const texHeight = Math.ceil(ns.points.length / texWidth);
+
+                const dimArray = new Uint8Array(texWidth * texHeight * 4);
+                for (let k = 0; k < ns.points.length; k++) {
+                    dimArray[k * 4] = 255; dimArray[k * 4 + 1] = 0; dimArray[k * 4 + 2] = 0; dimArray[k * 4 + 3] = 255;
+                }
+
+                const dimTex = new THREE.DataTexture(dimArray, texWidth, texHeight, THREE.RGBAFormat);
+                dimTex.minFilter = THREE.NearestFilter;
+                dimTex.magFilter = THREE.NearestFilter;
+                dimTex.unpackAlignment = 1;
+                dimTex.needsUpdate = true;
+
+                mesh.material.uniforms.dimTex.value = dimTex;
+                mesh.material.uniforms.dimTexWidth.value = texWidth;
+                mesh.material.uniforms.dimTexHeight.value = texHeight;
+
+                mesh.userData.dimTex = dimTex;
+                mesh.userData.dimArray = dimArray;
+                mesh.userData.dimWidth = texWidth;
+                mesh.userData.dimHeight = texHeight;
+            } else {
+                const dimFactors = new Float32Array(ns.points.length).fill(1.0);
+                mesh.geometry.setAttribute('instanceDimFactor', new THREE.InstancedBufferAttribute(dimFactors, 1));
+                mesh.userData.fallbackDimArray = dimFactors;
+            }
+
+            scene.add(mesh);
+            nodeSetMeshes.push(mesh);
+            totalNodeCount += ns.points.length;
+        });
+        updateNodeScales();
+
+        // Selection functions (update textures or fallback attributes)
+        const DIM_FACTOR_DIMMED = 0.1;
+
+        function updateSelectionVisuals() {
+            if (selectedNode === null) {
+                // Reset all nodes to normal
+                nodeSetMeshes.forEach((mesh, setIdx) => {
+                    if (isWebGL2 && mesh.userData.dimArray) {
+                        const arr = mesh.userData.dimArray;
+                        const texWidth = mesh.userData.dimWidth;
+                        const texHeight = mesh.userData.dimHeight;
+                        const total = texWidth * texHeight;
+                        for (let k = 0; k < total; k++) arr[k * 4] = 255;
+                        mesh.userData.dimTex.needsUpdate = true;
+                    } else if (mesh.geometry.attributes.instanceDimFactor) {
+                        const dimFactors = mesh.geometry.attributes.instanceDimFactor.array;
+                        for (let i = 0; i < dimFactors.length; i++) dimFactors[i] = 1.0;
+                        mesh.geometry.attributes.instanceDimFactor.needsUpdate = true;
+                    }
+                });
+
+                // Reset edges
+                edgeSetMeshes.forEach(mesh => {
+                    const attr = mesh.geometry.attributes.edgeDimFactor;
+                    if (!attr) return;
+                    const dimFactors = attr.array;
+                    for (let i = 0; i < dimFactors.length; i++) dimFactors[i] = 1.0;
+                    attr.needsUpdate = true;
+                });
+
+                return;
+            }
+
+            // Dim all nodes except selected and connected
+            nodeSetMeshes.forEach((mesh, setIdx) => {
+                const ns = NODE_SETS[setIdx];
+
+                if (isWebGL2 && mesh.userData.dimArray) {
+                    const arr = mesh.userData.dimArray;
+                    const texWidth = mesh.userData.dimWidth;
+                    const texHeight = mesh.userData.dimHeight;
+                    const dimByte = Math.round(DIM_FACTOR_DIMMED * 255);
+
+                    // Set all nodes to dim
+                    for (let i = 0; i < ns.points.length; i++) {
+                        const row = Math.floor(i / texWidth);
+                        const col = i % texWidth;
+                        const idx = (row * texWidth + col) * 4;
+                        arr[idx] = dimByte;
+                    }
+
+                    // Highlight selected and connected nodes
+                    ns.points.forEach((p, i) => {
+                        if (p.name === selectedNode || connectedNodes.has(p.name)) {
+                            const row = Math.floor(i / texWidth);
+                            const col = i % texWidth;
+                            const idx = (row * texWidth + col) * 4;
+                            arr[idx] = 255;
+                        }
+                    });
+
+                    mesh.userData.dimTex.needsUpdate = true;
+                } else if (mesh.geometry.attributes.instanceDimFactor) {
+                    const dimFactors = mesh.geometry.attributes.instanceDimFactor.array;
+                    for (let i = 0; i < dimFactors.length; i++) dimFactors[i] = DIM_FACTOR_DIMMED;
+                    ns.points.forEach((p, i) => {
+                        if (p.name === selectedNode || connectedNodes.has(p.name)) {
+                            dimFactors[i] = 1.0;
+                        }
+                    });
+                    mesh.geometry.attributes.instanceDimFactor.needsUpdate = true;
+                }
+            });
+
+            // Dim edges
+            edgeSetMeshes.forEach((mesh, setIdx) => {
+                const attr = mesh.geometry.attributes.edgeDimFactor;
+                const edgeSetName = EDGE_SETS[setIdx].name;
+                const parts = edgeSetName.split('_to_');
+                const sameNodeSet = (parts[0] === parts[1]);
+
+                if (!attr) return;
+                const dimFactors = attr.array;
+                edgeSetData[setIdx].forEach((edge, edgeIdx) => {
+                    const isConnected = (edge.a === selectedNode || edge.b === selectedNode);
+                    const dimValue = isConnected ? 1.0 : DIM_FACTOR_DIMMED;
+                    // if not connected and not sameNodeSet, dim completely
+                    if (!isConnected && !sameNodeSet) {
+                        dimFactors[edgeIdx * 2] = 0.0;
+                        dimFactors[edgeIdx * 2 + 1] = 0.0;
+                        return;
+                    }
+                    // else set to normal dimValue
+                    dimFactors[edgeIdx * 2] = dimValue;
+                    dimFactors[edgeIdx * 2 + 1] = dimValue;
+                });
+                attr.needsUpdate = true;
+            });
+
+            // Update info panel
+            document.getElementById('selectedNodeName').textContent = selectedNode;
+            document.getElementById('selectedNodeConnections').textContent = connectedNodes.size;
+        }
+
+
+        function selectNode(nodeName) {
+            if (selectedNode === nodeName) {
+                selectedNode = null;
+                connectedNodes.clear();
+            } else {
+                selectedNode = nodeName;
+                connectedNodes = new Set();
+
+                // Compute adjacency on the fly
+                EDGE_SETS.forEach(es => {
+                    es.edges.forEach(([a, b]) => {
+                        if (a === nodeName) connectedNodes.add(b);
+                        else if (b === nodeName) connectedNodes.add(a);
+                    });
+                });
+            }
+            updateSelectionVisuals();
+        }
+
+
+        // Raycasting for node selection with drag detection
+        const raycaster = new THREE.Raycaster();
+        raycaster.params.Points.threshold = 2;
+        const mouse = new THREE.Vector2();
+
+        // Track mouse movement to distinguish click from drag
+        let mouseDownX = 0;
+        let mouseDownY = 0;
+        let mouseDownTime = 0;
+        const DRAG_THRESHOLD = 5; // pixels
+        const CLICK_TIME_THRESHOLD = 300; // milliseconds
+
+        renderer.domElement.addEventListener('mousedown', (event) => {
+            if (event.target !== renderer.domElement) return;
+            mouseDownX = event.clientX;
+            mouseDownY = event.clientY;
+            mouseDownTime = Date.now();
+        });
+
+        renderer.domElement.addEventListener('click', (event) => {
+            if (event.target !== renderer.domElement) return;
+
+            // Calculate distance moved since mousedown
+            const dx = Math.abs(event.clientX - mouseDownX);
+            const dy = Math.abs(event.clientY - mouseDownY);
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const timeDelta = Date.now() - mouseDownTime;
+
+            // If mouse moved more than threshold or took too long, consider it a drag
+            if (distance > DRAG_THRESHOLD || timeDelta > CLICK_TIME_THRESHOLD) {
+                return; // This was a drag, not a click
+            }
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            let closestNode = null;
+            let closestDistance = Infinity;
+
+            nodeSetMeshes.forEach((mesh, setIdx) => {
+                if (!mesh.visible) return;
+
+                const intersects = raycaster.intersectObject(mesh, false);
+                if (intersects.length > 0) {
+                    const instanceId = intersects[0].instanceId;
+                    const distance = intersects[0].distance;
+
+                    if (instanceId !== undefined && distance < closestDistance) {
+                        closestDistance = distance;
+                        const point = NODE_SETS[setIdx].points[instanceId];
+                        if (point) {
+                            closestNode = point.name;
+                        }
+                    }
+                }
+            });
+
+            if (closestNode) {
+                selectNode(closestNode);
+            } else {
+                // Clicked on empty space - clear selection
+                if (selectedNode !== null) {
+                    selectedNode = null;
+                    connectedNodes.clear();
+                    updateSelectionVisuals();
+                }
+            }
+        });
+
+
+        // UI Controls
+
+        // --- Container layout ---
+        const nodeSetControlsContainer = document.getElementById('nodeSetControls');
+        nodeSetControlsContainer.style.display = 'flex';
+        nodeSetControlsContainer.style.flexDirection = 'column';
+        nodeSetControlsContainer.style.gap = '4px';
+
+        // 4 columns: name | checkbox | color | radius
+        nodeSetControlsContainer.style.columnGap = '6px';
+
+        // --- Helper to make a grid row ---
+        function makeGridRow(columns) {
+            const row = document.createElement('div');
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '1fr auto auto auto'; // name | check | color | radius
+            row.style.alignItems = 'center';
+            row.style.columnGap = '6px';
+            row.style.marginBottom = '3px';
+            columns.forEach(c => row.appendChild(c));
+            return row;
+        }
+
+        // --- Node controls ---
+        NODE_SETS.forEach((ns, i) => {
+            const name = document.createElement('span');
+            name.textContent = ns.name;
+
+            const toggle = document.createElement('input');
+            toggle.type = 'checkbox';
+            toggle.checked = true;
+            toggle.title = `Show/Hide ${ns.name}`;
+            toggle.onchange = () => { nodeSetMeshes[i].visible = toggle.checked; };
+
+            const colorPicker = document.createElement('input');
+            colorPicker.type = 'color';
+            colorPicker.value = ns.color;
+            colorPicker.style.width = '20px';
+            colorPicker.style.height = '20px';
+            colorPicker.style.padding = '0';
+            colorPicker.addEventListener('input', e => {
+                const color = e.target.value;
+                ns.color = color;
+                nodeSetMeshes[i].material.uniforms.nearColor.value.set(color);
+                nodeSetMeshes[i].material.uniforms.farColor.value.set(color);
+            });
+
+            const radiusWrapper = document.createElement('div');
+            radiusWrapper.style.display = 'flex';
+            radiusWrapper.style.alignItems = 'center';
+            radiusWrapper.style.gap = '3px';
+            radiusWrapper.title = 'Control radius of spherical geometry.'
+
+            const radiusLabel = document.createElement('span');
+            radiusLabel.textContent = 'r=';
+            const radiusInput = document.createElement('input');
+            radiusInput.type = 'number';
+            radiusInput.min = '5';
+            radiusInput.max = '100';
+            radiusInput.step = '1';
+            radiusInput.value = ns.radius;
+            radiusInput.style.width = '30px';
+            radiusInput.style.textAlign = 'right';
+            radiusInput.oninput = e => {
+                ns.radius = Number(e.target.value);
+                updateNodeScales();
+                EDGE_SETS.forEach((_, ei) => updateEdgePositions(ei));
+            };
+            radiusWrapper.appendChild(radiusLabel);
+            radiusWrapper.appendChild(radiusInput);
+
+            const row = makeGridRow([name, toggle, colorPicker, radiusWrapper]);
+            nodeSetControlsContainer.appendChild(row);
+        });
+
+        // --- Edge controls ---
+        const edgeSetControlsContainer = document.getElementById('edgeSetControls');
+        edgeSetControlsContainer.style.display = 'flex';
+        edgeSetControlsContainer.style.flexDirection = 'column';
+        edgeSetControlsContainer.style.gap = '4px';
+
+        EDGE_SETS.forEach((es, i) => {
+            const name = document.createElement('span');
+            name.textContent = es.name;
+
+            const toggle = document.createElement('input');
+            toggle.type = 'checkbox';
+            toggle.checked = true;
+            toggle.title = `Show/Hide ${es.name}`;
+            toggle.onchange = () => { edgeSetMeshes[i].visible = toggle.checked; };
+
+            // grid with 2 columns: name | check
+            const row = document.createElement('div');
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '1fr auto';
+            row.style.alignItems = 'center';
+            row.style.columnGap = '6px';
+            row.appendChild(name);
+            row.appendChild(toggle);
+
+            edgeSetControlsContainer.appendChild(row);
+        });
+
+        document.getElementById('toggleMap').onclick = () => { globe.visible = !globe.visible; };
+
+        // Map radius
+        const mapRadiusEl = document.getElementById('mapRadius');
+        mapRadius.oninput = e => {
+            const r = Number(e.target.value);
+            globe.geometry.dispose();
+            globe.geometry = new THREE.SphereGeometry(r, 64, 64);
+        };
+
+        // Node scale factor
+        const scaleFactorEl = document.getElementById('scaleFactor');
+        scaleFactorEl.oninput = e => {
+            baseScaleFactorRef.value = Number(e.target.value);
+            updateNodeScales();
+        };
+
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // FPS
+        let lastTime = performance.now(), frames = 0;
+
+        // Animate
+        function animate() {
+            requestAnimationFrame(animate);
+            nodeSetMeshes.forEach(m => {
+                if (m.material && m.material.uniforms && m.material.uniforms.cameraPos)
+                    m.material.uniforms.cameraPos.value.copy(camera.position);
+            });
+            edgeSetMeshes.forEach(m => {
+                if (m.material && m.material.uniforms && m.material.uniforms.cameraPos)
+                    m.material.uniforms.cameraPos.value.copy(camera.position);
+            });
+            controls.update();
+            frames++; const now = performance.now();
+            if (now - lastTime >= 1000) { document.getElementById('fps').textContent = frames; frames = 0; lastTime = now; }
+            document.getElementById('camDist').textContent = camera.position.length().toFixed(1);
+            renderer.render(scene, camera);
+        }
+        document.getElementById('nodeCount').textContent = totalNodeCount;
+        animate();
+    </script>
+</body>
+
+</html>
