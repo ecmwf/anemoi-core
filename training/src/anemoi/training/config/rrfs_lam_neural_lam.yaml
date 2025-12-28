@@ -1,6 +1,6 @@
 defaults:
   - data: zarr
-  - dataloader: native_grid
+  - dataloader: rrfs_native_no_frequency
   - diagnostics: evaluation
   - system: example
   - graph: existing_graph
