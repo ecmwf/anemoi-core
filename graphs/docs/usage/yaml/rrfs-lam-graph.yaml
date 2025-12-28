@@ -10,12 +10,12 @@ nodes:
       dataset: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/test-20km-bcmask.zarr
     attributes:
       boundary_mask:
-        _target_: anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable
+        _target_: anemoi.graphs.nodes.attributes.NonzeroAnemoiDatasetVariable
         variable: boundary_mask
       cutout_mask:
         _target_: anemoi.graphs.nodes.attributes.BooleanNot
         masks:
-          _target_: anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable
+          _target_: anemoi.graphs.nodes.attributes.NonzeroAnemoiDatasetVariable
           variable: boundary_mask
       area_weight:
         _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights

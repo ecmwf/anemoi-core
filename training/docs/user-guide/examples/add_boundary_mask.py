@@ -48,7 +48,7 @@ def main():
     dx_east = (lon_max - lon) * km_per_deg * cos_lat
     min_dist = np.minimum.reduce([dy_south, dy_north, dx_west, dx_east])
 
-    boundary = np.where(min_dist <= args.boundary_km, 1.0, np.nan).astype(np.float32)
+    boundary = np.where(min_dist <= args.boundary_km, 1.0, 0.0).astype(np.float32)
 
     data = ds["data"]
     if "variable" not in data.dims:
