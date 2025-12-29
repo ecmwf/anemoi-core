@@ -22,13 +22,7 @@ from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
 from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
-from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
-from .spectral import LogSpectralDistance
-from .spectral import LogFFT2Distance
-from .spectral import FourierCorrelationLoss
-from .spectral import SpectralCRPSLoss
-from .spectral import SpectralL2Loss
 
 __all__ = [
     "AlmostFairKernelCRPS",
@@ -39,7 +33,6 @@ __all__ = [
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
-    "LossVariableMapper",
     "MAELoss",
     "MSELoss",
     "MultiscaleLossWrapper",
@@ -47,10 +40,5 @@ __all__ = [
     "SpectralCRPSLoss",
     "SpectralL2Loss",
     "WeightedMSELoss",
-    "LogSpectralDistance",
-    "LogFFT2Distance",
-    "FourierCorrelationLoss",
-    "SpectralCRPSLoss",
-    "SpectralL2Loss",
     "get_loss_function",
 ]
