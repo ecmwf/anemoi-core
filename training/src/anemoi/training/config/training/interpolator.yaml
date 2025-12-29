@@ -55,7 +55,7 @@ target_forcing:
     data: # user-defined key in data #forcing parameters for the target time to include as input
       data: #of which come from the dataset
         - "insolation"
-  time_fraction: True
+      time_fraction: True
 
 # select strategy
 strategy:

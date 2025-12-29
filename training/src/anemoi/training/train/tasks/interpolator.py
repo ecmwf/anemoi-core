@@ -66,7 +66,7 @@ class GraphInterpolator(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
         target_forcing_config = get_multiple_datasets_config(config.training.target_forcing)
-        self.target_forcing_indices = {}
+        self.target_forcing_indices, self.use_time_fraction  = {}, {}
         for dataset_name in self.dataset_names:
             if len(target_forcing_config[dataset_name].data) >= 1:
                 self.target_forcing_indices[dataset_name] = itemgetter(*target_forcing_config[dataset_name].data)(
@@ -77,8 +77,9 @@ class GraphInterpolator(BaseGraphModule):
             else:
                 self.target_forcing_indices[dataset_name] = []
 
+            self.use_time_fraction[dataset_name] = target_forcing_config[dataset_name].time_fraction
+
         self.num_tfi = {name: len(idxs) for name, idxs in self.target_forcing_indices.items()}
-        self.use_time_fraction = config.training.target_forcing.time_fraction
 
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
@@ -97,7 +98,7 @@ class GraphInterpolator(BaseGraphModule):
                 batch_size,
                 ens_size,
                 grid_size,
-                num_tfi + self.use_time_fraction,
+                num_tfi + self.use_time_fraction[dataset_name],
                 device=self.device,
                 dtype=batch_type,
             )
@@ -112,7 +113,7 @@ class GraphInterpolator(BaseGraphModule):
                     self.target_forcing_indices[dataset_name],
                 ]
 
-            if self.use_time_fraction:
+            if self.use_time_fraction[dataset_name]:
                 target_forcing[dataset_name][..., -1] = (interp_step - self.boundary_times[-2]) / (
                     self.boundary_times[-1] - self.boundary_times[-2]
                 )

@@ -418,7 +418,7 @@ class InterpolationSchema(BaseTrainingSchema):
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
-    target_forcing: TargetForcing
+    target_forcing: DatasetDict[TargetForcing]
     "Forcing parameters for target output times."
 
 
