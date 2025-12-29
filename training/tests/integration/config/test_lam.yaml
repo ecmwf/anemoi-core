@@ -67,14 +67,17 @@ diagnostics:
     callbacks:
       # Add plot callbacks here
       - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+        dataset_names: ["data"]
         every_n_epochs: 5
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+        dataset_names: ["data"]
         # group parameters by categories when visualizing contributions to the loss
         # one-parameter groups are possible to highlight individual parameters
         parameter_groups:
           moisture: [tp]
         every_n_batches: ${diagnostics.plot.frequency.batch}
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+        dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
         per_sample : 6
         parameters: ${diagnostics.plot.parameters}
@@ -84,6 +87,7 @@ diagnostics:
         precip_and_related_fields: [tp]
         colormaps: ${diagnostics.plot.colormaps}
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+        dataset_names: ["data"]
         # every_n_batches: 100 # Override for batch frequency
         # min_delta: 0.01 # Minimum distance between two consecutive points
         sample_idx: ${diagnostics.plot.sample_idx}
@@ -91,6 +95,7 @@ diagnostics:
         parameters:
         - tp
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+        dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         precip_and_related_fields: [tp]
