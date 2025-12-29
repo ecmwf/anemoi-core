@@ -28,8 +28,10 @@ dataloader:
     min_distance_km: 0
 training:
   scalers:
-    node_weights:
-      weight_frac_of_total: ???
+    datasets:
+      data: # user-defined key in data
+        node_weights:
+          weight_frac_of_total: ???
 system:
   input:
     dataset: ???

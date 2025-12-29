@@ -68,8 +68,10 @@ graph:
 
 training:
   scalers:
-    node_weights:
-      weight_frac_of_total: 0.25
+    datasets:
+      data:
+        node_weights:
+          weight_frac_of_total: 0.25
 
 
 diagnostics:
