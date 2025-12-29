@@ -370,7 +370,7 @@ class BaseTrainingSchema(BaseModel):
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: DatasetDict[dict[str, LossSchemas]]
     "List of validation metrics configurations."
-    variable_groups: DatasetDict[dict[str, VariableGroupType]]
+    variable_groups: DatasetDict[VariableGroupType]
     "Groups for variable loss scaling"
     max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
