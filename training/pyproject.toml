@@ -98,8 +98,8 @@ optional-dependencies.tests = [
   "pytest>=8",
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
-  "torch-dct>=0.1.6", # required for spectral loss tests
   "sshfs",
+  "torch-dct>=0.1.6",        # required for spectral loss tests
 ]
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
