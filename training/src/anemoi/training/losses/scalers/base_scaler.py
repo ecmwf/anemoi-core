@@ -8,9 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import sys
 from abc import ABC
 from abc import abstractmethod
-from enum import StrEnum
 
 import torch
 
@@ -20,6 +20,14 @@ from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
+if sys.version_info < (3, 11):
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
+
+else:
+    from enum import StrEnum
 
 class BaseScaler(ABC):
     """Base class for all loss scalers."""
