@@ -44,7 +44,3 @@ datasets:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
       nodes_attribute_name: area_weight
       norm: unit-sum
-
-   # Scalers in the time dimension
-    time_steps:
-      _target_: anemoi.training.losses.scalers.UniformTimeStepScaler
