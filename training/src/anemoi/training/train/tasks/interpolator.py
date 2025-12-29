@@ -66,7 +66,7 @@ class GraphInterpolator(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
         target_forcing_config = get_multiple_datasets_config(config.training.target_forcing)
-        self.target_forcing_indices, self.use_time_fraction  = {}, {}
+        self.target_forcing_indices, self.use_time_fraction = {}, {}
         for dataset_name in self.dataset_names:
             if len(target_forcing_config[dataset_name].data) >= 1:
                 self.target_forcing_indices[dataset_name] = itemgetter(*target_forcing_config[dataset_name].data)(
