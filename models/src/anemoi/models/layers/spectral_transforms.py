@@ -16,6 +16,7 @@ import torch
 import torch.fft
 
 from anemoi.models.layers.spectral_helpers import CartesianRealSHT
+from anemoi.models.layers.spectral_helpers import EcTransOctahedralSHTModule
 from anemoi.models.layers.spectral_helpers import OctahedralRealSHT
 
 LOGGER = logging.getLogger(__name__)
@@ -85,6 +86,36 @@ class FFT2D(SpectralTransform):
         # [batch**ens*variables, y, x] -> [batch, ens y, x, variables]
         return einops.rearrange(fft_data, "(b e v) y x -> b e y x v", b=batch_size, e=ens, v=var)
 
+class DCT2D(SpectralTransform):
+    """2D Discrete Cosine Transform."""
+
+    def __init__(self, x_dim: int, y_dim: int) -> None:
+        self.x_dim = x_dim
+        self.y_dim = y_dim
+
+    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+        try:
+            from torch_dct import dct_2d
+        except ImportError:
+            raise ImportError(
+                "torch_dct is required for DCT2D transform. ")
+        b, e, points, v = data.shape
+        assert points == self.x_dim * self.y_dim
+
+        x = einops.rearrange(
+            data,
+            "b e (y x) v -> (b e v) y x",
+            x=self.x_dim,
+            y=self.y_dim,
+        )
+        x = dct_2d(x)
+        return einops.rearrange(
+            x,
+            "(b e v) y x -> b e y x v",
+            b=b,
+            e=e,
+            v=v,
+        )
 
 class SHT(SpectralTransform):
     """Placeholder for Spherical Harmonics Transform."""
@@ -196,3 +227,42 @@ class OctahedralSHT(SHT):
         x = einops.rearrange(data, "b e p v -> (b e v) p")
         coeffs = self._sht(x)  # complex: (b*e*v, L, M)
         return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+
+class EcTransOctahedralSHT(SHT):
+    def __init__(
+        self,
+        truncation: int,
+        dtype: torch.dtype = torch.float32,
+        filepath: str | None = None,
+        nodes_slice: tuple[int, int | None] | None = None,
+        *,
+        # optional “compat” args:
+        x_dim: int | None = None,  # interpreted as max_nlon
+        y_dim: int | None = None,  # interpreted as nlat (full globe)
+    ) -> None:
+        self.truncation = int(truncation)
+        self.dtype = dtype
+        self.y_dim = 2 * (self.truncation + 1)          # nlat full globe
+        self.x_dim = 20 + 4 * self.truncation           # max nlon on any latitude ring
+
+        if y_dim is not None and int(y_dim) != self.y_dim:
+            raise ValueError(f"y_dim={y_dim} incompatible with truncation={self.truncation} (expected {self.y_dim}).")
+        if x_dim is not None and int(x_dim) != self.x_dim:
+            raise ValueError(f"x_dim={x_dim} incompatible with truncation={self.truncation} (expected {self.x_dim}).")
+
+        nodes_slice = nodes_slice or (0, None)
+        self.nodes_slice = slice(*nodes_slice)
+        if not (self.nodes_slice.start == 0 and self.nodes_slice.stop is None):
+            raise ValueError("EcTransOctahedralSHT does not support `nodes_slice` (requires full grid).")
+
+        self._sht = EcTransOctahedralSHTModule(truncation=self.truncation, dtype=self.dtype, filepath=filepath)
+        self._expected_points = int(self._sht.n_grid_points)
+
+    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+        data = data[:, :, self.nodes_slice, :]
+        _, _, points, _ = data.shape
+        assert points == self._expected_points, (
+            f"Input data spatial dimension {points} does not match expected "
+            f"size {self._expected_points} for truncation={self.truncation}."
+        )
+        return self._sht(data)

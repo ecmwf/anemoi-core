@@ -20,18 +20,40 @@ from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import WeightedMSELoss
+from anemoi.training.losses import SpectralL2Loss
+from anemoi.training.losses import SpectralCRPSLoss
+from anemoi.training.losses import FourierCorrelationLoss
+from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
+losses = [
+    MSELoss,
+    HuberLoss,
+    MAELoss,
+    RMSELoss,
+    LogCoshLoss,
+    KernelCRPS,
+    AlmostFairKernelCRPS,
+    WeightedMSELoss]
+spectral_losses = [
+    SpectralL2Loss,
+    SpectralCRPSLoss,
+    FourierCorrelationLoss,
+    LogSpectralDistance]
+losses += spectral_losses
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    losses,
 )
 def test_manual_init(loss_cls: type[BaseLoss]) -> None:
-    loss = loss_cls()
+    if loss_cls in spectral_losses: # most spectral losses need grid dims
+        loss = loss_cls(x_dim=4, y_dim=4)
+    else:
+        loss = loss_cls()
     assert isinstance(loss, BaseLoss)
 
 
@@ -229,25 +251,37 @@ def test_grid_invariance(
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    losses,
 )
 def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(DictConfig({"_target_": f"anemoi.training.losses.{loss_cls.__name__}"}))
+    loss_dic = {
+                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            } if loss_cls not in spectral_losses else {
+                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+                "x_dim": 4,
+                "y_dim": 4,
+            }
+    loss = get_loss_function(DictConfig(loss_dic))
     assert isinstance(loss, BaseLoss)
 
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    losses,
 )
 def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(
-        DictConfig(
-            {
+    loss_dic = {
                 "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
                 "scalers": ["test"],
-            },
-        ),
+            } if loss_cls not in spectral_losses else {
+                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+                "scalers": ["test"],
+                "x_dim": 4,
+                "y_dim": 4,
+            }
+    loss = get_loss_function(
+        DictConfig(
+        loss_dic),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -258,16 +292,21 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    losses,
 )
 def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(
-        DictConfig(
-            {
+    loss_dic = {
                 "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
                 "scalers": ["*"],
-            },
-        ),
+            } if loss_cls not in spectral_losses else {
+                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+                "scalers": ["*"],
+                "x_dim": 4,
+                "y_dim": 4,
+            }
+    loss = get_loss_function(
+        DictConfig(
+        loss_dic),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -278,16 +317,21 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    losses,
 )
 def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(
-        DictConfig(
-            {
+    loss_dic = {
                 "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
                 "scalers": [],
-            },
-        ),
+            } if loss_cls not in spectral_losses else {
+                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+                "scalers": [],
+                "x_dim": 4,
+                "y_dim": 4,
+            }
+    loss = get_loss_function(
+        DictConfig(
+        loss_dic),
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -296,16 +340,20 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    losses,
 )
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
+    loss_dic = {
+                "_target_": f"anemoi.training.losses.{loss_cls.__name__}", "scalers": ["*", "!test"],
+            } if loss_cls not in spectral_losses else {
+                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+                "x_dim": 4,
+                "y_dim": 4,
+                "scalers": ["*", "!test"],
+            }
     loss = get_loss_function(
         DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["*", "!test"],
-            },
-        ),
+        loss_dic),
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -440,3 +488,120 @@ def test_cartesian_sht_loss() -> None:
     target_wrong = torch.zeros_like(pred_wrong)
     with pytest.raises(AssertionError):
         _ = loss(pred_wrong, target_wrong, squash=True)
+
+
+def _expected_octahedral_points(truncation: int) -> int:
+        # full globe reduced-octahedral points for ecTrans definition
+        # NH lons: 20 + 4*i, i=0..T  => sum_NH = 2*(T+1)*(T+10)
+        # full globe doubles:        => 4*(T+1)*(T+10)
+        return 4 * (truncation + 1) * (truncation + 10)
+
+class _DummyEcTransOctahedralSHTModule(torch.nn.Module):
+    """Stub that avoids needing ectrans assets/npz but preserves shapes."""
+
+    def __init__(self, truncation: int, dtype: torch.dtype = torch.float32, filepath=None) -> None:  # noqa: D401
+        super().__init__()
+        self.truncation = int(truncation)
+        self.dtype = dtype
+        self.n_grid_points = _expected_octahedral_points(self.truncation)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [batch, ens, grid_points, vars]
+        bsz, ens, _, nvars = x.shape
+
+        # Return "spectrum": [batch, ens, l, m, vars] (complex)
+        l_dim = self.truncation + 1
+        m_dim = self.truncation + 1
+
+        complex_dtype = torch.complex64 if x.dtype in (torch.float16, torch.float32) else torch.complex128
+        return torch.zeros((bsz, ens, l_dim, m_dim, nvars), device=x.device, dtype=complex_dtype)
+
+
+def test_spectral_l2_loss_ectrans_octahedral_sht_no_assets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    End-to-end-ish test: SpectralL2Loss(transform="ectrans_octahedral_sht") runs
+    without npz assets by stubbing the ecTrans module, and returns expected shapes.
+    """
+    import anemoi.models.layers.spectral_transforms as st
+    from anemoi.training.losses.spectral import SpectralL2Loss
+    monkeypatch.setattr(st, "EcTransOctahedralSHTModule", _DummyEcTransOctahedralSHTModule)
+
+    trunc = 8
+    nvars = 3
+    points = _expected_octahedral_points(trunc)
+
+    # Provide x_dim/y_dim “compat args” (validated by the transform)
+    x_dim = 20 + 4 * trunc              # max nlon (equator)
+    y_dim = 2 * (trunc + 1)             # number of latitude rings (full globe)
+
+    loss = SpectralL2Loss(
+        transform="ectrans_octahedral_sht",
+        truncation=trunc,
+        x_dim=x_dim,
+        y_dim=y_dim,
+        # filepath=None is fine because we stub the module
+    )
+
+    pred = torch.zeros((2, 1, points, nvars), dtype=torch.float32)
+    target = torch.zeros_like(pred)
+    out = loss(pred, target, squash=False)
+    assert out.shape == (nvars,)
+    torch.testing.assert_close(out, torch.zeros((nvars,)))
+    out_total = loss(pred, target, squash=True)
+    assert out_total.numel() == 1
+    torch.testing.assert_close(out_total, torch.tensor(0.))
+    pred_wrong = torch.zeros((2, 1, points + 1, nvars), dtype=torch.float32)
+    target_wrong = torch.zeros_like(pred_wrong)
+    with pytest.raises(AssertionError):
+        _ = loss(pred_wrong, target_wrong, squash=True)
+
+
+def test_ectrans_octahedral_sht_dim_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Validate the x_dim/y_dim alias checks (even though the grid isn't rectangular).
+    """
+    import anemoi.models.layers.spectral_transforms as st
+    from anemoi.training.losses.spectral import SpectralL2Loss
+
+    monkeypatch.setattr(st, "EcTransOctahedralSHTModule", _DummyEcTransOctahedralSHTModule)
+
+    trunc = 8
+    x_dim_ok = 20 + 4 * trunc
+    y_dim_ok = 2 * (trunc + 1)
+    _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok, y_dim=y_dim_ok)
+
+    # Wrong y_dim
+    with pytest.raises(ValueError):
+        _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok, y_dim=y_dim_ok + 1)
+
+    # Wrong x_dim
+    with pytest.raises(ValueError):
+        _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok + 1, y_dim=y_dim_ok)
+
+
+def test_spectral_crps_fft_and_dct() -> None:
+    bs, ens, nvars = 2, 5, 3
+    x_dim, y_dim = 8, 6
+    grid = x_dim * y_dim
+
+    pred = torch.randn(bs, ens, grid, nvars)
+    target = torch.randn(bs, 1, grid, nvars)
+
+    for transform in ["fft2d", "dct2d"]:
+        loss = get_loss_function(
+            DictConfig(
+                {
+                    "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
+                    "transform": transform,
+                    "x_dim": x_dim,
+                    "y_dim": y_dim,
+                    "cutoff_ratio": 0.5,
+                    "scalers": [],
+                }
+            )
+        )
+
+        out = loss(pred, target, squash=False)
+        assert out.shape == (nvars,), f"{transform}: per-variable CRPS expected"
+        out_total = loss(pred, target, squash=True)
+        assert out_total.numel() == 1, f"{transform}: scalar CRPS expected"
