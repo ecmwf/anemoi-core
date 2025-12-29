@@ -22,7 +22,7 @@ from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
-from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
@@ -52,24 +52,42 @@ def testing_modifications_with_temp_dir(tmp_path: Path) -> DictConfig:
     return _load_testing_modifications(tmp_path)
 
 
-class GetTmpPath:
+@pytest.fixture
+def testing_modifications_callbacks_on_with_temp_dir(tmp_path: Path) -> DictConfig:
+    testing_modifications = _load_testing_modifications(tmp_path)
+    del testing_modifications.diagnostics.plot.callbacks
+    return testing_modifications
+
+
+class GetTmpPaths:
     def __init__(self, temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> None:
         self.temporary_directory_for_test_data = temporary_directory_for_test_data
 
-    def __call__(self, url: str) -> tuple[str, list[str], list[str]]:
+    def __call__(self, config: DictConfig, list_datasets: list[str]) -> tuple[str, list[str], list[str]]:
+        tmp_paths = []
+        dataset_names = []
+        archive_urls = []
 
-        url_archive = url + ".tgz"
-        name_dataset = Path(url).name
-        tmp_path_dataset = self.temporary_directory_for_test_data(url_archive, archive=True)
+        for dataset in list_datasets:
+            url_archive = config.system.input[dataset] + ".tgz"
+            name_dataset = Path(config.system.input[dataset]).name
+            tmp_path_dataset = self.temporary_directory_for_test_data(url_archive, archive=True)
 
-        tmp_path = Path(tmp_path_dataset) / name_dataset
+            tmp_paths.append(tmp_path_dataset)
+            dataset_names.append(name_dataset)
+            archive_urls.append(url_archive)
 
-        return tmp_path, url_archive
+        if len(list_datasets) == 1:
+            return tmp_paths[0], dataset_names, archive_urls
+
+        tmp_dir = os.path.commonprefix([tmp_paths[0], tmp_paths[1]])[:-1]  # remove trailing slash
+        rel_paths = [Path(Path(path).name) / name for (name, path) in zip(dataset_names, tmp_paths, strict=False)]
+        return tmp_dir, rel_paths, archive_urls
 
 
 @pytest.fixture
-def get_tmp_path(temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> GetTmpPath:
-    return GetTmpPath(temporary_directory_for_test_data)
+def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> GetTmpPaths:
+    return GetTmpPaths(temporary_directory_for_test_data)
 
 
 @pytest.fixture(
@@ -84,27 +102,46 @@ def get_tmp_path(temporary_directory_for_test_data: TemporaryDirectoryForTestDat
         ],
         ["config_validation=False", "diagnostics.log.mlflow.enabled=False", "system.input.graph=null"],
     ],
-    ids=["pydantic_MLflow", "pydantic_no_MLflow", "no_pydantic_MLflow", "no_pydantic_no_MLflow"],
 )
-def gnn_config_mlflow(
+def base_global_config(
     request: pytest.FixtureRequest,
-    gnn_config: tuple[DictConfig, str],
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str, str]:
     overrides = request.param
-    config, _ = gnn_config
+    model_architecture = overrides[0].split("=")[1]
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
+        template = compose(
+            config_name="config",
+            overrides=overrides,
+        )  # apply architecture overrides to template since they override a default
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
 
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+
+    # Add the imputer here as it's not part of the default config
+    imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
+
+    OmegaConf.set_struct(template.data, False)  # allow adding new keys to the template to add the imputer
     cfg = OmegaConf.merge(
-        config,
+        template,
+        testing_modifications_with_temp_dir,
+        use_case_modifications,
+        imputer_modifications,
         OmegaConf.from_dotlist(overrides),
     )
+
+    OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg
+    return cfg, dataset_urls[0], model_architecture
 
 
-def build_global_config(
+def build_architecture_config(
     overrides: list[str],
     testing_modifications: DictConfig,
-    get_tmp_path: GetTmpPath,
+    get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str, str]:
 
     model_architecture = overrides[0].split("=")[1]
@@ -112,10 +149,10 @@ def build_global_config(
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(config_name="config", overrides=overrides)
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
 
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
     imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
 
@@ -128,47 +165,31 @@ def build_global_config(
     )
     OmegaConf.resolve(cfg)
 
-    return cfg, url_dataset, model_architecture
+    return cfg, dataset_urls[0], model_architecture
 
 
 @pytest.fixture(
-    params=[["model=gnn"], ["model=graphtransformer"]],
-    ids=["gnn", "graphtransformer"],
+    params=[
+        ["model=gnn"],
+        ["model=graphtransformer"],
+    ],
 )
-def global_config(
+def architecture_config(
     request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str, str]:
-    cfg, url, model_architecture = build_global_config(
+    return build_architecture_config(
         request.param,
-        testing_modifications_with_temp_dir,
-        get_tmp_path,
+        testing_modifications_callbacks_on_with_temp_dir,
+        get_tmp_paths,
     )
-
-    cfg.task.multistep_input = 3
-    cfg.task.multistep_output = 2
-
-    OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
-    cfg.training.scalers.datasets.data["output_steps"] = {
-        "_target_": "anemoi.training.losses.scalers.TimeStepScaler",
-        "norm": "unit-sum",
-        "weights": [1.0, 2.0],
-    }
-
-    cfg.training.training_loss.datasets.data.scalers = [
-        "pressure_level",
-        "general_variable",
-        "node_weights",
-        "output_steps",
-    ]
-    return cfg, url, model_architecture
 
 
 @pytest.fixture
 def stretched_config(
     testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, list[str]]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched"):
         template = compose(config_name="stretched")
@@ -176,47 +197,21 @@ def stretched_config(
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    tmp_dir_forcing_dataset, url_forcing_dataset = get_tmp_path(use_case_modifications.system.input.forcing_dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    use_case_modifications.system.input.forcing_dataset = str(tmp_dir_forcing_dataset)
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
+    dataset, forcing_dataset = rel_paths
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
+    use_case_modifications.system.input.forcing_dataset = str(Path(tmp_dir, forcing_dataset))
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, [url_dataset, url_forcing_dataset]
-
-
-@pytest.fixture
-def multidatasets_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
-) -> tuple[DictConfig, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidatasets"):
-        template = compose(config_name="multi")
-
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
-    assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    tmp_dir_dataset_b, url_dataset_b = get_tmp_path(use_case_modifications.system.input.dataset_b)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    use_case_modifications.system.input.dataset_b = str(tmp_dir_dataset_b)
-
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    assert isinstance(cfg, DictConfig)
-
-    cfg.task.multistep_input = 3
-    cfg.task.multistep_output = 2
-
-    return cfg, [url_dataset, url_dataset_b]
+    return cfg, dataset_urls
 
 
 @pytest.fixture
 def lam_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, list[str]]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_lam"):
         template = compose(config_name="lam")
@@ -224,14 +219,15 @@ def lam_config(
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    tmp_dir_forcing_dataset, url_forcing_dataset = get_tmp_path(use_case_modifications.system.input.forcing_dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    use_case_modifications.system.input.forcing_dataset = str(tmp_dir_forcing_dataset)
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
+    dataset, forcing_dataset = rel_paths
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
+    use_case_modifications.system.input.forcing_dataset = str(Path(tmp_dir, forcing_dataset))
+
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, [url_dataset, url_forcing_dataset]
+    return cfg, dataset_urls
 
 
 @pytest.fixture
@@ -243,10 +239,9 @@ def lam_config_with_graph(
     cfg, urls = lam_config
     cfg.graph = existing_graph_config
 
-    url_graph = "anemoi-integration-tests/training/graphs/lam-graph-2026-02-19.pt"
-    cfg.system.input.graph = Path(get_test_data(url_graph))
-    cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in the lam training cycle test
-    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in the lam training cycle test
+    url_graph = cfg.system.input.graph
+    tmp_path_graph = get_test_data(url_graph)
+    cfg.system.input.graph = Path(tmp_path_graph)
     return cfg, urls
 
 
@@ -272,8 +267,8 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
 
 @pytest.fixture
 def ensemble_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
     get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
@@ -284,87 +279,57 @@ def ensemble_config(
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
 
     cfg = handle_truncation_matrices(cfg, get_test_data)
-    assert isinstance(cfg, DictConfig)
 
-    cfg.task.multistep_input = 3
-    cfg.task.multistep_output = 2
-    return cfg, url_dataset
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0]
 
 
 @pytest.fixture
 def hierarchical_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, list[str]]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_hierarchical"):
         template = compose(config_name="hierarchical")
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
-
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, [url_dataset]
+    return cfg, dataset_urls
 
 
 @pytest.fixture
-def autoencoder_config(
-    testing_modifications_with_temp_dir: OmegaConf,
-    get_tmp_path: GetTmpPath,
-) -> tuple[OmegaConf, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_autoencoder"):
-        template = compose(config_name="autoencoder")
-
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_autoencoder.yaml")
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    return cfg, [url_dataset]
-
-
-@pytest.fixture
-def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: GetTmpPath) -> tuple[DictConfig, str]:
+def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths) -> tuple[DictConfig, str]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(config_name="config")
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test
-    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
-    return cfg, url_dataset
+    return cfg, dataset_urls[0]
 
 
 @pytest.fixture(
     params=[  # selects different test cases
-        "lam",
-        "graphtransformer",
-        "stretched",
-        "ensemble_crps",
-        "diffusiontend",
-    ],
-    ids=[
         "lam",
         "graphtransformer",
         "stretched",
@@ -428,22 +393,34 @@ def migrator() -> Migrator:
     return Migrator()
 
 
-@pytest.fixture
-def global_config_with_checkpoint(
+@pytest.fixture(
+    params=[
+        ["model=gnn"],
+        ["model=graphtransformer"],
+    ],
+)
+def architecture_config_with_checkpoint(
     migrator: Migrator,
-    global_config: tuple[DictConfig, str, str],
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
-
-    cfg, dataset_url, model_architecture = global_config
-
+    # Reuse the same overrides that architecture_config gets
+    overrides = request.param
+    cfg, dataset_url, model_architecture = build_architecture_config(
+        overrides,
+        testing_modifications_with_temp_dir,
+        get_tmp_paths,
+    )
+    # rest of your logic...
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-03-06.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2025-07-31.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-03-06.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"
@@ -458,16 +435,13 @@ def global_config_with_checkpoint(
     cfg.training.run_id = "dummy_id"
     cfg.training.max_epochs = 3
 
-    cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test
-    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
-
     return cfg, dataset_url
 
 
 @pytest.fixture
-def temporal_downscaler_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+def interpolator_config(
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str]:
     """Compose a runnable configuration for the temporal downscaling model with multiple output steps.
 
@@ -488,36 +462,12 @@ def temporal_downscaler_config(
     )
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, url_dataset
-
-
-@pytest.fixture
-def imerg_target_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
-) -> tuple[DictConfig, str]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_filtering"):
-        template = compose(config_name="config")
-
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_filtering.yaml")
-    assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    OmegaConf.set_struct(template.data, False)  # allow new keys under data (e.g. target)
-    OmegaConf.set_struct(
-        template.training.training_loss.datasets.data,
-        False,
-    )  # allow new keys under data (e.g. target)
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    assert isinstance(cfg, DictConfig)
-    return cfg, url_dataset
+    return cfg, dataset_urls[0]
 
 
 @pytest.fixture(
@@ -532,8 +482,8 @@ def imerg_target_config(
 )
 def diffusion_config(
     request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: OmegaConf,
-    get_tmp_path: GetTmpPath,
+    testing_modifications_callbacks_on_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
 ) -> tuple[OmegaConf, str]:
     overrides = request.param
 
@@ -541,103 +491,9 @@ def diffusion_config(
         template = compose(config_name="diffusion", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
-    return cfg, url_dataset
-
-
-@pytest.fixture(
-    params=[
-        pytest.param(
-            [
-                "model=graphtransformer_diffusion",
-                "training.training_method=anemoi.training.train.methods.DiffusionTraining",
-            ],
-            id="diffusion",
-        ),
-        pytest.param(
-            [
-                "model=graphtransformer_diffusiontend",
-                "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
-            ],
-            id="diffusiontend",
-        ),
-    ],
-    ids=["diffusion", "diffusiontend"],
-)
-def multidatasets_diffusion_config(
-    request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
-) -> tuple[DictConfig, list[str]]:
-    overrides = request.param
-    is_tendency = any("graphtransformer_diffusiontend" in override for override in overrides)
-
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multi_diffusion"):
-        template = compose(config_name="multi", overrides=overrides)
-
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
-    assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    tmp_dir_dataset_b, url_dataset_b = get_tmp_path(use_case_modifications.system.input.dataset_b)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    use_case_modifications.system.input.dataset_b = str(tmp_dir_dataset_b)
-
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    if is_tendency:
-        cfg.task.multistep_input = 3
-        cfg.task.multistep_output = 2
-    else:
-        cfg.task.multistep_input = 2
-        cfg.task.multistep_output = 1
-    OmegaConf.resolve(cfg)
-    assert isinstance(cfg, DictConfig)
-
-    cfg.diagnostics.plot.callbacks = (
-        []
-    )  # remove plotting callbacks as they are tested in multidatasets and diffusion test cases
-    return cfg, [url_dataset, url_dataset_b]
-
-
-@pytest.fixture
-def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str) -> tuple[DictConfig, str]:
-    cfg, url = gnn_config
-    cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
-    cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
-    cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
-    return cfg, url
-
-
-@pytest.fixture
-def temporal_downscaler_ensemble_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
-    get_test_data: GetTestData,
-) -> tuple[DictConfig, str]:
-
-    with initialize(
-        version_base=None,
-        config_path="../../src/anemoi/training/config",
-        job_name="test_temporal_downscaler_ensemble",
-    ):
-        template = compose(config_name="temporal_downscaler_ensemble")
-
-    use_case_modifications = OmegaConf.load(
-        Path.cwd() / "training/tests/integration/config/test_temporal_downscaler_ensemble.yaml",
-    )
-    assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-
-    cfg = handle_truncation_matrices(cfg, get_test_data)
-    assert isinstance(cfg, DictConfig)
-
-    return cfg, url_dataset
+    return cfg, dataset_urls[0]
