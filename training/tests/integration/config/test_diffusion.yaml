@@ -9,6 +9,10 @@ system:
 
 dataloader:
   training:
-    end: 2017-01-08 12:00:00
+    datasets:
+      data:
+        end: 2017-01-08 12:00:00
   validation:
-    start: 2017-01-08 18:00:00
+    datasets:
+      data:
+        start: 2017-01-08 18:00:00
