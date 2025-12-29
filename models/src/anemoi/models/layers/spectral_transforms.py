@@ -86,6 +86,7 @@ class FFT2D(SpectralTransform):
         # [batch**ens*variables, y, x] -> [batch, ens y, x, variables]
         return einops.rearrange(fft_data, "(b e v) y x -> b e y x v", b=batch_size, e=ens, v=var)
 
+
 class DCT2D(SpectralTransform):
     """2D Discrete Cosine Transform."""
 
@@ -97,8 +98,7 @@ class DCT2D(SpectralTransform):
         try:
             from torch_dct import dct_2d
         except ImportError:
-            raise ImportError(
-                "torch_dct is required for DCT2D transform. ")
+            raise ImportError("torch_dct is required for DCT2D transform. ")
         b, e, points, v = data.shape
         assert points == self.x_dim * self.y_dim
 
@@ -116,6 +116,7 @@ class DCT2D(SpectralTransform):
             e=e,
             v=v,
         )
+
 
 class SHT(SpectralTransform):
     """Placeholder for Spherical Harmonics Transform."""
@@ -228,6 +229,7 @@ class OctahedralSHT(SHT):
         coeffs = self._sht(x)  # complex: (b*e*v, L, M)
         return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
 
+
 class EcTransOctahedralSHT(SHT):
     def __init__(
         self,
@@ -242,8 +244,8 @@ class EcTransOctahedralSHT(SHT):
     ) -> None:
         self.truncation = int(truncation)
         self.dtype = dtype
-        self.y_dim = 2 * (self.truncation + 1)          # nlat full globe
-        self.x_dim = 20 + 4 * self.truncation           # max nlon on any latitude ring
+        self.y_dim = 2 * (self.truncation + 1)  # nlat full globe
+        self.x_dim = 20 + 4 * self.truncation  # max nlon on any latitude ring
 
         if y_dim is not None and int(y_dim) != self.y_dim:
             raise ValueError(f"y_dim={y_dim} incompatible with truncation={self.truncation} (expected {self.y_dim}).")

@@ -22,21 +22,24 @@ Notes
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from typing import Literal
 
 import einops
 import torch
-from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.layers.spectral_transforms import DCT2D
+from anemoi.models.layers.spectral_transforms import FFT2D
 from anemoi.models.layers.spectral_transforms import CartesianSHT
 from anemoi.models.layers.spectral_transforms import EcTransOctahedralSHT
-from anemoi.models.layers.spectral_transforms import FFT2D
-from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.utils.enums import TensorDim
 from anemoi.training.losses.kcrps import KernelCRPS
+from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -261,6 +264,7 @@ class LogFFT2Distance(LogSpectralDistance):
             **kwargs,
         )
 
+
 class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
     """CRPS computed in spectral space using arbitrary spectral transforms.
 
@@ -308,7 +312,8 @@ class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Keep only the lowest spectral modes."""
         if not (0.0 < cutoff_ratio <= 1.0):
-            raise ValueError("cutoff_ratio must be in (0, 1].")
+            msg = "cutoff_ratio must be in (0, 1]."
+            raise ValueError(msg)
 
         n_modes = pred.shape[-2]
         keep = max(1, int(cutoff_ratio * n_modes))
@@ -340,7 +345,7 @@ class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
         pred_spec = einops.rearrange(pred_spec, "b e m v -> b v m e")  # ensemble dim last for preds
         crps = self._kernel_crps(pred_spec, tgt_spec)
-        crps = einops.rearrange(crps, "b v m -> b 1 m v") # consistent with tensordim
+        crps = einops.rearrange(crps, "b v m -> b 1 m v")  # consistent with tensordim
 
         scaled = self.scale(
             crps,

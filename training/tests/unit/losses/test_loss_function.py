@@ -13,47 +13,33 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.training.losses import AlmostFairKernelCRPS
+from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
 from anemoi.training.losses import KernelCRPS
 from anemoi.training.losses import LogCoshLoss
+from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
-from anemoi.training.losses import WeightedMSELoss
-from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import FourierCorrelationLoss
-from anemoi.training.losses import LogSpectralDistance
+from anemoi.training.losses import SpectralL2Loss
+from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
-losses = [
-    MSELoss,
-    HuberLoss,
-    MAELoss,
-    RMSELoss,
-    LogCoshLoss,
-    KernelCRPS,
-    AlmostFairKernelCRPS,
-    WeightedMSELoss]
-spectral_losses = [
-    SpectralL2Loss,
-    SpectralCRPSLoss,
-    FourierCorrelationLoss,
-    LogSpectralDistance]
+losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
+spectral_losses = [SpectralL2Loss, SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
 losses += spectral_losses
+
 
 @pytest.mark.parametrize(
     "loss_cls",
     losses,
 )
 def test_manual_init(loss_cls: type[BaseLoss]) -> None:
-    if loss_cls in spectral_losses: # most spectral losses need grid dims
-        loss = loss_cls(x_dim=4, y_dim=4)
-    else:
-        loss = loss_cls()
+    loss = loss_cls(x_dim=4, y_dim=4) if loss_cls in spectral_losses else loss_cls()
     assert isinstance(loss, BaseLoss)
 
 
@@ -254,13 +240,17 @@ def test_grid_invariance(
     losses,
 )
 def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            } if loss_cls not in spectral_losses else {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "x_dim": 4,
-                "y_dim": 4,
-            }
+    loss_dic = (
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+        }
+        if loss_cls not in spectral_losses
+        else {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "x_dim": 4,
+            "y_dim": 4,
+        }
+    )
     loss = get_loss_function(DictConfig(loss_dic))
     assert isinstance(loss, BaseLoss)
 
@@ -270,18 +260,21 @@ def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["test"],
-            } if loss_cls not in spectral_losses else {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["test"],
-                "x_dim": 4,
-                "y_dim": 4,
-            }
+    loss_dic = (
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": ["test"],
+        }
+        if loss_cls not in spectral_losses
+        else {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": ["test"],
+            "x_dim": 4,
+            "y_dim": 4,
+        }
+    )
     loss = get_loss_function(
-        DictConfig(
-        loss_dic),
+        DictConfig(loss_dic),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -295,18 +288,21 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["*"],
-            } if loss_cls not in spectral_losses else {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["*"],
-                "x_dim": 4,
-                "y_dim": 4,
-            }
+    loss_dic = (
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": ["*"],
+        }
+        if loss_cls not in spectral_losses
+        else {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": ["*"],
+            "x_dim": 4,
+            "y_dim": 4,
+        }
+    )
     loss = get_loss_function(
-        DictConfig(
-        loss_dic),
+        DictConfig(loss_dic),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -320,18 +316,21 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": [],
-            } if loss_cls not in spectral_losses else {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": [],
-                "x_dim": 4,
-                "y_dim": 4,
-            }
+    loss_dic = (
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": [],
+        }
+        if loss_cls not in spectral_losses
+        else {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": [],
+            "x_dim": 4,
+            "y_dim": 4,
+        }
+    )
     loss = get_loss_function(
-        DictConfig(
-        loss_dic),
+        DictConfig(loss_dic),
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -343,17 +342,21 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}", "scalers": ["*", "!test"],
-            } if loss_cls not in spectral_losses else {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "x_dim": 4,
-                "y_dim": 4,
-                "scalers": ["*", "!test"],
-            }
+    loss_dic = (
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": ["*", "!test"],
+        }
+        if loss_cls not in spectral_losses
+        else {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "x_dim": 4,
+            "y_dim": 4,
+            "scalers": ["*", "!test"],
+        }
+    )
     loss = get_loss_function(
-        DictConfig(
-        loss_dic),
+        DictConfig(loss_dic),
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -491,25 +494,24 @@ def test_cartesian_sht_loss() -> None:
 
 
 def _expected_octahedral_points(truncation: int) -> int:
-        # full globe reduced-octahedral points for ecTrans definition
-        # NH lons: 20 + 4*i, i=0..T  => sum_NH = 2*(T+1)*(T+10)
-        # full globe doubles:        => 4*(T+1)*(T+10)
-        return 4 * (truncation + 1) * (truncation + 10)
+    # full globe reduced-octahedral points for ecTrans definition
+    # NH lons: 20 + 4*i, i=0..T  => sum_NH = 2*(T+1)*(T+10)
+    # full globe doubles:        => 4*(T+1)*(T+10)
+    return 4 * (truncation + 1) * (truncation + 10)
+
 
 class _DummyEcTransOctahedralSHTModule(torch.nn.Module):
     """Stub that avoids needing ectrans assets/npz but preserves shapes."""
 
-    def __init__(self, truncation: int, dtype: torch.dtype = torch.float32, filepath=None) -> None:  # noqa: D401
+    def __init__(self, truncation: int, dtype: torch.dtype = torch.float32, filepath: str | None = None) -> None:
         super().__init__()
         self.truncation = int(truncation)
         self.dtype = dtype
         self.n_grid_points = _expected_octahedral_points(self.truncation)
+        self.filepath = filepath
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [batch, ens, grid_points, vars]
         bsz, ens, _, nvars = x.shape
-
-        # Return "spectrum": [batch, ens, l, m, vars] (complex)
         l_dim = self.truncation + 1
         m_dim = self.truncation + 1
 
@@ -518,12 +520,9 @@ class _DummyEcTransOctahedralSHTModule(torch.nn.Module):
 
 
 def test_spectral_l2_loss_ectrans_octahedral_sht_no_assets(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    End-to-end-ish test: SpectralL2Loss(transform="ectrans_octahedral_sht") runs
-    without npz assets by stubbing the ecTrans module, and returns expected shapes.
-    """
     import anemoi.models.layers.spectral_transforms as st
     from anemoi.training.losses.spectral import SpectralL2Loss
+
     monkeypatch.setattr(st, "EcTransOctahedralSHTModule", _DummyEcTransOctahedralSHTModule)
 
     trunc = 8
@@ -531,8 +530,8 @@ def test_spectral_l2_loss_ectrans_octahedral_sht_no_assets(monkeypatch: pytest.M
     points = _expected_octahedral_points(trunc)
 
     # Provide x_dim/y_dim “compat args” (validated by the transform)
-    x_dim = 20 + 4 * trunc              # max nlon (equator)
-    y_dim = 2 * (trunc + 1)             # number of latitude rings (full globe)
+    x_dim = 20 + 4 * trunc  # max nlon (equator)
+    y_dim = 2 * (trunc + 1)  # number of latitude rings (full globe)
 
     loss = SpectralL2Loss(
         transform="ectrans_octahedral_sht",
@@ -549,7 +548,7 @@ def test_spectral_l2_loss_ectrans_octahedral_sht_no_assets(monkeypatch: pytest.M
     torch.testing.assert_close(out, torch.zeros((nvars,)))
     out_total = loss(pred, target, squash=True)
     assert out_total.numel() == 1
-    torch.testing.assert_close(out_total, torch.tensor(0.))
+    torch.testing.assert_close(out_total, torch.tensor(0.0))
     pred_wrong = torch.zeros((2, 1, points + 1, nvars), dtype=torch.float32)
     target_wrong = torch.zeros_like(pred_wrong)
     with pytest.raises(AssertionError):
@@ -557,9 +556,7 @@ def test_spectral_l2_loss_ectrans_octahedral_sht_no_assets(monkeypatch: pytest.M
 
 
 def test_ectrans_octahedral_sht_dim_validation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Validate the x_dim/y_dim alias checks (even though the grid isn't rectangular).
-    """
+    """Validate the x_dim/y_dim alias checks (even though the grid isn't rectangular)."""
     import anemoi.models.layers.spectral_transforms as st
     from anemoi.training.losses.spectral import SpectralL2Loss
 
@@ -569,13 +566,9 @@ def test_ectrans_octahedral_sht_dim_validation(monkeypatch: pytest.MonkeyPatch) 
     x_dim_ok = 20 + 4 * trunc
     y_dim_ok = 2 * (trunc + 1)
     _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok, y_dim=y_dim_ok)
-
-    # Wrong y_dim
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="y_dim does not match expected number of latitude rings"):
         _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok, y_dim=y_dim_ok + 1)
-
-    # Wrong x_dim
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="x_dim does not match expected maximum number of longitudes"):
         _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok + 1, y_dim=y_dim_ok)
 
 
@@ -597,8 +590,8 @@ def test_spectral_crps_fft_and_dct() -> None:
                     "y_dim": y_dim,
                     "cutoff_ratio": 0.5,
                     "scalers": [],
-                }
-            )
+                },
+            ),
         )
 
         out = loss(pred, target, squash=False)

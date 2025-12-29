@@ -554,7 +554,9 @@ class EcTransOctahedralSHTModule(Module):
 
         # Padding required to pad up to the maximum zonal wavenumber of the rfft output
         assert self.highest_zonal_wavenumber_per_lat_nh is not None
-        padding = [int(self.highest_zonal_wavenumber_per_lat_nh[-1] - m) for m in self.highest_zonal_wavenumber_per_lat_nh]
+        padding = [
+            int(self.highest_zonal_wavenumber_per_lat_nh[-1] - m) for m in self.highest_zonal_wavenumber_per_lat_nh
+        ]
         self.padding = padding + padding[::-1]
 
         self.highest_zonal_wavenumber_per_lat_nh = torch.from_numpy(self.highest_zonal_wavenumber_per_lat_nh)
