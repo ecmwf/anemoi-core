@@ -29,6 +29,7 @@ if sys.version_info < (3, 11):
 else:
     from enum import StrEnum
 
+
 class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
