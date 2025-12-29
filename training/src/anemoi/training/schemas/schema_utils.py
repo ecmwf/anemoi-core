@@ -12,4 +12,4 @@ from typing import TypeAlias
 from typing import TypeVar
 
 T = TypeVar("T")
-DatasetDict: TypeAlias = dict[Literal["dataset"], dict[str, T]]
+DatasetDict: TypeAlias = dict[Literal["datasets"], dict[str, T]]
