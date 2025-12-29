@@ -224,8 +224,7 @@ class AnemoiTrainer(ABC):
         "Please use a different activation function."
 
         kwargs = {
-            "config": self.config,
-            "task": self.task,
+            "config": convert_to_omegaconf(self.config),
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "truncation_data": self.truncation_data,
