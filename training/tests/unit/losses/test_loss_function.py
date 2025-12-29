@@ -566,9 +566,9 @@ def test_ectrans_octahedral_sht_dim_validation(monkeypatch: pytest.MonkeyPatch) 
     x_dim_ok = 20 + 4 * trunc
     y_dim_ok = 2 * (trunc + 1)
     _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok, y_dim=y_dim_ok)
-    with pytest.raises(ValueError, match="y_dim does not match expected number of latitude rings"):
+    with pytest.raises(ValueError, match=f"y_dim.* incompatible with truncation"):
         _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok, y_dim=y_dim_ok + 1)
-    with pytest.raises(ValueError, match="x_dim does not match expected maximum number of longitudes"):
+    with pytest.raises(ValueError, match=f"x_dim.* incompatible with truncation"):
         _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok + 1, y_dim=y_dim_ok)
 
 
