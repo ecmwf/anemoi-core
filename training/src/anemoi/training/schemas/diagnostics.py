@@ -262,6 +262,8 @@ class PlotSchema(BaseModel):
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
+    datasets_to_plot: list[str] = Field(default_factory=list, example=["data"])
+    "Default dataset names to use in the plot callbacks"
     frequency: PlottingFrequency
     "Frequency of the plotting."
     sample_idx: int

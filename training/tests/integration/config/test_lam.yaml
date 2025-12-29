@@ -64,6 +64,7 @@ diagnostics:
     # Parameters to plot
     parameters:
     - tp
+    datasets_to_plot: ["data"] # Default dataset names to use in the plot callbacks
     callbacks:
       # Add plot callbacks here
       - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
