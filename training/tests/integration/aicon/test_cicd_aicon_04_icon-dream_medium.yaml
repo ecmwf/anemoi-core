@@ -133,27 +133,27 @@ data:
       - "sin_julian_day"
       - "cos_local_time"
       - "sin_local_time"
-    diagnostic: []
-    processors:
-      normalizer:
-        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-        config:
-          default: mean-std # none
-          min-max: null
-          max:
-          - "SSO_STDH"
-          - "SSO_THETA"
-          - "SSO_GAMMA"
-          - "SSO_SIGMA"
-          none:
-          - EMIS_RAD
-          - cos_latitude
-          - cos_longitude
-          - sin_latitude
-          - sin_longitude
-          - "cos_local_time"
-          - "sin_local_time"
-          std: []
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std # none
+            min-max: null
+            max:
+            - "SSO_STDH"
+            - "SSO_THETA"
+            - "SSO_GAMMA"
+            - "SSO_SIGMA"
+            none:
+            - EMIS_RAD
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - "cos_local_time"
+            - "sin_local_time"
+            std: []
 
   num_features: null
   format: zarr
@@ -417,14 +417,14 @@ dataloader:
   validation:
     datasets:
       data:
-      dataset:
-        join:
-        - ${system.input.dataset}
-        - ${system.input.forcing_dataset}
-      start: "2022-01-04T06:00:00"
-      end: "2022-01-06T06:00:00"
-      frequency: ${data.frequency}
-      drop: []
+        dataset:
+          join:
+          - ${system.input.dataset}
+          - ${system.input.forcing_dataset}
+        start: "2022-01-04T06:00:00"
+        end: "2022-01-06T06:00:00"
+        frequency: ${data.frequency}
+        drop: []
   test:
     datasets:
       data:

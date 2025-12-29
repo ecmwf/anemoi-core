@@ -177,10 +177,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Create output_mask dictionary for each dataset
         self.output_mask = {}
         for name in self.dataset_names:
-            self.output_mask[name] = instantiate(
-                config.model_dump(by_alias=True).model.output_mask,
-                graph_data=graph_data[name],
-            )
+            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data[name])
 
         # Handle supporting_arrays merge for multi-dataset
         # Multi-dataset: merge supporting arrays from all output masks
@@ -197,7 +194,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metadata=metadata,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
-            config=convert_to_omegaconf(config),
+            config=config,
         )
         self.config = config
 
