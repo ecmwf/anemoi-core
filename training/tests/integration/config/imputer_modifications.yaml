@@ -2,10 +2,9 @@ data:
   datasets:
     data:
       processors:
-        processors:
-          const_imputer:
-            _target_: anemoi.models.preprocessing.imputer.ConstantImputer
-            config:
-              default: "none"
-              0:
-                - 2t
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+          config:
+            default: "none"
+            0:
+              - 2t

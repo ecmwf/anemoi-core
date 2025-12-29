@@ -10,6 +10,8 @@ def get_multiple_datasets_config(config: DictConfig) -> dict:
     Use /'data/' as the default dataset name.
     """
     if "datasets" in config:
+        if isinstance(config, dict):
+            return config["datasets"]
         return config.datasets
 
     return OmegaConf.create({"data": config})
