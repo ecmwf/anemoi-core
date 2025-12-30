@@ -19,7 +19,6 @@ import torch
 from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric import data
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
@@ -675,7 +674,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         bse: int,
         grid_shard_shapes: dict | None = None,
         model_comm_group=None,
-        dataset_name=None
+        dataset_name=None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[list]]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=bse)
@@ -746,11 +745,19 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name in x_t1.keys():
             if input_post_processor[dataset_name] is not None:
-                x_t1[dataset_name] = input_post_processor[dataset_name](x_t1[dataset_name], in_place=False, data_index=self.data_indices[dataset_name].data.output.full)
-                x_t0[dataset_name] = input_post_processor[dataset_name](x_t0[dataset_name], in_place=False, data_index=self.data_indices[dataset_name].data.output.prognostic)
+                x_t1[dataset_name] = input_post_processor[dataset_name](
+                    x_t1[dataset_name], in_place=False, data_index=self.data_indices[dataset_name].data.output.full
+                )
+                x_t0[dataset_name] = input_post_processor[dataset_name](
+                    x_t0[dataset_name],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.output.prognostic,
+                )
 
             tendency = x_t1[dataset_name].clone()
-            tendency[..., self.data_indices[dataset_name].model.output.prognostic] = pre_processors_tendencies[dataset_name](
+            tendency[..., self.data_indices[dataset_name].model.output.prognostic] = pre_processors_tendencies[
+                dataset_name
+            ](
                 x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] - x_t0[dataset_name],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.prognostic,
@@ -798,15 +805,21 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         state_outp = {}
 
         for dataset_name in tendency.keys():
-            state_outp[dataset_name] = post_processors_tendencies[dataset_name](tendency[dataset_name], in_place=False, data_index=self.data_indices[dataset_name].data.output.full)
+            state_outp[dataset_name] = post_processors_tendencies[dataset_name](
+                tendency[dataset_name], in_place=False, data_index=self.data_indices[dataset_name].data.output.full
+            )
 
-            state_outp[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic] = post_processors_state[dataset_name](
+            state_outp[dataset_name][
+                ..., self.data_indices[dataset_name].model.output.diagnostic
+            ] = post_processors_state[dataset_name](
                 tendency[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.diagnostic,
             )
 
-            state_outp[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] += post_processors_state[dataset_name](
+            state_outp[dataset_name][
+                ..., self.data_indices[dataset_name].model.output.prognostic
+            ] += post_processors_state[dataset_name](
                 state_inp[dataset_name],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.input.prognostic,

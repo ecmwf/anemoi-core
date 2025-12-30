@@ -143,10 +143,12 @@ class BaseDiffusionForecaster(BaseGraphModule):
         device: torch.device,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         sigma, weight = {}, {}
-        for dataset_name, shape in shape.items():
-            rnd_uniform = torch.rand(shape, device=device)
-            sigma[dataset_name] = (sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))) ** rho
-            weight[dataset_name] = (sigma[dataset_name]**2 + sigma_data**2) / (sigma[dataset_name] * sigma_data) ** 2
+        for dataset_name, shape_x in shape.items():
+            rnd_uniform = torch.rand(shape_x, device=device)
+            sigma[dataset_name] = (
+                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+            ) ** rho
+            weight[dataset_name] = (sigma[dataset_name] ** 2 + sigma_data**2) / (sigma[dataset_name] * sigma_data) ** 2
         return sigma, weight
 
 
@@ -262,15 +264,21 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             y_full,
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
-            **kwargs
+            **kwargs,
         )
 
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            assert dataset_name in y_pred_state, f"{dataset_name} must be a key in y_pred_state for tendency-based diffusion models."
-            assert dataset_name in y_state, f"{dataset_name} must be a key in y_state for tendency-based diffusion models."
-            assert y_pred_state[dataset_name] is not None, "y_pred_state must be provided for tendency-based diffusion models."
+            assert (
+                dataset_name in y_pred_state
+            ), f"{dataset_name} must be a key in y_pred_state for tendency-based diffusion models."
+            assert (
+                dataset_name in y_state
+            ), f"{dataset_name} must be a key in y_state for tendency-based diffusion models."
+            assert (
+                y_pred_state[dataset_name] is not None
+            ), "y_pred_state must be provided for tendency-based diffusion models."
             assert y_state[dataset_name] is not None, "y_state must be provided for tendency-based diffusion models."
 
             # Prepare states for metrics computation
