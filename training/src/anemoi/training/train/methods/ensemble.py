@@ -157,7 +157,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 y,
                 step=step,
                 dataset_name=dataset_name,
-                grid_shard_slice=self.grid_shard_slice[dataset_name]
+                grid_shard_slice=self.grid_shard_slice[dataset_name],
             )
 
         return loss, metrics_next, y_pred_ens
