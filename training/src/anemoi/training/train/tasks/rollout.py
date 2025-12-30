@@ -102,7 +102,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             x[:, -1],
             batch[:, self.multi_step + rollout_step],
             self.data_indices[dataset_name],
-            grid_shard_slice=self.grid_shard_slice,
+            grid_shard_slice=self.grid_shard_slice[dataset_name],
         )
 
         # get new "constants" needed for time-varying fields

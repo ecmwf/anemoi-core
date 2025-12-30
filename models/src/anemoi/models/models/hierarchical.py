@@ -65,7 +65,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         # Unpack config for hierarchical graph
         self.level_process = model_config.model.enable_hierarchical_level_processing
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
+        self.node_attributes = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.node_attributes[dataset_name] = NamedNodesAttributes(
+                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
+            )
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -74,7 +78,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self._build_networks(model_config)
 
         # build residual connection
-        self.residual = instantiate(model_config.model.residual, graph=graph_data)
+        self.residual = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.residual[dataset_name] = instantiate(model_config.model.residual, graph=graph_data[dataset_name])
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
