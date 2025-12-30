@@ -119,7 +119,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     assert_metadatakeys(
         trainer.metadata,
         ("config", "data", "timestep"),
-        ("config", "graph", dataset_name, "nodes", "icon_mesh", "node_builder", "max_level_dataset"),
+        ("config", "graph", "nodes", "icon_mesh", "node_builder", "max_level_dataset"),
         ("config", "training", "precision"),
         ("data_indices", dataset_name, "data", "input", "diagnostic"),
         ("data_indices", dataset_name, "data", "input", "full"),
@@ -128,7 +128,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
         ("data_indices", dataset_name, "model", "input", "full"),
         ("data_indices", dataset_name, "model", "input", "prognostic"),
         ("data_indices", dataset_name, "model", "output", "full"),
-        ("dataset", "shape"),
+        ("dataset", dataset_name, "shape"),
     )
 
     assert torch.is_tensor(trainer.graph_data[dataset_name].x), "data coordinates not present"
@@ -137,8 +137,14 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     assert aicon_config_with_grid.model.encoder.num_chunks != aicon_config_with_grid.model.decoder.num_chunks
 
     # Monitor path and setting of num_chunks
-    assert trainer.model.model.model.encoder.proc.num_chunks == aicon_config_with_grid.model.encoder.num_chunks
-    assert trainer.model.model.model.decoder.proc.num_chunks == aicon_config_with_grid.model.decoder.num_chunks
+    assert (
+        trainer.model.model.model.encoder[dataset_name].proc.num_chunks
+        == aicon_config_with_grid.model.encoder.num_chunks
+    )
+    assert (
+        trainer.model.model.model.decoder[dataset_name].proc.num_chunks
+        == aicon_config_with_grid.model.decoder.num_chunks
+    )
 
 
 @pytest.mark.slow
