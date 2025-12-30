@@ -21,7 +21,13 @@ data:
     std: []
     min-max: []
     max: []
-    none: []
+    none:
+      - boundary_mask
+      - icmr_850
+      - icmr_925
+      - snmr_850
+      - snmr_925
+      - refc
 
 system:
   hardware:
