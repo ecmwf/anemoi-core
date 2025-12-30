@@ -154,12 +154,19 @@ class MultiscaleLossWrapper(BaseLoss):
 
         return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
 
-    def _apply_projector(self, batch: torch.Tensor, projector: SparseProjector) -> torch.Tensor:
+    def _apply_dataset_projector(self, batch: torch.Tensor, projector: SparseProjector) -> torch.Tensor:
         """Apply sparse projector to a batch, handling multi-dimensional inputs."""
         input_shape = batch.shape
         batch = batch.reshape(-1, *input_shape[-2:])
         batch = projector(batch)
         return batch.reshape(*input_shape[:-2] + batch.shape[-2:])
+
+    def _apply_projector(self, batch: dict[str, torch.Tensor], projector: SparseProjector) -> dict[str, torch.Tensor]:
+        """Apply sparse projector to each dataset in the batch."""
+        projected_batch = {}
+        for dataset_name in batch:
+            projected_batch[dataset_name] = self._apply_dataset_projector(batch[dataset_name], projector)
+        return projected_batch
 
     def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply smoothing matrix to predictions and targets for loss computation."""

@@ -194,7 +194,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         )
 
         # get noised targets
-        y_noised = {name: self._noise_target(y, sigma[name]) for name, y in y.items()}
+        y_noised = self._noise_target(y, sigma)
 
         # prediction, fwd_with_preconditioning
         y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
@@ -209,7 +209,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]
 
 
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
@@ -387,4 +387,4 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]

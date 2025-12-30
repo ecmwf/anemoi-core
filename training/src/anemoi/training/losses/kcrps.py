@@ -127,7 +127,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         self.alpha = alpha
         self.no_autocast = no_autocast
 
-    def _kernel_crps(self, preds: torch.Tensor, targets: torch.Tensor, alpha: float = 1.0) -> torch.Tensor:
+    def _kernel_crps_dataset(self, preds: torch.Tensor, targets: torch.Tensor, alpha: float = 1.0) -> torch.Tensor:
         """Kernel (ensemble) CRPS.
 
         Parameters
@@ -165,6 +165,38 @@ class AlmostFairKernelCRPS(BaseLoss):
         coef = 1.0 / (2.0 * ens_size * (ens_size - 1))
         return coef * torch.sum(mem_err + mem_err_transpose - (1 - epsilon) * var, dim=(-1, -2))
 
+    def _kernel_crps(
+        self,
+        preds: dict[str, torch.Tensor],
+        targets: dict[str, torch.Tensor],
+        alpha: float = 1.0,
+    ) -> dict[str, torch.Tensor]:
+        """Kernel (ensemble) CRPS for each dataset.
+
+        Parameters
+        ----------
+        preds : dict[str, torch.Tensor]
+            Predicted ensemble for each dataset, shape (batch_size, n_vars, latlon, ens_size)
+        targets : dict[str, torch.Tensor]
+            Ground truth for each dataset, shape (batch_size, n_vars, latlon)
+        alpha : float
+            Factor for linear combination of fair (unbiased, ensemble variance component weighted by (ens-size-1)^-1)
+            and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)
+
+        Returns
+        -------
+        kCRPS : dict[str, torch.Tensor]
+            The point-wise kernel CRPS for each dataset, shape (batch_size, 1, latlon).
+        """
+        kcrps_dict = {}
+        for dataset_name in preds:
+            kcrps_dict[dataset_name] = self._kernel_crps_dataset(
+                preds[dataset_name],
+                targets[dataset_name],
+                alpha=alpha,
+            )
+        return kcrps_dict
+
     def forward(
         self,
         y_pred: torch.Tensor,
@@ -179,8 +211,8 @@ class AlmostFairKernelCRPS(BaseLoss):
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
-        y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
-        y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
+        y_target = {k: einops.rearrange(v, "bs latlon v -> bs v latlon") for k, v in y_target.items()}
+        y_pred = {k: einops.rearrange(v, "bs e latlon v -> bs v latlon e") for k, v in y_pred.items()}
 
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
@@ -188,7 +220,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         else:
             kcrps_ = self._kernel_crps(y_pred, y_target, alpha=self.alpha)
 
-        kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs 1 latlon v")
+        kcrps_ = {k: einops.rearrange(v, "bs v latlon -> bs 1 latlon v") for k, v in kcrps_.items()}
         kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
         return self.reduce(kcrps_, squash=squash, squash_mode="sum", group=group if is_sharded else None)

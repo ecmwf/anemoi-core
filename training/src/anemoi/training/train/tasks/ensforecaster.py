@@ -138,11 +138,13 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 shapes=[y_pred[dataset_name].shape] * self.ens_comm_subgroup_size,
                 mgroup=self.ens_comm_subgroup,
             )
+
         loss = self._compute_loss(
             y_pred_ens,
             y,
             grid_dim=self.grid_dim,
             grid_shard_shape=self.grid_shard_shapes,
+            dataset_name=dataset_name,
         )
 
         # Compute metrics if in validation mode

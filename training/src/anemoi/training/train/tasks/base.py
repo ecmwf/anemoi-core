@@ -662,8 +662,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
                 y_pred[dataset_name],
                 y[dataset_name],
-                validation_mode,
-                dataset_name,
+                validation_mode=validation_mode,
+                dataset_name=dataset_name,
                 **kwargs,
             )
 
