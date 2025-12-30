@@ -125,6 +125,7 @@ def test_modelindices_todict(data_indices) -> None:
             else:
                 assert torch.allclose(value, expected_output[key][subkey])
 
+
 def test_data_indices_with_target(data_indices_with_target) -> None:
     assert set(data_indices_with_target.data.input.includes) == {"tp", "tp_point", "tp_radar", "dem"}
     assert set(data_indices_with_target.data.input.excludes) == set()
