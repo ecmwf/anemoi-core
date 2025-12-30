@@ -22,7 +22,6 @@ data:
     min-max: []
     max: []
     none:
-      - boundary_mask
       - icmr_850
       - icmr_925
       - snmr_850

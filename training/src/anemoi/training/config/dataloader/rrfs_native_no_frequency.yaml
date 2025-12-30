@@ -56,7 +56,7 @@ training:
   dataset: ${dataloader.dataset}
   start: null
   end: 2020
-  drop: []
+  drop: [boundary_mask]
 
 validation_rollout: 1 # number of rollouts to use for validation, must be >= rollout expected by callbacks
 
@@ -64,10 +64,10 @@ validation:
   dataset: ${dataloader.dataset}
   start: 2021
   end: 2021
-  drop: []
+  drop: [boundary_mask]
 
 test:
   dataset: ${dataloader.dataset}
   start: 2022
   end: null
-  drop: []
+  drop: [boundary_mask]
