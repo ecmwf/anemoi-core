@@ -109,7 +109,3 @@ def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
 
     assert isinstance(loss, torch.Tensor)
     assert torch.allclose(loss, loss_kcrps), "Loss for single/original scale should be equal to the kcrps"
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-k", "test_multiscale_instantiation"])
