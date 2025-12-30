@@ -123,21 +123,20 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
-    def compute_loss_metrics(
+    def compute_dataset_loss_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         step: int | None = None,
+        dataset_name: str | None = None,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
-        y_pred_ens = {}
-        for dataset_name in y_pred:
-            y_pred_ens[dataset_name] = gather_tensor(
-                y_pred[dataset_name].clone(),  # for bwd because we checkpoint this region
-                dim=1,
-                shapes=[y_pred[dataset_name].shape] * self.ens_comm_subgroup_size,
-                mgroup=self.ens_comm_subgroup,
-            )
+        y_pred_ens = gather_tensor(
+            y_pred.clone(),  # for bwd because we checkpoint this region
+            dim=1,
+            shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
+            mgroup=self.ens_comm_subgroup,
+        )
 
         loss = self._compute_loss(
             y_pred_ens,
@@ -150,7 +149,13 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(y_pred_ens, y, step=step, grid_shard_slice=self.grid_shard_slice)
+            metrics_next = self._compute_metrics(
+                y_pred_ens,
+                y,
+                step=step,
+                dataset_name=dataset_name,
+                grid_shard_slice=self.grid_shard_slice[dataset_name]
+            )
 
         return loss, metrics_next, y_pred_ens
 
