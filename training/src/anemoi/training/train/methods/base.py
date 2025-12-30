@@ -325,8 +325,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.reader_group_rank = 0
         self.reader_group_size = 1
 
-        self.grid_shard_shapes = None
-        self.grid_shard_slice = None
+        self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
+        self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
     @property
     def plot_adapter(self) -> Any:
