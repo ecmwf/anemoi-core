@@ -87,6 +87,7 @@ def test_output_tensor_index_todict(output_tensor_index) -> None:
         else:
             assert torch.allclose(value, expected_output[key])
 
+
 def test_output_tensor_index_getattr(output_tensor_index) -> None:
     assert output_tensor_index.full is not None
     with pytest.raises(AttributeError):
