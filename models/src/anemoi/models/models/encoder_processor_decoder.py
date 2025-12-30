@@ -82,7 +82,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_shapes: dict | None,
         model_comm_group=None,
         dataset_name: str = None,
-    ):
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[list]]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
