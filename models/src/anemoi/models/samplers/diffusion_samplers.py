@@ -16,13 +16,8 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 DenoisingFunction = Callable[
-    [
-        dict[str,torch.Tensor],
-        dict[str,torch.Tensor],
-        torch.Tensor,
-        Optional[ProcessGroup], 
-        dict[str, Optional[list]]],
-        dict[str, torch.Tensor]
+    [dict[str, torch.Tensor], dict[str, torch.Tensor], torch.Tensor, Optional[ProcessGroup], dict[str, Optional[list]]],
+    dict[str, torch.Tensor],
 ]
 
 # Tolerance used when treating an explicitly provided final schedule value as zero.
@@ -395,11 +390,7 @@ class EDMHeunSampler(DiffusionSampler):
 class DPMpp2MSampler(DiffusionSampler):
     """DPM++ 2M sampler (DPM-Solver++ with 2nd order multistep)."""
 
-    def __init__(
-        self, 
-        dtype: torch.dtype = torch.float64,
-        **kwargs
-    ):
+    def __init__(self, dtype: torch.dtype = torch.float64, **kwargs):
         self.dtype = dtype
         pass  # No parameters needed for DPM++ 2M
 
