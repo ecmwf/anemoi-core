@@ -169,7 +169,7 @@ class NativeGridDataset(IterableDataset):
 
         LOGGER.info(
             "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
-            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
+            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d, "
             "sample_comm_group_id %d, sample_comm_num_groups %d",
             global_rank,
             model_comm_group_id,
