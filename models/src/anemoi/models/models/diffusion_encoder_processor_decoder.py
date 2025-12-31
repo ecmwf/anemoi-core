@@ -239,8 +239,10 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         # prepare noise conditionings
         c_data, c_hidden, shape_c_data, shape_c_hidden = {}, {}, {}, {}
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = {}, {}, {}
-        for dataset_name, sig in sigma.items():
-            c_data[dataset_name], c_hidden[dataset_name], _, _, _ = self._generate_noise_conditioning(sig, dataset_name)
+        for dataset_name in x:
+            c_data[dataset_name], c_hidden[dataset_name], _, _, _ = self._generate_noise_conditioning(
+                sigma, dataset_name=dataset_name, edge_conditioning=False
+            )
             shape_c_data[dataset_name] = get_shard_shapes(c_data[dataset_name], 0, model_comm_group=model_comm_group)
             shape_c_hidden[dataset_name] = get_shard_shapes(
                 c_hidden[dataset_name], 0, model_comm_group=model_comm_group
@@ -332,34 +334,31 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self,
         x: dict[str, torch.Tensor],
         y_noised: dict[str, torch.Tensor],
-        sigma: dict[str, torch.Tensor],
+        sigma: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Forward pass with pre-conditioning of EDM diffusion model."""
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
             x,
-            {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
+            {key: c_in * y_noised[key] for key in y_noised.keys()},
             c_noise,
             model_comm_group=model_comm_group,
             grid_shard_shapes=grid_shard_shapes,
         )  # calls forward ...
-        D_x = {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
+        D_x = {key: c_skip * y_noised[key] + c_out * pred[key] for key in y_noised.keys()}
 
         return D_x
 
     def _get_preconditioning(
-        self, sigma: dict[str, torch.Tensor], sigma_data: torch.Tensor
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        self, sigma: torch.Tensor, sigma_data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute preconditioning factors."""
-        c_skip = {key: sigma_data**2 / (sigma_value**2 + sigma_data**2) for key, sigma_value in sigma.items()}
-        c_out = {
-            key: sigma_value * sigma_data / (sigma_value**2 + sigma_data**2) ** 0.5
-            for key, sigma_value in sigma.items()
-        }
-        c_in = {key: 1.0 / (sigma_data**2 + sigma_value**2) ** 0.5 for key, sigma_value in sigma.items()}
-        c_noise = {key: sigma_value.log() / 4.0 for key, sigma_value in sigma.items()}
+        c_skip = sigma_data**2 / (sigma**2 + sigma_data**2)
+        c_out = sigma * sigma_data / (sigma**2 + sigma_data**2) ** 0.5
+        c_in = 1.0 / (sigma_data**2 + sigma**2) ** 0.5
+        c_noise = sigma.log() / 4.0
 
         return c_skip, c_out, c_in, c_noise
 
@@ -600,7 +599,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
         scheduler = scheduler_cls(**noise_scheduler_config)
-        sigmas = scheduler.get_schedule(x_device, torch.float64)
+
+        sigmas, y_init = {}, {}
+        for dataset_name, x_data in x.items():
+            sigmas[dataset_name] = scheduler.get_schedule(x_device, torch.float64)
+
+            # Initialize output with noise
+            batch_size, ensemble_size, grid_size = x_data.shape[0], x_data.shape[2], x_data.shape[-2]
+            shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
+            y_init[dataset_name] = torch.randn(shape, device=x_data.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
@@ -618,24 +625,24 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             raise ValueError(f"Unknown sampler: {actual_sampler}")
 
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
-        sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
+        sampler_instance = sampler_cls(dtype=next(iter(sigmas.values())).dtype, **diffusion_sampler_config)
 
-        sample = {}
-        for dataset_name, x_ in x.items():
-            # Initialize output with noise
-            batch_size, ensemble_size, grid_size = x_.shape[0], x_.shape[2], x_.shape[-2]
-            shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
-            y_init = torch.randn(shape, device=x_.device, dtype=sigmas.dtype) * sigmas[0]
+        # The same scheduler has to be used for all datasets
+        sigmas_ref = next(iter(sigmas.values()))
+        for dataset_name, sigmas_i in sigmas.items():
+            if not torch.allclose(sigmas_i, sigmas_ref):
+                warnings.warn(
+                    f"Sigma schedules differ between datasets! Dataset '{dataset_name}' has a different schedule."
+                )
 
-            sample[dataset_name] = sampler_instance.sample(
-                x_,
-                y_init,
-                sigmas,
-                self.fwd_with_preconditioning,
-                model_comm_group,
-                grid_shard_shapes=grid_shard_shapes[dataset_name],
-            )
-        return sample
+        return sampler_instance.sample(
+            x,
+            y_init,
+            sigmas_ref,
+            self.fwd_with_preconditioning,
+            model_comm_group,
+            grid_shard_shapes=grid_shard_shapes,
+        )
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
