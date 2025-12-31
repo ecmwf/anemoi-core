@@ -413,7 +413,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self,
         out: dict[str, torch.Tensor],
         post_processors: dict[str, nn.Module],
-        before_sampling_data: Union[torch.Tensor, tuple[torch.Tensor, ...]],
+        before_sampling_data: dict[str, Union[torch.Tensor, tuple[torch.Tensor, ...]]],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, Optional[list]] = None,
         gather_out: bool = True,
@@ -524,6 +524,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             )
 
             x = before_sampling_data[0]
+            x_dtype = next(iter(batch.values())).dtype
 
             out = self.sample(
                 x,
@@ -532,7 +533,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 noise_scheduler_params=noise_scheduler_params,
                 sampler_params=sampler_params,
                 **kwargs,
-            ).to(x.dtype)
+            ).to(x_dtype)
 
             # After sampling hook
             out = self._after_sampling(
@@ -580,6 +581,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         dict[str, torch.Tensor]
             Sampled output with shape (batch, ensemble, grid, vars)
         """
+        x_device = next(iter(x.values())).device
 
         # Start with inference defaults
         noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
@@ -598,12 +600,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
         scheduler = scheduler_cls(**noise_scheduler_config)
-        sigmas = scheduler.get_schedule(x.device, torch.float64)
-
-        # Initialize output with noise
-        batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
-        shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
-        y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * sigmas[0]
+        sigmas = scheduler.get_schedule(x_device, torch.float64)
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
@@ -623,14 +620,22 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
 
-        return sampler_instance.sample(
-            x,
-            y_init,
-            sigmas,
-            self.fwd_with_preconditioning,
-            model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
-        )
+        sample = {}
+        for dataset_name, x_ in x.items():
+            # Initialize output with noise
+            batch_size, ensemble_size, grid_size = x_.shape[0], x_.shape[2], x_.shape[-2]
+            shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
+            y_init = torch.randn(shape, device=x_.device, dtype=sigmas.dtype) * sigmas[0]
+
+            sample[dataset_name] = sampler_instance.sample(
+                x_,
+                y_init,
+                sigmas,
+                self.fwd_with_preconditioning,
+                model_comm_group,
+                grid_shard_shapes=grid_shard_shapes[dataset_name],
+            )
+        return sample
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
