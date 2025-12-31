@@ -407,7 +407,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
             xs[dataset_name] = x
 
-        return (xs, ), grid_shard_shapes
+        return (xs,), grid_shard_shapes
 
     def _after_sampling(
         self,
@@ -451,7 +451,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                     out[dataset_name],
                     -2,
                     apply_shard_shapes(out[dataset_name], -2, shard_shapes_dim=grid_shard_shapes[dataset_name]),
-                    model_comm_group
+                    model_comm_group,
                 )
 
         return out
@@ -510,7 +510,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             for dataset_name, dataset_tensor in batch.values():
                 assert (
                     len(dataset_tensor.shape) == 4
-                ), f"The input tensor \"{dataset_name}\" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!"
+                ), f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'
 
             # Before sampling hook
             before_sampling_data, grid_shard_shapes = self._before_sampling(
