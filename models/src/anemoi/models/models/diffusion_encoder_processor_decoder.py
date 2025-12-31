@@ -443,12 +443,16 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         torch.Tensor
             Post-processed output
         """
-        out = post_processors(out, in_place=False)
+        for dataset_name in out.keys():
+            out[dataset_name] = post_processors[dataset_name](out[dataset_name], in_place=False)
 
-        if gather_out and model_comm_group is not None:
-            out = gather_tensor(
-                out, -2, apply_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
-            )
+            if gather_out and model_comm_group is not None:
+                out[dataset_name] = gather_tensor(
+                    out[dataset_name],
+                    -2,
+                    apply_shard_shapes(out[dataset_name], -2, shard_shapes_dim=grid_shard_shapes[dataset_name]),
+                    model_comm_group
+                )
 
         return out
 
