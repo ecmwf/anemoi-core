@@ -397,7 +397,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
-        self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
+        self._ckpt_model_name_to_index = {
+            dataset_name: data_indices.name_to_index
+            for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
+        }
 
     def _update_scaler_for_dataset(
         self,
