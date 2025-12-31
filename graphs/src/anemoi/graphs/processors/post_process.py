@@ -310,10 +310,12 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         self,
         source_name: str,
         target_name: str,
+        edge_attributes: dict | None = None,
     ) -> None:
         self.source_name = source_name
         self.target_name = target_name
         self.edges_name = (self.source_name, "to", self.target_name)
+        self.edge_attributes = edge_attributes or {}
         super().__init__()
 
     def removing_edges(self, graph: HeteroData, mask: torch.Tensor) -> HeteroData:
@@ -331,7 +333,10 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
 
     def recompute_attributes(self, graph: HeteroData, graph_config: dict) -> HeteroData:
         """Recompute attributes"""
-        edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
+        edge_attributes = self.edge_attributes
+        if not edge_attributes:
+            edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
+
         for attr_name, edge_attr_builder in edge_attributes.items():
             LOGGER.info(f"Recomputing edge attribute {attr_name}.")
             graph[self.edges_name][attr_name] = instantiate(edge_attr_builder)(
@@ -390,8 +395,9 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         max_length_km: float,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        edge_attributes: dict | None = None,
     ) -> None:
-        super().__init__(source_name, target_name)
+        super().__init__(source_name, target_name, edge_attributes=edge_attributes)
         self.treshold = max_length_km
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name

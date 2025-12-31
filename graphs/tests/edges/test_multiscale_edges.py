@@ -26,7 +26,7 @@ class TestMultiScaleEdgesInit:
         assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=[1, 2, 3]), MultiScaleEdges)
 
     @pytest.mark.parametrize("x_hops", [-0.5, "hello", None, -4])
-    def test_fail_init_invalid_x_hops(self, x_hops: str):
+    def test_fail_init_invalid_x_hops(self, x_hops: int):
         """Test MultiScaleEdges initialization with invalid x_hops."""
         with pytest.raises(AssertionError):
             MultiScaleEdges("test_nodes", "test_nodes", x_hops, None)
@@ -49,7 +49,7 @@ class TestMultiScaleEdgesTransform:
     def tri_ico_graph(self) -> HeteroData:
         """Return a HeteroData object with MultiScaleEdges."""
         graph = HeteroData()
-        graph = TriNodes(1, "test_tri_nodes").update_graph(graph, {})
+        graph = TriNodes(1, "test_tri_nodes").update_graph(graph)
         graph["fail_nodes"].x = [1, 2, 3]
         graph["fail_nodes"].node_type = "FailNodes"
         return graph
@@ -58,7 +58,7 @@ class TestMultiScaleEdgesTransform:
     def hex_ico_graph(self) -> HeteroData:
         """Return a HeteroData object with TriNodes."""
         graph = HeteroData()
-        graph = HexNodes(1, "test_hex_nodes").update_graph(graph, {})
+        graph = HexNodes(1, "test_hex_nodes").update_graph(graph)
         graph["fail_nodes"].x = [1, 2, 3]
         graph["fail_nodes"].node_type = "FailNodes"
         return graph
@@ -108,7 +108,7 @@ class TestMultiScaleEdgesStretched:
 
         mocker.patch.object(node_builder.area_mask_builder, "fit", return_value=None)
 
-        graph = node_builder.update_graph(graph, {})
+        graph = node_builder.update_graph(graph)
         return graph
 
     def test_edges(self, tri_graph: HeteroData):
