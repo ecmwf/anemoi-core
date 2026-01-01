@@ -29,6 +29,35 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
+    def __init__(
+        self,
+        *,
+        model_config: DotDict,
+        data_indices: dict,
+        statistics: dict,
+        graph_data: HeteroData,
+    ) -> None:
+        """Initializes the graph neural network.
+
+        Parameters
+        ----------
+        model_config : DotDict
+            Model configuration
+        data_indices : dict
+            Data indices
+        graph_data : HeteroData
+            Graph definition
+        """
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+        )
+        self.interpolate_batch = model_config.model.interpolate_batch
+        self._graph_name_data = model_config.graph.data if not self.interpolate_batch else model_config.graph.data_intp
+
+
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
 
@@ -74,10 +103,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
-
-        # print('x',x.shape)
-        # print('x einops',einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)").shape)
-        # print('node_attributes_data',node_attributes_data.shape)
 
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(

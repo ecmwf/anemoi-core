@@ -76,6 +76,7 @@ class BaseGraphModel(nn.Module):
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+        
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_channels = len(data_indices.model.input)
