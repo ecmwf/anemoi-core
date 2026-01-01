@@ -1,0 +1,65 @@
+# Config for the stretched grid benchmark, will be merged with the base benchmark config
+
+system:
+  input:
+    dataset: /home/mlx/ai-ml/datasets/cerra-rr-an-oper-0001-mars-5p5km-1984-2022-6h-v3-hmsi.zarr
+    forcing_dataset: /home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
+    graph: ./stretched-bm-graph.pt
+  hardware:
+    num_gpus_per_model: 2
+
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${system.input.dataset}
+      - dataset: ${system.input.forcing_dataset}
+    adjust: all
+    min_distance_km: 0
+  training:
+    end: 2017-12-29
+  validation:
+    start: 2017-12-30
+
+# need this modification since some variables set in the default zarr config are not part of the dataset
+data:
+  forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+  diagnostic:
+    - tp
+  normalizer:
+    default: "mean-std"
+    std:
+      - "tp"
+    min-max:
+    max:
+    none:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        lam_resolution: 7
+        global_resolution: 5
+
+model:
+  num_channels: 512
+
+training:
+  scalers:
+    node_weights:
+      weight_frac_of_total: 0.25

@@ -20,8 +20,8 @@ You can define your graph in a YAML configuration file, following the
 same approach described in the other usage sections. This YAML file
 should specify the nodes, edges, and any attributes required for your
 graph. For more details on how to structure your recipe, refer to the
-examples in the :doc:`usage-getting_started` and
-:doc:`usage-limited_area` sections.
+examples in the :ref:`usage-getting_started` and
+:ref:`usage-limited_area` sections.
 
 .. literalinclude:: yaml/sparse_matrices.yaml
    :language: yaml
@@ -74,7 +74,7 @@ For example, to export only the ``gauss_weight`` attribute for the
 
    % anemoi-graphs export_to_sparse graph_recipe.yaml output_dir/ \
        --edges-attributes-name gauss_weight \
-       --edges-name data->down
+       --edges-name data down
 
 You can specify multiple attributes or subgraphs by repeating the
 arguments:
@@ -84,8 +84,8 @@ arguments:
    % anemoi-graphs export_to_sparse graph_recipe.yaml output_dir/ \
        --edges-attributes-name gauss_weight \
        --edges-attributes-name another_weight \
-       --edges-name data->down \
-       --edges-name down->data
+       --edges-name data down \
+       --edges-name down data
 
 This flexibility allows you to generate only the sparse matrices you
 need for your application, reducing storage and processing time.

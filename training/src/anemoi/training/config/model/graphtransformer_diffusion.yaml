@@ -1,0 +1,146 @@
+num_channels: 1024
+cpu_offload: False
+
+keep_batch_sharded: True
+
+model:
+  _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
+  # Diffusion parameters
+  diffusion:
+    sigma_data: 1.0
+    noise_channels: 32
+    noise_cond_dim: 16
+    sigma_max: 100.0
+    sigma_min: 0.02
+    rho: 7.0
+    noise_embedder:
+      _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
+      num_channels: ${model.model.diffusion.noise_channels}
+      max_period: 1000
+    inference_defaults:
+      noise_scheduler:
+        schedule_type: "karras"
+        sigma_max: 100.0
+        sigma_min: 0.02
+        rho: 7.0
+        num_steps: 50
+      diffusion_sampler:
+        sampler: "heun"
+        S_churn: 0.0
+        S_min: 0.0
+        S_max: .inf
+        S_noise: 1.0
+
+layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+    normalized_shape: ${model.num_channels}
+    condition_shape: 16
+    zero_init: True
+    autocast: false
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+processor:
+  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  trainable_size: ${model.trainable_parameters.hidden2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_layers: 16
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+encoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  trainable_size: ${model.trainable_parameters.data2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+
+decoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  initialise_data_extractor_zero: False
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
+
+trainable_parameters:
+  data: 8
+  hidden: 8
+  data2hidden: 8
+  hidden2data: 8
+  hidden2hidden: 8 # GNN and GraphTransformer Processor only
+
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+# Torch compile configuration
+# A list of modules present in the model, which will be compiled
+# You can optionally pass options to torch.compile with the 'options' key
+#
+# Below is an explanation of some common parameters to torch.compile
+# For a full list of possible parameters, consult the documenation for torch compile
+#       https://docs.pytorch.org/docs/stable/generated/torch.compile.html
+#
+# dynamic (bool): When True, it will try to avoid recompilation by generating
+#       as general a kernel as possible. But the performance of the general
+#       kernel might be worse. When False, it will generate a specific
+#       kernel for each input shape (until the configurable recompile
+#       limit has been hit), leading to possibly better performance but
+#       more recompilations
+# mode (str): Different compilation modes, allowing you to trade off
+#       compilation time versus potential performance. See the
+#       torch.compile documentation for list of possible modes
+# fullgraph (bool): When True, torch.compile will error when it hits a
+#       section of code it can't compile. When False, it will fallback to
+#       non-compiled ("eager") execution for those lines.
+# options (dict): a dict of further options which can be passed to torch.compile
+compile:
+  - module: anemoi.models.layers.conv.GraphTransformerConv
+    #options: # An example of setting torch.compile options
+      #dynamic: false
+      #mode: max-autotune
+  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+    options:
+      dynamic: false
+
+# Bounding configuration
+bounding: []

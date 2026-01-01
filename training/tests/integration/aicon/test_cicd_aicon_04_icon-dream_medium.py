@@ -13,14 +13,14 @@
 # used for CI/CD!
 import os
 import pathlib
-import tempfile
-from collections.abc import Iterator
 from functools import reduce
 from operator import getitem
+from pathlib import Path
 
 import matplotlib as mpl
 import pytest
 import torch
+from conftest import GetTmpPaths
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
@@ -29,6 +29,8 @@ from typeguard import typechecked
 import anemoi.training
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.utils.testing import GetTestArchive
+from anemoi.utils.testing import GetTestData
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
 os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
@@ -37,32 +39,34 @@ mpl.use("agg")
 
 @pytest.fixture
 @typechecked
-def aicon_config_with_tmp_dir() -> Iterator[DictConfig]:
+def aicon_config_with_tmp_dir(get_tmp_paths: GetTmpPaths, get_test_archive: GetTestArchive) -> DictConfig:
     """Get AICON config with temporary output paths."""
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
-    with tempfile.TemporaryDirectory() as output_dir:
-        config.hardware.paths.output = output_dir
-        config.hardware.paths.graph = output_dir
-        yield config
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(config, ["dataset", "forcing_dataset"])
+    config.system.output.root = tmp_dir
+    dataset, forcing_dataset = rel_paths
+    config.system.input.dataset = str(Path(tmp_dir, dataset))
+    config.system.input.forcing_dataset = str(Path(tmp_dir, forcing_dataset))
+
+    for url in dataset_urls:
+        get_test_archive(url)
+
+    return config
 
 
 @pytest.fixture
 @typechecked
-def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig) -> Iterator[DictConfig]:
+def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data: GetTestData) -> DictConfig:
     """Temporarily download the ICON grid specified in the config.
 
     Downloading the grid is required as the AICON grid is currently required as a netCDF file.
     """
-    with tempfile.NamedTemporaryFile(suffix=".nc") as grid_fp:
-        grid_filename = aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename
-        if grid_filename.startswith(("http://", "https://")):
-            import urllib.request
-
-            urllib.request.urlretrieve(grid_filename, grid_fp.name)  # noqa: S310
-            aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = grid_fp.name
-        yield aicon_config_with_tmp_dir
+    aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename,
+    )
+    return aicon_config_with_tmp_dir
 
 
 @pytest.fixture
@@ -137,5 +141,5 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
 @pytest.mark.slow
 @typechecked
 def test_aicon_training(trained_aicon: tuple) -> None:
-    trainer, initial_sum, final_sum = trained_aicon
+    _, initial_sum, final_sum = trained_aicon
     assert initial_sum != final_sum

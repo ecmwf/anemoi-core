@@ -1,4 +1,5 @@
 num_channels: 1024
+condition_on_residual: False
 cpu_offload: False
 
 keep_batch_sharded: True
@@ -11,11 +12,13 @@ noise_injector:
   noise_std: 1
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
-  inject_noise: True
+  noise_matrix: null
+  transpose_noise_matrix: false
+  row_normalize_noise_matrix: false
+  autocast: false
   layer_kernels:
     Activation:
       _target_: torch.nn.GELU
-
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
@@ -40,7 +43,7 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0
-  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  attention_implementation: flash_attention # Possible values:  scaled_dot_product_attention, flash_attention
   qk_norm: True # Transformer and GraphTransformer only
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
@@ -50,14 +53,13 @@ processor:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
       normalized_shape: ${model.num_channels}
       condition_shape: ${model.noise_injector.noise_channels_dim}
-      w_one_bias_zero_init: True
+      zero_init: True
       autocast: false
       #Any arguments to your chosen function go here
     Linear:
       _target_: torch.nn.Linear # These reflect the defaults, but are shown here for clarity
     Activation:
       _target_: torch.nn.GELU
-
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -70,8 +72,7 @@ encoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
-
-
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -85,6 +86,14 @@ decoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
+#  _target_: anemoi.models.layers.residual.TruncatedConnection
+#  truncation_up_file_path: ${system.input.truncation}
+#  truncation_down_file_path:  ${system.input.truncation_inv}
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
@@ -95,21 +104,49 @@ trainable_parameters:
   data2hidden: 8
   hidden2data: 8
 
-
 attributes:
   edges:
-  - edge_length
-  - edge_dirs
+    - edge_length
+    - edge_dirs
   nodes: []
+
+# Torch compile configuration
+# A list of modules present in the model, which will be compiled
+# You can optionally pass options to torch.compile with the 'options' key
+#
+# Below is an explanation of some common parameters to torch.compile
+# For a full list of possible parameters, consult the documenation for torch compile
+#       https://docs.pytorch.org/docs/stable/generated/torch.compile.html
+#
+# dynamic (bool): When True, it will try to avoid recompilation by generating
+#       as general a kernel as possible. But the performance of the general
+#       kernel might be worse. When False, it will generate a specific
+#       kernel for each input shape (until the configurable recompile
+#       limit has been hit), leading to possibly better performance but
+#       more recompilations
+# mode (str): Different compilation modes, allowing you to trade off
+#       compilation time versus potential performance. See the
+#       torch.compile documentation for list of possible modes
+# fullgraph (bool): When True, torch.compile will error when it hits a
+#       section of code it can't compile. When False, it will fallback to
+#       non-compiled ("eager") execution for those lines.
+# options (dict): a dict of further options which can be passed to torch.compile
+compile:
+  - module: anemoi.models.layers.conv.GraphTransformerConv
+    #options:
+      #dynamic: false
+      #mode: max-autotune # an example of setting the compilation mode
+  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+    options:
+      dynamic: false
 
 # Bounding configuration
 bounding: #These are applied in order
-
   # Bound tp (total precipitation) with a Relu bounding layer
   # ensuring a range of [0, infinity) to avoid negative precipitation values.
   - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
     variables:
-    - tp
+      - tp
 
   # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
   # This guarantees that cp is physically consistent with tp by restricting cp

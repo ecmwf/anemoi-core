@@ -1,0 +1,14 @@
+# Modifications for the diffusion template "diffusion.yaml"
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    # We only use the graph file in test_training_cycle_lam_with_existing_graph, not in test_training_cycle_lam
+    graph: null
+    truncation: null
+    truncation_inv: null
+
+dataloader:
+  training:
+    end: 2017-01-08 12:00:00
+  validation:
+    start: 2017-01-08 18:00:00

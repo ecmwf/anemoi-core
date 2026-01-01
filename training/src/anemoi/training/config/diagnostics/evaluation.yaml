@@ -12,10 +12,6 @@ debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training
   anomaly_detection: False
 
-# activate the pytorch profiler (disable this in production)
-# remember to also activate the tensorboard logger (below)
-profiler: False
-
 enable_checkpointing: True
 checkpoint:
   every_n_minutes:
@@ -44,6 +40,7 @@ log:
     enabled: False
   mlflow:
     enabled: False
+    _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
     offline: False
     authentication: False
     tracking_uri: ???
@@ -57,7 +54,13 @@ log:
       - config
     http_max_retries: 35
     max_params_length: 2000
+    save_dir: ${system.output.logs.mlflow}
   interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True
+progress_bar:
+  _target_: pytorch_lightning.callbacks.TQDMProgressBar
+  refresh_rate: 1
+
+check_val_every_n_epoch: 1
 print_memory_summary: False

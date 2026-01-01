@@ -22,9 +22,10 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.chunk import GNNProcessorChunk
-from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
-from anemoi.models.layers.chunk import TransformerProcessorChunk
+from anemoi.models.layers.block import GraphConvProcessorBlock
+from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.layers.block import PointWiseMLPProcessorBlock
+from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.models.layers.utils import load_layer_kernels
@@ -45,15 +46,34 @@ class BaseProcessor(nn.Module, ABC):
         layer_kernels: DotDict,
         **kwargs,
     ) -> None:
-        """Initialize BaseProcessor."""
+        """Initialize BaseProcessor.
+
+        Parameters
+        ----------
+        num_layers : int
+            Number of processor layers.
+        num_channels : int
+            Number of channels, i.e. feature dimension of the processor state.
+        num_chunks: int
+            Number of chunks of the processor. The num_chunks and num_layers, defines how many layers are grouped together for checkpointing, i.e. chunk_size = num_layers/ num_chunks.
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        **kwargs : dict
+            Additional keyword arguments
+        """
         super().__init__()
 
-        # Each Processor divides the layers into chunks that get assigned to each ProcessorChunk
+        self.num_layers = num_layers
         self.num_chunks = num_chunks
-        self.num_channels = num_channels
         self.chunk_size = num_layers // num_chunks
+        self.num_channels = num_channels
 
         self.layer_factory = load_layer_kernels(layer_kernels)
+
+        self._has_dropout = kwargs.get("dropout_p", 0.0) > 0 if "dropout_p" in kwargs else False
 
         assert (
             num_layers % num_chunks == 0
@@ -63,44 +83,105 @@ class BaseProcessor(nn.Module, ABC):
         if cpu_offload:
             self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
 
-    def build_layers(self, processor_chunk_class, *args, **kwargs) -> None:
+    def build_layers(self, layer_class, *layer_args, **layer_kwargs) -> None:
         """Build Layers."""
         self.proc = nn.ModuleList(
             [
-                processor_chunk_class(
-                    *args,
-                    **kwargs,
+                layer_class(
+                    *layer_args,
+                    **layer_kwargs,
                 )
-                for _ in range(self.num_chunks)
+                for _ in range(self.num_layers)
             ],
         )
 
-
-    def run_layers(self, data: tuple, *args, **kwargs) -> Tensor:
-        """Run Layers with checkpoint."""
-        attention_block = []
-        for layer in self.proc:
-        
-            data = checkpoint(layer, *data, *args, **kwargs, use_reentrant=False)
-            attention_block.extend([layer.blocks[idx].conv.alpha for idx in range(layer.num_layers)])
-        epoch = kwargs.get('epoch',0)
+    def run_layer_chunk(self, chunk_start: int, data: tuple, *args, **kwargs) -> tuple:
         self.node_entropy =[]
-        if epoch % 5 == 0:
-            for alpha_idx in range(0,len(attention_block)):
-                alpha_layer = attention_block[alpha_idx]
-                class_name = kwargs.get('class_name','unknown')
-                run_id = kwargs.get('run_id', 'default_run')
-                edge_index = kwargs.get('edge_index', None)
-                save_attention(epoch,class_name,run_id,alpha_layer,edge_index,alpha_idx)
+        for layer_id in range(chunk_start, chunk_start + self.chunk_size):
+            data = self.proc[layer_id](*data, *args, **kwargs)
+            alpha_attention = self.proc[layer_id].conv.alpha.shape
+
+            epoch = kwargs.get('epoch',0)
+            class_name = kwargs.get('class_name','unknown')
+            run_id = kwargs.get('run_id', 'default_run')
+            edge_index = kwargs.get('edge_index', None)
+            if epoch % 5 == 0:
+                save_attention(epoch,class_name,run_id,alpha_attention,edge_index,layer_id)
                 num_nodes = edge_index[0].max()+1
-                self.node_entropy.append(node_level_entropy(edge_index, alpha_layer, num_nodes))
+                self.node_entropy.append(node_level_entropy(edge_index, alpha_attention, num_nodes))
+        
+        return data
+
+    def run_layers(self, data: tuple, *args, **kwargs) -> tuple:
+        """Run Layers with checkpoints around chunks."""
+        for chunk_start in range(0, self.num_layers, self.chunk_size):
+            data = checkpoint(self.run_layer_chunk, chunk_start, data, *args, **kwargs, use_reentrant=False)
 
         return data
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
-        
+
+        if (model_comm_group := kwargs.get("model_comm_group", None)) is not None:
+            assert (
+                model_comm_group.size() == 1 or not self._has_dropout
+            ), f"Dropout is not supported when model is sharded across {model_comm_group.size()} GPUs"
+
         x = self.run_layers((x,), *args, **kwargs)
+        return x
+
+
+class PointWiseMLPProcessor(BaseProcessor):
+    """Point-wise MLP Processor."""
+
+    def __init__(
+        self,
+        *,
+        num_layers: int,
+        num_channels: int,
+        num_chunks: int,
+        mlp_hidden_ratio: int,
+        cpu_offload: bool = False,
+        dropout_p: float = 0.0,
+        layer_kernels: DotDict,
+        **kwargs,
+    ):
+        super().__init__(
+            num_layers=num_layers,
+            num_channels=num_channels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
+        )
+
+        self.build_layers(
+            PointWiseMLPProcessorBlock,
+            num_channels=num_channels,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
+            layer_kernels=self.layer_factory,
+            dropout_p=dropout_p,
+        )
+
+        self.offload_layers(cpu_offload)
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_shapes: list[list[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
+    ) -> Tensor:
+        shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
+        if model_comm_group:
+            assert (
+                model_comm_group.size() == 1 or batch_size == 1
+            ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
+
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+
         return x
 
 
@@ -167,17 +248,17 @@ class TransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
         )
 
         self.build_layers(
-            TransformerProcessorChunk,
+            TransformerProcessorBlock,
             num_channels=num_channels,
-            num_layers=self.chunk_size,
-            layer_kernels=self.layer_factory,
-            mlp_hidden_ratio=mlp_hidden_ratio,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
             num_heads=num_heads,
-            window_size=window_size,
             qk_norm=qk_norm,
+            window_size=window_size,
+            layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
             softcap=softcap,
@@ -190,7 +271,7 @@ class TransformerProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], ...],
+        shard_shapes: list[list[int]],
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
@@ -201,7 +282,7 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return x
 
@@ -273,10 +354,21 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
             "edge_dim": None,
         }
 
-        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, **kwargs)
+        self.build_layers(
+            GraphConvProcessorBlock,
+            in_channels=num_channels,
+            out_channels=num_channels,
+            num_chunks=1,
+            **kwargs,
+        )
 
         kwargs["edge_dim"] = self.edge_dim  # Edge dim for first layer
-        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, **kwargs)
+        self.proc[0] = GraphConvProcessorBlock(
+            in_channels=num_channels,
+            out_channels=num_channels,
+            num_chunks=1,
+            **kwargs,
+        )
 
         self.offload_layers(cpu_offload)
 
@@ -284,7 +376,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: list[list[int]],
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
@@ -328,6 +420,8 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerProcessor.
@@ -361,6 +455,10 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
         super().__init__(
             num_channels=num_channels,
@@ -377,14 +475,16 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
 
         self.build_layers(
-            GraphTransformerProcessorChunk,
-            num_channels=num_channels,
-            num_layers=self.chunk_size,
-            layer_kernels=self.layer_factory,
+            GraphTransformerProcessorBlock,
+            in_channels=num_channels,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
+            out_channels=num_channels,
             num_heads=num_heads,
-            mlp_hidden_ratio=mlp_hidden_ratio,
-            qk_norm=qk_norm,
             edge_dim=self.edge_dim,
+            layer_kernels=self.layer_factory,
+            qk_norm=qk_norm,
+            graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
         )
 
         self.class_name = 'processor'
@@ -394,7 +494,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: list[list[int]],
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,

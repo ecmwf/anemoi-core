@@ -18,7 +18,9 @@ from .boolean_op import BooleanNot
 from .boolean_op import BooleanOrMask
 from .masks import CutOutMask
 from .masks import GridsMask
+from .masks import LimitedAreaMask
 from .masks import NonmissingAnemoiDatasetVariable
+from .masks import NonzeroAnemoiDatasetVariable
 
 __all__ = [
     "GridsMask",
@@ -26,8 +28,10 @@ __all__ = [
     "PlanarAreaWeights",
     "UniformWeights",
     "CutOutMask",
+    "LimitedAreaMask",
     "MaskedPlanarAreaWeights",
     "NonmissingAnemoiDatasetVariable",
+    "NonzeroAnemoiDatasetVariable",
     "BooleanAndMask",
     "BooleanNot",
     "BooleanOrMask",
