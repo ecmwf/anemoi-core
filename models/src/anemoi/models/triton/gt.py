@@ -18,63 +18,9 @@ except ImportError:
     raise ValueError(
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
-
-
-@triton.jit
-def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
-    """Pads H and C to the nearest power of 2 if needed.
-
-    This is required to support non-square numbers of heads and/or channels.
-    Returns a mask for H, H*C and an offset for accessing into a 2D H*C matrix, ignoring padded values
-
-    masking apparently has a price, so if H and C are already powers of 2, nothing is returned
-    If H is already a power of 2 but C is not, a simpler H*C mask is returned
-
-    This function assumes a matrix layout of shape [H,C] for mask_H_C and H_C_off
-    """
-
-    # default mask (assume no padded values)
-    H_mask = True
-    H_C_mask = True
-
-    if H == H_pad and C == C_pad:
-        H_C_off = tl.arange(0, H * C)
-
-    elif H == H_pad:  # just C is not square, we can avoid mask_H
-        C_pad_off = tl.arange(0, C_pad)[None, :]  # (1, C_pad)
-        H_off = tl.arange(0, H)[:, None]  # (H, 1)
-
-        # 2D mask for H * C
-        # e.g 1 2 X X
-        #     5 6 X X
-        #     X X X X
-        # But this kernel loads in 1d, hence we reshape to 1d
-        # shape (H_pad, 1) & shape (1, C_pad) => shape (H_pad, C_pad) => shape (H_pad * C_pad, )
-        H_C_mask_2d = (C_pad_off < C) & (H_off < H)  # (H, C_pad)
-        H_C_mask = tl.reshape(H_C_mask_2d, (H * C_pad,))
-        H_C_off = tl.reshape(H_off * C + C_pad_off, (H * C_pad,))
-
-    else:  # H and C both not square
-        H_pad_off = tl.arange(0, H_pad)[:, None]
-        C_pad_off = tl.arange(0, C_pad)[None, :]
-
-        # mask for H
-        H_mask = tl.arange(0, H_pad) < H
-
-        # 2D mask for H * C
-        # e.g 1 2 X X
-        #     5 6 X X
-        #     X X X X
-        # But this kernel loads in 1d, hence we reshape to 1d
-        # shape (H_pad, 1) & shape (1, C_pad) => shape (H_pad, C_pad) => shape (H_pad * C_pad, )
-        H_C_mask_2d = (C_pad_off < C) & (H_pad_off < H)  # (H, C_pad)
-        H_C_mask = tl.reshape(H_C_mask_2d, (H_pad * C_pad,))
-
-        # tl.arange(H_pad, C_pad) doesnt work, because the arrays its offseting into aren't padded
-        # Therefore we make our own range, using unpadded major dimension (C)
-        H_C_off = tl.reshape(H_pad_off * C + C_pad_off, (H_pad * C_pad,))
-
-    return H_mask, H_C_mask, H_C_off
+from anemoi.models.triton.norm import _rms_norm_bwd
+from anemoi.models.triton.norm import _rms_norm_fwd
+from anemoi.models.triton.utils import build_masks_and_offsets
 
 
 @triton.jit
@@ -91,6 +37,7 @@ def _gt_fwd(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
 ):
     pid = tl.program_id(0)
     dst_idx = pid
@@ -118,6 +65,10 @@ def _gt_fwd(
         return
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+
+    if qk_norm:
+        q = _rms_norm_fwd(q, C)
+
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
     m_i = tl.full((H_pad,), value=-float("inf"), dtype=tl.float32)  # running max for stability
@@ -125,9 +76,9 @@ def _gt_fwd(
     # helpers to avoid repeated computations/indexing:
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
+
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
-    # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
         e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -136,6 +87,10 @@ def _gt_fwd(
 
         src_off = src_idx * H * C + H_C_off
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+
+        if qk_norm:
+            k = _rms_norm_fwd(k, C)
+
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         k_e = k + e
@@ -195,6 +150,7 @@ def _gt_bwd_dst_pass(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
 ):
     dst_idx = tl.program_id(0)
     if dst_idx >= N_dst:
@@ -225,19 +181,30 @@ def _gt_bwd_dst_pass(
     Dj = tl.sum(d_out * out, axis=-1)  # [H]
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+
+    if qk_norm:
+        # Q is saved unnormalised,
+        # if normalisation was done in the fwd pass, we have to normalise it here
+        # before we recompute elements of the attention forward pass
+        q_unnorm = q  # need to save an unnormalised copy for the bwd pass later
+        q = _rms_norm_fwd(q, C)
+
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
-    # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
         e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         src = tl.load(ROW_ptr + e_idx)
         src_off = src * H * C + H_C_off
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+
+        # Normalise k if required
+        if qk_norm:  # rms norm
+            k = _rms_norm_fwd(k, C)
 
         ke = k + e
         # score and alpha using saved M
@@ -256,6 +223,10 @@ def _gt_bwd_dst_pass(
         # move to next edge
         edge_ptr += H * C
         e_idx += 1
+
+    if qk_norm:
+        # As a last step, apply the the normalisation gradient
+        dq = _rms_norm_bwd(q_unnorm, dq, C)
 
     # store D_j and dQ
     tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
@@ -287,6 +258,7 @@ def _gt_bwd_src_pass(
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
 ):
     src_idx = tl.program_id(0)
     if src_idx >= N_src:
@@ -309,6 +281,12 @@ def _gt_bwd_src_pass(
     # src-side k, v (shared for all edges)
     src_off = src_idx * H * C + H_C_off
     k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    if qk_norm:  # rms norm
+        # K is saved unnormalised,
+        # if normalisation was done in the fwd pass, we renormalise it now
+        k_unnorm = k  # must save copy of unnormalised value for bwd pass later
+        k = _rms_norm_fwd(k, C)
+
     v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     accK = tl.zeros((H_pad, C_pad), dtype=tl.float32)
@@ -326,6 +304,8 @@ def _gt_bwd_src_pass(
         # get saved tensors for dst node
         dst_off = dst * H * C + H_C_off
         q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        if qk_norm:
+            q = _rms_norm_fwd(q, C)
         d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
@@ -358,6 +338,10 @@ def _gt_bwd_src_pass(
         accK += dK_edge
         accV += dV_edge
 
+    if qk_norm:
+        # As a last step, apply normalisation gradient if required
+        accK = _rms_norm_bwd(k_unnorm, accK, C)
+
     # write final accumulated per-src grads
     tl.store(
         D_K_ptr + src_off,
@@ -388,7 +372,7 @@ class GraphTransformerFunction(torch.autograd.Function):
             )
 
     @staticmethod
-    def forward(ctx, q, k, v, e, csc, reverse):
+    def forward(ctx, q, k, v, e, csc, reverse, qk_norm):
         """Args:
         q: [N_dst, H, C]
         k: [N_src, H, C]
@@ -396,6 +380,7 @@ class GraphTransformerFunction(torch.autograd.Function):
         e: [num_edges, H, C]
         csc: (row, colptr)
         reverse: (rowptr, edge_ids, edge_dst)
+        qk_norm: bool
         """
         row, colptr = csc
         rowptr, edge_ids, edge_dst = reverse
@@ -421,7 +406,9 @@ class GraphTransformerFunction(torch.autograd.Function):
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype)
+        ctx.qk_norm = qk_norm
+
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm)
 
         # Save tensors for backward
         ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
@@ -443,11 +430,13 @@ class GraphTransformerFunction(torch.autograd.Function):
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
 
         # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
+        _gt_bwd_dst_pass[(N_dst,)](
+            q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype, ctx.qk_norm
+        )
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
-            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype
+            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype, ctx.qk_norm
         )
 
-        return dQ, dK, dV, dE, None, None
+        return dQ, dK, dV, dE, None, None, None
