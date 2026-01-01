@@ -23,9 +23,10 @@ LOGGER = logging.getLogger(__name__)
 def save_attention(epoch,class_name, run_id,alpha_attention, edge_index,layer=None):
     import numpy as np
     import os
-    os.makedirs(f"/leonardo/home/userexternal/aprieton/repos/aifs_9km/anemoi-core/training/src/anemoi/training/config/attention_weights/{run_id}", exist_ok=True)
-    np.save(f"/leonardo/home/userexternal/aprieton/repos/aifs_9km/anemoi-core/training/src/anemoi/training/config/attention_weights/{run_id}/edge_index_{class_name}_{layer}.npy",edge_index.cpu().detach().numpy())
-    np.save(f"/leonardo/home/userexternal/aprieton/repos/aifs_9km/anemoi-core/training/src/anemoi/training/config/attention_weights/{run_id}/attention_weights_{epoch}_{class_name}_{layer}.npy",alpha_attention.cpu().detach().numpy())
+    cwd = os.getcwd()
+    os.makedirs(f"{cwd}/attention_weights/{run_id}", exist_ok=True)
+    np.save(f"{cwd}/attention_weights/{run_id}/edge_index_{class_name}_{layer}.npy",edge_index.cpu().detach().numpy())
+    np.save(f"{cwd}/attention_weights/{run_id}/attention_weights_{epoch}_{class_name}_{layer}.npy",alpha_attention.cpu().detach().numpy())
 
 def node_level_entropy(edge_index, attn, num_nodes,index=1):
     """
