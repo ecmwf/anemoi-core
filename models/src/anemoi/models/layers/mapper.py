@@ -37,7 +37,7 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import load_layer_kernels, save_attention, node_level_entropy
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -264,7 +264,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
         )
-
+        self.class_name = 'base'
         self.num_chunks = num_chunks
 
         Linear = self.layer_factory.Linear
@@ -350,6 +350,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         batch_size: int,
         size: tuple[int],
         model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
     ) -> Tensor:
         x_src, x_dst = x
 
@@ -381,6 +382,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             batch_size,
             chunk_size,
             model_comm_group,
+            **kwargs,
         )
 
         return self.post_process(x_dst_out, shapes[1], model_comm_group, keep_x_dst_sharded=True)
@@ -394,6 +396,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        **kwargs,
     ) -> PairTensor:
         x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst = checkpoint(
             self.pre_process_edge_sharding_wrapper,
@@ -425,8 +428,23 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
                 batch_size,
                 size,
                 use_reentrant=False,
+                **kwargs,
             ).to(dtype=out_type)
 
+        epoch = kwargs.get('epoch',0)
+        class_name = kwargs.get('class_name','unknown')
+        run_id = kwargs.get('run_id','unknown')
+        if self.proc.alpha_attention is not None:
+            if epoch % 5 == 0:
+                save_attention(epoch,class_name,run_id,self.proc.alpha_attention,edge_index)
+                if self.class_name == 'encoder':
+                    num_nodes = edge_index[0].max()+1
+                    self.node_entropy=[node_level_entropy(edge_index, self.proc.alpha_attention, num_nodes)]
+                elif self.class_name == 'decoder':
+                    num_nodes = edge_index[1].max()+1
+                    self.node_entropy=[node_level_entropy(edge_index, self.proc.alpha_attention, num_nodes,index=0)]
+
+         
         if not keep_x_dst_sharded:  # gather after processing chunks
             out_dst = gather_tensor(out_dst, 0, change_channels_in_shape(shapes_dst, out_channels), model_comm_group)
 
@@ -475,6 +493,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        **kwargs
     ) -> PairTensor:
 
         kwargs_forward = {
@@ -485,7 +504,11 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             "x_src_is_sharded": x_src_is_sharded,
             "x_dst_is_sharded": x_dst_is_sharded,
             "keep_x_dst_sharded": keep_x_dst_sharded,
+            "class_name": self.class_name,
+            **kwargs
         }
+
+
 
         if self.shard_strategy == "edges":
             return self.forward_with_edge_sharding(**kwargs_forward)
@@ -568,7 +591,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
         )
-
+        self.class_name = 'encoder'
         self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
 
     def forward(
@@ -580,9 +603,10 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = True,
+        **kwargs,
     ) -> PairTensor:
         x_dst = super().forward(
-            x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded
+            x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded, **kwargs
         )
         return x[0], x_dst
 
@@ -669,7 +693,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
         )
-
+        self.class_name = 'decoder'
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )

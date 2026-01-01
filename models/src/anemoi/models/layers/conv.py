@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+from tracemalloc import stop
 from typing import Optional
 
 import torch
@@ -96,6 +97,7 @@ class GraphTransformerConv(MessagePassing):
 
         self.out_channels = out_channels
         self.dropout = dropout
+        self.alpha = None
 
     def forward(
         self,
@@ -109,7 +111,7 @@ class GraphTransformerConv(MessagePassing):
         dim_size = query.shape[0]
         heads = query.shape[1]
 
-        out = self.propagate(
+        out= self.propagate(
             edge_index=edge_index,
             size=size,
             dim_size=dim_size,
@@ -119,7 +121,8 @@ class GraphTransformerConv(MessagePassing):
             key=key,
             value=value,
         )
-
+        # print('out shape:', out.shape)
+        # print('alpha shape in forward:', self.alpha.shape)
         return out
 
     def message(
@@ -141,4 +144,6 @@ class GraphTransformerConv(MessagePassing):
         alpha = softmax(alpha, index, ptr, size_i)
         alpha = dropout(alpha, p=self.dropout, training=self.training)
 
+        self.alpha = alpha  # Store alpha for access after forward
+        # print('alpha shape in message:', self.alpha.shape)
         return (value_j + edge_attr) * alpha.view(-1, heads, 1)

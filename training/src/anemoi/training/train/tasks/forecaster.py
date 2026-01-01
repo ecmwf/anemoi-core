@@ -81,6 +81,29 @@ class GraphForecaster(BaseGraphModule):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
+    def _log_entropy(self) -> None:
+        if self.current_epoch % 5 == 0:
+            for i in range(len(self.model.model.encoder.node_entropy)):
+                self.log(f'encoder_entropy_layer_{i}', self.model.model.encoder.node_entropy[0][i],
+                on_epoch=True,
+                on_step=True,
+                prog_bar=True,
+                logger=self.logger_enabled,
+                sync_dist=True)
+                self.log(f'decoder_entropy_layer_{i}', self.model.model.decoder.node_entropy[0][i],
+                    on_epoch=True,
+                    on_step=True,
+                    prog_bar=True,
+                    logger=self.logger_enabled,
+                    sync_dist=True)
+            for i, entropy in enumerate(self.model.model.processor.node_entropy):
+                for j in range(len(self.model.model.encoder.node_entropy)):
+                    self.log(f'processor_{i}_entropy_head_{j}', entropy[j], on_epoch=True,
+                    on_step=True,
+                    prog_bar=True,
+                    logger=self.logger_enabled,
+                    sync_dist=True)
+
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss = super().training_step(batch, batch_idx)
         self.log(
@@ -91,6 +114,7 @@ class GraphForecaster(BaseGraphModule):
             rank_zero_only=True,
             sync_dist=False,
         )
+        self._log_entropy()
         return train_loss
 
     def on_train_epoch_end(self) -> None:

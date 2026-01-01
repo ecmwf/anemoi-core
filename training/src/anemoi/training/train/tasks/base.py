@@ -304,10 +304,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_slice = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        kwargs = {'epoch': self.current_epoch,'run_id': self.trainer.logger.run_id}
+
         return self.model(
             x,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
+            **kwargs,
         )
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
@@ -462,10 +465,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         else:
             batch = self.allgather_batch(batch)
             self.grid_shard_shapes, self.grid_shard_slice = None, None
-
+        #print(self.interpolate_batch)
         if self.interpolate_batch:
+            #print(batch.shape)
             batch = self._interpolate_batch(batch)
-
+            #print(batch.shape)
         return batch
 
     @abstractmethod

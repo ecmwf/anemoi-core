@@ -192,6 +192,10 @@ class AnemoiModelEncProcDec(nn.Module):
             shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
+        # print('x',x.shape)
+        # print('x einops',einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)").shape)
+        # print('node_attributes_data',node_attributes_data.shape)
+
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
@@ -277,6 +281,7 @@ class AnemoiModelEncProcDec(nn.Module):
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
         use_reentrant: bool = False,
+        **kwargs
     ) -> Tensor:
         """Run mapper with activation checkpoint.
 
@@ -307,19 +312,20 @@ class AnemoiModelEncProcDec(nn.Module):
         Tensor
             Mapped data
         """
-        kwargs = {
+        kwargs_forward = {
             "batch_size": batch_size,
             "shard_shapes": shard_shapes,
             "model_comm_group": model_comm_group,
             "x_src_is_sharded": x_src_is_sharded,
             "x_dst_is_sharded": x_dst_is_sharded,
             "keep_x_dst_sharded": keep_x_dst_sharded,
+            **kwargs
         }
 
         if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
-            return mapper(data, **kwargs)
+            return mapper(data, **kwargs_forward)
 
-        return checkpoint(mapper, data, **kwargs, use_reentrant=use_reentrant)
+        return checkpoint(mapper, data, **kwargs_forward, use_reentrant=use_reentrant)
 
     def forward(
         self,
@@ -367,6 +373,7 @@ class AnemoiModelEncProcDec(nn.Module):
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            **kwargs
         )
 
         # Processor
@@ -375,6 +382,7 @@ class AnemoiModelEncProcDec(nn.Module):
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden,
             model_comm_group=model_comm_group,
+            **kwargs,   
         )
 
         # Skip
@@ -390,8 +398,8 @@ class AnemoiModelEncProcDec(nn.Module):
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+            **kwargs,
         )
-
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out

@@ -454,7 +454,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         )
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
-        return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
+        #return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
+        return self.node_dst_mlp(self.layer_norm_mlp_dst(x))
 
     def get_qkve(
         self,
@@ -523,6 +524,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         conv_size = (size, size) if isinstance(size, int) else size
 
         if num_chunks > 1:
+            self.alpha_attention = None
             # split 1-hop edges into chunks, compute self.conv chunk-wise
             edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
                 num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
@@ -538,9 +540,11 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
                     edge_index=edge_index_list[i],
                     size=conv_size,
                 )
+                self.alpha_attention += self.conv.alpha
         else:
             out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=conv_size)
 
+            self.alpha_attention = self.conv.alpha
         return out
 
     def shard_output_seq(
@@ -571,7 +575,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ): ...
-
 
 class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
     """Graph Transformer Block for node embeddings."""
@@ -684,9 +687,14 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
     ):
         x_skip = x
 
+        # x = (
+        #     self.layer_norm_attention_src(x[0], **layer_kwargs),
+        #     self.layer_norm_attention_dest(x[1], **layer_kwargs),
+        # )
+
         x = (
-            self.layer_norm_attention_src(x[0], **layer_kwargs),
-            self.layer_norm_attention_dest(x[1], **layer_kwargs),
+            self.layer_norm_attention_src(x[0]),
+            self.layer_norm_attention_dest(x[1],),
         )
 
         x_r = self.lin_self(x[1])
@@ -796,7 +804,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
     ):
         x_skip = x
 
-        x = self.layer_norm_attention(x, **layer_kwargs)
+        x = self.layer_norm_attention(x)
         x_r = self.lin_self(x)
 
         query, key, value, edges = self.get_qkve(x, edge_attr)
@@ -810,7 +818,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
         out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
-
         out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
 
         # out = self.projection(out + x_r) in chunks:

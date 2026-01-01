@@ -29,6 +29,7 @@ from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
+from anemoi.models.layers.utils import save_attention, node_level_entropy
 
 
 class BaseProcessor(nn.Module, ABC):
@@ -74,14 +75,31 @@ class BaseProcessor(nn.Module, ABC):
             ],
         )
 
+
     def run_layers(self, data: tuple, *args, **kwargs) -> Tensor:
         """Run Layers with checkpoint."""
+        attention_block = []
         for layer in self.proc:
+        
             data = checkpoint(layer, *data, *args, **kwargs, use_reentrant=False)
+            attention_block.extend([layer.blocks[idx].conv.alpha for idx in range(layer.num_layers)])
+        epoch = kwargs.get('epoch',0)
+        self.node_entropy =[]
+        if epoch % 5 == 0:
+            for alpha_idx in range(0,len(attention_block)):
+                alpha_layer = attention_block[alpha_idx]
+                class_name = kwargs.get('class_name','unknown')
+                run_id = kwargs.get('run_id', 'default_run')
+                edge_index = kwargs.get('edge_index', None)
+                save_attention(epoch,class_name,run_id,alpha_layer,edge_index,alpha_idx)
+                num_nodes = edge_index[0].max()+1
+                self.node_entropy.append(node_level_entropy(edge_index, alpha_layer, num_nodes))
+
         return data
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
+        
         x = self.run_layers((x,), *args, **kwargs)
         return x
 
@@ -369,6 +387,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             edge_dim=self.edge_dim,
         )
 
+        self.class_name = 'processor'
         self.offload_layers(cpu_offload)
 
     def forward(
@@ -387,9 +406,13 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
 
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
 
+        kwargs= {
+            "class_name": self.class_name,
+            **kwargs
+        }
+
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
-
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),
             edge_index=edge_index,
