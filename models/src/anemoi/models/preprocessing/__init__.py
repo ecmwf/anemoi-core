@@ -198,14 +198,6 @@ class Processors(nn.Module):
         """Run checks on the processed tensor."""
         if not self.inverse:
             # Forward transformation checks:
-            # print('x',x.shape)
-            # import numpy as np
-            # print(x[0,0,0,:,0])
-            # print(torch.isnan((x[0,0,0,:,0])).sum())
-            # print(torch.isnan(x[0,0,0,:,0]))
-            # print(torch.isnan(x[0,1,0,:,0]))
-            # print(torch.isnan(x[0,2,0,:,0]))
-            # print('argwhere',np.argwhere(np.array(torch.isnan(x).any(dim=(0,1,2,3)).detach().cpu())))
             assert not torch.isnan(
                 x
             ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
