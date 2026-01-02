@@ -142,6 +142,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
+        truncation_data:dict=None
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -174,6 +175,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metadata=metadata,
             supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
             graph_data=graph_data,
+            truncation_data=truncation_data,
             config=convert_to_omegaconf(config),
         )
         self.config = config
@@ -496,6 +498,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             )
 
         return loss, metrics_next, y_pred_full
+
 
     def _interpolate_batch(self, batch: torch.Tensor) -> tuple[torch.Tensor, list[int] | None, slice | None]:
         """Interpolate the batch to the full grid size if needed.

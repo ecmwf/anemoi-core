@@ -773,11 +773,13 @@ class PlotAttentionEntropy(BasePerEpochPlotCallback):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         epoch: int,
+        **kwargs,
     ) -> None:
         logger = trainer.logger
+        del kwargs  # unused
         local_rank = pl_module.local_rank
         node_entropy_stacked = pl_module.model.model.get_node_entropy_stacked()
-        fig = plot_attention_heads_entropy(num_blocks=node_entropy_stacked.shape[0], E=node_entropy_stacked)
+        fig = plot_attention_heads_entropy(num_blocks=node_entropy_stacked.shape[0], stacked_entropy=node_entropy_stacked)
 
         self._output_figure(
             logger,
@@ -787,15 +789,6 @@ class PlotAttentionEntropy(BasePerEpochPlotCallback):
             exp_log_tag=f"attention_rank{local_rank:01d}",
         )
 
-    @rank_zero_only
-    def on_validation_epoch_end(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        **kwargs,
-    ) -> None:
-
-        self.plot(trainer, pl_module, epoch=trainer.current_epoch, **kwargs)
 
 
 class PlotLoss(BasePerBatchPlotCallback):

@@ -40,6 +40,7 @@ class BaseGraphModel(nn.Module):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        truncation_data:dict=None
     ) -> None:
         """Initializes the graph neural network.
 
@@ -59,6 +60,10 @@ class BaseGraphModel(nn.Module):
 
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
+
+        self.interpolate_batch = model_config.model.interpolate_batch if model_config.model.interpolate_batch else False
+        self._graph_name_data = model_config.graph.data if not self.interpolate_batch else model_config.graph.data_intp
+
         self._graph_name_hidden = model_config.graph.hidden
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
@@ -76,7 +81,24 @@ class BaseGraphModel(nn.Module):
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
-        
+
+        self._truncation_data = truncation_data
+        self.A_down, self.A_up = None, None
+        if "down" in self._truncation_data:
+            self.A_down = self._make_truncation_matrix(self._truncation_data["down"])
+            LOGGER.info("Truncation: A_down %s", self.A_down.shape)
+        if "up" in self._truncation_data:
+            self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
+            LOGGER.info("Truncation: A_up %s", self.A_up.shape)
+
+    def _make_truncation_matrix(self, A, data_type=torch.float32):
+        import numpy as np
+        A_ = torch.sparse_coo_tensor(
+            torch.tensor(np.vstack(A.nonzero()), dtype=torch.long),
+            torch.tensor(A.data, dtype=data_type),
+            size=A.shape,
+        ).coalesce()
+        return A_
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_channels = len(data_indices.model.input)

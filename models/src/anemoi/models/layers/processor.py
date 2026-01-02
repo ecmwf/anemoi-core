@@ -98,11 +98,9 @@ class BaseProcessor(nn.Module, ABC):
         )
 
     def run_layer_chunk(self, chunk_start: int, data: tuple, *args, **kwargs) -> tuple:
-        self.node_entropy =[]
         for layer_id in range(chunk_start, chunk_start + self.chunk_size):
             data = self.proc[layer_id](*data, *args, **kwargs)
-<<<<<<< HEAD
-            alpha_attention = self.proc[layer_id].conv.alpha.shape
+            alpha_attention = self.proc[layer_id].conv.alpha
 
             epoch = kwargs.get('epoch',0)
             class_name = kwargs.get('class_name','unknown')
@@ -112,19 +110,7 @@ class BaseProcessor(nn.Module, ABC):
                 save_attention(epoch,class_name,run_id,alpha_attention,edge_index,layer_id)
                 num_nodes = edge_index[0].max()+1
                 self.node_entropy.append(node_level_entropy(edge_index, alpha_attention, num_nodes))
-        
-=======
-            alpha_attention = self.proc[layer_id].conv.alpha
 
-            epoch = kwargs.get("epoch", 0)
-            class_name = kwargs.get("class_name", "unknown")
-            run_id = kwargs.get("run_id", "default_run")
-            edge_index = kwargs.get("edge_index", None)
-            if epoch % 5 == 0:
-                save_attention(epoch, class_name, run_id, alpha_attention, edge_index, layer_id)
-                num_nodes = edge_index[0].max() + 1
-                self.node_entropy.append(node_level_entropy(edge_index, alpha_attention, num_nodes))
->>>>>>> attention_tracking
         return data
 
     def run_layers(self, data: tuple, *args, **kwargs) -> tuple:
@@ -529,12 +515,6 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
-<<<<<<< HEAD
-=======
-
-        kwargs = {"class_name": self.class_name, **kwargs}
-
->>>>>>> attention_tracking
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),
             edge_index=edge_index,

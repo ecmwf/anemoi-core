@@ -169,6 +169,25 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
+    def truncation_data(self) -> dict:
+        """Truncation data.
+
+        Loads truncation data.
+        """
+        from scipy.sparse import load_npz
+        truncation_data = {}
+        if self.config.system.input.truncation is not None:
+            truncation_data["down"] = load_npz(
+                Path(self.config.system.input.truncation),
+            )
+        if self.config.system.input.truncation_inv is not None:
+            truncation_data["up"] = load_npz(
+                Path(self.config.system.input.truncation_inv),
+            )
+
+        return truncation_data
+
+    @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
         assert (
@@ -195,8 +214,9 @@ class AnemoiTrainer(ABC):
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
             "supporting_arrays": self.supporting_arrays,
+            "truncation_data": self.truncation_data,
         }
-
+        print(self.config.training.model_task)
         model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 

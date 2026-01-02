@@ -455,7 +455,6 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
                 size,
                 model_comm_group,
                 cond,
-                **kwargs,
                 use_reentrant=False,
                 **kwargs,
             ).to(dtype=out_type)
@@ -465,15 +464,14 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         epoch = kwargs.get("epoch", 0)
         class_name = kwargs.get("class_name", "unknown")
         run_id = kwargs.get("run_id", "unknown")
-        if self.proc.alpha_attention is not None:
-            if epoch % 5 == 0:
-                save_attention(epoch, class_name, run_id, attention_mapper, edge_index)
-                if self.class_name == "encoder":
-                    num_nodes = edge_index[0].max() + 1
-                    self.node_entropy = [node_level_entropy(edge_index, attention_mapper, num_nodes)]
-                elif self.class_name == "decoder":
-                    num_nodes = edge_index[1].max() + 1
-                    self.node_entropy = [node_level_entropy(edge_index, attention_mapper, num_nodes, index=0)]
+        if epoch % 5 == 0:
+            save_attention(epoch, class_name, run_id, attention_mapper, edge_index)
+            if self.class_name == "encoder":
+                num_nodes = edge_index[0].max() + 1
+                self.node_entropy = [node_level_entropy(edge_index, attention_mapper, num_nodes)]
+            elif self.class_name == "decoder":
+                num_nodes = edge_index[1].max() + 1
+                self.node_entropy = [node_level_entropy(edge_index, attention_mapper, num_nodes, index=0)]
         if not keep_x_dst_sharded:  # gather after processing chunks
             out_dst = gather_tensor(out_dst, 0, change_channels_in_shape(shapes_dst, out_channels), model_comm_group)
 

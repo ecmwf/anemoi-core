@@ -22,6 +22,7 @@ from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
+from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,38 +30,8 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
-    def __init__(
-        self,
-        *,
-        model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-    ) -> None:
-        """Initializes the graph neural network.
-
-        Parameters
-        ----------
-        model_config : DotDict
-            Model configuration
-        data_indices : dict
-            Data indices
-        graph_data : HeteroData
-            Graph definition
-        """
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-        )
-        self.interpolate_batch = model_config.model.interpolate_batch
-        self._graph_name_data = model_config.graph.data if not self.interpolate_batch else model_config.graph.data_intp
-
-
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
-
         # Encoder data -> hidden
         self.encoder = instantiate(
             model_config.model.encoder,
@@ -95,6 +66,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
         )
+
+    def _multiply_sparse(self, x, A):
+        return torch.sparse.mm(A, x)
+
+    def _truncate_fields(self, x, A, batch_size=None, auto_cast=False):
+        if not batch_size:
+            batch_size = x.shape[0]
+        out = []
+        with torch.amp.autocast(device_type="cuda", enabled=auto_cast):
+            for i in range(batch_size):
+                out.append(self._multiply_sparse(x[i, ...], A))
+        return torch.stack(out)
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
@@ -148,7 +131,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             node_entropy_stacked.append(node_entropy[1].cpu().detach().numpy())
         for node_entropy in self.decoder.node_entropy:
             node_entropy_stacked.append(node_entropy.cpu().detach().numpy())
-        print(np.stack(node_entropy_stacked, axis=0).shape)
         return np.stack(node_entropy_stacked, axis=0)
 
     def forward(

@@ -45,6 +45,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
+        truncation_data:dict=None
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -72,6 +73,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
+            truncation_data=truncation_data
         )
 
         self.rollout = config.training.rollout.start
