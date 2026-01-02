@@ -37,7 +37,9 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.utils import load_layer_kernels, save_attention, node_level_entropy
+from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import node_level_entropy
+from anemoi.models.layers.utils import save_attention
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -393,7 +395,6 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src_chunk, x_dst_chunk, _, _ = self.pre_process(
             (x_src_chunk, x_dst_chunk), shapes, model_comm_group, x_src_is_sharded=True, x_dst_is_sharded=True
         )
-
         (_, x_dst_out), _ = self.proc(
             (x_src_chunk, x_dst_chunk),
             edge_attr,
@@ -431,7 +432,6 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             cond,
             use_reentrant=False,
         )
-
         size = (x_src.shape[0], x_dst.shape[0])  # node sizes of local graph shard
         num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
 
@@ -440,7 +440,10 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
+        attention_mapper = []
+
         for dst_chunk in dst_chunks:
+
             out_dst[dst_chunk] = checkpoint(
                 self.run_processor_chunk_edge_sharding,
                 (x_src, x_dst),
@@ -456,21 +459,21 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
                 use_reentrant=False,
                 **kwargs,
             ).to(dtype=out_type)
+            attention_mapper.append(self.proc.alpha_attention)
 
-        epoch = kwargs.get('epoch',0)
-        class_name = kwargs.get('class_name','unknown')
-        run_id = kwargs.get('run_id','unknown')
+        attention_mapper = torch.cat(attention_mapper, dim=0)
+        epoch = kwargs.get("epoch", 0)
+        class_name = kwargs.get("class_name", "unknown")
+        run_id = kwargs.get("run_id", "unknown")
         if self.proc.alpha_attention is not None:
             if epoch % 5 == 0:
-                save_attention(epoch,class_name,run_id,self.proc.alpha_attention,edge_index)
-                if self.class_name == 'encoder':
-                    num_nodes = edge_index[0].max()+1
-                    self.node_entropy=[node_level_entropy(edge_index, self.proc.alpha_attention, num_nodes)]
-                elif self.class_name == 'decoder':
-                    num_nodes = edge_index[1].max()+1
-                    self.node_entropy=[node_level_entropy(edge_index, self.proc.alpha_attention, num_nodes,index=0)]
-
-         
+                save_attention(epoch, class_name, run_id, attention_mapper, edge_index)
+                if self.class_name == "encoder":
+                    num_nodes = edge_index[0].max() + 1
+                    self.node_entropy = [node_level_entropy(edge_index, attention_mapper, num_nodes)]
+                elif self.class_name == "decoder":
+                    num_nodes = edge_index[1].max() + 1
+                    self.node_entropy = [node_level_entropy(edge_index, attention_mapper, num_nodes, index=0)]
         if not keep_x_dst_sharded:  # gather after processing chunks
             out_dst = gather_tensor(out_dst, 0, change_channels_in_shape(shapes_dst, out_channels), model_comm_group)
 
@@ -533,11 +536,8 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             "x_dst_is_sharded": x_dst_is_sharded,
             "keep_x_dst_sharded": keep_x_dst_sharded,
             "class_name": self.class_name,
-            **kwargs
+            **kwargs,
         }
-
-
-
         if self.shard_strategy == "edges":
             return self.mapper_forward_with_edge_sharding(**kwargs_forward)
         else:  # self.shard_strategy == "heads"
@@ -627,7 +627,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
         )
-        self.class_name = 'encoder'
+        self.class_name = "encoder"
         self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
 
     def forward(
@@ -744,7 +744,8 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
         )
-        self.class_name = 'decoder'
+        self.class_name = "decoder"
+
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )

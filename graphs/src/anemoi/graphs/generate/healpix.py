@@ -10,12 +10,30 @@
 import healpy as hp
 import torch
 
+# def get_healpix_edgeindex(resolution: int) -> torch.Tensor:
+#     """Get the HEALPix edge index for a given resolution."""
+#     npix = hp.nside2npix(2**resolution)
+#     edge_index = torch.zeros((2, npix * 8))
+#     edge_index[0] = torch.repeat_interleave(torch.arange(npix), 8)
+#     for i in range(npix):
+#         edge_index[1, i * 8 : (i + 1) * 8] = torch.from_numpy(hp.get_all_neighbours(2**resolution, i, nest=True))
+#         if (edge_index[1, i * 8 : (i + 1) * 8]<0).any():
+#             faulty = edge_index[1, i * 8 : (i + 1) * 8]
+#             print(i,faulty[faulty<0])
+#     return edge_index
+
 
 def get_healpix_edgeindex(resolution: int) -> torch.Tensor:
-    """Get the HEALPix edge index for a given resolution."""
-    npix = hp.nside2npix(2**resolution)
-    edge_index = torch.zeros((2, npix * 8))
-    edge_index[0] = torch.repeat_interleave(torch.arange(npix), 8)
-    for i in range(npix):
-        edge_index[1, i * 8 : (i + 1) * 8] = torch.from_numpy(hp.get_all_neighbours(2**resolution, i, nest=True))
-    return edge_index
+    nside = 2**resolution
+    npix = hp.nside2npix(nside)
+
+    src = torch.repeat_interleave(torch.arange(npix), 8)
+    import numpy as np
+
+    nbrs = torch.from_numpy(np.vstack([hp.get_all_neighbours(nside, i, nest=True) for i in range(npix)])).reshape(-1)
+
+    edge_index = torch.stack([src, nbrs])
+
+    # Drop invalid neighbours
+    mask = nbrs >= 0
+    return edge_index[:, mask]

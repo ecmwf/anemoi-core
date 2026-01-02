@@ -309,7 +309,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         This method calls the model's forward method with the appropriate
         communication group and sharding information.
         """
-        kwargs = {'epoch': self.current_epoch,'run_id': self.trainer.logger.run_id}
+        kwargs = {"epoch": self.current_epoch, "run_id": self.trainer.logger.run_id}
         return self.model(
             x,
             model_comm_group=self.model_comm_group,

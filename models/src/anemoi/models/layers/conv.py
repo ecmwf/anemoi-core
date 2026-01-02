@@ -121,8 +121,6 @@ class GraphTransformerConv(MessagePassing):
             key=key,
             value=value,
         )
-        # print('out shape:', out.shape)
-        # print('alpha shape in forward:', self.alpha.shape)
         return out
 
     def message(
@@ -145,5 +143,4 @@ class GraphTransformerConv(MessagePassing):
         alpha = dropout(alpha, p=self.dropout, training=self.training)
 
         self.alpha = alpha  # Store alpha for access after forward
-        # print('alpha shape in message:', self.alpha.shape)
         return (value_j + edge_attr) * alpha.view(-1, heads, 1)
