@@ -1130,3 +1130,32 @@ def plot_ensemble_sample(
             title=f"{vname[0]}_{i_ens + 1} - mean",
             datashader=datashader,
         )
+
+
+def plot_attention_heads_entropy(num_blocks: int, stacked_entropy: np.ndarray) -> Figure:
+    import math
+
+    ncols = 6
+    num_heads = stacked_entropy.shape[1]
+    nrows = math.ceil(num_blocks / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3 * ncols, 3 * nrows))
+    axes = axes.flatten()
+
+    for b in range(num_blocks):
+        values = stacked_entropy[b]  # shape (16,)
+
+        axes[b].bar(np.arange(num_heads), values, width=0.9)
+
+        axes[b].set_title(f"Block {b}")
+        axes[b].set_ylim(0, 1)
+        axes[b].set_xlim(-0.5, num_heads - 0.5)
+        axes[b].set_xticks(np.arange(num_heads))
+        axes[b].set_xticklabels(np.arange(num_heads), fontsize=7)
+
+        if b % ncols == 0:
+            axes[b].set_ylabel("Normalized entropy")
+
+    # Hide unused axes if any
+    for i in range(num_blocks, len(axes)):
+        axes[i].axis("off")
+    return fig

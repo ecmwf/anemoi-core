@@ -21,6 +21,51 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
+def save_attention(epoch, class_name, run_id, alpha_attention, edge_index, layer=None):
+    import os
+
+    import numpy as np
+
+    cwd = os.getcwd()
+    os.makedirs(f"{cwd}/attention_weights/{run_id}", exist_ok=True)
+    if class_name == "processor":
+        np.save(
+            f"{cwd}/attention_weights/{run_id}/edge_index_{class_name}_{layer}.npy", edge_index.cpu().detach().numpy()
+        )
+        np.save(
+            f"{cwd}/attention_weights/{run_id}/attention_weights_{epoch}_{class_name}_{layer}.npy",
+            alpha_attention.cpu().detach().numpy(),
+        )
+    else:
+        np.save(f"{cwd}/attention_weights/{run_id}/edge_index_{class_name}.npy", edge_index.cpu().detach().numpy())
+        np.save(
+            f"{cwd}/attention_weights/{run_id}/attention_weights_{epoch}_{class_name}.npy",
+            alpha_attention.cpu().detach().numpy(),
+        )
+
+
+def node_level_entropy(edge_index, attn, num_nodes, index=1):
+    """Vectorized head entropy."""
+    import torch
+
+    num_heads = attn.size(1)
+
+    # Compute -α log α per edge
+    edge_entropy = -(attn * torch.log(attn + 1e-12))  # [E, H]-    # Accumulate per node
+    node_entropy = torch.zeros(num_nodes, num_heads, device=attn.device)  # [N, H]
+    node_entropy.index_add_(0, edge_index[index], edge_entropy)
+
+    # degree per node
+    deg = torch.zeros(num_nodes, device=attn.device)
+    deg.index_add_(0, edge_index[index], torch.ones(edge_index.size(1), device=attn.device))
+
+    # normalize per node
+    node_entropy = node_entropy / torch.log(deg.clamp(min=2)).unsqueeze(1)
+
+    # Average over nodes
+    return node_entropy.mean(dim=0)
+
+
 class CheckpointWrapper(nn.Module):
     """Wrapper for checkpointing a module."""
 

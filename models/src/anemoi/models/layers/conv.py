@@ -96,6 +96,7 @@ class GraphTransformerConv(MessagePassing):
 
         self.out_channels = out_channels
         self.dropout = dropout
+        self.alpha = None
 
     def forward(
         self,
@@ -119,7 +120,6 @@ class GraphTransformerConv(MessagePassing):
             key=key,
             value=value,
         )
-
         return out
 
     def message(
@@ -141,4 +141,5 @@ class GraphTransformerConv(MessagePassing):
         alpha = softmax(alpha, index, ptr, size_i)
         alpha = dropout(alpha, p=self.dropout, training=self.training)
 
+        self.alpha = alpha  # Store alpha for access after forward
         return (value_j + edge_attr) * alpha.view(-1, heads, 1)

@@ -38,6 +38,7 @@ from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
+from anemoi.training.diagnostics.plots import plot_attention_heads_entropy
 from anemoi.training.diagnostics.plots import plot_graph_edge_features
 from anemoi.training.diagnostics.plots import plot_graph_node_features
 from anemoi.training.diagnostics.plots import plot_histogram
@@ -749,6 +750,42 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             )
         else:
             LOGGER.warning("There are no trainable edge attributes to plot.")
+
+    @rank_zero_only
+    def on_validation_epoch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        **kwargs,
+    ) -> None:
+
+        self.plot(trainer, pl_module, epoch=trainer.current_epoch, **kwargs)
+
+
+class PlotAttentionEntropy(BasePerEpochPlotCallback):
+    def __init__(self, config: OmegaConf, every_n_epochs: int | None = None) -> None:
+        """Multi-head attention entropy over the nodes."""
+        super().__init__(config, every_n_epochs=every_n_epochs)
+
+    @rank_zero_only
+    def _plot(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        epoch: int,
+    ) -> None:
+        logger = trainer.logger
+        local_rank = pl_module.local_rank
+        node_entropy_stacked = pl_module.model.model.get_node_entropy_stacked()
+        fig = plot_attention_heads_entropy(num_blocks=node_entropy_stacked.shape[0], E=node_entropy_stacked)
+
+        self._output_figure(
+            logger,
+            fig,
+            epoch=epoch,
+            tag=f"attention_rank{local_rank:01d}",
+            exp_log_tag=f"attention_rank{local_rank:01d}",
+        )
 
     @rank_zero_only
     def on_validation_epoch_end(

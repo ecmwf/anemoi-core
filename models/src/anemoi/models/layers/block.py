@@ -529,7 +529,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
                 f"{self.__class__.__name__} requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend."
             )
             self.graph_attention_backend = "pyg"
-
         if self.graph_attention_backend == "triton":
             LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
             self.conv = GraphTransformerFunction.apply
@@ -610,8 +609,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             args_conv = (edges_csc, csc, reverse)
         else:
             args_conv = (edges, edge_index, conv_size)
-
-        return self.conv(query, key, value, *args_conv)
+        output = self.conv(query, key, value, *args_conv)
+        return output
 
     def attention_block(
         self,
@@ -630,12 +629,18 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             )
             # shape: (num_nodes, num_heads, out_channels_conv)
             out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
+            alpha = torch.zeros((edge_index.shape[1], self.num_heads), device=query.device)
             for i in range(num_chunks):
                 out += self.apply_gt(
                     query=query, key=key, value=value, edges=edge_attr_list[i], edge_index=edge_index_list[i], size=size
                 )
+                if self.conv.alpha is not None:
+                    alpha += self.conv.alpha  # accumulate attention weights
+
         else:
             out = self.apply_gt(query=query, key=key, value=value, edges=edges, edge_index=edge_index, size=size)
+            if self.conv.alpha is not None:
+                alpha = self.conv.alpha  # accumulate attention weights
 
         return out
 
@@ -905,6 +910,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
+        **kwargs,
     ):
         x_skip = x
 

@@ -33,6 +33,13 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
     "Epoch frequency to plot at."
 
 
+class PlotAttentionEntropySchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotAttentionEntropy"] = Field(alias="_target_")
+    "PlotAttentionEntropy object from anemoi training diagnostics callbacks."
+    every_n_epochs: int | None
+    "Epoch frequency to plot at."
+
+
 class PlotLossSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
     "PlotLoss object from anemoi training diagnostics callbacks."
@@ -219,6 +226,7 @@ PlotCallbacks = Annotated[
     | PlotSampleSchema
     | PlotSpectrumSchema
     | PlotHistogramSchema
+    | PlotAttentionEntropySchema
     | PlotEnsSampleSchema
     | PlotEnsLossSchema
     | PlotEnsSpectrumSchema

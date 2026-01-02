@@ -109,6 +109,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_out = bounding(x_out)
         return x_out
 
+    def get_node_entropy_stacked(self):
+        import numpy as np
+
+        node_entropy_stacked = []
+        for node_entropy in self.encoder.node_entropy:
+            node_entropy_stacked.append(node_entropy.cpu().detach().numpy())
+        for node_entropy in enumerate(self.processor.node_entropy):
+            node_entropy_stacked.append(node_entropy[1].cpu().detach().numpy())
+        for node_entropy in self.decoder.node_entropy:
+            node_entropy_stacked.append(node_entropy.cpu().detach().numpy())
+        print(np.stack(node_entropy_stacked, axis=0).shape)
+        return np.stack(node_entropy_stacked, axis=0)
+
     def forward(
         self,
         x: Tensor,
@@ -153,8 +166,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
             model_comm_group=model_comm_group,
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-            x_dst_is_sharded=False,  # x_latent does not come sharded
+            _dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            **kwargs,
         )
 
         # Processor
@@ -163,6 +177,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden,
             model_comm_group=model_comm_group,
+            **kwargs,
         )
 
         # Skip
@@ -177,8 +192,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+            **kwargs,
         )
-
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out
