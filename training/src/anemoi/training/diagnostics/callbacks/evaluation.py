@@ -144,7 +144,7 @@ class RolloutEval(Callback):
 class RolloutEvalEns(RolloutEval):
     """Evaluates the model performance over a (longer) rollout window."""
 
-    def _eval(self, pl_module: pl.LightningModule, batch: torch.Tensor) -> None:
+    def _eval(self, pl_module: pl.LightningModule, batch: dict[str, torch.Tensor]) -> None:
         """Rolls out the model and calculates the validation metrics.
 
         Parameters
@@ -154,10 +154,16 @@ class RolloutEvalEns(RolloutEval):
         batch: torch.Tensor
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
         """
-        loss = torch.zeros(pl_module.loss.num_scales, dtype=batch.dtype, device=pl_module.device, requires_grad=False)
+        loss = torch.zeros(
+            1,
+            dtype=next(iter(batch.values())).dtype,
+            device=pl_module.device,
+            requires_grad=False,
+        )
+        batch_shape = next(iter(batch.values())).shape
         assert (
-            batch.shape[1] >= self.rollout + pl_module.multi_step
-        ), f"Batch length ({batch.shape[1]}) not sufficient for requested rollout length!"
+            batch_shape[1] >= self.rollout + pl_module.multi_step
+        ), f"Batch length ({batch_shape[1]}) not sufficient for requested rollout length!"
 
         metrics = {}
         with torch.no_grad():
@@ -171,7 +177,7 @@ class RolloutEvalEns(RolloutEval):
 
             # scale loss
             loss *= 1.0 / self.rollout
-            self._log(pl_module, loss, metrics, batch.shape[0])
+            self._log(pl_module, loss, metrics, batch_shape[0])
 
     def on_validation_batch_end(
         self,
@@ -189,7 +195,11 @@ class RolloutEvalEns(RolloutEval):
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
-            context = torch.autocast(device_type=batch.device.type, dtype=dtype) if dtype is not None else nullcontext()
+            context = (
+                torch.autocast(device_type=next(iter(batch.values())).device.type, dtype=dtype)
+                if dtype is not None
+                else nullcontext()
+            )
 
             with context:
                 self._eval(pl_module, batch)
