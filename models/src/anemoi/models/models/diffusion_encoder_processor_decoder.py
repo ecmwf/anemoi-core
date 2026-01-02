@@ -28,6 +28,7 @@ from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
+from anemoi.training.utils.enums import TensorDim
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -145,7 +146,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             ensemble=ensemble_size,
         ).to(dtype=dtype)
 
-        return x_out
+        return x_out.unsqueeze(TensorDim.TIME)  # add time dim
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
         out = einops.repeat(

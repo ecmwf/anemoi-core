@@ -138,15 +138,16 @@ class MultiscaleLossWrapper(BaseLoss):
             shard_info: tuple
                 Shard shapes for later gathering
         """
-        batch_size, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1]
-        y_pred_ens_interp = einops.rearrange(y_pred_ens, "b e g c -> (b e) g c")
+        batch_size, out_times, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1], y_pred_ens.shape[2]
+        y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) g (c t)")
         shard_shapes = apply_shard_shapes(y_pred_ens_interp, grid_dim, grid_shard_shapes)
         y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, model_comm_group)
         y_pred_ens_interp = einops.rearrange(
             y_pred_ens_interp,
-            "(b e) g c -> b e g c",
+            "(b e) g (c t) -> b t e g c",
             b=batch_size,
             e=ensemble_size,
+            t=out_times,
         )
 
         shard_shapes_y = apply_shard_shapes(y, grid_dim, grid_shard_shapes)

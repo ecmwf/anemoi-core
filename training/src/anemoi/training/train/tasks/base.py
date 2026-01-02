@@ -227,6 +227,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.is_first_step = True
         self.multi_step = config.training.multistep_input
+        self.multi_out = config.training.multistep_output  # default to 1
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -247,7 +248,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             reader_group_size=reader_group_size,
         )
         self.grid_indices.setup(graph_data)
-        self.grid_dim = -2
+        self.grid_dim = TensorDim.GRID
 
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
@@ -565,7 +566,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         batch: torch.Tensor,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], torch.Tensor]:
         pass
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
