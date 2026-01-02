@@ -6,40 +6,48 @@ dataloader:
         thinning: 25 # ???-value in stretched config
       - dataset: ${system.input.forcing_dataset}
   training:
-    start: "2017-01-01"
-    end: "2017-01-07"
+    datasets:
+      data:
+        start: "2017-01-01"
+        end: "2017-01-07"
   validation:
-    start: "2017-01-08"
-    end: "2017-01-10"
+    datasets:
+      data:
+        start: "2017-01-08"
+        end: "2017-01-10"
 
 # need this modification since some variables set in the default zarr config are not part of the dataset
 data:
-  forcing:
-    - "cos_latitude"
-    - "cos_longitude"
-    - "sin_latitude"
-    - "sin_longitude"
-    - "cos_julian_day"
-    - "cos_local_time"
-    - "sin_julian_day"
-    - "sin_local_time"
-  diagnostic:
-    - tp
-  normalizer:
-    default: "mean-std"
-    std:
-      - "tp"
-    min-max:
-    max:
-    none:
-      - "cos_latitude"
-      - "cos_longitude"
-      - "sin_latitude"
-      - "sin_longitude"
-      - "cos_julian_day"
-      - "cos_local_time"
-      - "sin_julian_day"
-      - "sin_local_time"
+  datasets:
+    data:
+      forcing:
+        - "cos_latitude"
+        - "cos_longitude"
+        - "sin_latitude"
+        - "sin_longitude"
+        - "cos_julian_day"
+        - "cos_local_time"
+        - "sin_julian_day"
+        - "sin_local_time"
+      diagnostic:
+        - tp
+      processors:
+        normalizer:
+          config:
+            default: "mean-std"
+            std:
+              - "tp"
+            min-max:
+            max:
+            none:
+              - "cos_latitude"
+              - "cos_longitude"
+              - "sin_latitude"
+              - "sin_longitude"
+              - "cos_julian_day"
+              - "cos_local_time"
+              - "sin_julian_day"
+              - "sin_local_time"
 
 system:
   input:
@@ -60,8 +68,10 @@ graph:
 
 training:
   scalers:
-    node_weights:
-      weight_frac_of_total: 0.25
+    datasets:
+      data:
+        node_weights:
+          weight_frac_of_total: 0.25
 
 
 diagnostics:
@@ -72,14 +82,17 @@ diagnostics:
     callbacks:
       # Add plot callbacks here
       - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+        dataset_names: ["data"]
         every_n_epochs: 5
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+        dataset_names: ["data"]
         # group parameters by categories when visualizing contributions to the loss
         # one-parameter groups are possible to highlight individual parameters
         parameter_groups:
           moisture: [tp]
         every_n_batches: ${diagnostics.plot.frequency.batch}
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+        dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
         per_sample : 6
         parameters: ${diagnostics.plot.parameters}
@@ -96,6 +109,7 @@ diagnostics:
       #   parameters:
       #   - tp
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+        dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         precip_and_related_fields: ["tp"]

@@ -269,20 +269,24 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         if batch_idx % self.every_n_batches == 0:
             # gather tensors if necessary
             batch = {
-                dataset: pl_module.allgather_batch(batch[dataset], pl_module.grid_indices[dataset], pl_module.grid_dim)
-                for dataset in batch
+                dataset_name: pl_module.allgather_batch(
+                    dataset_tensor,
+                    pl_module.grid_indices[dataset_name],
+                    pl_module.grid_dim,
+                )
+                for dataset_name, dataset_tensor in batch.items()
             }
             # output: [loss, [pred_dict1, pred_dict2, ...]], gather predictions for plotting
             output = [
                 output[0],
                 [
                     {
-                        dataset: pl_module.allgather_batch(
-                            pred[dataset],
-                            pl_module.grid_indices[dataset],
+                        dataset_name: pl_module.allgather_batch(
+                            dataset_pred,
+                            pl_module.grid_indices[dataset_name],
                             pl_module.grid_dim,
                         )
-                        for dataset in pred
+                        for dataset_name, dataset_pred in pred.items()
                     }
                     for pred in output[1]
                 ],

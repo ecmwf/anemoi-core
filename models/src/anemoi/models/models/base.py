@@ -83,9 +83,7 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build residual connection
-        self.residual = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.residual[dataset_name] = instantiate(model_config.model.residual, graph=graph_data[dataset_name])
+        self._build_residual(model_config.model.residual)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -206,6 +204,11 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
+
+    def _build_residual(self, residual_config: DotDict) -> None:
+        self.residual = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data[dataset_name])
 
     @abstractmethod
     def forward(

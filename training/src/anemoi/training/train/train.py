@@ -37,9 +37,9 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.train.tasks.base import get_multiple_datasets_config
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -209,7 +209,7 @@ class AnemoiTrainer(ABC):
         "Please use a different activation function."
 
         kwargs = {
-            "config": self.config,
+            "config": convert_to_omegaconf(self.config),
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,

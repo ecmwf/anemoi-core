@@ -41,7 +41,7 @@ limit_batches:
 # Useful for LAM (dropping unconnected nodes from forcing dataset)
 grid_indices:
   datasets:
-    data: # user-defined key in data
+    data: # user-defined name for the dataset
       _target_: anemoi.training.data.grid_indices.FullGrid
       nodes_name: ${graph.data}
 
@@ -56,10 +56,10 @@ dataset: ${system.input.dataset}
 
 training:
   datasets:
-    data: # user-defined key in data
+    data:
       dataset: ${dataloader.dataset}
-      start: 2000
-      end: 2019
+      start: null
+      end: 2020
       frequency: ${data.frequency}
       drop: []
 
@@ -67,7 +67,7 @@ validation_rollout: 1 # number of rollouts to use for validation, must be equal
 
 validation:
   datasets:
-    data: # user-defined key
+    data:
       dataset: ${dataloader.dataset}
       start: 2021
       end: 2021
@@ -76,9 +76,9 @@ validation:
 
 test:
   datasets:
-    data: # user-defined key
+    data:
       dataset: ${dataloader.dataset}
       start: 2022
-      end: 2022
+      end: null
       frequency: ${data.frequency}
       drop: []

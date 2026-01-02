@@ -76,6 +76,7 @@ def test_dataindices_todict(data_indices) -> None:
             "forcing": torch.Tensor([0, 4]).to(torch.int),
             "diagnostic": torch.Tensor([2, 3]).to(torch.int),
             "prognostic": torch.Tensor([1, 5, 6]).to(torch.int),
+            "name_to_index": dict(x=0, y=1, z=2, q=3, e=4, d=5, other=6),
         },
         "output": {
             "full": torch.Tensor([1, 2, 3, 5, 6]).to(torch.int),
@@ -83,13 +84,17 @@ def test_dataindices_todict(data_indices) -> None:
             "forcing": torch.Tensor([0, 4]).to(torch.int),
             "diagnostic": torch.Tensor([2, 3]).to(torch.int),
             "prognostic": torch.Tensor([1, 5, 6]).to(torch.int),
+            "name_to_index": dict(x=0, y=1, z=2, q=3, e=4, d=5, other=6),
         },
     }
 
     for key in ["output", "input"]:
         for subkey, value in data_indices.data.todict()[key].items():
             assert subkey in expected_output[key]
-            assert torch.allclose(value, expected_output[key][subkey])
+            if isinstance(value, dict):
+                assert value == expected_output[key][subkey]
+            else:
+                assert torch.allclose(value, expected_output[key][subkey])
 
 
 def test_modelindices_todict(data_indices) -> None:
@@ -100,6 +105,7 @@ def test_modelindices_todict(data_indices) -> None:
             "forcing": torch.Tensor([0, 2]).to(torch.int),
             "diagnostic": torch.Tensor([]).to(torch.int),
             "prognostic": torch.Tensor([1, 3, 4]).to(torch.int),
+            "name_to_index": dict(x=0, y=1, e=2, d=3, other=4),
         },
         "output": {
             "full": torch.Tensor([0, 1, 2, 3, 4]).to(torch.int),
@@ -107,13 +113,17 @@ def test_modelindices_todict(data_indices) -> None:
             "forcing": torch.Tensor([]).to(torch.int),
             "diagnostic": torch.Tensor([1, 2]).to(torch.int),
             "prognostic": torch.Tensor([0, 3, 4]).to(torch.int),
+            "name_to_index": dict(y=0, z=1, q=2, d=3, other=4),
         },
     }
 
     for key in ["output", "input"]:
         for subkey, value in data_indices.model.todict()[key].items():
             assert subkey in expected_output[key]
-            assert torch.allclose(value, expected_output[key][subkey])
+            if isinstance(value, dict):
+                assert value == expected_output[key][subkey]
+            else:
+                assert torch.allclose(value, expected_output[key][subkey])
 
 
 def test_data_indices_with_target(data_indices_with_target) -> None:

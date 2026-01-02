@@ -5,7 +5,7 @@ frequency: 6h
 timestep: 6h
 
 datasets:
-  data: # user-defined key
+  data: # user-defined name for the dataset
     # features that are not part of the forecast state
     # but are used as forcing to generate the forecast state
     forcing:

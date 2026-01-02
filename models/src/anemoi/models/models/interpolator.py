@@ -20,6 +20,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -48,9 +49,12 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             Graph definition
         """
         model_config = DotDict(model_config)
-        self.num_target_forcings = (
-            len(model_config.training.target_forcing.data) + model_config.training.target_forcing.time_fraction
-        )
+        target_forcing_config = get_multiple_datasets_config(model_config.training.target_forcing)
+
+        self.num_target_forcings = {}
+        for dataset_name, target_forcing in target_forcing_config.items():
+            self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction
+
         self.input_times = model_config.training.explicit_times.input
         self.output_times = model_config.training.explicit_times.target
         super().__init__(
@@ -67,7 +71,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         return (
             len(self.input_times) * self.num_input_channels[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-            + self.num_target_forcings
+            + self.num_target_forcings[dataset_name]
         )
 
     def _assemble_input(

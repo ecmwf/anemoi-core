@@ -177,10 +177,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Create output_mask dictionary for each dataset
         self.output_mask = {}
         for name in self.dataset_names:
-            self.output_mask[name] = instantiate(
-                config.model_dump(by_alias=True).model.output_mask,
-                graph_data=graph_data[name],
-            )
+            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data[name])
 
         # Handle supporting_arrays merge for multi-dataset
         # Multi-dataset: merge supporting arrays from all output masks
@@ -197,7 +194,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metadata=metadata,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
-            config=convert_to_omegaconf(config),
+            config=config,
         )
         self.config = config
 
@@ -326,8 +323,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.reader_group_rank = 0
         self.reader_group_size = 1
 
-        self.grid_shard_shapes = None
-        self.grid_shard_slice = None
+        self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
+        self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
@@ -400,7 +397,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
-        self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
+        self._ckpt_model_name_to_index = {
+            dataset_name: data_indices.name_to_index
+            for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
+        }
 
     def _update_scaler_for_dataset(
         self,
@@ -665,8 +665,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
                 y_pred[dataset_name],
                 y[dataset_name],
-                validation_mode,
-                dataset_name,
+                validation_mode=validation_mode,
+                dataset_name=dataset_name,
                 **kwargs,
             )
 

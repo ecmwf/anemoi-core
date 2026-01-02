@@ -232,15 +232,22 @@ def test_on_epoch_wrong_validation(
 
 
 def test_on_load_checkpoint_restores_name_to_index() -> None:
-
+    """Test that on_load_checkpoint correctly restores _ckpt_model_name_to_index."""
     model = GraphForecaster.__new__(GraphForecaster)
+    dataset_name = "test_dataset"
 
     model.on_load_checkpoint = types.MethodType(GraphForecaster.on_load_checkpoint, GraphForecaster)
 
     mock_name_to_index = {"var1": 0, "var2": 1}
-    mock_checkpoint = {"hyper_parameters": {"data_indices": MagicMock(name_to_index=mock_name_to_index)}}
+    mock_checkpoint = {
+        "hyper_parameters": {
+            "data_indices": {
+                dataset_name: MagicMock(name_to_index=mock_name_to_index),
+            },
+        },
+    }
     # Act
     model.on_load_checkpoint(mock_checkpoint)
 
     # Assert
-    assert model._ckpt_model_name_to_index == mock_name_to_index
+    assert model._ckpt_model_name_to_index == {dataset_name: mock_name_to_index}
