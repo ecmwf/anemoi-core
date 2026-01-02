@@ -18,6 +18,7 @@ from anemoi.models.samplers.diffusion_samplers import EDMHeunSampler
 
 DATASET_NAME = "test_dataset"
 
+
 class MockDenoisingFunction:
     """Mock denoising function for testing samplers."""
 
@@ -291,7 +292,6 @@ class TestDPMPP2MSampler:
 
         # Check that denoising function was called
         assert mock_denoising_fn.call_count > 0
-
 
     def test_output_shape_consistency(self, mock_denoising_fn):
         """Test that output shape matches input shape for various dimensions."""
