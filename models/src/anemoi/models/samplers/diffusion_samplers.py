@@ -212,7 +212,7 @@ class EDMHeunSampler(DiffusionSampler):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, Optional[list]] = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         # Override instance defaults with any kwargs
         S_churn = kwargs.get("S_churn", self.S_churn)
         S_min = kwargs.get("S_min", self.S_min)
@@ -250,7 +250,10 @@ class EDMHeunSampler(DiffusionSampler):
                 sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype),
                 model_comm_group,
                 grid_shard_shapes,
-            ).to(dtype)
+            )
+
+            for dataset_name in D1:
+                D1[dataset_name] = D1[dataset_name].to(dtype)
 
             d, y_next = {}, {}
             for dataset_name in y:
@@ -265,7 +268,10 @@ class EDMHeunSampler(DiffusionSampler):
                     sigma_next.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype),
                     model_comm_group,
                     grid_shard_shapes,
-                ).to(dtype)
+                )
+
+                for dataset_name in D2:
+                    D2[dataset_name] = D2[dataset_name].to(dtype)
 
                 for dataset_name in y:
                     d_prime = (y_next[dataset_name] - D2[dataset_name]) / (sigma_next + eps_prec)
@@ -292,7 +298,7 @@ class DPMpp2MSampler(DiffusionSampler):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, Optional[list]] = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         dtype = kwargs.get("dtype", self.dtype)
 
         # DPM++ sampler converts to x.dtype
