@@ -394,8 +394,8 @@ class TestSamplerComparison:
         """Create sample data for testing."""
         batch_size, time_steps, ensemble_size, grid_size, vars_size = 2, 3, 1, 10, 5
 
-        x = torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)
-        y = torch.randn(batch_size, ensemble_size, grid_size, vars_size)
+        x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
+        y = {DATASET_NAME: torch.randn(batch_size, ensemble_size, grid_size, vars_size)}
 
         # Create a simple noise schedule
         num_steps = 5
@@ -412,16 +412,20 @@ class TestSamplerComparison:
         mock_fn2 = MockDenoisingFunction(deterministic=True, noise_reduction_factor=0.8)
 
         sampler_heun = EDMHeunSampler(S_churn=0.0)
-        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_heun = sampler_heun.sample(x, y_cloned, sigmas, mock_fn1)
 
         sampler_dpmpp = DPMpp2MSampler()
-        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_dpmpp = sampler_dpmpp.sample(x, y_cloned, sigmas, mock_fn2)
 
         # Convert to same dtype for comparison
-        result_heun = result_heun.to(result_dpmpp.dtype)
+        result_heun = {k: v.to(result_dpmpp[k].dtype) for k, v in result_heun.items()}
 
-        # Results should be different (unless by coincidence)
-        assert not torch.allclose(result_heun, result_dpmpp, atol=1e-6)
+        assert set(result_heun.keys()) == set(result_dpmpp.keys())
+        for dataset_name in result_heun:
+            # Results should be different (unless by coincidence)
+            assert not torch.allclose(result_heun[dataset_name], result_dpmpp[dataset_name], atol=1e-6)
 
     def test_samplers_same_output_shape(self, sample_data):
         """Test that all samplers produce the same output shape."""
@@ -431,11 +435,15 @@ class TestSamplerComparison:
         mock_fn2 = MockDenoisingFunction(deterministic=True)
 
         sampler_heun = EDMHeunSampler()
-        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_heun = sampler_heun.sample(x, y_cloned, sigmas, mock_fn1)
         sampler_dpmpp = DPMpp2MSampler()
-        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_dpmpp = sampler_dpmpp.sample(x, y_cloned, sigmas, mock_fn2)
 
-        assert result_heun.shape == result_dpmpp.shape == y.shape
+        assert set(result_heun.keys()) == set(result_dpmpp.keys())
+        for dataset_name in result_heun:
+            assert result_heun[dataset_name].shape == result_dpmpp[dataset_name].shape == y[dataset_name].shape
 
     @pytest.mark.parametrize("device", ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"])
     def test_device_compatibility(self, sample_data, device):
@@ -444,28 +452,35 @@ class TestSamplerComparison:
             pytest.skip("CUDA not available")
 
         x, y, sigmas = sample_data
-        x = x.to(device)
-        y = y.to(device)
+        for dataset_name in x:
+            x[dataset_name] = x[dataset_name].to(device)
+            y[dataset_name] = y[dataset_name].to(device)
         sigmas = sigmas.to(device)
 
         # Create device-aware mock function
         class DeviceMockDenoisingFunction(MockDenoisingFunction):
             def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
                 result = super().__call__(x, y, sigma, model_comm_group, grid_shard_shapes)
-                return result.to(device)
+                for dataset_name in result:
+                    result[dataset_name] = result[dataset_name].to(device)
+                return result
 
         mock_fn1 = DeviceMockDenoisingFunction(deterministic=True)
         mock_fn2 = DeviceMockDenoisingFunction(deterministic=True)
 
         sampler_heun = EDMHeunSampler()
-        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_heun = sampler_heun.sample(x, y_cloned, sigmas, mock_fn1)
         sampler_dpmpp = DPMpp2MSampler()
-        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_dpmpp = sampler_dpmpp.sample(x, y_cloned, sigmas, mock_fn2)
 
-        assert result_heun.device.type == device
-        assert result_dpmpp.device.type == device
-        assert torch.isfinite(result_heun).all()
-        assert torch.isfinite(result_dpmpp).all()
+        assert set(result_heun.keys()) == set(result_dpmpp.keys())
+        for dataset_name in result_heun:
+            assert result_heun[dataset_name].device.type == device
+            assert result_dpmpp[dataset_name].device.type == device
+            assert torch.isfinite(result_heun[dataset_name]).all()
+            assert torch.isfinite(result_dpmpp[dataset_name]).all()
 
 
 class TestSamplerEdgeCases:
@@ -481,14 +496,18 @@ class TestSamplerEdgeCases:
         mock_fn2 = MockDenoisingFunction(deterministic=True)
 
         sampler_heun = EDMHeunSampler()
-        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_heun = sampler_heun.sample(x, y_cloned, sigmas, mock_fn1)
         sampler_dpmpp = DPMpp2MSampler()
-        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_dpmpp = sampler_dpmpp.sample(x, y_cloned, sigmas, mock_fn2)
 
-        assert result_heun.shape == y.shape
-        assert result_dpmpp.shape == y.shape
-        assert torch.isfinite(result_heun).all()
-        assert torch.isfinite(result_dpmpp).all()
+        assert set(result_heun.keys()) == set(result_dpmpp.keys())
+        for dataset_name in result_heun:
+            assert result_heun[dataset_name].shape == y[dataset_name].shape
+            assert result_dpmpp[dataset_name].shape == y[dataset_name].shape
+            assert torch.isfinite(result_heun[dataset_name]).all()
+            assert torch.isfinite(result_dpmpp[dataset_name]).all()
 
     def test_large_batch_sizes(self):
         """Test samplers with large batch sizes."""
@@ -501,14 +520,18 @@ class TestSamplerEdgeCases:
         mock_fn2 = MockDenoisingFunction(deterministic=True)
 
         sampler_heun = EDMHeunSampler()
-        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_heun = sampler_heun.sample(x, y_cloned, sigmas, mock_fn1)
         sampler_dpmpp = DPMpp2MSampler()
-        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_dpmpp = sampler_dpmpp.sample(x, y_cloned, sigmas, mock_fn2)
 
-        assert result_heun.shape == y.shape
-        assert result_dpmpp.shape == y.shape
-        assert torch.isfinite(result_heun).all()
-        assert torch.isfinite(result_dpmpp).all()
+        assert set(result_heun.keys()) == set(result_dpmpp.keys())
+        for dataset_name in result_heun:
+            assert result_heun[dataset_name].shape == y[dataset_name].shape
+            assert result_dpmpp[dataset_name].shape == y[dataset_name].shape
+            assert torch.isfinite(result_heun[dataset_name]).all()
+            assert torch.isfinite(result_dpmpp[dataset_name]).all()
 
     def test_multiple_ensemble_members(self):
         """Test samplers with multiple ensemble members."""
@@ -521,11 +544,15 @@ class TestSamplerEdgeCases:
         mock_fn2 = MockDenoisingFunction(deterministic=True)
 
         sampler_heun = EDMHeunSampler()
-        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_heun = sampler_heun.sample(x, y_cloned, sigmas, mock_fn1)
         sampler_dpmpp = DPMpp2MSampler()
-        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result_dpmpp = sampler_dpmpp.sample(x, y_cloned, sigmas, mock_fn2)
 
-        assert result_heun.shape == y.shape
-        assert result_dpmpp.shape == y.shape
-        assert torch.isfinite(result_heun).all()
-        assert torch.isfinite(result_dpmpp).all()
+        assert set(result_heun.keys()) == set(result_dpmpp.keys())
+        for dataset_name in result_heun:
+            assert result_heun[dataset_name].shape == y[dataset_name].shape
+            assert result_dpmpp[dataset_name].shape == y[dataset_name].shape
+            assert torch.isfinite(result_heun[dataset_name]).all()
+            assert torch.isfinite(result_dpmpp[dataset_name]).all()
