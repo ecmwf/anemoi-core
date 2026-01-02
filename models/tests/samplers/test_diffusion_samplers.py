@@ -281,14 +281,17 @@ class TestDPMPP2MSampler:
         sampler = DPMpp2MSampler()
         result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
 
-        # Check output shape
-        assert result.shape == y.shape
+        assert set(result.keys()) == set(y.keys())
+        for dataset_name in result:
+            # Check output shape
+            assert result[dataset_name].shape == y[dataset_name].shape
+
+            # Check that result is finite
+            assert torch.isfinite(result[dataset_name]).all()
 
         # Check that denoising function was called
         assert mock_denoising_fn.call_count > 0
 
-        # Check that result is finite
-        assert torch.isfinite(result).all()
 
     def test_output_shape_consistency(self, mock_denoising_fn):
         """Test that output shape matches input shape for various dimensions."""
@@ -308,9 +311,10 @@ class TestDPMPP2MSampler:
 
             sampler = DPMpp2MSampler()
             result = sampler.sample(x, y, sigmas, mock_denoising_fn)
-
-            assert result.shape == y.shape
-            assert torch.isfinite(result).all()
+            assert set(result.keys()) == set(y.keys())
+            for dataset_name in result:
+                assert result[dataset_name].shape == y[dataset_name].shape
+                assert torch.isfinite(result[dataset_name]).all()
 
     @pytest.mark.parametrize("num_steps", [1, 3, 10, 20])
     def test_different_step_counts(self, mock_denoising_fn, num_steps):
@@ -324,7 +328,10 @@ class TestDPMPP2MSampler:
         sampler = DPMpp2MSampler()
         result = sampler.sample(x, y, sigmas, mock_denoising_fn)
 
-        assert result.shape == y.shape
+        assert set(result.keys()) == set(y.keys())
+        for dataset_name in result:
+            assert result[dataset_name].shape == y[dataset_name].shape
+
         # DPM++ 2M should call denoising function once per step
         assert mock_denoising_fn.call_count == num_steps
 
@@ -335,13 +342,17 @@ class TestDPMPP2MSampler:
         # Run twice with same inputs
         mock_fn1 = MockDenoisingFunction(deterministic=True)
         sampler1 = DPMpp2MSampler()
-        result1 = sampler1.sample(x, y.clone(), sigmas, mock_fn1)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result1 = sampler1.sample(x, y_cloned, sigmas, mock_fn1)
 
         mock_fn2 = MockDenoisingFunction(deterministic=True)
         sampler2 = DPMpp2MSampler()
-        result2 = sampler2.sample(x, y.clone(), sigmas, mock_fn2)
+        y_cloned = {k: v.clone() for k, v in y.items()}
+        result2 = sampler2.sample(x, y_cloned, sigmas, mock_fn2)
 
-        assert torch.allclose(result1, result2, atol=1e-6)
+        assert set(result1.keys()) == set(result2.keys())
+        for dataset_name in result1:
+            assert torch.allclose(result1[dataset_name], result2[dataset_name], atol=1e-6)
 
     def test_zero_final_sigma(self, sample_data, mock_denoising_fn):
         """Test behavior when final sigma is zero."""
@@ -353,23 +364,26 @@ class TestDPMPP2MSampler:
         sampler = DPMpp2MSampler()
         result = sampler.sample(x, y, sigmas, mock_denoising_fn)
 
-        assert result.shape == y.shape
-        assert torch.isfinite(result).all()
+        assert set(result.keys()) == set(y.keys())
+        for dataset_name in result:
+            assert result[dataset_name].shape == y[dataset_name].shape
+            assert torch.isfinite(result[dataset_name]).all()
 
     def test_numerical_stability_small_sigmas(self, mock_denoising_fn):
         """Test numerical stability with very small sigma values."""
-        x = torch.randn(1, 2, 1, 5, 3)
-        y = torch.randn(1, 1, 5, 3)
+        x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 1, 5, 3)}
 
         # Create schedule with very small sigmas
         sigmas = torch.tensor([1e-3, 1e-4, 1e-5, 0.0])
 
         sampler = DPMpp2MSampler()
         result = sampler.sample(x, y, sigmas, mock_denoising_fn)
-
-        assert result.shape == y.shape
-        assert torch.isfinite(result).all()
-        assert not torch.isnan(result).any()
+        assert set(result.keys()) == set(y.keys())
+        for dataset_name in result:
+            assert result[dataset_name].shape == y[dataset_name].shape
+            assert torch.isfinite(result[dataset_name]).all()
+            assert not torch.isnan(result[dataset_name]).any()
 
 
 class TestSamplerComparison:
