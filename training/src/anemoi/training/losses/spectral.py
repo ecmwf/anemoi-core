@@ -48,11 +48,11 @@ def _ensure_without_scalers_has_2(without_scalers: list[str] | list[int] | None)
     by default. Ensure this exclusion is present for numeric lists.
     """
     if without_scalers is None:
-        return [2]
+        return [TensorDim.GRID.value]
     if len(without_scalers) == 0:
-        return [2]
-    if not isinstance(without_scalers[0], str) and 2 not in without_scalers:
-        without_scalers.append(2)  # type: ignore[arg-type]
+        return [TensorDim.GRID.value]
+    if not isinstance(without_scalers[0], str) and TensorDim.GRID.value not in without_scalers:
+        without_scalers.append(TensorDim.GRID.value)  # type: ignore[arg-type]
     return without_scalers
 
 
