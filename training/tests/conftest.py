@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Any
+
 import numpy as np
 import pytest
 import torch
@@ -64,14 +66,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         dest="mlflow",
         default=False,
-        help="enable tests marked as requiring mlflow test server",
+        help="enable tests marked as requiring MLFlow test server",
+    )
+    parser.addoption(
+        "--mlflow-server",
+        dest="mlflow_server",
+        default=None,
+        help="MLFlow server for tests requiring MLFlow (only if --mlflow is set)",
     )
 
 
-def pytest_configure(config: pytest.Config) -> None:
-    """Register the 'multigpu' marker to avoid warnings."""
-    config.addinivalue_line("markers", "multigpu: mark tests as requiring multiple GPUs")
-    config.addinivalue_line("markers", "mlflow: mark tests as requiring mlflow test server")
+@pytest.fixture
+def mlflow_server(pytestconfig: Any) -> str:
+    return pytestconfig.getoption("mlflow_server")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
