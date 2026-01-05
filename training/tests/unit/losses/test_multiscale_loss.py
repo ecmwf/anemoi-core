@@ -13,8 +13,7 @@ from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
 
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_providers import ProjectionGraphProvider
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
@@ -65,11 +64,11 @@ class FakeGroup:
 @pytest.fixture
 def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs."""
-    tensor_shape = [1, 1, 2, 4, 2]  # (batch, output_steps, ens, latlon, vars)
+    tensor_shape = [1, 2, 4, 1]  # (bs, time, grid, vars)
 
     pred = torch.zeros(tensor_shape)
-    pred[0, 0, :, 0] = torch.tensor([1.0, 0.0])
-    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
+    pred[0, :, 0, 0] = torch.tensor([1.0, 1.0])
+    target = torch.zeros(tensor_shape[1:])
 
     # With only one "grid point" differing by 1 in all
     # variables, the loss should be 1.0
@@ -133,20 +132,18 @@ def test_multi_scale(
 
     assert isinstance(loss, torch.Tensor)
     assert loss.shape == (2,), "Loss should have shape (num_scales,) when squash=True"
+
     loss = multiscale_loss(pred, target, squash=False)
 
     assert isinstance(loss, torch.Tensor)
-    # better to have a nvar > 1 because otherwise pred.shape[-1] == 1 and loss.shape == (2) which makes the test fail
     assert loss.shape == (2, pred.shape[-1]), "Loss should have shape (num_scales, num_variables) when squash=False"
 
 
 def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
     """Test equivalence when only one scale is used."""
-    tensor_shape = [1, 1, 2, 4, 1]  # (batch, output_steps, ens, latlon, vars)
-
-    pred = torch.zeros(tensor_shape)
-    pred[0, 0, :, 0] = torch.tensor([1.0])
-    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
+    tensor_shape = [1, 2, 4, 5]
+    pred = torch.randn(tensor_shape)
+    target = torch.randn(tensor_shape[1:])
 
     per_scale_loss = AlmostFairKernelCRPS()
     multiscale_loss = MultiscaleLossWrapper(
