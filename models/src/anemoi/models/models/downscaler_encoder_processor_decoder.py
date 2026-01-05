@@ -196,7 +196,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         x_in_lres_interp_hres: torch.Tensor,
         x_in_hres: torch.Tensor,
         y_noised: torch.Tensor,
-        sigma: torch.Tensor,
+        c_noise: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
@@ -213,7 +213,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
 
         # prepare noise conditionings
-        c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
+        c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(c_noise)
         shape_c_data = get_shard_shapes(c_data, 0, model_comm_group)
         shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group)
 
@@ -414,7 +414,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             "schedule_type": "karras",
             # "sigma_max": 88,
             "sigma_max": 100000,
-            "sigma_min": 0.02,
+            "sigma_min": 0.03,
             "rho": 7.0,
             "num_steps": 80,
         }
@@ -556,6 +556,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             torch.randn(shape, device=x_in_interp_to_hres.device, dtype=sigmas.dtype)
             * sigmas[0]
         )
+
+        print("sigmas", sigmas)
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)

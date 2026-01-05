@@ -149,6 +149,7 @@ class ForwardMapperPreProcessMixin:
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
             x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
         )
+
         if not x_src_is_sharded:
             x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
         if not x_dst_is_sharded:
@@ -157,6 +158,7 @@ class ForwardMapperPreProcessMixin:
         x_dst = self.emb_nodes_dst(x_dst)
         shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
         shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
+
         return x_src, x_dst, shapes_src, shapes_dst
 
 

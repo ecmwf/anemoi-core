@@ -100,7 +100,6 @@ class AnemoiModelInterface(torch.nn.Module):
         self.post_processors = Processors(processors, inverse=True)
 
         # If tendencies statistics are provided, instantiate the tendencies processors
-        from icecream import ic
 
         if self.statistics_tendencies is not None:
             processors = [

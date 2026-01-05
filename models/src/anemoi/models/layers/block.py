@@ -467,24 +467,27 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             edge_dim, num_heads * self.out_channels_conv
         )  # , bias=False)
 
+        if self.qk_norm:
+            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
+            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
         self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
         self.projection = Linear(out_channels, out_channels)
 
-        if self.qk_norm:
-            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
-            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
-
-        self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
-        self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
         self.node_dst_mlp = nn.Sequential(
             Linear(out_channels, hidden_dim),
             layer_kernels.Activation(),
             Linear(hidden_dim, out_channels),
         )
+        self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
+        self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
-        return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
+        # return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
+        x = self.layer_norm_mlp_dst(x, **layer_kwargs)
+        x = self.node_dst_mlp(x)
+
+        return x
 
     def get_qkve(
         self,
@@ -766,7 +769,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
         else:
             out = einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
-
         out = self.projection(out + x_r)
         out = out + x_skip[1]
 

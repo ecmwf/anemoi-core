@@ -46,13 +46,15 @@ class ConditionalLayerNorm(nn.Module):
         autocast: bool = True,
     ):
         super().__init__()
-        self.norm = nn.LayerNorm(normalized_shape, elementwise_affine=False)  # no learnable parameters
+        self.norm = nn.LayerNorm(
+            normalized_shape, elementwise_affine=False
+        )  # no learnable parameters
         self.scale = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.bias = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.autocast = autocast
 
         if w_one_bias_zero_init:
-            nn.init.zeros_(self.scale.weight)
+            nn.init.ones_(self.scale.weight)
             nn.init.zeros_(self.scale.bias)
             nn.init.zeros_(self.bias.weight)
             nn.init.zeros_(self.bias.bias)
@@ -72,8 +74,10 @@ class ConditionalLayerNorm(nn.Module):
         Tensor
             The output tensor.
         """
+
         scale = self.scale(cond)
         bias = self.bias(cond)
         out = self.norm(x)
+
         out = out * (scale + 1.0) + bias
         return out.type_as(x) if self.autocast else out
