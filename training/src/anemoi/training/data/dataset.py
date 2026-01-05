@@ -169,12 +169,15 @@ class NativeGridDataset(IterableDataset):
 
         LOGGER.info(
             "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
-            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
+            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d, "
+            "sample_comm_group_id %d, sample_comm_num_groups %d",
             global_rank,
             model_comm_group_id,
             model_comm_group_rank,
             model_comm_num_groups,
             reader_group_rank,
+            self.sample_comm_group_id,
+            self.sample_comm_num_groups,
         )
 
     def set_ens_comm_group_info(
@@ -198,14 +201,20 @@ class NativeGridDataset(IterableDataset):
         self.ens_comm_group_rank = ens_comm_group_rank
         self.ens_comm_num_groups = ens_comm_num_groups
 
+        self.sample_comm_group_id = ens_comm_group_id
+        self.sample_comm_num_groups = ens_comm_num_groups
+
         LOGGER.info(
-            "NativeGridDataset.set_group_info(): global_rank %d, ens_comm_group_id %d, "
-            "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d",
+            "NativeGridDataset.set_ens_comm_group_info(): global_rank %d, ens_comm_group_id %d, "
+            "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d, "
+            "sample_comm_group_id %d, sample_comm_num_groups %d",
             self.global_rank,
             ens_comm_group_id,
             ens_comm_group_rank,
             ens_comm_num_groups,
             self.reader_group_rank,
+            self.sample_comm_group_id,
+            self.sample_comm_num_groups,
         )
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
