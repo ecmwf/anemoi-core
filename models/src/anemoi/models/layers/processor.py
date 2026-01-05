@@ -99,7 +99,7 @@ class BaseProcessor(nn.Module, ABC):
     def run_layer_chunk(self, chunk_start: int, data: tuple, *args, **kwargs) -> tuple:
         for layer_id in range(chunk_start, chunk_start + self.chunk_size):
             data = self.proc[layer_id](*data, *args, **kwargs)
-            alpha_attention = self.proc[layer_id].conv.alpha
+            alpha_attention = self.proc[layer_id].alpha_attention
 
             epoch = kwargs.get("epoch", 0)
             class_name = kwargs.get("class_name", "unknown")

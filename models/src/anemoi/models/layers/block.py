@@ -642,6 +642,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             if self.conv.alpha is not None:
                 alpha = self.conv.alpha  # accumulate attention weights
 
+        self.alpha_attention = alpha
+
         return out
 
     def shard_output_seq(
