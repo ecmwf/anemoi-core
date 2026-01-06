@@ -927,6 +927,14 @@ class PlotLoss(BasePerBatchPlotCallback):
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
+
+            # Some tasks/models return predictions without an explicit time
+            # dimension (B, E, G, V). Losses/scalers assume (B, T, E, G, V).
+            if y_hat.ndim == 4:
+                y_hat = y_hat.unsqueeze(TensorDim.TIME)
+            if y_true.ndim == 4:
+                y_true = y_true.unsqueeze(TensorDim.TIME)
+
             loss = reduce_to_last_dim(self.loss(y_hat, y_true, squash=False).detach().cpu().numpy())
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
@@ -1001,11 +1009,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        # Mask is defined along the grid dimension. The output tensor may be
-        # (B, T, E, G, V) or (B, T, G, V) depending on the task/model.
-        grid_dim = TensorDim.GRID.value if output_tensor.ndim == 5 else TensorDim.GRID.value - 1
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=grid_dim, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=grid_dim, fill_value=np.nan)
+        # `output_tensor` / `data` can be shaped either as (B, T, E, G, V)
+        # or (B, E, G, V) depending on task/model.
+        # Use -2 to always target the grid dimension (variables are last).
+        output_tensor = pl_module.output_mask.apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
+        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=-2, fill_value=np.nan)
         data = data.numpy()
 
         return data, output_tensor
