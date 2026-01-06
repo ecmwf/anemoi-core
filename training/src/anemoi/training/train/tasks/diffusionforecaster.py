@@ -78,6 +78,13 @@ class BaseDiffusionForecaster(BaseGraphModule):
         return y
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+        # Some diffusion implementations embed sigma assuming a compact shape
+        # like (B, E, noise_level). During training we create sigma with extra
+        # singleton dims for broadcasting; squeeze trailing singleton dims so
+        # model-side einops patterns stay stable.
+        while sigma.ndim > 3 and sigma.shape[-1] == 1:
+            sigma = sigma.squeeze(-1)
+
         return self.model.model.fwd_with_preconditioning(
             x,
             y_noised,

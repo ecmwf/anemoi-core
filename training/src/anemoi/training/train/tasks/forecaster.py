@@ -96,7 +96,7 @@ class GraphForecaster(BaseRolloutGraphModule):
             LOGGER.debug("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)
 
-    def advance_input(
+    def _advance_input(
         self,
         x: torch.Tensor,
         y_pred: torch.Tensor,
@@ -189,6 +189,6 @@ class GraphForecaster(BaseRolloutGraphModule):
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred

@@ -48,6 +48,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.tasks import GraphInterpolator
+from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1000,8 +1001,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
+        # Mask is defined along the grid dimension. The output tensor may be
+        # (B, T, E, G, V) or (B, T, G, V) depending on the task/model.
+        grid_dim = TensorDim.GRID.value if output_tensor.ndim == 5 else TensorDim.GRID.value - 1
+        output_tensor = pl_module.output_mask.apply(output_tensor, dim=grid_dim, fill_value=np.nan).numpy()
+        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=grid_dim, fill_value=np.nan)
         data = data.numpy()
 
         return data, output_tensor

@@ -89,10 +89,19 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         batch: torch.Tensor,
         rollout_step: int,
     ) -> torch.Tensor:
+        """Default implementation used by simple rollout tasks.
+
+        Supports model outputs shaped like:
+        - (B, E, G, V)
+        - (B, T, E, G, V)  (uses the last time step)
+        """
+        # If the prediction carries a time dimension, use the last step.
+        y_pred_step = y_pred[:, -1] if y_pred.ndim == 5 else y_pred
+
         x = x.roll(-1, dims=1)
 
         # Get prognostic variables
-        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
+        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred_step[
             ...,
             self.data_indices.model.output.prognostic,
         ]

@@ -11,8 +11,10 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
+from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.interpolator import GraphInterpolator
 from anemoi.training.train.tasks.obsinterpolator import ObsGraphInterpolator
+from anemoi.training.utils.masks import NoOutputMask
 
 
 class DummyLoss(torch.nn.Module):
@@ -38,7 +40,9 @@ class DummyModel:
         model_comm_group: Any | None = None,
         grid_shard_slice: Any | None = None,
         grid_shard_shapes: Any | None = None,
+        **kwargs: Any,
     ) -> torch.Tensor:
+        del kwargs
         x_input = einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
         self.called_with = {
             "x_shape": tuple(x_input.shape),
@@ -275,3 +279,99 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(y_pred, torch.Tensor)
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, 1, e, g, v)
+
+
+def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for _advance_input with time-aware model outputs.
+
+    GraphEnsForecaster rollouts call _advance_input with y_pred from the model.
+    Depending on the model, y_pred may include a time dim (B, T, E, G, V).
+    This test ensures the default BaseRolloutGraphModule._advance_input can
+    handle that (by taking the last time step) without shape errors.
+    """
+
+    def _compute_loss_metrics_stub(
+        self: GraphEnsForecaster,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        step: int | None = None,
+        validation_mode: bool = False,
+    ) -> tuple[torch.Tensor, dict, torch.Tensor]:
+        del y, step, validation_mode
+        assert isinstance(self, GraphEnsForecaster)
+        return torch.zeros(1, device=y_pred.device, dtype=y_pred.dtype), {}, y_pred
+
+    monkeypatch.setattr(
+        GraphEnsForecaster,
+        "compute_loss_metrics",
+        _compute_loss_metrics_stub,
+        raising=True,
+    )
+
+    name_to_index = {"A": 0, "B": 1}
+    data_indices = _make_minimal_index_collection(name_to_index)
+
+    forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
+    pl.LightningModule.__init__(forecaster)
+
+    forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
+    forecaster.output_mask = NoOutputMask()
+    forecaster.loss = DummyLoss()
+    forecaster.data_indices = data_indices
+    forecaster.multi_step = 1
+    forecaster.rollout = 1
+    forecaster.nens_per_device = 2
+    forecaster.grid_shard_shapes = None
+    forecaster.grid_shard_slice = None
+    forecaster.model_comm_group = None
+
+    b, e_dummy, g, v = 2, 1, 4, len(name_to_index)
+    batch = torch.randn((b, forecaster.multi_step + forecaster.rollout, e_dummy, g, v), dtype=torch.float32)
+
+    # Consume one rollout step and ensure it yields a prediction with a time dim.
+    loss, metrics, preds = next(forecaster._rollout_step(batch=batch, rollout=1, validation_mode=False))
+    assert isinstance(loss, torch.Tensor)
+    assert metrics == {}
+    assert isinstance(preds, torch.Tensor)
+    assert preds.ndim == 5
+    assert preds.shape[0] == b
+
+
+def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    # We only want to validate that the rollout loop can advance the input
+    # window when the model returns a time dimension (B, T, E, G, V).
+    name_to_index = {"A": 0, "B": 1}
+    data_indices = _make_minimal_index_collection(name_to_index)
+
+    forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
+    pl.LightningModule.__init__(forecaster)
+    forecaster.multi_step = 1
+    forecaster.rollout = 1
+    forecaster.nens_per_device = 2
+    forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
+    forecaster.model_comm_group = None
+    forecaster.grid_shard_shapes = None
+    forecaster.grid_shard_slice = None
+    forecaster.output_mask = NoOutputMask()
+    forecaster.data_indices = data_indices
+
+    def _compute_loss_metrics(
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, torch.Tensor]:
+        del y, args, kwargs
+        return torch.zeros(1, dtype=y_pred.dtype, device=y_pred.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics)
+    b, g, v = 2, 4, len(name_to_index)
+    # Batch has dummy ensemble dim=1 in the dataset
+    batch = torch.randn((b, forecaster.multi_step + forecaster.rollout, 1, g, v), dtype=torch.float32)
+
+    # Run one rollout step; should not raise and should yield a 5D prediction
+    (loss, metrics, preds) = next(forecaster._rollout_step(batch=batch, rollout=1, validation_mode=False))
+    assert isinstance(loss, torch.Tensor)
+    assert metrics == {}
+    assert isinstance(preds, torch.Tensor)
+    assert preds.ndim == 5
