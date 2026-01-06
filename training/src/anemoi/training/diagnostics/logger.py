@@ -9,24 +9,28 @@
 
 
 import logging
+from typing import Any
 
 import pytorch_lightning as pl
 from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
-
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
 LOGGER = logging.getLogger(__name__)
 
 
-def get_mlflow_logger(config: BaseSchema) -> None:
-    if not config.diagnostics.log.mlflow.enabled:
+def get_mlflow_logger(
+    diagnostics_config: Any,
+    run_id: Any,
+    fork_run_id: Any,
+    paths: Any,
+    config: Any,
+    **kwargs,
+) -> None:
+    if not diagnostics_config.log.mlflow.enabled:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
-    logger_config = OmegaConf.to_container(convert_to_omegaconf(config).diagnostics.log.mlflow)
+    logger_config = OmegaConf.to_container(diagnostics_config.log.mlflow)
     del logger_config["enabled"]
 
     # backward compatibility to not break configs
@@ -34,7 +38,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         "_target_",
         "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
-    logger_config["save_dir"] = logger_config.get("save_dir", str(config.system.output.logs.mlflow))
+    logger_config["save_dir"] = logger_config.get("save_dir", str(paths.output.logs.mlflow))
 
     logger = instantiate(
         logger_config,
@@ -43,14 +47,14 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     )
 
     if logger.log_terminal:
-        logger.log_terminal_output(artifact_save_dir=config.system.output.plots)
+        logger.log_terminal_output(artifact_save_dir=paths.output.get("plots"))
     if logger.log_system:
         logger.log_system_metrics()
 
     return logger
 
 
-def get_tensorboard_logger(config: DictConfig) -> pl.loggers.TensorBoardLogger | None:
+def get_tensorboard_logger(diagnostics_config: Any, paths: Any, **kwargs) -> pl.loggers.TensorBoardLogger | None:
     """Setup TensorBoard experiment logger.
 
     Parameters
@@ -64,19 +68,26 @@ def get_tensorboard_logger(config: DictConfig) -> pl.loggers.TensorBoardLogger |
         Logger object, or None
 
     """
-    if not config.diagnostics.log.tensorboard.enabled:
+    if not diagnostics_config.log.tensorboard.enabled:
         LOGGER.debug("Tensorboard logging is disabled.")
         return None
 
     from pytorch_lightning.loggers import TensorBoardLogger
 
     return TensorBoardLogger(
-        save_dir=config.system.output.logs.tensorboard,
+        save_dir=paths.output.logs.tensorboard,
         log_graph=False,
     )
 
 
-def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.loggers.WandbLogger | None:
+def get_wandb_logger(
+    diagnostics_config: Any,
+    run_id: Any,
+    paths: Any,
+    model: pl.LightningModule,
+    config: Any,
+    **kwargs,
+) -> pl.loggers.WandbLogger | None:
     """Setup Weights & Biases experiment logger.
 
     Parameters
@@ -97,7 +108,7 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
         If `wandb` is not installed
 
     """
-    if not config.diagnostics.log.wandb.enabled:
+    if not diagnostics_config.log.wandb.enabled:
         LOGGER.debug("Weights & Biases logging is disabled.")
         return None
 
@@ -108,22 +119,22 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
         raise ImportError(msg) from err
 
     logger = WandbLogger(
-        project=config.diagnostics.log.wandb.project,
-        entity=config.diagnostics.log.wandb.entity,
-        id=config.training.run_id,
-        save_dir=config.system.output.logs.wandb,
-        offline=config.diagnostics.log.wandb.offline,
-        log_model=config.diagnostics.log.wandb.log_model,
-        resume=config.training.run_id is not None,
+        project=diagnostics_config.log.wandb.project,
+        entity=diagnostics_config.log.wandb.entity,
+        id=run_id,
+        save_dir=paths.output.logs.wandb,
+        offline=diagnostics_config.log.wandb.offline,
+        log_model=diagnostics_config.log.wandb.log_model,
+        resume=run_id is not None,
     )
     logger.log_hyperparams(OmegaConf.to_container(config, resolve=True))
-    if config.diagnostics.log.wandb.gradients or config.diagnostics.log.wandb.parameters:
-        if config.diagnostics.log.wandb.gradients and config.diagnostics.log.wandb.parameters:
+    if diagnostics_config.log.wandb.gradients or diagnostics_config.log.wandb.parameters:
+        if diagnostics_config.log.wandb.gradients and diagnostics_config.log.wandb.parameters:
             log_ = "all"
-        elif config.diagnostics.log.wandb.gradients:
+        elif diagnostics_config.log.wandb.gradients:
             log_ = "gradients"
         else:
             log_ = "parameters"
-        logger.watch(model, log=log_, log_freq=config.diagnostics.log.interval, log_graph=False)
+        logger.watch(model, log=log_, log_freq=diagnostics_config.log.interval, log_graph=False)
 
     return logger
