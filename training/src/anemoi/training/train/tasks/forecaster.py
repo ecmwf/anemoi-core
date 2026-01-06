@@ -189,6 +189,6 @@ class GraphForecaster(BaseRolloutGraphModule):
                 use_reentrant=False,
             )
 
-            x = self._advance_input(x, y_pred, batch, rollout_step)
+            x = self.advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
