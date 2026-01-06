@@ -269,6 +269,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )  # calls forward ...
+        if y_noised.ndim == 4:
+            y_noised = y_noised.unsqueeze(TensorDim.TIME)
         D_x = c_skip * y_noised + c_out * pred
 
         return D_x

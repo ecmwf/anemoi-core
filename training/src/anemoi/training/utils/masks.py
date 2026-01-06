@@ -15,6 +15,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.utils.enums import TensorDim
 
 
 class BaseMask:
@@ -67,8 +68,11 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
         fill_value: torch.Tensor,
         dim: int,
     ) -> torch.Tensor:
-        assert fill_value.ndim == 4, "fill_value has to be shape (bs, ens, latlon, nvar)"
-        fill_value = torch.index_select(fill_value, dim, indices)  # The mask is applied over the latlon dim
+        if fill_value.ndim == x.ndim + 1:
+            fill_value = fill_value.unsqueeze(TensorDim.TIME)
+        elif fill_value.ndim + 1 == x.ndim:
+            x = x.unsqueeze(TensorDim.TIME)  # mainly for backward compatibility
+        fill_value = torch.index_select(fill_value, dim, indices)
         return x.index_copy_(dim, indices, fill_value)
 
     @staticmethod
@@ -136,7 +140,6 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
             fill_value=true_state[..., data_indices.data.output.prognostic],
             grid_shard_slice=grid_shard_slice,
         )
-
         return pred_state
 
 

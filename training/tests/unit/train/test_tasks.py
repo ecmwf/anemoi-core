@@ -10,6 +10,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
 from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.interpolator import GraphInterpolator
 from anemoi.training.train.tasks.obsinterpolator import ObsGraphInterpolator
 
@@ -22,12 +23,13 @@ class DummyLoss(torch.nn.Module):
 
 
 class DummyModel:
-    def __init__(self, num_output_variables: int | None = None, output_times: int = 1) -> None:
+    def __init__(self, num_output_variables: int | None = None, output_times: int = 1, add_skip: bool = False) -> None:
         self.called_with: dict[str, Any] | None = None
         self.pre_processors = Processors([])
         self.post_processors = Processors([], inverse=True)
         self.output_times = output_times
         self.num_output_variables = num_output_variables
+        self.add_skip = add_skip
         self.metrics = {}
 
     def __call__(
@@ -46,16 +48,32 @@ class DummyModel:
         }
         bs, _, e, g, v = x.shape
         output_vars = self.num_output_variables or v
-        y_shape = (bs, self.output_times, e, g, output_vars)  # assuming deterministic model
-        y_pred = torch.randn(y_shape, dtype=x.dtype, device=x.device)
-        y_pred = einops.rearrange(y_pred, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
-        return einops.rearrange(
-            y_pred,
-            "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
-            batch=bs,
-            ensemble=e,
-            time=self.output_times,
-        )
+        y_shape = (bs, self.output_times, e, g, output_vars)
+        return torch.randn(y_shape, dtype=x.dtype, device=x.device)
+
+
+class DummyDiffusionModel(DummyModel):
+
+    def __init__(self, num_output_variables: int | None = None) -> None:
+        super().__init__(num_output_variables=num_output_variables, output_times=1)
+        self.sigma_max = 4.0
+        self.sigma_min = 1.0
+        self.sigma_data = 0.5
+
+    def fwd_with_preconditioning(
+        self,
+        x: torch.Tensor,
+        y_noised: torch.Tensor,
+        sigma: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        # behave like diffusion: call forward and combine
+        assert sigma.shape[0] == x.shape[0]
+        assert all(sigma.shape[i] == 1 for i in range(1, sigma.ndim))
+        pred = self(x, **kwargs)
+        if y_noised.ndim == 4:
+            y_noised = y_noised.unsqueeze(1)
+        return y_noised + 0.1 * pred
 
 
 def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
@@ -77,7 +95,7 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> None:
         del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
         pl.LightningModule.__init__(self)
-        self.model = DummyModel(output_times=len(config.training.explicit_times.target))
+        self.model = DummyModel(output_times=len(config.training.explicit_times.target), add_skip=True)
         self.model_comm_group = None
         self.grid_shard_slice = None
         self.grid_shard_shapes = None
@@ -185,3 +203,75 @@ def test_obsinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(y_pred, torch.Tensor)
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, len(itp.interp_times), e, g, v)
+
+
+def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyDiffusion:
+        def __init__(self, model: DummyDiffusionModel) -> None:
+            self.model = model
+
+    def _stub_init(
+        self: BaseGraphModule,
+        *,
+        config: DictConfig,
+        graph_data: HeteroData,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: IndexCollection,
+        metadata: dict | None = None,
+        supporting_arrays: dict | None = None,
+    ) -> None:
+        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
+        pl.LightningModule.__init__(self)
+        self.multi_step = config.training.multistep_input
+        model = DummyDiffusionModel(num_output_variables=len(data_indices.model.output))
+        self.model = DummyDiffusion(model=model)
+        self.model_comm_group = None
+        self.grid_shard_shapes = None
+        self.grid_shard_slice = None
+        self.is_first_step = False
+        self.updating_scalars = {}
+        self.data_indices = data_indices
+        self.config = config
+        self.loss = DummyLoss()
+        self.loss_supports_sharding = False
+
+    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
+
+    cfg = DictConfig(
+        {
+            "training": {"multistep_input": 1},
+            "model": {
+                "model": {
+                    "diffusion": {
+                        "rho": 7.0,
+                    },
+                },
+            },
+        },
+    )
+
+    name_to_index = {"A": 0, "B": 1}
+    data_indices = _make_minimal_index_collection(name_to_index)
+
+    forecaster = GraphDiffusionForecaster(
+        config=cfg,
+        graph_data=HeteroData(),
+        statistics={},
+        statistics_tendencies={},
+        data_indices=data_indices,
+        metadata={},
+        supporting_arrays={},
+    )
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t = cfg.training.multistep_input
+
+    batch = torch.randn((b, t + 1, e, g, v), dtype=torch.float32)
+    loss, metrics, y_pred = forecaster._step(batch=batch, validation_mode=False)
+
+    assert isinstance(loss, torch.Tensor)
+    assert metrics == {}
+    assert isinstance(y_pred, torch.Tensor)
+    assert y_pred.ndim == 5
+    assert y_pred.shape == (b, 1, e, g, v)

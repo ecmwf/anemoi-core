@@ -177,7 +177,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
-            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
+            shape=(x.shape[0],) + (1,) * (x.ndim - 1),
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
@@ -319,7 +319,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
-            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
+            shape=(x.shape[0],) + (1,) * (x.ndim - 1),
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
@@ -330,7 +330,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         tendency_target_noised = self._noise_target(tendency_target, sigma)
 
         # prediction, fwd_with_preconditioning
-        tendency_pred = self(x, tendency_target_noised, sigma)  # shape is (bs, ens, latlon, nvar)
+        tendency_pred = self(x, tendency_target_noised, sigma)  # shape is (bs, time, ens, latlon, nvar)
 
         y_pred = None
         if validation_mode:

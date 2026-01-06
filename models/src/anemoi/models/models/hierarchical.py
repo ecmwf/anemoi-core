@@ -58,6 +58,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self._graph_hidden_names = model_config.graph.hidden
         self.num_hidden = len(self._graph_hidden_names)
         self.multi_step = model_config.training.multistep_input
+        self.multi_out = getattr(
+            model_config.training,
+            "multistep_output",
+            1,
+        )
         num_channels = model_config.model.num_channels
 
         # hidden_dims is the dimentionality of features at each depth
