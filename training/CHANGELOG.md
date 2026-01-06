@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.3](https://github.com/ecmwf/anemoi-core/compare/training-0.8.2...training-0.8.3) (2026-01-05)
+
+
+### Bug Fixes
+
+* **ensemble training:** Training is broken when ensemble is sharded across gpus ([#774](https://github.com/ecmwf/anemoi-core/issues/774)) ([ca08316](https://github.com/ecmwf/anemoi-core/commit/ca08316c20e854e1d1f9708facba0bc695a3269c))
+* Reverting change to include dependency of mlflow-export-import to unblock pypi releases ([#775](https://github.com/ecmwf/anemoi-core/issues/775)) ([f7d2acc](https://github.com/ecmwf/anemoi-core/commit/f7d2accd527c8e3729f91685e534873a2f3b4136))
+* **tests:** Expand losses test suite ([#754](https://github.com/ecmwf/anemoi-core/issues/754)) ([e6b7dbb](https://github.com/ecmwf/anemoi-core/commit/e6b7dbb3b200a4117fd51de02b201e6669414317))
+* **training:** Convert warm_start_path to pathlib.Path object ([#751](https://github.com/ecmwf/anemoi-core/issues/751)) ([59f033c](https://github.com/ecmwf/anemoi-core/commit/59f033c7d87006004b58ecfd50308ccaca695127))
+
 ## [0.8.2](https://github.com/ecmwf/anemoi-core/compare/training-0.8.1...training-0.8.2) (2025-12-18)
 
 
