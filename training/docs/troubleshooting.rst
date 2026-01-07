@@ -29,8 +29,9 @@ adjustments:
        training: 100
        validation: 100
 
-   hardware:
-     num_gpus_per_node: 1
+   system:
+      hardware:
+      num_gpus_per_node: 1
 
 These settings limit the data processed and use a single GPU, helping
 isolate issues related to data or parallelization.
@@ -194,8 +195,9 @@ training complexities:
 
 .. code:: yaml
 
-   hardware:
-     num_gpus_per_node: 1
+   system:
+      hardware:
+      num_gpus_per_node: 1
 
 The code is still distributed, but at least it removes the multi-GPU
 aspect and you can use debug statements.
@@ -237,16 +239,7 @@ This can be enabled in the diagnostics configuration:
        mlflow:
            system: true
 
-4. Use PyTorch Profiler
-=======================
-
-Leverage PyTorch's built-in profiler to identify performance
-bottlenecks:
-
-We are currently updating the Anemoi profiler to use modern Pytorch
-profiling tools.
-
-5. Gradient Checking
+4. Gradient Checking
 ====================
 
 If you suspect issues with backpropagation, consider implementing

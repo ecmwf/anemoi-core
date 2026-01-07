@@ -45,6 +45,59 @@ latitude and longitude coordinates of the source and target nodes.
          edge_length:
             _target_: anemoi.graphs.edges.attributes.EdgeDirection
 
+.. warning::
+
+   The result of this class, `EdgeDirection` is fixed with
+   `anemoi-graphs=0.8`. If you train a model on a graph using a version
+   before 0.8 and then run inference or finetuning with `anemoi-graphs`
+   version 0.8 or later, results may be inconsistent or incorrect.
+   Previously edge directions were wrong by 90 degrees. Ensure that the
+   same version of `anemoi-graphs` is used for both training and
+   inference/finetuning to avoid compatibility issues.
+
+***********************
+ Directional Harmonics
+***********************
+
+The `Directional Harmonics` attribute computes harmonic features from
+edge directions, providing a periodic encoding of the angle between
+source and target nodes. For each order :math:`m` from 1 to the
+specified maximum, it computes :math:`\sin(m\psi)` and
+:math:`\cos(m\psi)` where :math:`\psi` is the edge direction angle.
+
+.. code:: yaml
+
+   edges:
+     - source_name: ...
+       target_name: ...
+       edge_builders: ...
+       attributes:
+         dir_harmonics:
+            _target_: anemoi.graphs.edges.attributes.DirectionalHarmonics
+            order: 3
+
+***********************
+ Radial Basis Features
+***********************
+
+The `Radial Basis Features` attribute computes Gaussian radial basis
+function (RBF) features from edge distances. It evaluates a set of
+Gaussian basis functions centered at different scaled distances. By
+default, per-node adaptive scaling is used.
+
+.. code:: yaml
+
+   edges:
+     - source_name: ...
+       target_name: ...
+       edge_builders: ...
+       attributes:
+         rbf_features:
+            _target_: anemoi.graphs.edges.attributes.RadialBasisFeatures
+            r_scale: auto
+            centers: [0.0, 0.25, 0.5, 0.75, 1.0]
+            sigma: 0.2
+
 ******************
  Gaussian Weights
 ******************
