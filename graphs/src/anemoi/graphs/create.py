@@ -26,14 +26,14 @@ from anemoi.graphs.processors.post_process import PostProcessor
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphCreator:
-    """Graph creator."""
+class GraphBuilder:
+    """Create a graph using without a config."""
 
     def __init__(
         self,
-        nodes: list[BaseNodeBuilder],
-        edges: list[BaseEdgeBuilder],
-        post_processors: list[PostProcessor],
+        nodes: list[BaseNodeBuilder] | None = None,
+        edges: list[BaseEdgeBuilder] | None = None,
+        post_processors: list[PostProcessor] | None = None,
     ):
         self.nodes = nodes or []
         self.edges = edges or []
@@ -161,30 +161,18 @@ class GraphCreator:
         return graph
 
 
-def create_graph_from_config(config_path: Path | str) -> GraphCreator:
-    
-    """
-    Create a GraphCreator instance from a YAML configuration file.
-
-    Parameters
-    ----------
-    config_path : Path | str
-        Path to the configuration file.
-    Returns
-    -------
-    GraphCreator
-        An instance of GraphCreator
-    """
-    config = OmegaConf.load(config_path)
-    nodes = _parse_nodes(config.get("nodes", []))
-    edges = _parse_edges(config.get("edges", []))
-
-    post_processors = _parse_post_processors(config.get("post_processors", []))
-    return GraphCreator(
-        nodes=nodes,
-        edges=edges,
-        post_processors=post_processors,
-    )
+class GraphCreator(GraphBuilder):
+    """Create a graph from a configuration file."""
+    def __init__(self, config_path: Path | str):
+        config = OmegaConf.load(config_path)
+        nodes = _parse_nodes(config.get("nodes", []))
+        edges = _parse_edges(config.get("edges", []))
+        post_processors = _parse_post_processors(config.get("post_processors", []))
+        super().__init__(
+            nodes=nodes,
+            edges=edges,
+            post_processors=post_processors,
+        )
 
 def _parse_nodes(cfg: DictConfig) -> list[BaseNodeBuilder]:
     _nodes = []
