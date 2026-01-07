@@ -25,6 +25,7 @@ except ImportError:
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
 
+
 def torch_dtype_to_triton(dtype):
     if dtype == torch.float16:
         return tl.float16
@@ -34,6 +35,7 @@ def torch_dtype_to_triton(dtype):
         return tl.float32
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
+
 
 def edge_index_to_csc(edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = None, reverse: bool = True):
     """Convert edge indices to CSC format, optionally also building reverse (CSR-like) metadata.

@@ -231,7 +231,7 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
     torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
     torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
-    #TODO compare d_q_norm and d_k_norm
+    # TODO compare d_q_norm and d_k_norm
     # Must make gt into an nn.module first
-    #if qk_norm:
+    # if qk_norm:
     #    torch.testing.assert_close( atol=tolerance, rtol=0)
