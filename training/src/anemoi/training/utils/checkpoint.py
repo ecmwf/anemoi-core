@@ -75,6 +75,68 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     save_metadata(inference_filepath, metadata)
     return inference_filepath
 
+def transfer_linear_layer(lin_layer: nn.Linear, old_leads: list[int], new_leads: list[int], transfer_on_output: bool = True) -> nn.Linear:
+    
+    def copy_block_inplace(dst: torch.Tensor, src: torch.Tensor, dst_index: int, src_index: int, block_size: int, dim: int):
+        """
+        Copy a contiguous block of size `block_size` from src to dst along dimension `dim`.
+        """
+        dst_slice = [slice(None)] * dst.ndim
+        src_slice = [slice(None)] * src.ndim
+
+        dst_slice[dim] = slice(dst_index * block_size, (dst_index + 1) * block_size)
+        src_slice[dim] = slice(src_index * block_size, (src_index + 1) * block_size)
+
+        dst[tuple(dst_slice)] = src[tuple(src_slice)]
+
+    dim = 0 if transfer_on_output else 1
+    lead_dim_size = lin_layer.weight.shape[dim]
+    assert lead_dim_size % len(old_leads) == 0
+    
+    
+    block_size = lead_dim_size // len(old_leads)
+
+    if transfer_on_output:
+        new_out_features = block_size * len(new_leads)
+        new_in_features = lin_layer.in_features
+    else:
+        new_out_features = lin_layer.out_features
+        new_in_features = block_size * len(new_leads)
+
+    new_linear = nn.Linear(
+        in_features=new_in_features,
+        out_features=new_out_features,
+        bias=lin_layer.bias is not None
+    ).to(device=lin_layer.weight.device, dtype=lin_layer.weight.dtype)
+
+    common_leads = [lead for lead in new_leads if lead in old_leads]
+  
+    with torch.no_grad():
+        for common_lead in common_leads:
+
+            old_index = old_leads.index(common_lead)
+            new_index = new_leads.index(common_lead)
+
+            copy_block_inplace(
+                dst=new_linear.weight,
+                src=lin_layer.weight,
+                dst_index=new_index,
+                src_index=old_index,
+                block_size=block_size,
+                dim=dim
+            )
+
+            if transfer_on_output and lin_layer.bias is not None:
+                copy_block_inplace(
+                    dst=new_linear.bias,
+                    src=lin_layer.bias,
+                    dst_index=new_index,
+                    src_index=old_index,
+                    block_size=block_size,
+                    dim=0
+                )
+    
+    return new_linear
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
     # Load the checkpoint

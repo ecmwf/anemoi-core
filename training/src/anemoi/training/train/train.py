@@ -234,7 +234,10 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = model_task.load_from_checkpoint(self.last_checkpoint,
+                                                        **kwargs,
+                                                        strict=False,
+                                                        map_location="cpu")
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
@@ -503,16 +506,16 @@ class AnemoiTrainer(ABC):
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
-        LOGGER.debug("Starting training..")
+        # LOGGER.debug("Starting training..")
+        LOGGER.debug("Skipped training to only test transfer learning initialization.")
+        # trainer.fit(
+        #     self.model,
+        #     datamodule=self.datamodule,
+        #     ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
+        # )
 
-        trainer.fit(
-            self.model,
-            datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
-        )
-
-        if self.config.diagnostics.print_memory_summary:
-            LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
+        # if self.config.diagnostics.print_memory_summary:
+        #     LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
 
         LOGGER.debug("---- DONE. ----")
 
