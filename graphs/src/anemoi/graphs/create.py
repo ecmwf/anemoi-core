@@ -162,6 +162,7 @@ class GraphBuilder:
 
 class GraphCreator(GraphBuilder):
     """Create a graph from a configuration file."""
+
     def __init__(self, config: str | Path | DotDict | DictConfig):
         if isinstance(config, Path) or isinstance(config, str):
             config = DotDict.from_file(config)
@@ -169,16 +170,17 @@ class GraphCreator(GraphBuilder):
             self.config = DotDict(config)
         else:
             self.config = config
-        
+
         nodes = _parse_nodes(config)
         edges = _parse_edges(config)
         post_processors = _parse_post_processors(config)
-        
+
         super().__init__(
             nodes=nodes,
             edges=edges,
             post_processors=post_processors,
         )
+
 
 def _parse_nodes(cfg: DotDict) -> list[BaseNodeBuilder]:
     _nodes = []
@@ -196,6 +198,7 @@ def _parse_nodes(cfg: DotDict) -> list[BaseNodeBuilder]:
             node = instantiate(node_builder_cfg, name=node_name, attributes=attributes)
             _nodes.append(node)
     return _nodes
+
 
 def _parse_edges(cfg: DotDict) -> list[BaseEdgeBuilder]:
     _edges = []
@@ -227,6 +230,7 @@ def _parse_edges(cfg: DotDict) -> list[BaseEdgeBuilder]:
                 edge_builders_list.append(edge_builder)
             _edges.extend(edge_builders_list)
     return _edges
+
 
 def _parse_post_processors(cfg: DotDict) -> list[PostProcessor]:
     _post_processors = []
