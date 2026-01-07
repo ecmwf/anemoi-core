@@ -65,7 +65,7 @@ class BasePlotCallback(Callback, ABC):
         """
         super().__init__()
         self.config = config
-        self.save_basedir = config.hardware.paths.plots
+        self.save_basedir = config.system.output.plots
 
         self.post_processors = None
         self.latlons = None
@@ -733,6 +733,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         config: OmegaConf,
         parameter_groups: dict[dict[str, list[str]]],
         every_n_batches: int | None = None,
+        focus_area: dict | None = None,
     ) -> None:
         """Initialise the PlotLoss callback.
 
@@ -744,13 +745,18 @@ class PlotLoss(BasePerBatchPlotCallback):
             Dictionary with parameter groups with parameter names as keys
         every_n_batches : int, optional
             Override for batch frequency, by default None
-
+        focus_area : dict | None, optional
+            Area or point indices to focus the plot on. Can be:
+            - {"spacial_mask": str}
+            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
         """
         super().__init__(config, every_n_batches=every_n_batches)
         self.parameter_names = None
         self.parameter_groups = parameter_groups
         if self.parameter_groups is None:
             self.parameter_groups = {}
+
+        self.focus_area = focus_area
 
     @cached_property
     def sort_and_color_by_parameter_group(
@@ -882,15 +888,33 @@ class PlotLoss(BasePerBatchPlotCallback):
             )
 
         rollout = getattr(pl_module, "rollout", 0)
+        latlons = self.latlons
+
+        # Compute focus mask
+        focus_mask = np.ones(latlons.shape[0], dtype=bool)
+        if self.focus_area is not None:
+            if "spacial_mask" in self.focus_area:
+                focus_mask = np.zeros(latlons.shape[0], dtype=bool)
+                spacial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spacial_mask"]]
+                focus_mask[spacial_mask_idxs.squeeze()] = True
+
+            elif "latlon_bounds" in self.focus_area:
+                (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
+                lat, lon = latlons[:, 0], latlons[:, 1]
+                focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
+            else:
+                msg = "focus_area must contain either 'indices' or 'latlon_bounds'."
+                raise ValueError(msg)
 
         for rollout_step in range(rollout):
-            y_hat = outputs[1][rollout_step]
+            y_hat = outputs[1, rollout_step, focus_mask, :, :]  # apply focus mask
             y_true = batch[
                 :,
                 pl_module.multi_step + rollout_step,
-                ...,
+                focus_mask,  # apply focus mask
                 pl_module.data_indices.data.output.full,
             ]
+
             loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
@@ -918,7 +942,11 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             self.loss = copy.deepcopy(pl_module.loss)
 
-            if hasattr(self.loss.scaler, "nan_mask_weights"):
+            # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
+            if (
+                hasattr(self.loss.scaler, "nan_mask_weights")
+                and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+            ):
                 self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
 
             super().on_validation_batch_end(
@@ -1047,6 +1075,7 @@ class PlotSample(BasePerBatchPlotCallback):
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
         )
+
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
@@ -1204,6 +1233,12 @@ class PlotReconstruction(BasePerBatchPlotCallback):
         reconstruction = output_tensor[0, ...]  # Shape: [channels, spatial]
 
         # Apply mask
+<<<<<<< HEAD
+=======
+        if in_data.shape != reconstruction.shape:
+            in_data = in_data.reshape(reconstruction.shape)
+
+>>>>>>> feature/reconstruction-plots
         in_data = in_data[..., focus_mask, :]
         reconstruction = reconstruction[..., focus_mask, :]
         diff = np.abs(in_data - reconstruction)
@@ -1357,6 +1392,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         sample_idx: int,
         parameters: list[str],
         precip_and_related_fields: list[str] | None = None,
+        log_scale: bool = False,
         every_n_batches: int | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback.
@@ -1378,6 +1414,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.precip_and_related_fields = precip_and_related_fields
+        self.log_scale = log_scale
         LOGGER.info(
             "Using precip histogram plotting method for fields: %s.",
             self.precip_and_related_fields,
@@ -1419,6 +1456,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
                 self.precip_and_related_fields,
+                self.log_scale,
             )
 
             self._output_figure(

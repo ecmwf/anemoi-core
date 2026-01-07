@@ -1,0 +1,20 @@
+# (C) Copyright 2024-2025 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+
+<<<<<<< HEAD:training/src/anemoi/training/data/dataset/__init__.py
+from .autoencoderdataset import AutoencoderNativeGridDataset
+from .ensdataset import EnsNativeGridDataset
+from .singledataset import NativeGridDataset
+
+__all__ = ["AutoencoderNativeGridDataset", "EnsNativeGridDataset", "NativeGridDataset"]
+=======
+from typing import Literal
+
+ImplementedNormalisationSchema = Literal["unit-max", "l1", "l2", "unit-sum", "unit-std", "log1p"]
+>>>>>>> feature/reconstruction-plots:graphs/src/anemoi/graphs/schemas/normalise.py

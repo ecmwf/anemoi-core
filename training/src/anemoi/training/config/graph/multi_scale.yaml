@@ -16,7 +16,6 @@ nodes:
     node_builder:
       _target_: anemoi.graphs.nodes.TriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
       resolution: 5 # grid resolution for npz (o32, o48, ...)
-    attributes: ${graph.attributes.nodes}
 
 edges:
 # Encoder configuration
@@ -47,7 +46,6 @@ edges:
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
-
 
 attributes:
   nodes:

@@ -61,9 +61,14 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
         data_indices: dict,
         metadata: dict,
+<<<<<<< HEAD
         statistics_tendencies: dict = None,
         supporting_arrays: dict = None,
         truncation_data: Optional[dict] = None,
+=======
+        statistics_tendencies: dict | None = None,
+        supporting_arrays: dict | None = None,
+>>>>>>> feature/reconstruction-plots
     ) -> None:
         super().__init__()
         self.config = config
@@ -72,7 +77,6 @@ class AnemoiModelInterface(torch.nn.Module):
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
-        self.truncation_data = truncation_data
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
@@ -112,7 +116,6 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
             graph_data=self.graph_data,
-            truncation_data=self.truncation_data,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
