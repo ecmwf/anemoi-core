@@ -11,7 +11,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.create import create_graph_from_config
 from anemoi.graphs.describe import GraphDescriptor
 
 from . import Command
@@ -54,7 +54,7 @@ class Create(Command):
                 GraphDescriptor(args.save_path).describe()
             return
 
-        graph_creator = GraphCreator.from_config(config_path=args.config)
+        graph_creator = create_graph_from_config(config_path=args.config)
         graph_creator.create(save_path=args.save_path, overwrite=args.overwrite)
 
         if args.description:
