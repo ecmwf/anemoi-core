@@ -15,8 +15,6 @@ from pathlib import Path
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from omegaconf import ListConfig
-from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
@@ -164,19 +162,25 @@ class GraphBuilder:
 
 class GraphCreator(GraphBuilder):
     """Create a graph from a configuration file."""
-    def __init__(self, config: str | Path):
-        config = OmegaConf.load(config)
+    def __init__(self, config: str | Path | DotDict | DictConfig):
+        if isinstance(config, Path) or isinstance(config, str):
+            config = DotDict.from_file(config)
+        elif isinstance(config, DictConfig):
+            self.config = DotDict(config)
+        else:
+            self.config = config
+        
         nodes = _parse_nodes(config.get("nodes", []))
         edges = _parse_edges(config.get("edges", []))
         post_processors = _parse_post_processors(config.get("post_processors", []))
-
+        
         super().__init__(
             nodes=nodes,
             edges=edges,
             post_processors=post_processors,
         )
 
-def _parse_nodes(cfg: DictConfig) -> list[BaseNodeBuilder]:
+def _parse_nodes(cfg: DotDict) -> list[BaseNodeBuilder]:
     _nodes = []
     nodes_cfg = cfg.get("nodes")
     if nodes_cfg:
@@ -193,7 +197,7 @@ def _parse_nodes(cfg: DictConfig) -> list[BaseNodeBuilder]:
             _nodes.append(node)
     return _nodes
 
-def _parse_edges(cfg: DictConfig) -> list[BaseEdgeBuilder]:
+def _parse_edges(cfg: DotDict) -> list[BaseEdgeBuilder]:
     _edges = []
     edges_cfg = cfg.get("edges")
     if edges_cfg:
@@ -224,7 +228,7 @@ def _parse_edges(cfg: DictConfig) -> list[BaseEdgeBuilder]:
             _edges.extend(edge_builders_list)
     return _edges
 
-def _parse_post_processors(cfg: DictConfig) -> list[PostProcessor]:
+def _parse_post_processors(cfg: DotDict) -> list[PostProcessor]:
     _post_processors = []
     post_processors_cfg = cfg.get("post_processors")
     if post_processors_cfg:
