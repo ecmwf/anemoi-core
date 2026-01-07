@@ -73,7 +73,7 @@ repos:
     - --check-overridden # Check overridden methods
     - --check-protected  # Check protected methods
     - --check-class      # Check class docstrings
-    - --disable=SIG101,SIG102     # Disable empty docstrings
+    - --disable=SIG101,SIG102,SIG305     # Disable empty docstrings
 ci:
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"
