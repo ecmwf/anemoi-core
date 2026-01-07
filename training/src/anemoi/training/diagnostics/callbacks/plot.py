@@ -1037,12 +1037,17 @@ class PlotSample(BasePerBatchPlotCallback):
             for name in self.parameters
         }
 
+<<<<<<< HEAD
         # Handle device movement
         if self.post_processors is None:
             self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
         latlons = self.latlons
+=======
+        data, output_tensor = self.process(pl_module, outputs, batch, output_times)
+
+>>>>>>> c34b4ffb1a9b92ac6e93a028f8c49b6e8ad9ad1a
         local_rank = pl_module.local_rank
         rollout = getattr(pl_module, "rollout", 0)
 
