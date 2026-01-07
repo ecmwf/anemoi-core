@@ -155,17 +155,47 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
         return out
 
-    def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
+    def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False):
+        """Generate noise conditioning tensors. Normalises sigma to shape (B, E, N) so that the noise embedder
+        produces (B, E, N, C).
+        """
+        if sigma.ndim == 1:
+            # (B,) -> (B, 1, 1)
+            sigma = sigma[:, None, None]
+
+        elif sigma.ndim == 2:
+            # (B, E) -> (B, E, 1)
+            sigma = sigma[:, :, None]
+
+        elif sigma.ndim == 3:
+            # already (B, E, N)
+            pass
+
+        elif sigma.ndim > 3:
+            # e.g. (B,1,1,1) or (B,E,1,1)
+            # squeeze ONLY trailing singleton dims
+            while sigma.ndim > 3 and sigma.shape[-1] == 1:
+                sigma = sigma.squeeze(-1)
+
+            if sigma.ndim == 1:
+                sigma = sigma[:, None, None]
+            elif sigma.ndim == 2:
+                sigma = sigma[:, :, None]
+            elif sigma.ndim != 3:
+                raise ValueError(f"Cannot normalise sigma with shape {tuple(sigma.shape)}")
+
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
-
         c_data = self._make_noise_emb(
             noise_cond,
             repeat=self.node_attributes.num_nodes[self._graph_name_data],
         )
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
+        c_hidden = self._make_noise_emb(
+            noise_cond,
+            repeat=self.node_attributes.num_nodes[self._graph_name_hidden],
+        )
 
-        if edge_conditioning:  # this is currently not used but could be useful for edge conditioning of GNN
+        if edge_conditioning:
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
                 repeat=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)]["edge_length"].shape[0],
@@ -813,3 +843,4 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
         # x_skip.shape: (bs, ens, latlon, nvar)
         return x_skip[..., self.data_indices.model.input.prognostic]
+                                                                      

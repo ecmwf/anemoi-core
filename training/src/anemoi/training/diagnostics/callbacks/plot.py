@@ -191,8 +191,11 @@ class BasePlotCallback(Callback, ABC):
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
         if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
-            # Fill with NaNs values where the mask is False
-            data[:, :, ~pl_module.output_mask, :] = np.nan
+            data = pl_module.output_mask.apply(
+                data,
+                dim=-2,  # grid dimension
+                fill_value=np.nan,
+            )
         return data
 
     @abstractmethod
@@ -962,10 +965,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             self.loss = copy.deepcopy(pl_module.loss)
 
             # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
-            if (
-                hasattr(self.loss.scaler, "nan_mask_weights")
-                and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-            ):
+            if hasattr(self.loss.scaler, "nan_mask_weights") and self.loss.scaler.nan_mask_weights.shape[-2] != 1:
                 self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
 
             super().on_validation_batch_end(
