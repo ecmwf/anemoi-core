@@ -7,14 +7,6 @@
 # nor does it submit to any jurisdiction.
 #
 
-<<<<<<< HEAD:training/src/anemoi/training/data/dataset/__init__.py
-from .autoencoderdataset import AutoencoderNativeGridDataset
-from .ensdataset import EnsNativeGridDataset
-from .singledataset import NativeGridDataset
-
-__all__ = ["AutoencoderNativeGridDataset", "EnsNativeGridDataset", "NativeGridDataset"]
-=======
 from typing import Literal
 
 ImplementedNormalisationSchema = Literal["unit-max", "l1", "l2", "unit-sum", "unit-std", "log1p"]
->>>>>>> feature/reconstruction-plots:graphs/src/anemoi/graphs/schemas/normalise.py

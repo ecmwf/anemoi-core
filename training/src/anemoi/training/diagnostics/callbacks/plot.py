@@ -1233,12 +1233,9 @@ class PlotReconstruction(BasePerBatchPlotCallback):
         reconstruction = output_tensor[0, ...]  # Shape: [channels, spatial]
 
         # Apply mask
-<<<<<<< HEAD
-=======
         if in_data.shape != reconstruction.shape:
             in_data = in_data.reshape(reconstruction.shape)
 
->>>>>>> feature/reconstruction-plots
         in_data = in_data[..., focus_mask, :]
         reconstruction = reconstruction[..., focus_mask, :]
         diff = np.abs(in_data - reconstruction)
