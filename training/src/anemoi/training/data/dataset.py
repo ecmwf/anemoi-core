@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
-from abc import ABC
 
 import numpy as np
 import torch
@@ -20,7 +19,7 @@ from anemoi.datasets import open_dataset
 from anemoi.utils.dates import frequency_to_seconds
 
 
-class BaseAnemoiReader(ABC):
+class BaseAnemoiReader:
     """Anemoi data reader for native grid datasets."""
 
     def __init__(
@@ -127,11 +126,11 @@ class BaseAnemoiReader(ABC):
 
 
 class NativeGridDataset(BaseAnemoiReader):
-    """Native grid dataset"""
+    """Native grid dataset."""
 
 
 class TrajectoryDataset(BaseAnemoiReader):
-    """Trajectory dataset"""
+    """Trajectory dataset."""
 
     def __init__(
         self,
