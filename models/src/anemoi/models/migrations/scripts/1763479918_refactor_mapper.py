@@ -39,6 +39,11 @@ def migrate(ckpt: CkptType) -> CkptType:
         for layer in update_layers:
             ckpt["state_dict"][layer.format(block=new_block)] = ckpt["state_dict"].pop(layer.format(block=old_block))
 
+    # Clear optimizer states -> parameter ordering changed
+    if "optimizer_states" in ckpt:
+        for opt_state in ckpt["optimizer_states"]:
+            opt_state["state"] = {}
+
     return ckpt
 
 
