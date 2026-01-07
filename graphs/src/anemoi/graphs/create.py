@@ -22,6 +22,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.processors.post_process import PostProcessor
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -163,11 +164,12 @@ class GraphBuilder:
 
 class GraphCreator(GraphBuilder):
     """Create a graph from a configuration file."""
-    def __init__(self, config_path: Path | str):
-        config = OmegaConf.load(config_path)
+    def __init__(self, config: str | Path):
+        config = OmegaConf.load(config)
         nodes = _parse_nodes(config.get("nodes", []))
         edges = _parse_edges(config.get("edges", []))
         post_processors = _parse_post_processors(config.get("post_processors", []))
+
         super().__init__(
             nodes=nodes,
             edges=edges,
