@@ -110,8 +110,8 @@ def _seqalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = N
     # get input format
     input_format = get_memory_format(input_)
 
-    # SL TODO: repair for non sym shapes
-    input_list = [x.contiguous() for x in torch.tensor_split(input_, comm_size, dim=-2)]  # do we need contiguous?
+    seq_per_rank = [x[0] for x in shapes]
+    input_list = [x.contiguous() for x in torch.split(input_, seq_per_rank, dim=-2)]
 
     output_list = [torch.empty_like(input_list[comm_rank]) for _ in range(comm_size)]
 

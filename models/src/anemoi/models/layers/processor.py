@@ -363,7 +363,7 @@ class GNNProcessor(BaseProcessor):
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             target_nodes = sum(x[0] for x in shape_nodes)
             edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-                target_nodes,
+                (target_nodes, target_nodes),
                 edge_attr,
                 edge_index,
                 model_comm_group,

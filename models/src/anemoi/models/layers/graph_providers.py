@@ -58,8 +58,7 @@ def _shard_edges_1hop(
     tuple[Tensor, Adj, tuple[list, list]]
         Sharded edge_attr, edge_index, and edge_shard_shapes tuple
     """
-    num_nodes = (src_size, dst_size) if src_size != dst_size else dst_size
-
+    num_nodes = (src_size, dst_size)
     edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
         num_nodes, edge_attr, edge_index, model_comm_group
     )
