@@ -843,4 +843,3 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
         # x_skip.shape: (bs, ens, latlon, nvar)
         return x_skip[..., self.data_indices.model.input.prognostic]
-                                                                      
