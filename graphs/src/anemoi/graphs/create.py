@@ -170,9 +170,9 @@ class GraphCreator(GraphBuilder):
         else:
             self.config = config
         
-        nodes = _parse_nodes(config.get("nodes", []))
-        edges = _parse_edges(config.get("edges", []))
-        post_processors = _parse_post_processors(config.get("post_processors", []))
+        nodes = _parse_nodes(config)
+        edges = _parse_edges(config)
+        post_processors = _parse_post_processors(config)
         
         super().__init__(
             nodes=nodes,
