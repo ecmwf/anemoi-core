@@ -99,6 +99,7 @@ class BaseMapper(nn.Module, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ):
         """Forward pass of the mapper.
@@ -123,6 +124,9 @@ class BaseMapper(nn.Module, ABC):
             Whether destination is already sharded, by default False
         keep_x_dst_sharded : bool, optional
             Whether to keep destination sharded, by default False
+        edge_shard_shapes : tuple, optional
+            Shard shapes for edges (shapes_edge_attr, shapes_edge_idx)
+            If provided, edges are gathered before use.
         """
         pass
 
@@ -226,6 +230,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edge_shard_shapes: Optional[tuple] = None,
     ):
         x_src, x_dst = x
         shapes_src, shapes_dst = shard_shapes
@@ -234,14 +239,25 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         # gather/scatter if x_src is sharded, always reduce gradients in bwds
         x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
-        # Sort and shard edges for the full graph
-        size_full_graph = (sum(shape[0] for shape in shard_shapes[0]), sum(shape[0] for shape in shard_shapes[1]))
-        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-            size_full_graph, edge_attr, edge_index, model_comm_group, relabel_dst_nodes=True
-        )
+        if edge_shard_shapes is not None:
+            # Edges are 1-hop sorted and sharded by graph provider
+            shapes_edge_attr = edge_shard_shapes[0]
+            shapes_edge_idx = edge_shard_shapes[1]
+        else:
+            # Edges not pre-sharded, do 1-hop sorting and sharding here
+            size_full_graph = (sum(shape[0] for shape in shapes_src), sum(shape[0] for shape in shapes_dst))
+            edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
+                size_full_graph, edge_attr, edge_index, model_comm_group
+            )
+            edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
+            edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
-        edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
-        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+        # Relabel destination indices from global to local
+        if model_comm_group is not None and model_comm_group.size() > 1:
+            rank = model_comm_group.rank()
+            dst_offset = sum(shapes_dst[i][0] for i in range(rank))
+            edge_index = edge_index.clone()  # no in-place modification of pre-sharded tensor
+            edge_index[1] -= dst_offset
 
         # at this point, x_src is synced i.e. full, x_dst is sharded, edges are sharded (incoming edges to x_dst)
         size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
@@ -329,6 +345,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst, cond = checkpoint(
@@ -342,6 +359,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             x_src_is_sharded,
             x_dst_is_sharded,
             cond,
+            edge_shard_shapes,
             use_reentrant=False,
         )
 
@@ -385,12 +403,18 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
 
-        shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
-        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+        if edge_shard_shapes is not None:
+            # Heads sharding needs full edge_index
+            shapes_edge_attr = edge_shard_shapes[0]
+            edge_index = gather_tensor(edge_index, 1, edge_shard_shapes[1], model_comm_group)
+        else:
+            shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
+            edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
         x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
             x=x,
@@ -428,6 +452,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
 
@@ -441,6 +466,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             "x_src_is_sharded": x_src_is_sharded,
             "x_dst_is_sharded": x_dst_is_sharded,
             "keep_x_dst_sharded": keep_x_dst_sharded,
+            "edge_shard_shapes": edge_shard_shapes,
             **kwargs,
         }
 
@@ -541,6 +567,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = True,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
         x_dst = super().forward(
@@ -553,6 +580,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             x_src_is_sharded,
             x_dst_is_sharded,
             keep_x_dst_sharded,
+            edge_shard_shapes,
             **kwargs,
         )
         return x[0], x_dst
@@ -726,17 +754,20 @@ class GNNBaseMapper(BaseMapper, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
 
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
 
-        # Apply sharding and embedding
-        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-            size, edge_attr, edge_index, model_comm_group
-        )
-        edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
-        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+        if edge_shard_shapes is None:
+            # Edges not pre-sharded, do 1-hop sorting and sharding here
+            edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
+                size, edge_attr, edge_index, model_comm_group
+            )
+            edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
+            edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+
         edge_attr = self.emb_edges(edge_attr)
 
         x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
@@ -774,6 +805,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
         return checkpoint(
@@ -787,6 +819,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             x_src_is_sharded=x_src_is_sharded,
             x_dst_is_sharded=x_dst_is_sharded,
             keep_x_dst_sharded=keep_x_dst_sharded,
+            edge_shard_shapes=edge_shard_shapes,
             **kwargs,
             use_reentrant=False,
         )
@@ -991,6 +1024,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> Tensor:
 
@@ -1004,6 +1038,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             x_src_is_sharded,
             x_dst_is_sharded,
             keep_x_dst_sharded,
+            edge_shard_shapes,
             **kwargs,
         )
         return x_dst
@@ -1371,6 +1406,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
         return checkpoint(
@@ -1500,6 +1536,8 @@ class TransformerForwardMapper(TransformerBaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
+        **kwargs,
     ) -> PairTensor:
         x_dst = super().forward(
             x,
@@ -1511,6 +1549,8 @@ class TransformerForwardMapper(TransformerBaseMapper):
             x_src_is_sharded,
             x_dst_is_sharded,
             keep_x_dst_sharded,
+            edge_shard_shapes,
+            **kwargs,
         )
         return x[0], x_dst
 

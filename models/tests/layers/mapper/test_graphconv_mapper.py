@@ -177,7 +177,7 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
         batch_size = 1
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
-        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
         x_src, x_dst = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
         assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim])
         assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
@@ -248,7 +248,7 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim),
         )
 
-        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
         result = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
         assert result.shape == torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst])
 
