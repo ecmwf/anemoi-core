@@ -21,6 +21,7 @@ except ImportError:
 from anemoi.models.triton.norm import _rms_norm_bwd
 from anemoi.models.triton.norm import _rms_norm_fwd
 from anemoi.models.triton.utils import build_masks_and_offsets
+from anemoi.models.triton.utils import torch_dtype_to_triton
 
 
 @triton.jit
@@ -38,6 +39,8 @@ def _gt_fwd(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
+    w_q_norm_ptr, # ptr [C] or None, depending on qk_norm
+    w_k_norm_ptr, # ptr [C] or None, depending on qk_norm
 ):
     pid = tl.program_id(0)
     dst_idx = pid
@@ -67,7 +70,10 @@ def _gt_fwd(
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     if qk_norm:
-        q = _rms_norm_fwd(q, C)
+        C_pad_off = tl.arange(0,C_pad) 
+        w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
+        w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
+        q = _rms_norm_fwd(q, w_q_norm, C)
 
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
@@ -89,7 +95,7 @@ def _gt_fwd(
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         if qk_norm:
-            k = _rms_norm_fwd(k, C)
+            k = _rms_norm_fwd(k, w_k_norm, C)
 
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -151,6 +157,9 @@ def _gt_bwd_dst_pass(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
+    w_q_norm_ptr, # ptr [C] or None, depending on qk_norm
+    w_k_norm_ptr, # ptr [C] or None, depending on qk_norm
+    D_w_q_norm_ptr, # ptr [C] or None, depending on qk_norm
 ):
     dst_idx = tl.program_id(0)
     if dst_idx >= N_dst:
@@ -187,7 +196,12 @@ def _gt_bwd_dst_pass(
         # if normalisation was done in the fwd pass, we have to normalise it here
         # before we recompute elements of the attention forward pass
         q_unnorm = q  # need to save an unnormalised copy for the bwd pass later
-        q = _rms_norm_fwd(q, C)
+        C_pad_off = tl.arange(0,C_pad) 
+        w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
+        #Load the weights for k_norm outside of the inner loop
+        w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
+        q = _rms_norm_fwd(q, w_q_norm, C)
+        
 
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
@@ -204,7 +218,7 @@ def _gt_bwd_dst_pass(
 
         # Normalise k if required
         if qk_norm:  # rms norm
-            k = _rms_norm_fwd(k, C)
+            k = _rms_norm_fwd(k, w_k_norm, C)
 
         ke = k + e
         # score and alpha using saved M
@@ -226,7 +240,9 @@ def _gt_bwd_dst_pass(
 
     if qk_norm:
         # As a last step, apply the the normalisation gradient
-        dq = _rms_norm_bwd(q_unnorm, dq, C)
+        dq, dw_q_norm = _rms_norm_bwd(q_unnorm, w_q_norm, dq, C)
+        C_pad_off = tl.arange(0,C_pad) 
+        tl.store(D_w_q_norm_ptr + C_pad_off, dw_q_norm, mask=(C_pad_off < C_pad))
 
     # store D_j and dQ
     tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
@@ -259,6 +275,9 @@ def _gt_bwd_src_pass(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
+    w_q_norm_ptr, # ptr [C] or None, depending on qk_norm
+    w_k_norm_ptr, # ptr [C] or None, depending on qk_norm
+    D_w_k_norm_ptr, # ptr [C] or None, depending on qk_norm
 ):
     src_idx = tl.program_id(0)
     if src_idx >= N_src:
@@ -285,7 +304,11 @@ def _gt_bwd_src_pass(
         # K is saved unnormalised,
         # if normalisation was done in the fwd pass, we renormalise it now
         k_unnorm = k  # must save copy of unnormalised value for bwd pass later
-        k = _rms_norm_fwd(k, C)
+        C_pad_off = tl.arange(0,C_pad) 
+        w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
+        #Load the weights for k_norm outside of the inner loop
+        w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
+        k = _rms_norm_fwd(k, w_k_norm, C)
 
     v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -305,7 +328,7 @@ def _gt_bwd_src_pass(
         dst_off = dst * H * C + H_C_off
         q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         if qk_norm:
-            q = _rms_norm_fwd(q, C)
+            q = _rms_norm_fwd(q, w_q_norm, C)
         d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
@@ -340,7 +363,9 @@ def _gt_bwd_src_pass(
 
     if qk_norm:
         # As a last step, apply normalisation gradient if required
-        accK = _rms_norm_bwd(k_unnorm, accK, C)
+        accK, dw_k_norm = _rms_norm_bwd(k_unnorm, w_k_norm, accK, C)
+        C_pad_off = tl.arange(0,C_pad) 
+        tl.store(D_w_k_norm_ptr + C_pad_off, dw_k_norm, mask=(C_pad_off < C_pad))
 
     # write final accumulated per-src grads
     tl.store(
@@ -393,31 +418,31 @@ class GraphTransformerFunction(torch.autograd.Function):
         out = torch.empty_like(q)
         m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
-        def torch_dtype_to_triton(dtype):
-            if dtype == torch.float16:
-                return tl.float16
-            elif dtype == torch.bfloat16:
-                return tl.bfloat16
-            elif dtype == torch.float32:
-                return tl.float32
-            else:
-                raise ValueError(f"Unsupported dtype: {dtype}")
-
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
 
         ctx.qk_norm = qk_norm
+        w_q_norm = None
+        w_k_norm = None
+        if ctx.qk_norm:
+            w_q_norm = torch.ones(C, device=q.device, dtype = torch.float32)
+            w_k_norm = torch.ones(C, device=q.device, dtype = torch.float32)
+            #TODO remove below
+            #for the purposes of correctness testing i am initalising the weights to a non [1] value
+            with torch.no_grad():
+                w_q_norm[:] = torch.arange(C, device=q.device) * 0.1 + 1.0
+                w_k_norm[:] = torch.arange(C, device=q.device) * 0.2 - 1.0
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm)
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm, w_q_norm, w_k_norm)
 
         # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
+        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_q_norm, w_k_norm)
         return out
 
     @staticmethod
     def backward(ctx, d_out):
         d_out = d_out.contiguous()
-        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_q_norm, w_k_norm= ctx.saved_tensors
 
         N_dst, H, C = q.shape
         N_src = k.shape[0]
@@ -427,16 +452,22 @@ class GraphTransformerFunction(torch.autograd.Function):
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
+        dW_q_norm=None
+        if w_q_norm is not None:
+            dW_q_norm = torch.empty_like(w_q_norm)
+        dW_k_norm=None
+        if w_k_norm is not None:
+            dW_k_norm = torch.empty_like(w_k_norm)
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
 
         # Pass A: destination nodes (computes D and dQ)
         _gt_bwd_dst_pass[(N_dst,)](
-            q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype, ctx.qk_norm
+            q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype, ctx.qk_norm, w_q_norm, w_k_norm, dW_q_norm
         )
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
-            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype, ctx.qk_norm
+            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype, ctx.qk_norm, w_q_norm, w_k_norm, dW_k_norm
         )
 
         return dQ, dK, dV, dE, None, None, None

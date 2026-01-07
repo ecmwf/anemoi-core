@@ -124,8 +124,6 @@ def _rms_norm_bwd(x, w, dout, C):
     dx = (wdy - x_hat * dot) * inv_rms
 
     # dL/dW
-    #dw = None
-    #if w is not None: 
     #TODO could make optional 
     dw = tl.sum(dout * x_hat, axis=0,)
 
@@ -166,8 +164,6 @@ def _rms_norm_bwd_standalone(x_ptr, dout_ptr, w_ptr, dx_ptr, dw_ptr, H: tl.const
     if w_ptr is not None:
         tl.store(dw_ptr + C_off, dw.reshape(C,))
     
-    
-
 class RMSNormFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, weight):

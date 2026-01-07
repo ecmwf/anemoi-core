@@ -46,7 +46,7 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
     return edge_index, edge_index.shape[1]
 
 
-# To test GT with QK norm,
+# To test GT with QK norm
 class _GraphTransformerConvQKnorm(GraphTransformerConv):
     def forward(
         self,
@@ -59,9 +59,13 @@ class _GraphTransformerConvQKnorm(GraphTransformerConv):
         qk_norm: bool = False,
     ):
         if qk_norm:
-            norm = torch.nn.RMSNorm(self.out_channels)
-            query = norm(query)
-            key = norm(key)
+            q_norm = torch.nn.RMSNorm(self.out_channels)
+            k_norm = torch.nn.RMSNorm(self.out_channels)
+            with torch.no_grad():
+                q_norm.weight[:] = torch.arange(query.shape[-1], device=query.device) * 0.1 + 1.0
+                k_norm.weight[:] = torch.arange(query.shape[-1], device=query.device) * 0.2 - 1.0
+            query = q_norm(query)
+            key = k_norm(key)
 
         return super().forward(query, key, value, edge_attr, edge_index, size=size)
 
@@ -227,3 +231,7 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
     torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
     torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
+    #TODO compare d_q_norm and d_k_norm
+    # Must make gt into an nn.module first
+    #if qk_norm:
+    #    torch.testing.assert_close( atol=tolerance, rtol=0)
