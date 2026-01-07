@@ -903,25 +903,20 @@ class PlotLoss(BasePerBatchPlotCallback):
             else:
                 msg = "focus_area must contain either 'indices' or 'latlon_bounds'."
                 raise ValueError(msg)
-        
+
         # Apply spatial mask
         data = data[..., focus_mask, :]
         output_tensor = output_tensor[..., focus_mask, :]
 
         for rollout_step in range(rollout):
-            y_hat = outputs[1, 
-                            rollout_step,
-                            focus_mask, # apply focus mask
-                            :, 
-                            :
-            ]
+            y_hat = outputs[1, rollout_step, focus_mask, :, :]  # apply focus mask
             y_true = batch[
                 :,
                 pl_module.multi_step + rollout_step,
-                focus_mask, # apply focus mask
+                focus_mask,  # apply focus mask
                 pl_module.data_indices.data.output.full,
             ]
-            
+
             loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
