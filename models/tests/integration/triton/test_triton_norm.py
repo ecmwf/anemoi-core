@@ -16,7 +16,7 @@ from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
-    from anemoi.models.triton.norm import RMSNormFunction
+    from anemoi.models.triton.norm import RMSNorm
 
 
 @pytest.fixture(autouse=True)
@@ -46,20 +46,28 @@ def test_rms_norm_forward(h: int, d: int, elementwise_affine: bool):
         pytest.skip("CUDA not available")
 
     x = torch.randn((h, d))
-    x_ref = torch.clone(x)
     
-    w=None
-    if elementwise_affine:
-        w = torch.ones(h, d, device=x.device, dtype=torch.float32)
-        w[:] =torch.arange(d, device=x.device) * 0.1 + 1.0  #change weights from [1,]
-    x_triton = RMSNormFunction.apply(x, w) 
-    
+    #w=None
+    #if elementwise_affine:
+    #    w = torch.ones(h, d, device=x.device, dtype=torch.float32)
+    #    w[:] =torch.arange(d, device=x.device) * 0.1 + 1.0  #change weights from [1,]
+    #x_triton = RMSNormFunction.apply(x, w)
+    rms_norm = RMSNorm(d, elementwise_affine=elementwise_affine).cuda()
     rms_norm_ref = torch.nn.RMSNorm(d, elementwise_affine=elementwise_affine)
-    #change weights from [1,] for correctness testing
+    
+    #change weights from inital value of [1] for correctness testing
     if elementwise_affine:
         with torch.no_grad():
+            rms_norm.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
             rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
-    x_ref = rms_norm_ref(x_ref)
+    
+    x_triton = rms_norm(x)
+    
+    #change weights from [1,] for correctness testing
+    #if elementwise_affine:
+    #    with torch.no_grad():
+    #        rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
+    x_ref = rms_norm_ref(x)
     
     tolerance = 1e-4
     torch.testing.assert_close(x_triton, x_ref, atol=tolerance, rtol=0)
@@ -82,30 +90,32 @@ def test_rms_norm_backward(h: int, d: int, elementwise_affine: bool):
         pytest.skip("CUDA not available")
 
     x = torch.randn((h, d), requires_grad=True)
-    #x_ref = torch.clone(x, requires_grad=True)
-    #x_ref.retain_grad()
     
     w=None
+    rms_norm = RMSNorm(d, elementwise_affine=elementwise_affine).cuda()
+    rms_norm_ref = torch.nn.RMSNorm(d,elementwise_affine=elementwise_affine)
+    
+    #change weights from inital value of [1] for correctness testing
     if elementwise_affine:
-        w = torch.ones(h, d, device=x.device, dtype=torch.float32, requires_grad=True)
         with torch.no_grad():
-            w[:] =torch.arange(d, device=x.device) * 0.1 + 1.0 
-    x_triton = RMSNormFunction.apply(x, w) 
+            rms_norm.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
+            rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
+    
+    x_triton = rms_norm(x)
     
     loss_triton = x_triton.pow(2).sum()
     loss_triton.backward()
     grad_x_triton = x.grad.clone()
     if elementwise_affine:
-        grad_w_triton = w.grad.clone()
+        grad_w_triton = rms_norm.weight.grad.clone()
         
     x.grad.zero_()
     
-    rms_norm_ref = torch.nn.RMSNorm(d,elementwise_affine=elementwise_affine)
     
     #change weights from [1,] for correctness testing
-    if elementwise_affine:
-        with torch.no_grad():
-            rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
+    #if elementwise_affine:
+    #    with torch.no_grad():
+    #        rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
     x_ref = rms_norm_ref(x)
     loss_ref = x_ref.pow(2).sum()
     loss_ref.backward()
