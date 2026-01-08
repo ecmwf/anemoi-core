@@ -163,7 +163,7 @@ class StaticGraphProvider(BaseGraphProvider):
         self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
         self.register_buffer("edge_index_base", graph.edge_index, persistent=False)
         self.register_buffer(
-            "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=True
+            "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=False
         )
 
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=edge_attr_tensor.shape[0])
