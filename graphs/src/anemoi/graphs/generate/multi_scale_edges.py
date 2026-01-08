@@ -12,6 +12,8 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 
+import networkx as nx
+import numpy as np
 from torch_geometric.data.storage import NodeStorage
 
 LOGGER = logging.getLogger(__name__)
@@ -21,13 +23,13 @@ class BaseIcosahedronEdgeStrategy(ABC):
     """Abstract base class for different edge-building strategies."""
 
     @abstractmethod
-    def add_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage: ...
+    def get_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage: ...
 
 
 class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for TriNodes and LimitedAreaTriNodes."""
 
-    def add_edges(
+    def get_edges(
         self,
         nodes: NodeStorage,
         x_hops: int,
@@ -46,36 +48,43 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
                 node_ordering=nodes["_node_ordering"],
                 area_mask_builder=nodes.get("_area_mask_builder", None),
             )
-            nodes["_multiscale_edges"] = multiscale_edges
+
         else:
             LOGGER.info("Using networkx strategy for multiscale-edge building.")
-            nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
+            nx_graph = tri_icosahedron.add_edges_to_nx_graph(
                 nodes["_nx_graph"],
                 resolutions=scale_resolutions,
                 x_hops=x_hops,
                 area_mask_builder=nodes.get("_area_mask_builder", None),
             )
-        return nodes
+            adjmat = nx.to_scipy_sparse_array(nx_graph, format="coo")
+            # Get source & target indices of the edges
+            multiscale_edges = np.stack([adjmat.col, adjmat.row], axis=0)
+        return multiscale_edges
 
 
 class HexNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for HexNodes and LimitedAreaHexNodes."""
 
-    def add_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage:
+    def get_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage:
         from anemoi.graphs.generate import hex_icosahedron
 
-        nodes["_nx_graph"] = hex_icosahedron.add_edges_to_nx_graph(
+        nx_graph = hex_icosahedron.add_edges_to_nx_graph(
             nodes["_nx_graph"],
             resolutions=scale_resolutions,
             x_hops=x_hops,
         )
-        return nodes
+        adjmat = nx.to_scipy_sparse_array(nx_graph, format="coo")
+        # Get source & target indices of the edges
+        multiscale_edges = np.stack([adjmat.col, adjmat.row], axis=0)
+
+        return multiscale_edges
 
 
 class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for StretchedTriNodes."""
 
-    def add_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage:
+    def get_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage:
         from anemoi.graphs.generate import tri_icosahedron
         from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 
@@ -93,12 +102,16 @@ class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
                 node_ordering=nodes["_node_ordering"],
                 area_mask_builder=all_points_mask_builder,
             )
-            nodes["_multiscale_edges"] = multiscale_edges
+
         else:
-            nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
+            nx_graph = tri_icosahedron.add_edges_to_nx_graph(
                 nodes["_nx_graph"],
                 resolutions=scale_resolutions,
                 x_hops=x_hops,
                 area_mask_builder=all_points_mask_builder,
             )
-        return nodes
+            adjmat = nx.to_scipy_sparse_array(nx_graph, format="coo")
+            # Get source & target indices of the edges
+            multiscale_edges = np.stack([adjmat.col, adjmat.row], axis=0)
+
+        return multiscale_edges
