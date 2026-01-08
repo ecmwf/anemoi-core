@@ -166,6 +166,7 @@ def build_sparse_projector(
     graph: Optional[HeteroData] = None,
     edges_name: Optional[tuple[str, str, str]] = None,
     edge_weight_attribute: Optional[str] = None,
+    src_node_weight_attribute: Optional[str] = None,
     row_normalize: bool = True,
     transpose: bool = True,
     **kwargs,
@@ -182,6 +183,8 @@ def build_sparse_projector(
         Name/identifier for the edge set to use from the graph.
     edge_weight_attribute : str, optional
         Attribute name for edge weights.
+    src_node_weight_attribute : str, optional
+        Attribute name for node weights.
     row_normalize : bool, optional
         Whether to normalize weights per destination node.
     transpose : bool, optional
@@ -211,6 +214,7 @@ def build_sparse_projector(
             graph=graph,
             edges_name=edges_name,
             edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=src_node_weight_attribute,
             row_normalize=row_normalize,
             transpose=transpose,
             **kwargs,
