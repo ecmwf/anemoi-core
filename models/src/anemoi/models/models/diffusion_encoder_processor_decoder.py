@@ -127,7 +127,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -171,6 +171,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         produces (B, E, N, C).
         """
         if sigma.ndim == 1:
+            # (B,) -> (B, 1, 1)
             sigma = sigma[:, None, None]
         elif sigma.ndim == 2:
             sigma = sigma[:, :, None]
@@ -597,8 +598,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         x_skip = self.residual(x, grid_shard_shapes, model_comm_group)[..., self._internal_input_idx]
-        x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
         # Get node attributes
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
 
@@ -613,7 +614,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -762,7 +763,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
         # Dimensions are batch, timesteps, grid, variables
         x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
-        x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension
+        x_t0 = batch[:, -1:, None, ...]  # add dummy ensemble dimension
 
         grid_shard_shapes = None
         if model_comm_group is not None:
@@ -800,7 +801,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         # truncate x_t0 if needed
         x_t0 = self.apply_reference_state_truncation(x_t0, grid_shard_shapes, model_comm_group)
-
         # Convert tendency to state
         out = self.add_tendency_to_state(
             x_t0,
@@ -833,5 +833,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Truncated tensor with same shape as input
         """
         x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
-        # x_skip.shape: (bs, ens, latlon, nvar)
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        # x_skip.shape: (bs, time, ens, latlon, nvar)
         return x_skip[..., self.data_indices.model.input.prognostic]

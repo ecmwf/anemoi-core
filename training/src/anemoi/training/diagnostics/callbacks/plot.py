@@ -1197,7 +1197,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 self.latlons,
                 data[init_step, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
-                output_tensor[rollout_step, ...],
+                output_tensor[rollout_step, ...].squeeze(),
                 min_delta=self.min_delta,
             )
 
