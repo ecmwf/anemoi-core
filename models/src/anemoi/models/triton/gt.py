@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+from torch import Tensor
 
 # check if triton is installed
 # If pytorch is installed on CPU then torch is not available
@@ -18,9 +19,14 @@ except ImportError:
     raise ValueError(
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
+from typing import Union
+
+from torch_geometric.typing import Adj
+
 from anemoi.models.triton.norm import _rms_norm_bwd
 from anemoi.models.triton.norm import _rms_norm_fwd
 from anemoi.models.triton.utils import build_masks_and_offsets
+from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import torch_dtype_to_triton
 
 
@@ -396,7 +402,7 @@ class GraphTransformerFunction(torch.autograd.Function):
             )
 
     @staticmethod
-    def forward(ctx, q, k, v, e, csc, reverse, qk_norm):
+    def forward(ctx, q, k, v, e, csc, reverse, qk_norm_args):
         """Args:
         q: [N_dst, H, C]
         k: [N_src, H, C]
@@ -404,7 +410,7 @@ class GraphTransformerFunction(torch.autograd.Function):
         e: [num_edges, H, C]
         csc: (row, colptr)
         reverse: (rowptr, edge_ids, edge_dst)
-        qk_norm: bool
+        qk_norm_args: (bool, w_qnorm_ptr, w_knorm_ptr)
         """
         row, colptr = csc
         rowptr, edge_ids, edge_dst = reverse
@@ -420,17 +426,15 @@ class GraphTransformerFunction(torch.autograd.Function):
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
 
+        # Set up qk_normalisation
+
+        (qk_norm, w_q_norm, w_k_norm) = (
+            qk_norm_args  # weights are either None or pointer to tensor if qk_norm is being used
+        )
         ctx.qk_norm = qk_norm
-        w_q_norm = None
-        w_k_norm = None
-        if ctx.qk_norm:
-            w_q_norm = torch.ones(C, device=q.device, dtype=torch.float32)
-            w_k_norm = torch.ones(C, device=q.device, dtype=torch.float32)
-            # TODO remove below
-            # for the purposes of correctness testing i am initalising the weights to a non [1] value
-            with torch.no_grad():
-                w_q_norm[:] = torch.arange(C, device=q.device) * 0.1 + 1.0
-                w_k_norm[:] = torch.arange(C, device=q.device) * 0.2 - 1.0
+        if qk_norm:
+            # w_k_norm and w_q_norm should be pointers to tensors
+            assert w_k_norm is not None and w_q_norm is not None
 
         _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm, w_q_norm, w_k_norm)
 
@@ -508,3 +512,40 @@ class GraphTransformerFunction(torch.autograd.Function):
         )
 
         return dQ, dK, dV, dE, None, None, None
+
+
+class GraphTransformer(torch.nn.Module):
+    def __init__(self, dim: int, qk_norm: bool = False):
+        super().__init__()
+        self.dim = dim
+        self.qk_norm = qk_norm
+
+        if self.qk_norm:
+            self.w_qnorm = torch.nn.Parameter(torch.ones(dim))
+            self.w_knorm = torch.nn.Parameter(torch.ones(dim))
+        else:
+            self.register_parameter("w_qnorm", None)
+            self.register_parameter("w_knorm", None)
+
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        size: Union[int, tuple[int, int]],
+    ) -> torch.Tensor:
+
+        # self.conv requires size to be a tuple
+        conv_size = (size, size) if isinstance(size, int) else size
+
+        csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
+        edges_csc = edges.index_select(0, perm)
+
+        if self.qk_norm:
+            qk_norm_args = (True, self.w_qnorm, self.w_knorm)
+        else:
+            qk_norm_args = (False, None, None)
+
+        return GraphTransformerFunction.apply(query, key, value, edges_csc, csc, reverse, qk_norm_args)

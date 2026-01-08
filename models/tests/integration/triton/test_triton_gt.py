@@ -22,6 +22,7 @@ from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
+    from anemoi.models.triton.gt import GraphTransformer
     from anemoi.models.triton.gt import GraphTransformerFunction
 
 
@@ -61,9 +62,9 @@ class _GraphTransformerConvQKnorm(GraphTransformerConv):
         if qk_norm:
             q_norm = torch.nn.RMSNorm(self.out_channels)
             k_norm = torch.nn.RMSNorm(self.out_channels)
-            with torch.no_grad():
-                q_norm.weight[:] = torch.arange(query.shape[-1], device=query.device) * 0.1 + 1.0
-                k_norm.weight[:] = torch.arange(query.shape[-1], device=query.device) * 0.2 - 1.0
+            # with torch.no_grad():
+            #    q_norm.weight[:] = torch.arange(query.shape[-1], device=query.device) * 0.1 + 1.0
+            #    k_norm.weight[:] = torch.arange(query.shape[-1], device=query.device) * 0.2 - 1.0
             query = q_norm(query)
             key = k_norm(key)
 
@@ -153,7 +154,7 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
         pytest.skip("CUDA not available")
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+    # csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
     # Custom implementation
     query_triton = torch.randn((n_dst, h, d), requires_grad=True)
@@ -164,8 +165,13 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     query_ref = torch.clone(query_triton)
     key_ref = torch.clone(key_triton)
 
-    edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query_triton, key_triton, value, edge_attr_csc, csc, reverse, qk_norm)
+    # edge_attr_csc = edge_attr[perm]
+    gt_triton = GraphTransformer(d, qk_norm)
+
+    # out_triton = GraphTransformerFunction.apply(query_triton, key_triton, value, edge_attr_csc, csc, reverse, qk_norm)
+    # edges: Tensor, edge_index:  Adj, size: Union[int, tuple[int, int]]
+    size = (n_src, n_dst)
+    out_triton = gt_triton(query_triton, key_triton, value, edge_attr, edge_index, size)
 
     # Reference pyg implementation
     gt_ref = _GraphTransformerConvQKnorm(out_channels=d)
@@ -203,8 +209,10 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     value = torch.randn((n_src, h, d), requires_grad=True)
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
-    edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse, qk_norm)
+    gt_triton = GraphTransformer(d, qk_norm)
+    size = (n_src, n_dst)
+    out_triton = gt_triton(query, key, value, edge_attr, edge_index, size)
+
     loss_triton = out_triton.pow(2).sum()
     loss_triton.backward()
     grads_triton = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())

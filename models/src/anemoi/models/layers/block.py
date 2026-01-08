@@ -34,12 +34,11 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
-from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
 
 if is_triton_available():
-    from anemoi.models.triton.gt import GraphTransformerFunction
+    from anemoi.models.triton.gt import GraphTransformer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -497,10 +496,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.projection = Linear(out_channels, out_channels)
 
-        if self.qk_norm:
-            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
-            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
-
         self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
         self.node_dst_mlp = nn.Sequential(
@@ -532,9 +527,14 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         if self.graph_attention_backend == "triton":
             LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
-            self.conv = GraphTransformerFunction.apply
+            self.conv = GraphTransformer(self.out_channels_conv, qk_norm)
         else:
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+
+        # Triton graph attention has a fused QK norm which will be used instead to perform QK normalisation
+        if self.qk_norm and self.graph_attention_backend != "triton":
+            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
+            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
@@ -601,17 +601,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
     ) -> Tensor:
-        # self.conv requires size to be a tuple
-        conv_size = (size, size) if isinstance(size, int) else size
 
-        if self.graph_attention_backend == "triton":
-            csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
-            edges_csc = edges.index_select(0, perm)
-            args_conv = (edges_csc, csc, reverse)
-        else:
-            args_conv = (edges, edge_index, conv_size)
-
-        return self.conv(query, key, value, *args_conv)
+        return self.conv(query, key, value, edges, edge_index, size)
 
     def attention_block(
         self,
@@ -918,7 +909,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
-        if self.qk_norm:
+        # Triton graphtransformer has a fused qk_norm option which is used instead
+        if self.qk_norm and self.graph_attention_backend != "triton":
             query = self.q_norm(query)
             key = self.k_norm(key)
 
