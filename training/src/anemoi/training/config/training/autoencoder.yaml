@@ -153,6 +153,14 @@ metrics:
   - u_850
   - v_850
 
+# length of the "rollout" window (see Keisler's paper)
+rollout:
+  start: 0
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  max: 0
+
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
 max_steps: 150000

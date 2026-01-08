@@ -311,23 +311,21 @@ class NativeGridDataset(IterableDataset):
         )
 
         for i in shuffled_chunk_indices:
-            start = i + self.relative_date_indices[0]
-            end = i + self.relative_date_indices[-1] + 1
-            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
-            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
-            # data[start...] will be replaced with data[self.relative_date_indices + i]
+            rel = self.relative_date_indices
+            grid_shard = self.grid_indices.get_shard_indices(self.reader_group_rank)
 
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
+            start_idx = i + rel[0]
+            end_idx = (i + rel[-1] + 1) if len(rel) > 1 else (start_idx + 1)
+            timeincrement = (rel[1] - rel[0]) if len(rel) > 1 else 1
 
+            time_slice = slice(start_idx, end_idx, timeincrement)
+
+            if isinstance(grid_shard, slice):
+                x = self.data[time_slice, :, :, grid_shard]
             else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[start:end:timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]  # select the grid shard
+                x = self.data[time_slice, :, :, :]
+                x = x[..., grid_shard]
+         
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
 

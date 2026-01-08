@@ -54,11 +54,11 @@ class SWA(BaseModel):
 class Rollout(BaseModel):
     """Rollout configuration."""
 
-    start: PositiveInt = Field(example=1)
+    start: NonNegativeInt = Field(example=1)
     "Number of rollouts to start with."
     epoch_increment: NonNegativeInt = Field(example=0)
     "Number of epochs to increment the rollout."
-    max: PositiveInt = Field(example=1)
+    max: NonNegativeInt = Field(example=1)
     "Maximum number of rollouts."
 
 
@@ -420,7 +420,7 @@ class InterpolationSchema(BaseTrainingSchema):
     "Forcing parameters for target output times."
 
 
-class AutoencoderSchema(BaseTrainingSchema):
+class AutoencoderSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
     "Training objective."
 

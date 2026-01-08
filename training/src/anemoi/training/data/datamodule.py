@@ -20,7 +20,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.data.dataset import NativeGridDataset, SingleTimestepNativeGridDataset
+from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.training.data.dataset import SingleTimestepNativeGridDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
@@ -215,7 +216,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self,
         data_reader: Callable,
         shuffle: bool = True,
-        val_rollout: int = 1,
+        val_rollout: int = 0,
         label: str = "generic",
     ) -> NativeGridDataset:
 
