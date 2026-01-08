@@ -14,32 +14,38 @@ complex_dtype_map = {torch.float16: torch.complex32, torch.float32: torch.comple
 
 
 class EcTransOctahedralSHT(torch.nn.Module):
-    def __init__(self, truncation: int, dtype, filepath=None) -> None:
+    def __init__(self, truncation: int, dtype, filepath=None, inverse=False) -> None:
+        super().__init__()
         self.truncation = truncation
         self.n_lat_nh = truncation + 1
 
-        self.n_grid_points = 2 * int(sum(self.n_lon_for_each_lat_nh))
         self.highest_zonal_wavenumber_per_lat_nh = None
         lons_per_lat = [20 + 4 * i for i in range(truncation + 1)]
-        lons_per_lat = lons_per_lat + lons_per_lat[::-1]
+        self.lons_per_lat = lons_per_lat + lons_per_lat[::-1]
+        self.n_grid_points = 2 * int(sum(lons_per_lat))
         # Needed to access the corresponding grid points from the 1D input fields
-        self.cumsum_indices = [0] + np.cumsum(lons_per_lat).tolist()
+        self.cumsum_indices = [0] + np.cumsum(self.lons_per_lat).tolist()
 
         self.dtype = dtype
         symmetric, antisymmetric, gaussian_weights = self._get_polynomials_and_weights(filepath)
 
-        # Normalise polynomials
-        symmetric *= gaussian_weights.view(1, 1, -1)
-        antisymmetric *= gaussian_weights.view(1, 1, -1)
-
-        self.register_buffer("symmetric", symmetric, persistent=False)
-        self.register_buffer("antisymmetric", antisymmetric, persistent=False)
+        self._register_polyonomials(symmetric, antisymmetric, gaussian_weights)
 
         # Padding required to pad up the maximin wavenumber of the rfft output
         padding = [self.highest_zonal_wavenumber_per_lat_nh[-1] - m for m in self.highest_zonal_wavenumber_per_lat_nh]
         self.padding = padding + padding[::-1]
 
         self.highest_zonal_wavenumber_per_lat_nh = torch.from_numpy(self.highest_zonal_wavenumber_per_lat_nh)
+
+    def _register_polyonomials(
+        self, symmetric: torch.Tensor, antisymmetric: torch.Tensor, gaussian_weights: torch.Tensor
+    ) -> None:
+
+        symmetric *= gaussian_weights.view(1, 1, -1)
+        antisymmetric *= gaussian_weights.view(1, 1, -1)
+
+        self.register_buffer("symmetric", symmetric, persistent=False)
+        self.register_buffer("antisymmetric", antisymmetric, persistent=False)
 
     @cached_property
     def n_lats_per_wavenumber(self) -> list[int]:
@@ -67,7 +73,7 @@ class EcTransOctahedralSHT(torch.nn.Module):
             self.truncation,
             2 * self.n_lat_nh,
             poly_size,
-            np.concat((self.n_lon_for_each_lat_nh, self.n_lon_for_each_lat_nh[::-1])),
+            np.array(self.lons_per_lat),
             1,
         )
         return highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials
@@ -211,8 +217,9 @@ class EcTransOctahedralSHT(torch.nn.Module):
         Returns
         -------
         torch.Tensor
-            intermediate state after Fourier transform
+            intermediate state after Fourier transform [bs, ens, lat, m, vars]
         """
+
         four_out = []
         for i in range(2 * self.truncation + 2):
 
@@ -236,26 +243,25 @@ class EcTransOctahedralSHT(torch.nn.Module):
         Parameters
         ----------
         x : torch.Tensor
-            fourier-transformed field
+            fourier-transformed field [bs, ens, lat, m, vars]
 
         Returns
         -------
         torch.Tensor
-            spectrum
+            spectrum [bs, ens, l, m, vars]
         """
+
         # Add/substract southern hemisphere from northern hemisphere
         fourier_sh_flipped = torch.flip(x[:, :, self.n_lat_nh :, :, :], dims=[2])
-        fourier_norm_sym = x[:, :, : self.n_lat_nh, :, :] + fourier_sh_flipped
-        fourier_norm_anti = x[:, :, : self.n_lat_nh, :, :] - fourier_sh_flipped
+        fourier_sym = x[:, :, : self.n_lat_nh, :, :] + fourier_sh_flipped
+        fourier_anti = x[:, :, : self.n_lat_nh, :, :] - fourier_sh_flipped
 
-        [bs, ens, _, mmax, nvars] = fourier_norm_sym.shape
+        [bs, ens, _, mmax, nvars] = fourier_sym.shape
 
         # Compute symmetric and antisymmetric component
         spectrum = torch.empty(bs, ens, self.truncation + 1, mmax, nvars, dtype=x.dtype, device=x.device)
-        spectrum[:, :, 1::2, :, :] = torch.einsum("mnijk,jli->mnljk", fourier_norm_sym, self.symmetric)  # noqa: F841
-        spectrum[:, :, 0::2, :, :] = torch.einsum(
-            "mnijk,jli->mnljk", fourier_norm_anti, self.antisymmetric
-        )  # noqa: F841
+        spectrum[:, :, 1::2, :, :] = torch.einsum("mnijk,jli->mnljk", fourier_sym, self.symmetric)  # noqa: F841
+        spectrum[:, :, 0::2, :, :] = torch.einsum("mnijk,jli->mnljk", fourier_anti, self.antisymmetric)  # noqa: F841
 
         return spectrum
 
