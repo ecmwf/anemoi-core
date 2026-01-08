@@ -149,46 +149,25 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         return x_out.unsqueeze(TensorDim.TIME)  # add time dim
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
-        if noise_emb.ndim == 2:
-            # (B, C) -> (B, 1, 1, C)
-            noise_emb = noise_emb[:, None, None, :]
-        elif noise_emb.ndim == 3:
-            # (B, E, C) -> (B, E, 1, C)
-            noise_emb = noise_emb[:, :, None, :]
-        elif noise_emb.ndim != 4:
-            raise ValueError(f"Unexpected noise_emb shape {tuple(noise_emb.shape)}")
-
         out = einops.repeat(
             noise_emb,
-            "batch ensemble noise_level vars -> batch ensemble (repeat noise_level) vars",
+            "batch time ensemble noise_level vars -> batch time ensemble (repeat noise_level) vars",
             repeat=repeat,
         )
-        out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
+        out = einops.rearrange(out, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
         return out
 
-    def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False):
-        """Generate noise conditioning tensors. Normalises sigma to shape (B, E, N) so that the noise embedder
-        produces (B, E, N, C).
-        """
-        if sigma.ndim == 1:
-            # (B,) -> (B, 1, 1)
-            sigma = sigma[:, None, None]
-        elif sigma.ndim == 2:
-            sigma = sigma[:, :, None]
-        elif sigma.ndim != 3:
-            raise ValueError(f"Expected sigma with ndim <= 3, got {sigma.shape}")
+    def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
+
         c_data = self._make_noise_emb(
             noise_cond,
             repeat=self.node_attributes.num_nodes[self._graph_name_data],
         )
-        c_hidden = self._make_noise_emb(
-            noise_cond,
-            repeat=self.node_attributes.num_nodes[self._graph_name_hidden],
-        )
+        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
 
-        if edge_conditioning:
+        if edge_conditioning:  # this is currently not used but could be useful for edge conditioning of GNN
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
                 repeat=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)]["edge_length"].shape[0],
@@ -292,8 +271,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )  # calls forward ...
-        if y_noised.ndim == 4:
-            y_noised = y_noised.unsqueeze(TensorDim.TIME)
         D_x = c_skip * y_noised + c_out * pred
 
         return D_x
@@ -536,8 +513,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         sigmas = scheduler.get_schedule(x.device, torch.float64)
 
         # Initialize output with noise
-        batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
-        shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
+        batch_size, time_size, ensemble_size, grid_size = x.shape[0], x.shape[1], x.shape[2], x.shape[-2]
+        shape = (batch_size, time_size, ensemble_size, grid_size, self.num_output_channels)
         y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
