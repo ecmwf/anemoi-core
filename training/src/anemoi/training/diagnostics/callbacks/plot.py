@@ -931,11 +931,17 @@ class PlotLoss(BasePerBatchPlotCallback):
                 pl_module.data_indices.data.output.full,
             ]
 
-            # Some tasks/models return predictions without an explicit time
-            # dimension (B, E, G, V). Losses/scalers assume (B, T, E, G, V).
-            if y_hat.ndim == 4:
+            # Some tasks/models return predictions/targets without an explicit
+            # time dimension.
+            #
+            # - deterministic: (B, G, V)
+            # - ensemble:      (B, E, G, V)
+            # - time-aware:    (B, T, ...)
+            #
+            # Losses/scalers generally assume a TIME axis exists.
+            if y_hat.ndim in (3, 4):
                 y_hat = y_hat.unsqueeze(TensorDim.TIME)
-            if y_true.ndim == 4:
+            if y_true.ndim in (3, 4):
                 y_true = y_true.unsqueeze(TensorDim.TIME)
 
             loss = reduce_to_last_dim(self.loss(y_hat, y_true, squash=False).detach().cpu().numpy())

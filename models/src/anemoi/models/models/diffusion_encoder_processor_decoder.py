@@ -149,8 +149,19 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         return x_out.unsqueeze(TensorDim.TIME)  # add time dim
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
+        if noise_emb.ndim == 2:
+            # (B, C) -> (B, 1, 1, C)
+            noise_emb = noise_emb[:, None, None, :]
+        elif noise_emb.ndim == 3:
+            # (B, E, C) -> (B, E, 1, C)
+            noise_emb = noise_emb[:, :, None, :]
+        elif noise_emb.ndim != 4:
+            raise ValueError(f"Unexpected noise_emb shape {tuple(noise_emb.shape)}")
+
         out = einops.repeat(
-            noise_emb, "batch ensemble noise_level vars -> batch ensemble (repeat noise_level) vars", repeat=repeat
+            noise_emb,
+            "batch ensemble noise_level vars -> batch ensemble (repeat noise_level) vars",
+            repeat=repeat,
         )
         out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
         return out
@@ -160,30 +171,11 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         produces (B, E, N, C).
         """
         if sigma.ndim == 1:
-            # (B,) -> (B, 1, 1)
             sigma = sigma[:, None, None]
-
         elif sigma.ndim == 2:
-            # (B, E) -> (B, E, 1)
             sigma = sigma[:, :, None]
-
-        elif sigma.ndim == 3:
-            # already (B, E, N)
-            pass
-
-        elif sigma.ndim > 3:
-            # e.g. (B,1,1,1) or (B,E,1,1)
-            # squeeze ONLY trailing singleton dims
-            while sigma.ndim > 3 and sigma.shape[-1] == 1:
-                sigma = sigma.squeeze(-1)
-
-            if sigma.ndim == 1:
-                sigma = sigma[:, None, None]
-            elif sigma.ndim == 2:
-                sigma = sigma[:, :, None]
-            elif sigma.ndim != 3:
-                raise ValueError(f"Cannot normalise sigma with shape {tuple(sigma.shape)}")
-
+        elif sigma.ndim != 3:
+            raise ValueError(f"Expected sigma with ndim <= 3, got {sigma.shape}")
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
         c_data = self._make_noise_emb(
