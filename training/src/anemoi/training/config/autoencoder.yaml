@@ -2,8 +2,7 @@ defaults:
 - data: zarr
 - dataloader: native_grid
 - diagnostics: evaluation
-- datamodule: single
-- hardware: example
+- system: example
 - graph: encoder_decoder_only
 - model: graphtransformer
 - training: autoencoder
