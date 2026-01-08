@@ -246,4 +246,4 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     return trainer_callbacks
 
 
-__all__ = ["_get_progress_bar_callback", "get_callbacks"]
+__all__ = ["get_callbacks"]
