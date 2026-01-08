@@ -340,6 +340,7 @@ class NativeGridDataset(IterableDataset):
             Relative dates: {self.relative_date_indices}
         """
 
+
 class SingleTimestepNativeGridDataset(NativeGridDataset):
     """Iterable autoencoder dataset for AnemoI data on the arbitrary grids."""
 
