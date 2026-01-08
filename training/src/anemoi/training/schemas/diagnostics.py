@@ -33,6 +33,21 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
     "Epoch frequency to plot at."
 
 
+class FocusAreaSchema(BaseModel):
+    spatial_mask: str | None = Field(default=None)
+    "Name of the node attribute to use as masking. eg. cutout_mask"
+
+    latlon_bounds: list[list[float]] | None = Field(default=None, min_items=2, max_items=2)
+    "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
+
+    @model_validator(mode="after")
+    def exactly_one_present(self) -> "FocusAreaSchema":
+        if (self.spatial_mask is None) == (self.latlon_bounds is None):
+            msg = "Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both)."
+            raise ValueError(msg)
+        return self
+
+
 class PlotLossSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
     "PlotLoss object from anemoi training diagnostics callbacks."
@@ -40,6 +55,8 @@ class PlotLossSchema(BaseModel):
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -100,6 +117,8 @@ class LongRolloutPlotsSchema(BaseModel):
     "Delay between frames in the animation in milliseconds, by default 400."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
 class FocusAreaSchema(BaseModel):
@@ -152,6 +171,8 @@ class PlotSpectrumSchema(BaseModel):
     "List of parameters to plot."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
 class PlotHistogramSchema(BaseModel):
