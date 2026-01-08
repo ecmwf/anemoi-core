@@ -28,7 +28,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.khop_edges import bipartite_subgraph
 from anemoi.models.distributed.khop_edges import drop_unconnected_src_nodes
-from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
+from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvMapperBlock
@@ -253,12 +253,11 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             shapes_edge_idx = edge_shard_shapes[1]
         else:
             # Edges not pre-sharded, do 1-hop sorting and sharding here
-            size_full_graph = (sum(shape[0] for shape in shapes_src), sum(shape[0] for shape in shapes_dst))
-            edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-                size_full_graph, edge_attr, edge_index, model_comm_group
+            src_size = sum(shape[0] for shape in shapes_src)
+            dst_size = sum(shape[0] for shape in shapes_dst)
+            edge_attr, edge_index, (shapes_edge_attr, shapes_edge_idx) = shard_edges_1hop(
+                edge_attr, edge_index, src_size, dst_size, model_comm_group
             )
-            edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
-            edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
         # Relabel destination indices from global to local
         if model_comm_group is not None and model_comm_group.size() > 1:
@@ -784,11 +783,7 @@ class GNNBaseMapper(BaseMapper, ABC):
 
         if edge_shard_shapes is None:
             # Edges not pre-sharded, do 1-hop sorting and sharding here
-            edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-                size, edge_attr, edge_index, model_comm_group
-            )
-            edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
-            edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+            edge_attr, edge_index, _ = shard_edges_1hop(edge_attr, edge_index, size[0], size[1], model_comm_group)
 
         edge_attr = self.emb_edges(edge_attr)
 

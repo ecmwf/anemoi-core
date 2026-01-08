@@ -24,47 +24,10 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
+from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.layers.graph import TrainableTensor
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _shard_edges_1hop(
-    edge_attr: Tensor,
-    edge_index: Adj,
-    src_size: int,
-    dst_size: int,
-    model_comm_group: Optional[ProcessGroup],
-) -> tuple[Tensor, Adj, tuple[list, list]]:
-    """1-hop sort and shard edges.
-
-    Parameters
-    ----------
-    edge_attr : Tensor
-        Edge attributes
-    edge_index : Adj
-        Edge indices
-    src_size : int
-        Number of source nodes
-    dst_size : int
-        Number of destination nodes
-    model_comm_group : ProcessGroup, optional
-        Model communication group
-
-    Returns
-    -------
-    tuple[Tensor, Adj, tuple[list, list]]
-        Sharded edge_attr, edge_index, and edge_shard_shapes tuple
-    """
-    num_nodes = (src_size, dst_size)
-    edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-        num_nodes, edge_attr, edge_index, model_comm_group
-    )
-    edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
-    edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
-    return edge_attr, edge_index, (shapes_edge_attr, shapes_edge_idx)
 
 
 def create_graph_provider(
@@ -247,7 +210,7 @@ class StaticGraphProvider(BaseGraphProvider):
 
         if shard_edges:
             src_size, dst_size = self.edge_inc[:, 0].tolist()
-            return _shard_edges_1hop(
+            return shard_edges_1hop(
                 edge_attr, edge_index, src_size * batch_size, dst_size * batch_size, model_comm_group
             )
 
@@ -402,7 +365,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
 
         if shard_edges:
-            return _shard_edges_1hop(edge_attr, edge_index, src_coords.shape[0], dst_coords.shape[0], model_comm_group)
+            return shard_edges_1hop(edge_attr, edge_index, src_coords.shape[0], dst_coords.shape[0], model_comm_group)
 
         return edge_attr, edge_index, None
 

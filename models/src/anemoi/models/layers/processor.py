@@ -20,7 +20,7 @@ from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
+from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvProcessorBlock
@@ -362,14 +362,9 @@ class GNNProcessor(BaseProcessor):
         if edge_shard_shapes is None:
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             target_nodes = sum(x[0] for x in shape_nodes)
-            edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-                (target_nodes, target_nodes),
-                edge_attr,
-                edge_index,
-                model_comm_group,
+            edge_attr, edge_index, _ = shard_edges_1hop(
+                edge_attr, edge_index, target_nodes, target_nodes, model_comm_group
             )
-            edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
-            edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
         x, edge_attr = self.run_layers(
             (x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group, **kwargs
