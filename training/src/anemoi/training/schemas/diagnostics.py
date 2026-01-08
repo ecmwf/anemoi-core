@@ -182,7 +182,6 @@ class PlotReconstructionSchema(BaseModel):
     "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
-
 class PlotSpectrumSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSpectrum"] = Field(alias="_target_")
     "PlotSpectrum object from anemoi training diagnostics callbacks."
