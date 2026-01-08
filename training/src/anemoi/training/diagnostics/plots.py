@@ -943,7 +943,13 @@ def single_plot(
             aspect="auto",
             ax=ax,
         )
-        continents.plot_continents(ax)
+
+    xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
+    ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
+    ax.set_xlim((xmin - 0.1, xmax + 0.1))
+    ax.set_ylim((ymin - 0.1, ymax + 0.1))
+
+    continents.plot_continents(ax)
 
     if title is not None:
         ax.set_title(title)
