@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.fft import irfft
 from torch.fft import rfft
 
 polytype = np.float64
@@ -265,7 +266,61 @@ class EcTransOctahedralSHT(torch.nn.Module):
 
         return spectrum
 
-    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_fourier = self.longitudinal_rfft(x)
         spectrum = self.legendre(x_fourier)
         return spectrum
+
+
+class InverseEcTransOctahedralSHT(EcTransOctahedralSHT):
+
+    def _register_polyonomials(
+        self, symmetric: torch.Tensor, antisymmetric: torch.Tensor, gaussian_weights: torch.Tensor
+    ) -> None:
+        self.register_buffer("symmetric", symmetric, persistent=False)
+        self.register_buffer("antisymmetric", antisymmetric, persistent=False)
+
+    def inverse_longitudinal_rfft(self, x: torch.Tensor):
+        """Performs irfft along the longitude.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            intermediate state befire inverse Fourier transform
+
+        Returns
+        -------
+        torch.Tensor
+            field
+        """
+
+        four_out = []
+        for i in range(2 * self.truncation + 2):
+
+            out = irfft(
+                x[:, :, i, : self.highest_zonal_wavenumber_per_lat[i] + 1, :],
+                axis=2,
+                norm="forward",
+                n=self.lons_per_lat[i],
+            )
+
+            four_out.append(out)
+
+        return torch.cat(four_out, dim=2)
+
+    def inverse_legendre(self, spectrum: torch.Tensor):
+        spec_symm = spectrum[:, :, 1::2, :, :]
+        spec_anti = spectrum[:, :, 0::2, :, :]
+
+        fourier_symm = torch.einsum("jli, mnljk -> mnijk", self.symmetric, spec_symm)
+        fourier_anti = torch.einsum("jli, mnljk -> nmijk", self.antisymmetric, spec_anti)
+
+        fourier_nh = 0.5 * (fourier_symm + fourier_anti)
+        fourier_sh = 0.5 * (torch.flip(fourier_symm - fourier_anti, dims=[2]))
+
+        return torch.cat([fourier_nh, fourier_sh], 2)
+
+    def forward(self, spectrum: torch.Tensor):
+        x_fourier = self.inverse_legendre(spectrum)
+        x_field = self.inverse_longitudinal_rfft(x_fourier)
+        return x_field
