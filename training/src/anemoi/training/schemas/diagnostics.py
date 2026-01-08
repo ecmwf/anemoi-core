@@ -162,6 +162,11 @@ class PlotSampleSchema(BaseModel):
     "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
+class PlotReconstructionSchema(PlotSampleSchema):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotReconstruction"] = Field(alias="_target_")
+    "PlotReconstruction object from anemoi training diagnostics callbacks."
+
+
 class PlotSpectrumSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSpectrum"] = Field(alias="_target_")
     "PlotSpectrum object from anemoi training diagnostics callbacks."
@@ -258,6 +263,7 @@ PlotCallbacks = Annotated[
     | GraphTrainableFeaturesPlotSchema
     | PlotLossSchema
     | PlotSampleSchema
+    | PlotReconstructionSchema
     | PlotSpectrumSchema
     | PlotHistogramSchema
     | PlotEnsSampleSchema
