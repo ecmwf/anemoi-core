@@ -135,7 +135,7 @@ def transfer_linear_layer(lin_layer: nn.Linear, old_leads: list[int], new_leads:
                     block_size=block_size,
                     dim=0
                 )
-    
+
     return new_linear
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
