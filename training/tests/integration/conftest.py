@@ -320,6 +320,27 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     return cfg, dataset_urls[0]
 
 
+@pytest.fixture
+def multi_out_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, str]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multi_out"):
+        template = compose(config_name="config")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multi_out.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+
+    OmegaConf.set_struct(template.training.scalers, False)  # allow adding timestep scaler
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0]
+
+
 @pytest.fixture(
     params=[  # selects different test cases
         "lam",

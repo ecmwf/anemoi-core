@@ -77,6 +77,21 @@ def test_training_cycle_without_config_validation(
     AnemoiTrainer(cfg).train()
 
 
+@pytest.mark.slow
+def test_training_cycle_multi_out(
+    multi_out_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = multi_out_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_multi_out(multi_out_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = multi_out_config
+    BaseSchema(**cfg)
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_stretched(
