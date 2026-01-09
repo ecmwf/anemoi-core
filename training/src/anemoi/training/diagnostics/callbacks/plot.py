@@ -97,20 +97,21 @@ class BasePlotCallback(Callback, ABC):
         focus_mask = np.ones(self.latlons.shape[0], dtype=bool)
         self.tag = None
         if self.focus_area is not None:
-            if "spatial_mask" in self.focus_area:
+            print(self.focus_area)
+            if self.focus_area["spatial_mask"] is not None:
                 focus_mask = np.zeros(self.latlons.shape[0], dtype=bool)
                 spatial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spatial_mask"]]
                 focus_mask[spatial_mask_idxs.squeeze()] = True
                 self.tag = "_spatial_mask"
 
-            elif "latlon_bounds" in self.focus_area:
+            elif self.focus_area["latlon_bounds"] is not None:
                 (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
                 lat, lon = self.latlons[:, 0], self.latlons[:, 1]
                 focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
                 self.tag = "_latlon_bounds"
 
             else:
-                msg = "focus_area must contain either 'indices' or 'latlon_bounds'."
+                msg = "focus_area must contain either 'spatial_mask' or 'latlon_bounds'."
                 raise ValueError(msg)
 
         return focus_mask
