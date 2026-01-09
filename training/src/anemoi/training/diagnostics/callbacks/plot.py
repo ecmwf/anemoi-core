@@ -97,7 +97,6 @@ class BasePlotCallback(Callback, ABC):
         focus_mask = np.ones(self.latlons.shape[0], dtype=bool)
         self.tag = None
         if self.focus_area is not None:
-            print(self.focus_area)
             if self.focus_area["spatial_mask"] is not None:
                 focus_mask = np.zeros(self.latlons.shape[0], dtype=bool)
                 spatial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spatial_mask"]]
