@@ -19,6 +19,8 @@ def get_balanced_partition_sizes(
 ) -> list[int]:
     """Partition the total size into n balanced parts, i.e. differing in size by at most 1.
 
+    Example: total_size=10, n_partitions=4 -> [3, 3, 2, 2]
+
     Parameters
     ----------
     total_size : int
