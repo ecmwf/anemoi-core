@@ -236,22 +236,12 @@ def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -
 @pytest.mark.slow
 @pytest.mark.mlflow
 def test_training_cycle_mlflow_dry_run(
-    gnn_config: tuple[DictConfig, str],
+    mlflow_dry_run_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
-    mlflow_server: str,
 ) -> None:
     from anemoi.training.commands.mlflow import prepare_mlflow_run_id
-    from anemoi.utils.mlflow.auth import TokenAuth
 
-    cfg, url = gnn_config
-
-    # Override config for MLFlow logging using an dry run ID
-    cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
-    cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
-    cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
-
-    # Log in and acquire a token from keycloak
-    TokenAuth(url=cfg.diagnostics.log.mlflow.tracking_uri).login()
+    cfg, url = mlflow_dry_run_config
 
     # Generate a dry run ID and set it in the config
     run_id, _ = prepare_mlflow_run_id(
