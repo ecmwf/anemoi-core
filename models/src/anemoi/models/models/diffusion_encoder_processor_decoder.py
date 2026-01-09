@@ -19,7 +19,6 @@ import torch
 from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric import data
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
@@ -69,8 +68,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
-
-
 
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
@@ -301,7 +298,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 x_hidden_latent, 0, model_comm_group=model_comm_group
             )
 
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[dataset_name].get_edges(
+            encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
+                dataset_name
+            ].get_edges(
                 batch_size=bse,
                 model_comm_group=model_comm_group,
             )
@@ -355,7 +354,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_out_dict = {}
         for dataset_name in dataset_names:
             # Compute decoder edges using updated latent representation
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[dataset_name].get_edges(
+            decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
+                dataset_name
+            ].get_edges(
                 batch_size=bse,
                 model_comm_group=model_comm_group,
             )

@@ -53,7 +53,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent[dataset_name],
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
-                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim
+                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
 
         # Processor hidden -> hidden (shared across all datasets)
@@ -255,7 +255,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
             # Compute encoder edges at model level
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[dataset_name].get_edges(
+            encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
+                dataset_name
+            ].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
             )
@@ -407,7 +409,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         x_out_dict = {}
         for dataset_name in dataset_names:
             # Compute decoder edges
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[dataset_name].get_edges(
+            decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
+                dataset_name
+            ].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
             )
@@ -418,7 +422,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 shard_shapes=(
                     shard_shapes_hidden_dict[self._graph_name_hidden[0]],
                     shard_shapes_data_dict[dataset_name],
-                ),           
+                ),
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
