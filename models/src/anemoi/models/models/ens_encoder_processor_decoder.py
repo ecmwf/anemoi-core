@@ -202,15 +202,23 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_ens_size)
             shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
+            encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider.get_edges(
+                batch_size=batch_ens_size,
+                model_comm_group=model_comm_group,
+            )
+
             # Encoder for this dataset
             x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_ens_size,
                 shard_shapes=(shard_shapes_data_dict[dataset_name], shard_shapes_hidden_dict[dataset_name]),
+                edge_attr=encoder_edge_attr,
+                edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                edge_shard_shapes=enc_edge_shard_shapes,
             )
             dataset_latents[dataset_name] = x_latent
 
@@ -231,6 +239,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
         )
 
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=batch_ens_size,
+            model_comm_group=model_comm_group,
+        )
+
         processor_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
 
         # Processor
@@ -238,11 +251,20 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x=x_latent_proc,
             batch_size=batch_ens_size,
             shard_shapes=shard_shapes_hidden,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
             **processor_kwargs,
         )
 
         x_latent_proc = x_latent_proc + x_latent
+
+        # Compute decoder edges using updated latent representation
+        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider.get_edges(
+            batch_size=batch_ens_size,
+            model_comm_group=model_comm_group,
+        )
 
         x_out_dict = {}
         for dataset_name in dataset_names:
@@ -250,10 +272,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=batch_ens_size,
                 shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
+                edge_attr=decoder_edge_attr,
+                edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=True,  # x_latent always comes sharded
                 x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
                 keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+                edge_shard_shapes=dec_edge_shard_shapes,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

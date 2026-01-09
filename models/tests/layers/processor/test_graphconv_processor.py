@@ -17,6 +17,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
@@ -28,11 +29,9 @@ class GNNProcessorInit:
     num_layers: int = 2
     num_chunks: int = 2
     mlp_extra_layers: int = 0
-    trainable_size: int = 8
-    src_grid_size: int = 0
-    dst_grid_size: int = 0
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
+    edge_dim: int = None  # Will be set from graph_provider
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
@@ -58,34 +57,43 @@ class TestGNNProcessor:
         return GNNProcessorInit()
 
     @pytest.fixture
-    def graphconv_processor(self, graphconv_init, fake_graph):
-        return GNNProcessor(
-            **asdict(graphconv_init),
-            sub_graph=fake_graph[("nodes", "to", "nodes")],
-            sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
+    def graph_provider(self, fake_graph):
+        return create_graph_provider(
+            graph=fake_graph[("nodes", "to", "nodes")],
+            edge_attributes=["edge_attr1", "edge_attr2"],
+            src_size=self.NUM_NODES,
+            dst_size=self.NUM_NODES,
+            trainable_size=8,
         )
 
-    def test_graphconv_processor_init(self, graphconv_processor, graphconv_init):
+    @pytest.fixture
+    def graphconv_processor(self, graphconv_init, graph_provider):
+        config = asdict(graphconv_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        return GNNProcessor(**config)
+
+    def test_graphconv_processor_init(self, graphconv_processor, graphconv_init, graph_provider):
         assert graphconv_processor.num_chunks == graphconv_init.num_chunks
         assert graphconv_processor.num_channels == graphconv_init.num_channels
         assert graphconv_processor.chunk_size == graphconv_init.num_layers // graphconv_init.num_chunks
-        assert isinstance(graphconv_processor.trainable, TrainableTensor)
+        assert isinstance(graph_provider.trainable, TrainableTensor)
 
     def test_all_blocks(self, graphconv_processor):
         assert all(isinstance(block, GraphConvProcessorBlock) for block in graphconv_processor.proc)
 
-    def test_forward(self, graphconv_processor, graphconv_init):
+    def test_forward(self, graphconv_processor, graphconv_init, graph_provider):
         batch_size = 1
-        x = torch.rand((self.NUM_EDGES, graphconv_init.num_channels))
+        x = torch.rand((self.NUM_NODES, graphconv_init.num_channels))
         shard_shapes = [list(x.shape)]
 
         # Run forward pass of processor
-        output = graphconv_processor.forward(x, batch_size, shard_shapes)
-        assert output.shape == (self.NUM_EDGES, graphconv_init.num_channels)
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        output = graphconv_processor.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
+        assert output.shape == (self.NUM_NODES, graphconv_init.num_channels)
 
         # Generate dummy target and loss function
         loss_fn = torch.nn.MSELoss()
-        target = torch.rand((self.NUM_EDGES, graphconv_init.num_channels))
+        target = torch.rand((self.NUM_NODES, graphconv_init.num_channels))
         loss = loss_fn(output, target)
 
         # Check loss
@@ -95,7 +103,10 @@ class TestGNNProcessor:
         loss.backward()
 
         # Check gradients of trainable tensor
-        assert graphconv_processor.trainable.trainable.grad.shape == (self.NUM_EDGES, graphconv_init.trainable_size)
+        assert graph_provider.trainable.trainable.grad.shape == (
+            self.NUM_EDGES,
+            8,
+        )
 
         # Check gradients of processor
         for param in graphconv_processor.parameters():

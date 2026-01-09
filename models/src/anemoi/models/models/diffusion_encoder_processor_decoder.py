@@ -19,6 +19,7 @@ import torch
 from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric import data
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
@@ -26,6 +27,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -68,18 +70,28 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
 
+
+
         # Encoder data -> hidden
+        self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
+            # Create graph providers
+            self.encoder_graph_provider[dataset_name] = create_graph_provider(
+                graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
+                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            )
+
             self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
                 hidden_dim=self.num_channels,
-                sub_graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
-                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
 
         # Processor hidden -> hidden (shared across all datasets)
@@ -87,18 +99,33 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
         processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
 
+        # Processor hidden -> hidden
+        self.processor_graph_provider = create_graph_provider(
+            graph=self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden],
+            dst_size=self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+        )
+
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            sub_graph=processor_graph,
-            src_grid_size=processor_grid_size,
-            dst_grid_size=processor_grid_size,
+            edge_dim=self.processor_graph_provider.edge_dim,
         )
 
         # Decoder hidden -> data
+        self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
+            self.decoder_graph_provider[dataset_name] = create_graph_provider(
+                graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
+                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            )
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -106,9 +133,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,
                 out_channels_dst=self.num_output_channels[dataset_name],
-                sub_graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
-                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -276,14 +301,22 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 x_hidden_latent, 0, model_comm_group=model_comm_group
             )
 
+            encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[dataset_name].get_edges(
+                batch_size=bse,
+                model_comm_group=model_comm_group,
+            )
+
             x_data_latent, dataset_latents[dataset_name] = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=bse,
                 shard_shapes=(shard_shapes_data_dict[dataset_name], shard_shapes_hidden_dict[dataset_name]),
+                edge_attr=encoder_edge_attr,
+                edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                edge_shard_shapes=enc_edge_shard_shapes,
                 **fwd_mapper_kwargs[dataset_name],
             )
 
@@ -299,12 +332,20 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             proc_kwargs == processor_kwargs[dataset_name] for dataset_name in dataset_names
         ), "All datasets must have the same processor kwargs."
 
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=bse,
+            model_comm_group=model_comm_group,
+        )
+
         x_latent_proc = self.processor(
             x=x_latent,
             batch_size=bse,
             shard_shapes=shard_shapes_hidden,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
-            **proc_kwargs,  # processor is shared across datasets
+            edge_shard_shapes=proc_edge_shard_shapes,
+            **proc_kwargs,
         )
 
         # Processor skip connection
@@ -313,14 +354,23 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
+            # Compute decoder edges using updated latent representation
+            decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[dataset_name].get_edges(
+                batch_size=bse,
+                model_comm_group=model_comm_group,
+            )
+
             x_out = self.decoder[dataset_name](
                 (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=bse,
                 shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
+                edge_attr=decoder_edge_attr,
+                edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=True,  # x_latent always comes sharded
                 x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
                 keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+                edge_shard_shapes=dec_edge_shard_shapes,
                 **bwd_mapper_kwargs[dataset_name],
             )
 
