@@ -18,8 +18,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.typing import Adj
 
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
+from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvProcessorBlock
@@ -352,20 +353,18 @@ class GNNProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edge_shard_shapes: Optional[tuple] = None,
         *args,
         **kwargs,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
 
-        target_nodes = sum(x[0] for x in shape_nodes)
-        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
-            target_nodes,
-            edge_attr,
-            edge_index,
-            model_comm_group,
-        )
-        edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
-        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+        if edge_shard_shapes is None:
+            # Edges not pre-sharded, do 1-hop sorting and sharding here
+            target_nodes = sum(x[0] for x in shape_nodes)
+            edge_attr, edge_index, _ = shard_edges_1hop(
+                edge_attr, edge_index, target_nodes, target_nodes, model_comm_group
+            )
 
         x, edge_attr = self.run_layers(
             (x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group, **kwargs
@@ -454,6 +453,7 @@ class GraphTransformerProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edge_shard_shapes: Optional[tuple] = None,
         *args,
         **kwargs,
     ) -> Tensor:
@@ -461,8 +461,15 @@ class GraphTransformerProcessor(BaseProcessor):
 
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
 
-        shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
-        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+        if edge_shard_shapes is not None:
+            # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
+            # but edge_attr can stay sharded
+            shapes_edge_attr = edge_shard_shapes[0]
+            edge_index = gather_tensor(edge_index, 1, edge_shard_shapes[1], model_comm_group)
+        else:
+            # Edges not pre-sharded, shard edge_attr here (edge_index stays full)
+            shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
+            edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),

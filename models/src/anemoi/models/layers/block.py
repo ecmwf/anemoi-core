@@ -650,7 +650,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         shape_dst_nodes = shapes[1]
 
         out = einops.rearrange(out, "(batch grid) heads vars -> batch heads grid vars", batch=batch_size)
-        out = shard_sequence(out, shapes=shape_dst_nodes, mgroup=model_comm_group)
+        out = shard_sequence(out, shapes=shape_dst_nodes, num_heads=self.num_heads, mgroup=model_comm_group)
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         return out
