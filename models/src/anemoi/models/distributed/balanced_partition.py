@@ -17,7 +17,7 @@ def get_balanced_partition_sizes(
     total_size: int,
     n_partitions: int,
 ) -> list[int]:
-    """Get balanced partition sizes.
+    """Partition the total size into n balanced parts, i.e. differing in size by at most 1.
 
     Parameters
     ----------
@@ -32,17 +32,10 @@ def get_balanced_partition_sizes(
         List of partition sizes
 
     """
-    if total_size < n_partitions:
-        LOGGER.warning(
-            "Balanced partition contains empty partitions: total_size=%d, n_partitions=%d",
-            total_size,
-            n_partitions,
-        )
-
     base_size = total_size // n_partitions
     remainder = total_size % n_partitions
 
-    # distribute the remainder across the first #remainder partitions
+    # distribute the remainder across the first #remainder parts
     return [base_size + 1] * remainder + [base_size] * (n_partitions - remainder)
 
 

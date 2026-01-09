@@ -19,8 +19,8 @@ import torch
 from einops import rearrange
 from torch.utils.data import IterableDataset
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.grid_indices import BaseGridIndices
-from anemoi.training.utils.balanced_partition import get_balanced_partition_range
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
 

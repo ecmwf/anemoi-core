@@ -17,8 +17,8 @@ from functools import cached_property
 import numpy as np
 from torch_geometric.data import HeteroData
 
-from anemoi.training.utils.balanced_partition import get_balanced_partition_sizes
-from anemoi.training.utils.balanced_partition import get_partition_range
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.balanced_partition import get_partition_range
 
 LOGGER = logging.getLogger(__name__)
 
