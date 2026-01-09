@@ -19,10 +19,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     import torch
-    from torch_geometric.data import HeteroData
-
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 
 LOGGER = logging.getLogger(__name__)
@@ -30,108 +26,6 @@ LOGGER = logging.getLogger(__name__)
 
 class GraphForecaster(BaseRolloutGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
-
-    def __init__(
-        self,
-        *,
-        config: BaseSchema,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict,
-        supporting_arrays: dict,
-    ) -> None:
-        """Initialize graph neural network forecaster.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Job configuration
-        graph_data : HeteroData
-            Graph object
-        statistics : dict
-            Statistics of the training data
-        data_indices : IndexCollection
-            Indices of the training data,
-        metadata : dict
-            Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
-
-        """
-        super().__init__(
-            config=config,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
-        )
-
-        self.rollout = config.training.rollout.start
-        self.rollout_epoch_increment = config.training.rollout.epoch_increment
-        self.rollout_max = config.training.rollout.max
-
-        LOGGER.debug("Rollout window length: %d", self.rollout)
-        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
-        LOGGER.debug("Rollout max : %d", self.rollout_max)
-
-    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss = super().training_step(batch, batch_idx)
-        self.log(
-            "rollout",
-            float(self.rollout),
-            on_step=True,
-            logger=self.logger_enabled,
-            rank_zero_only=True,
-            sync_dist=False,
-        )
-        return train_loss
-
-    def on_train_epoch_end(self) -> None:
-        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
-            self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
-        self.rollout = min(self.rollout, self.rollout_max)
-
-    def _advance_input(
-        self,
-        x: torch.Tensor,
-        y_pred: torch.Tensor,
-        batch: torch.Tensor,
-        rollout_step: int,
-    ) -> torch.Tensor:
-        x = x.roll(-self.multi_out, dims=1)
-        # TODO(dieter): see if we can replace for loop with tensor operations
-        for i in range(self.multi_out):
-            # Get prognostic variables
-            x[:, -(i + 1), :, :, self.data_indices.model.input.prognostic] = y_pred[
-                :,
-                -(i + 1),
-                ...,
-                self.data_indices.model.output.prognostic,
-            ]
-
-            batch_time_index = self.multi_step + (rollout_step + 1) * self.multi_out - (i + 1)
-
-            x[:, -(i + 1)] = self.output_mask.rollout_boundary(
-                x[:, -(i + 1)],
-                batch[:, batch_time_index],
-                self.data_indices,
-                grid_shard_slice=self.grid_shard_slice,
-            )
-
-            # get new "constants" needed for time-varying fields
-            x[:, -(i + 1), :, :, self.data_indices.model.input.forcing] = batch[
-                :,
-                batch_time_index,
-                :,
-                :,
-                self.data_indices.data.input.forcing,
-            ]
-        return x
 
     def _rollout_step(
         self,
