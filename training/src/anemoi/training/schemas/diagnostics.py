@@ -121,21 +121,6 @@ class LongRolloutPlotsSchema(BaseModel):
     "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
-class FocusAreaSchema(BaseModel):
-    spatial_mask: str | None = Field(default=None)
-    "Name of the node attribute to use as masking. eg. cutout_mask"
-
-    latlon_bounds: list[list[float]] | None = Field(default=None, min_items=2, max_items=2)
-    "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
-
-    @model_validator(mode="after")
-    def exactly_one_present(self) -> "FocusAreaSchema":
-        if (self.spatial_mask is None) == (self.latlon_bounds is None):
-            msg = "Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both)."
-            raise ValueError(msg)
-        return self
-
-
 class PlotSampleSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
     "PlotSample object from anemoi training diagnostics callbacks."
