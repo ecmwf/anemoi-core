@@ -113,29 +113,36 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     """
     trainer = AnemoiTrainer(aicon_config_with_grid)
 
+    dataset_name = "data"
     assert_metadatakeys(
         trainer.metadata,
         ("config", "data", "timestep"),
         ("config", "graph", "nodes", "icon_mesh", "node_builder", "max_level_dataset"),
         ("config", "training", "precision"),
-        ("data_indices", "data", "input", "diagnostic"),
-        ("data_indices", "data", "input", "full"),
-        ("data_indices", "data", "output", "full"),
-        ("data_indices", "model", "input", "forcing"),
-        ("data_indices", "model", "input", "full"),
-        ("data_indices", "model", "input", "prognostic"),
-        ("data_indices", "model", "output", "full"),
-        ("dataset", "shape"),
+        ("data_indices", dataset_name, "data", "input", "diagnostic"),
+        ("data_indices", dataset_name, "data", "input", "full"),
+        ("data_indices", dataset_name, "data", "output", "full"),
+        ("data_indices", dataset_name, "model", "input", "forcing"),
+        ("data_indices", dataset_name, "model", "input", "full"),
+        ("data_indices", dataset_name, "model", "input", "prognostic"),
+        ("data_indices", dataset_name, "model", "output", "full"),
+        ("dataset", dataset_name, "shape"),
     )
 
-    assert torch.is_tensor(trainer.graph_data["data"].x), "data coordinates not present"
+    assert torch.is_tensor(trainer.graph_data[dataset_name]["data"].x), "data coordinates not present"
 
     # Assert heterogeneity of num_chunks setting.
     assert aicon_config_with_grid.model.encoder.num_chunks != aicon_config_with_grid.model.decoder.num_chunks
 
     # Monitor path and setting of num_chunks
-    assert trainer.model.model.model.encoder.proc.num_chunks == aicon_config_with_grid.model.encoder.num_chunks
-    assert trainer.model.model.model.decoder.proc.num_chunks == aicon_config_with_grid.model.decoder.num_chunks
+    assert (
+        trainer.model.model.model.encoder[dataset_name].proc.num_chunks
+        == aicon_config_with_grid.model.encoder.num_chunks
+    )
+    assert (
+        trainer.model.model.model.decoder[dataset_name].proc.num_chunks
+        == aicon_config_with_grid.model.decoder.num_chunks
+    )
 
 
 @pytest.mark.slow

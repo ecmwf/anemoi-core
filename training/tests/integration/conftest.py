@@ -22,6 +22,7 @@ from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
@@ -247,13 +248,20 @@ def lam_config_with_graph(
 def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> DictConfig:
     url_loss_matrices = cfg.system.input.loss_matrices_path
     tmp_path_loss_matrices = None
-    for file in cfg.training.training_loss.loss_matrices:
-        if file is not None:
-            tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
-    if tmp_path_loss_matrices is not None:
-        cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
-        cfg.training.training_loss.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
-        cfg.training.validation_metrics.multiscale.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+
+    training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
+    for dataset_name, training_loss_cfg in training_losses_cfg.items():
+        for file in training_loss_cfg.loss_matrices:
+            if file is not None:
+                tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+        if tmp_path_loss_matrices is not None:
+            cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
+            training_loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+
+            cfg.training.validation_metrics.datasets[dataset_name].multiscale.loss_matrices_path = str(
+                Path(tmp_path_loss_matrices).parent,
+            )
+        cfg.training.training_loss.datasets[dataset_name] = training_loss_cfg
     return cfg
 
 
