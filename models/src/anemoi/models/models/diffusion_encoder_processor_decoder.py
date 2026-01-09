@@ -98,10 +98,10 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
-            graph=self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            graph=processor_graph,
             edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden],
-            dst_size=self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden],
+            src_size=processor_grid_size,
+            dst_size=processor_grid_size,
             trainable_size=model_config.model.processor.get("trainable_size", 0),
         )
 

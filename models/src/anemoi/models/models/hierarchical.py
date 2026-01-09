@@ -328,7 +328,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             x_encoded_latents[src_hidden_name], x_latent = self.downscale[src_hidden_name](
                 (x_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
-                shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
+                shard_shapes=(shard_shapes_hidden_dict[src_hidden_name], shard_shapes_hidden_dict[dst_hidden_name]),
                 edge_attr=downscale_edge_attr,
                 edge_index=downscale_edge_index,
                 model_comm_group=model_comm_group,
@@ -345,10 +345,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
         )
 
-        curr_latent = self.processor(
-            curr_latent,
+        x_latent = self.processor(
+            x_latent,
             batch_size=batch_size,
-            shard_shapes=shard_shapes_hiddens[dst_hidden_name],
+            shard_shapes=shard_shapes_hidden_dict[dst_hidden_name],
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
@@ -372,7 +372,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             x_latent = self.upscale[src_hidden_name](
                 (x_latent, x_encoded_latents[dst_hidden_name]),
                 batch_size=batch_size,
-                shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
+                shard_shapes=(shard_shapes_hidden_dict[src_hidden_name], shard_shapes_hidden_dict[dst_hidden_name]),
                 edge_attr=upscale_edge_attr,
                 edge_index=upscale_edge_index,
                 model_comm_group=model_comm_group,
@@ -400,7 +400,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     edge_attr=up_level_edge_attr,
                     edge_index=up_level_edge_index,
                     batch_size=batch_size,
-                    shard_shapes=shard_shapes_hiddens[dst_hidden_name],
+                    shard_shapes=shard_shapes_hidden_dict[dst_hidden_name],
                     model_comm_group=model_comm_group,
                     edge_shard_shapes=up_edge_shard_shapes,
                 )
