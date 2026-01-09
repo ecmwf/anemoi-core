@@ -239,12 +239,13 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         self.config = config
         self.loss = DummyLoss()
         self.loss_supports_sharding = False
+        self.multi_out = 1
 
     monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
 
     cfg = DictConfig(
         {
-            "training": {"multistep_input": 1},
+            "training": {"multistep_input": 1, "multistep_output": 1},
             "model": {
                 "model": {
                     "diffusion": {
@@ -319,6 +320,7 @@ def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.M
     forecaster.loss = DummyLoss()
     forecaster.data_indices = data_indices
     forecaster.multi_step = 1
+    forecaster.multi_out = 1
     forecaster.rollout = 1
     forecaster.nens_per_device = 2
     forecaster.grid_shard_shapes = None
@@ -346,6 +348,7 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
     forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
     pl.LightningModule.__init__(forecaster)
     forecaster.multi_step = 1
+    forecaster.multi_out = 1
     forecaster.rollout = 1
     forecaster.nens_per_device = 2
     forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
