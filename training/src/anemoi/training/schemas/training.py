@@ -398,11 +398,6 @@ class LatentForecasterSchema(ForecasterSchema):
     "Training objective."
 
 
-class LatentForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.LatentGraphForecaster",] = Field(..., alias="model_task")
-    "Training objective."
-
-
 class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."

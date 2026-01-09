@@ -79,7 +79,7 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     return inference_filepath
 
 
-def compare_state_dicts(state_dict, model_state_dict):
+def compare_state_dicts(state_dict: dict, model_state_dict: dict) -> None:
     common_keys = state_dict.keys() & model_state_dict.keys()
     missing_in_model = state_dict.keys() - model_state_dict.keys()
     missing_in_checkpoint = model_state_dict.keys() - state_dict.keys()
@@ -91,19 +91,19 @@ def compare_state_dicts(state_dict, model_state_dict):
         s_shape_str = str(tuple(s_shape)) if s_shape is not None else "N/A"
         m_shape_str = str(tuple(m_shape)) if m_shape is not None else "N/A"
         match = "✓" if s_shape == m_shape else "✗"
-        LOGGER.info(f"{k:60} | checkpoint: {s_shape_str:>20} | model: {m_shape_str:>20} | match: {match}")
+        LOGGER.info("%60s | checkpoint: %20s | model: %20s | match: %s", k, s_shape_str, m_shape_str, match)
 
     LOGGER.info("=== Missing in model (present in checkpoint only) ===")
     for k in sorted(missing_in_model):
         s_shape = getattr(state_dict[k], "shape", None)
         s_shape_str = str(tuple(s_shape)) if s_shape is not None else "N/A"
-        LOGGER.info(f"{k:60} | checkpoint: {s_shape_str}")
+        LOGGER.info("%60s | checkpoint: %s", k, s_shape_str)
 
     LOGGER.info("=== Missing in checkpoint (present in model only) ===")
     for k in sorted(missing_in_checkpoint):
         m_shape = getattr(model_state_dict[k], "shape", None)
         m_shape_str = str(tuple(m_shape)) if m_shape is not None else "N/A"
-        LOGGER.info(f"{k:60} | model: {m_shape_str}")
+        LOGGER.info("%60s | model: %s", k, m_shape_str)
 
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
@@ -135,6 +135,7 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
     return model
 
+
 def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
     """Recursively freezes the parameters of a submodule with the specified name.
 
@@ -153,6 +154,7 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
         else:
             # Recursively search within children
             freeze_submodule_by_name(child, target_name)
+
 
 class LoggingUnpickler(pickle.Unpickler):
     def find_class(self, module: str, name: str) -> str:

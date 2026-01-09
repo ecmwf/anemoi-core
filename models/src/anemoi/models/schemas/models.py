@@ -344,12 +344,11 @@ class DisentangledHierarchicalModelSchema(HierarchicalModelSchema, DisentangledM
 
 
 ModelSchema = Union[
-    
     BaseModelSchema,
     EnsModelSchema,
     HierarchicalModelSchema,
     DisentangledModelSchema,
     DisentangledHierarchicalModelSchema,
     DiffusionModelSchema,
-    DiffusionTendModelSchema
+    DiffusionTendModelSchema,
 ]

@@ -181,10 +181,10 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
         # Decoder
         x_out = self.decoder(
-            (x_latent, x_target_latent), #TODO: put back in place
+            (x_latent, x_target_latent),  # TODO: put back in place
             # (x_latent, x_data_latent),
             batch_size=batch_size,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_target), #TODO: put back in place
+            shard_shapes=(shard_shapes_hidden, shard_shapes_target),  # TODO: put back in place
             # shard_shapes=(shard_shapes_hidden, shard_shapes_data),
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded

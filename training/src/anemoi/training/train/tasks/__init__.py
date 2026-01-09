@@ -21,5 +21,6 @@ __all__ = [
     "GraphDiffusionTendForecaster",
     "GraphEnsForecaster",
     "GraphForecaster",
-    "GraphInterpolator", 
-    "LatentGraphForecaster"]
+    "GraphInterpolator",
+    "LatentGraphForecaster",
+]
