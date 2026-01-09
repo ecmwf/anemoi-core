@@ -42,7 +42,7 @@ class GraphAutoEncoder(BaseGraphModule):
         y = batch[:, 0, ..., self.data_indices.data.output.full]
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
-        loss, metrics = checkpoint(
+        loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
             y,

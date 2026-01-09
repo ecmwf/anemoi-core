@@ -148,7 +148,6 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         Tensor
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
-        print(x.shape)
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
         in_out_sharded = grid_shard_shapes is not None
