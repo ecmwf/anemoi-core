@@ -15,15 +15,19 @@ deterministic: False
 precision: 16-mixed
 
 # multistep input
-# 1 = single step scheme, X(t-1) used to predict X(t)
-# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
+# 1 = single step input scheme, X(t-1) used to predict future time step(s)
+# k > 1: multistep input scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict future time step(s)
 # Deepmind use k = 2 in their model
 multistep_input: 2
-# TODO(dieter): update comments
+
+# multistep output
+# 1 = single step output scheme, single model forward predicts X(t)
+# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
+# Deepmind use l = 1 in their model
 multistep_output: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
-# the effective batch size becomes num-devices * batch_size * k
+# the effective batch size becomes num-devices * batch_size * K
 accum_grad_batches: 1
 
 num_sanity_val_steps: 6

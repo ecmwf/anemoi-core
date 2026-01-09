@@ -54,6 +54,8 @@ class BaseDiffusionForecaster(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
+        assert self.multi_out == 1, "BaseDiffusionForecaster currently only supports single-output models!"
+
         self.rho = config.model.model.diffusion.rho
 
     def get_input(self, batch: torch.Tensor) -> torch.Tensor:

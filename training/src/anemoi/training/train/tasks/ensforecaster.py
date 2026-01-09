@@ -66,6 +66,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
+        assert self.multi_out == 1, "EnsForecaster currently only supports single-output models!"
+
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
         self.model_comm_group_size = config.system.hardware.num_gpus_per_model
         num_gpus_per_model = config.system.hardware.num_gpus_per_model
