@@ -46,10 +46,10 @@ class DefinedModels(str, Enum):
     ANEMOI_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDec"
     ANEMOI_ENS_MODEL_ENC_PROC_DEC = "anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec"
     ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
-    ANEMOI_MODEL_ENC_HIERPROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
-    ANEMOI_MODEL_ENC_HIERPROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
-    ANEMOI_MODEL_INTERPENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
-    ANEMOI_MODEL_INTERPENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecInterpolator"
+    ANEMOI_MODEL_HIER_ENC_PROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
+    ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
+    ANEMOI_MODEL_INTERP_ENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
+    ANEMOI_MODEL_INTERP_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecInterpolator"
     ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec"
     )
@@ -58,6 +58,16 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec"
     )
     ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec"
+    ANEMOI_MODEL_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder"
+    ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
+    ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"
+    ANEMOI_MODEL_HIER_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder"
+    ANEMOI_MODEL_ENC_PROC_DEC_DIS = "anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDec"
+    ANEMOI_MODEL_ENC_PROC_DEC_DIS_SHORT = "anemoi.models.models.AnemoiModelDisentangledEncProcDec"
+    ANEMOI_MODEL_HIER_ENC_PROC_DEC_DIS = (
+        "anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDecHierarchical"
+    )
+    ANEMOI_MODEL_HIER_ENC_PROC_DEC_DIS_SHORT = "anemoi.models.models.AnemoiModelDisentangledEncProcDecHierarchical"
 
 
 class Model(BaseModel):
@@ -322,6 +332,23 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Number of message passing steps at each level"
 
 
+class DisentangledModelSchema(BaseModelSchema):
+    latent_rollout: bool = Field(default=False)
+    "Toggle to do enable latent rollout."
+
+
+class DisentangledHierarchicalModelSchema(HierarchicalModelSchema, DisentangledModelSchema):
+    """Inherits fields from both `HierarchicalModelSchema` and `DisentangledModelSchema`."""
+
+    pass
+
+
 ModelSchema = Union[
-    BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, DiffusionTendModelSchema
+    BaseModelSchema,
+    EnsModelSchema,
+    HierarchicalModelSchema,
+    DisentangledModelSchema,
+    DisentangledHierarchicalModelSchema,
+    DiffusionModelSchema,
+    DiffusionTendModelSchema,
 ]

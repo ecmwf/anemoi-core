@@ -1,8 +1,8 @@
 ---
 defaults:
-  - scalers: global
+  - scalers: autoencoder
 
-# resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
+# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
@@ -20,7 +20,7 @@ precision: 16-mixed
 # k = 1, is also necessary for autoencoder training as X(t) is used to predict X^(t)
 # k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
 # Deepmind use k = 2 in their model
-multistep_input: 2
+multistep_input: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
@@ -75,7 +75,7 @@ optimizer:
   # betas: [0.9, 0.95]
 
 # select model
-model_task: anemoi.training.train.tasks.GraphForecaster
+model_task: anemoi.training.train.tasks.GraphAutoEncoder
 
 # select strategy
 strategy:
@@ -115,7 +115,7 @@ validation_metrics:
     # Available scalers include:
     # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
     # Use the `scale_validation_metrics` section to variable scale.
-    scalers: ["node_weights"]
+    scalers: []
     # other kwargs
     ignore_nans: True
 
@@ -155,11 +155,11 @@ metrics:
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
-  start: 1
+  start: 0
   # increase rollout every n epochs
   epoch_increment: 0
   # maximum rollout to use
-  max: 1
+  max: 0
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null

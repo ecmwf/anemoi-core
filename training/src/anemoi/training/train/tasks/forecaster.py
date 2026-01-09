@@ -85,3 +85,70 @@ class GraphForecaster(BaseRolloutGraphModule):
             x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
+
+
+class LatentGraphForecaster(GraphForecaster):
+
+    def forward(self, x: torch.Tensor, rollout_step: int) -> torch.Tensor:
+        return self.model(
+            x,
+            rollout_step=rollout_step,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
+
+    def rollout_step(
+        self,
+        batch: torch.Tensor,
+        rollout: int | None = None,
+        validation_mode: bool = False,
+    ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
+        """Rollout step for the forecaster.
+
+        Will run pre_processors on batch, but not post_processors on predictions.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to use for rollout
+        rollout : Optional[int], optional
+            Number of times to rollout for, by default None
+            If None, will use self.rollout
+        validation_mode : bool, optional
+            Whether in validation mode, and to calculate validation metrics, by default False
+            If False, metrics will be empty
+
+        Yields
+        ------
+        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+            Loss value, metrics, and predictions (per step)
+
+        """
+        # start rollout of preprocessed batch
+        x = batch[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.data.input.full,
+        ]  # (bs, multi_step, latlon, nvar)
+        msg = (
+            "Batch length not sufficient for requested multi_step length!"
+            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
+        )
+        assert batch.shape[1] >= rollout + self.multi_step, msg
+
+        for rollout_step in range(rollout or self.rollout):
+            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
+            y_pred = self(x, rollout_step)
+
+            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
+            # y includes the auxiliary variables, so we must leave those out when computing the loss
+            loss, metrics_next = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
+                rollout_step,
+                validation_mode,
+                use_reentrant=False,
+            )
+            yield loss, metrics_next, y_pred

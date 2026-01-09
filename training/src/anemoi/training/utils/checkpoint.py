@@ -79,6 +79,33 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     return inference_filepath
 
 
+def compare_state_dicts(state_dict: dict, model_state_dict: dict) -> None:
+    common_keys = state_dict.keys() & model_state_dict.keys()
+    missing_in_model = state_dict.keys() - model_state_dict.keys()
+    missing_in_checkpoint = model_state_dict.keys() - state_dict.keys()
+
+    LOGGER.info("=== Common Keys ===")
+    for k in sorted(common_keys):
+        s_shape = getattr(state_dict[k], "shape", None)
+        m_shape = getattr(model_state_dict[k], "shape", None)
+        s_shape_str = str(tuple(s_shape)) if s_shape is not None else "N/A"
+        m_shape_str = str(tuple(m_shape)) if m_shape is not None else "N/A"
+        match = "✓" if s_shape == m_shape else "✗"
+        LOGGER.info("%60s | checkpoint: %20s | model: %20s | match: %s", k, s_shape_str, m_shape_str, match)
+
+    LOGGER.info("=== Missing in model (present in checkpoint only) ===")
+    for k in sorted(missing_in_model):
+        s_shape = getattr(state_dict[k], "shape", None)
+        s_shape_str = str(tuple(s_shape)) if s_shape is not None else "N/A"
+        LOGGER.info("%60s | checkpoint: %s", k, s_shape_str)
+
+    LOGGER.info("=== Missing in checkpoint (present in model only) ===")
+    for k in sorted(missing_in_checkpoint):
+        m_shape = getattr(model_state_dict[k], "shape", None)
+        m_shape_str = str(tuple(m_shape)) if m_shape is not None else "N/A"
+        LOGGER.info("%60s | model: %s", k, m_shape_str)
+
+
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
     # Load the checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
@@ -91,6 +118,8 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     state_dict = checkpoint["state_dict"]
 
     model_state_dict = model.state_dict()
+
+    compare_state_dicts(state_dict, model_state_dict)
 
     for key in state_dict.copy():
         if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
