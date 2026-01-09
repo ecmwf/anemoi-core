@@ -23,6 +23,11 @@ from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
 pytest_plugins = "anemoi.utils.testing"
 
+PYTEST_MARKED_TESTS = [
+    "multigpu",
+    "mlflow",
+]
+
 
 @pytest.fixture
 def config(request: SubRequest) -> DictConfig:
@@ -78,12 +83,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.fixture
 def mlflow_server(pytestconfig: Any) -> str:
-    return pytestconfig.getoption("mlflow_server")
+    mlflow_server = pytestconfig.getoption("mlflow_server")
+    if pytestconfig.getoption("mlflow") and mlflow_server is None:
+        e = ValueError("MLFlow server must be provided via --mlflow-server when using --mlflow")
+        raise e
+    return mlflow_server
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Automatically skip @pytest.mark.multigpu tests unless --multigpu is used."""
-    for option_name in ["multigpu", "mlflow"]:
+    """Automatically skip PYTEST_MARKED_TESTS unless options are used in CLI."""
+    for option_name in PYTEST_MARKED_TESTS:
         if not config.getoption(f"--{option_name}"):
             skip_marker = pytest.mark.skip(
                 reason=f"Skipping tests requiring {option_name}, use --{option_name} to enable",
