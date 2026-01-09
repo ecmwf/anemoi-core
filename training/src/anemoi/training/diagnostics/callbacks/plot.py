@@ -92,10 +92,15 @@ class BasePlotCallback(Callback, ABC):
 
     def get_focus_mask(self, pl_module: pl.LightningModule) -> np.ndarray | None:
         """Get the focus mask based on the focus area configuration."""
-        self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+
+        if self.latlons is None:
+            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
+            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
+
         # Compute focus mask
         focus_mask = np.ones(self.latlons.shape[0], dtype=bool)
         self.tag = None
+
         if self.focus_area is not None:
             if self.focus_area["spatial_mask"] is not None:
                 focus_mask = np.zeros(self.latlons.shape[0], dtype=bool)
@@ -1177,7 +1182,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                 logger,
                 fig,
                 epoch=epoch,
-                tag=f"gnn_pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0{self.tag}",
+                tag=f"pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
                 exp_log_tag=f"val_pred_sample_rstep{rollout_step:02d}_rank{local_rank:01d}",
             )
 
@@ -1198,7 +1203,7 @@ class PlotReconstruction(BasePlotAdditionalMetrics):
         focus_area: dict | None = None,
         **kwargs: Any,
     ) -> None:
-        """Initialise the PlotSample callback.
+        """Initialise the PlotReconstruction callback.
 
         Parameters
         ----------
@@ -1262,20 +1267,15 @@ class PlotReconstruction(BasePlotAdditionalMetrics):
             for name in self.parameters
         }
 
-        data, output_tensor = self.process(pl_module, outputs, batch, output_times)
-        reconstruction = output_tensor[0, ...]  # Shape: [channels, spatial]
+        data, reconstruction = self.process(pl_module, outputs, batch, output_times)
 
         local_rank = pl_module.local_rank
 
         # Get focus mask
         focus_mask = self.get_focus_mask(pl_module)
 
-        # Apply mask
-        if data.shape != reconstruction.shape:
-            data = data.reshape(reconstruction.shape)
-
-        data = data[..., focus_mask, :]
-        reconstruction = reconstruction[..., focus_mask, :]
+        data = data[0, 0, focus_mask, :]
+        reconstruction = reconstruction[0, 0, focus_mask, :]
         diff = np.abs(data - reconstruction)
         latlons = self.latlons[focus_mask]
 
@@ -1285,7 +1285,7 @@ class PlotReconstruction(BasePlotAdditionalMetrics):
             self.per_sample,
             latlons,
             self.accumulation_levels_plot,
-            data.squeeze(),
+            data,
             reconstruction,
             diff,
             datashader=self.datashader_plotting,
