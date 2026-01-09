@@ -62,6 +62,7 @@ dataloader:
     drop: [boundary_mask]
 
 training:
+  max_epochs: 200
   metrics:
     - height_500
     - temp_850
