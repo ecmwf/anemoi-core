@@ -18,11 +18,11 @@ import torch.fft
 LOGGER = logging.getLogger(__name__)
 
 
-class SpectralTransform:
+class SpectralTransform(torch.nn.Module):
     """Abstract base class for spectral transforms."""
 
     @abc.abstractmethod
-    def __call__(
+    def forward(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
@@ -64,7 +64,7 @@ class FFT2D(SpectralTransform):
         self.y_dim = y_dim
         self.nodes_slice = slice(*nodes_slice)
 
-    def __call__(
+    def forward(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
@@ -83,7 +83,7 @@ class SHT(SpectralTransform):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
 
-    def __call__(
+    def forward(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
