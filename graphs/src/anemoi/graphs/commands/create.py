@@ -54,7 +54,7 @@ class Create(Command):
                 GraphDescriptor(args.save_path).describe()
             return
 
-        graph_creator = GraphCreator(config=args.config)
+        graph_creator = GraphCreator(config_path=args.config)
         graph_creator.create(save_path=args.save_path, overwrite=args.overwrite)
 
         if args.description:

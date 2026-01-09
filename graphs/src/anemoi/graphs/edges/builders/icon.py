@@ -52,7 +52,7 @@ class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder, ABC):
         """Update the graph with the edges."""
         assert self.icon_mesh is not None, f"{self.__class__.__name__} requires initialized icon_mesh."
         self.icon_sub_graph = graph[self.icon_mesh][self.sub_graph_address]
-        return super().update_graph(graph, attrs_config)
+        return super().update_graph(graph)
 
     def compute_edge_index(self, _source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices for the KNN method.

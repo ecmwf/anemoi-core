@@ -53,9 +53,9 @@ def test_register_attributes(mocker, mock_anemoi_dataset_cutout, graph_with_node
     node_builder = from_file.AnemoiDatasetNodes(
         OmegaConf.create({"cutout": ["lam.zarr", "global.zarr"]}), name="test_nodes"
     )
-    config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
-    graph = node_builder.register_attributes(graph_with_nodes, config)
+    attr = attr_class(name="test_attr")
+    graph = node_builder.register_attributes(graph_with_nodes, [attr])
 
     assert graph["test_nodes"]["test_attr"] is not None
     assert isinstance(graph["test_nodes"]["test_attr"], torch.Tensor)

@@ -58,9 +58,9 @@ def test_register_nodes(grid: str):
 def test_register_attributes(graph_with_nodes: HeteroData, attr_class, grid: str):
     """Test ReducedGaussianGridNodes register correctly the weights."""
     node_builder = ReducedGaussianGridNodes(grid, "test_nodes")
-    config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
-    graph = node_builder.register_attributes(graph_with_nodes, config)
+    attr = attr_class(name="test_attr")
+    graph = node_builder.register_attributes(graph_with_nodes, [attr])
 
     assert graph["test_nodes"]["test_attr"] is not None
     assert isinstance(graph["test_nodes"]["test_attr"], torch.Tensor)

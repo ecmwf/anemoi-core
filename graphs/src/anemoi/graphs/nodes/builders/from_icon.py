@@ -15,7 +15,6 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
 from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
-from anemoi.utils.config import DotDict
 
 
 class ICONNodes(BaseNodeBuilder):
@@ -32,11 +31,11 @@ class ICONNodes(BaseNodeBuilder):
     def get_coordinates(self) -> torch.Tensor:
         return torch.from_numpy(self.multi_mesh.nodeset.gc_vertices.astype(np.float32)).fliplr()
 
-    def register_attributes(self, graph: HeteroData, config: DotDict) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, attributes: list | None = None) -> HeteroData:
         graph[self.name]["_grid_filename"] = self.grid_filename
         graph[self.name]["_multi_mesh"] = self.multi_mesh
         graph[self.name]["_cell_grid"] = self.cell_grid
-        return super().register_attributes(graph, config)
+        return super().register_attributes(graph, attributes)
 
 
 class ICONTopologicalBaseNodeBuilder(BaseNodeBuilder):
@@ -54,10 +53,10 @@ class ICONTopologicalBaseNodeBuilder(BaseNodeBuilder):
         self.icon_mesh = icon_mesh
         super().__init__(name)
 
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData) -> HeteroData:
         """Update the graph with new nodes."""
         self.icon_sub_graph = graph[self.icon_mesh][self.sub_graph_address]
-        return super().update_graph(graph, attrs_config)
+        return super().update_graph(graph)
 
 
 class ICONMultimeshNodes(ICONTopologicalBaseNodeBuilder):
