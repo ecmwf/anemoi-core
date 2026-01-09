@@ -15,7 +15,6 @@ noise_injector:
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
   noise_matrix: null
-  transpose_noise_matrix: false
   row_normalize_noise_matrix: false
   autocast: false
   layer_kernels:
