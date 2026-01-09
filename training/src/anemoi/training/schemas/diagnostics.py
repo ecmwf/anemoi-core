@@ -13,6 +13,7 @@ from typing import Annotated
 from typing import Any
 from typing import Literal
 
+from omegaconf import OmegaConf
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
@@ -32,6 +33,21 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
     "Epoch frequency to plot at."
 
 
+class FocusAreaSchema(BaseModel):
+    spatial_mask: str | None = Field(default=None)
+    "Name of the node attribute to use as masking. eg. cutout_mask"
+
+    latlon_bounds: list[list[float]] | None = Field(default=None, min_items=2, max_items=2)
+    "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
+
+    @model_validator(mode="after")
+    def exactly_one_present(self) -> "FocusAreaSchema":
+        if (self.spatial_mask is None) == (self.latlon_bounds is None):
+            msg = "Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both)."
+            raise ValueError(msg)
+        return self
+
+
 class PlotLossSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
     "PlotLoss object from anemoi training diagnostics callbacks."
@@ -39,6 +55,8 @@ class PlotLossSchema(BaseModel):
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -99,29 +117,36 @@ class LongRolloutPlotsSchema(BaseModel):
     "Delay between frames in the animation in milliseconds, by default 400."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-
-
-class FocusAreaSchema(BaseModel):
-    spatial_mask: str | None = Field(default=None)
-    "Name of the node attribute to use as masking. eg. cutout_mask"
-
-    latlon_bounds: list[list[float]] | None = Field(default=None, min_items=2, max_items=2)
-    "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
-
-    @model_validator(mode="after")
-    def exactly_one_present(self) -> "FocusAreaSchema":
-        if (self.spatial_mask is None) == (self.latlon_bounds is None):
-            msg = "Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both)."
-            raise ValueError(msg)
-        return self
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
 class PlotSampleSchema(BaseModel):
-    target_: Literal[
-        "anemoi.training.diagnostics.callbacks.plot.PlotSample",
-        "anemoi.training.diagnostics.callbacks.plot.PlotReconstruction",
-    ] = Field(alias="_target_")
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
     "PlotSample object from anemoi training diagnostics callbacks."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    accumulation_levels_plot: list[float]
+    "Accumulation levels to plot."
+    cmap_accumulation: list[str] | None = Field(default=None)
+    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
+    precip_and_related_fields: list[str] | None = Field(default=None)
+    "List of precipitation related fields, by default None."
+    per_sample: int = Field(example=6)
+    "Number of plots per sample, by default 6."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
+    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
+    "List of colormaps to use, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
+
+
+class PlotReconstructionSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotReconstruction"] = Field(alias="_target_")
+    "PlotReconstruction object from anemoi training diagnostics callbacks."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
@@ -151,6 +176,8 @@ class PlotSpectrumSchema(BaseModel):
     "List of parameters to plot."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
 class PlotHistogramSchema(BaseModel):
@@ -166,13 +193,84 @@ class PlotHistogramSchema(BaseModel):
     "Batch frequency to plot at, by default None."
 
 
+class PlotEnsSampleSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample"] = Field(alias="_target_")
+    "PlotEnsSample object from anemoi training diagnostics callbacks."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    accumulation_levels_plot: list[float]
+    "Accumulation levels to plot."
+    cmap_accumulation: list[str] | None = Field(default=None)
+    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
+    precip_and_related_fields: list[str] | None = Field(default=None)
+    "List of precipitation related fields, by default None."
+    per_sample: int = Field(example=6)
+    "Number of plots per sample, by default 6."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
+    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
+    "List of colormaps to use, by default None."
+    members: list[int] | None = Field(default=None)
+    "List of ensemble members to plot. If None, plots all members."
+
+
+class PlotEnsLossSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss"] = Field(alias="_target_")
+    "PlotLoss object from anemoi training diagnostics callbacks."
+    parameter_groups: dict[str, list[str]]
+    "Dictionary with parameter groups with parameter names as key."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at."
+
+
+class PlotEnsSpectrumSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum"] = Field(alias="_target_")
+    "PlotSpectrum object from anemoi training diagnostics callbacks."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
+
+
+class PlotEnsHistogramSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram"] = Field(alias="_target_")
+    "PlotHistogram object from anemoi training diagnostics callbacks."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    precip_and_related_fields: list[str] | None = Field(default=None)
+    "List of precipitation related fields, by default None."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
+
+
+class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot"] = Field(
+        alias="_target_",
+    )
+    "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
+    every_n_epochs: int | None
+    "Epoch frequency to plot at."
+
+
 PlotCallbacks = Annotated[
     LongRolloutPlotsSchema
     | GraphTrainableFeaturesPlotSchema
     | PlotLossSchema
     | PlotSampleSchema
+    | PlotReconstructionSchema
     | PlotSpectrumSchema
-    | PlotHistogramSchema,
+    | PlotHistogramSchema
+    | PlotEnsSampleSchema
+    | PlotEnsLossSchema
+    | PlotEnsSpectrumSchema
+    | PlotEnsHistogramSchema
+    | GraphTrainableFeaturesPlotEnsSchema,
     Field(discriminator="target_"),
 ]
 
@@ -274,7 +372,10 @@ class WandbSchema(BaseModel):
 
 
 class MlflowSchema(BaseModel):
-
+    target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
+        default="anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
+        alias="_target_",
+    )
     enabled: bool
     "Use MLflow logger."
     offline: bool
@@ -304,12 +405,37 @@ class MlflowSchema(BaseModel):
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
     max_params_length: int = MAX_PARAMS_LENGTH
     "Maximum number of hpParams to be logged with mlflow"
+    save_dir: str | None = None
+    "Directory to save logs to when offline=True, default={system.output.root}/{system.output.logs.mlflow}"
 
     @root_validator(pre=True)
     def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["tracking_uri"] = None
         return values
+
+
+class AzureMlflowSchema(MlflowSchema):
+    target_: Literal["anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger"] = Field(
+        ...,
+        alias="_target_",
+    )
+
+    # These options are inherited, but either don't't make sense or don't work for Azure
+    # so we enforce the required value
+    offline: Literal[False]
+    terminal: Literal[False]
+    # These are specific to Azure
+    identity: str | None = None
+    "Type of identity to use for logging in with Azure ML."
+    resource_group: str | None = None
+    "Name of the AzureML resource group"
+    workspace_name: str | None = None
+    "Name of the AzureML workspace"
+    subscription_id: str | None = None
+    "AzureML subscription ID"
+    azure_log_level: str = "WARNING"
+    "Log level for all azure packages (azure-identity, azure-core, etc)"
 
 
 class TensorboardSchema(BaseModel):
@@ -322,10 +448,18 @@ class LoggingSchema(BaseModel):
     "W&B logging schema."
     tensorboard: TensorboardSchema
     "TensorBorad logging schema."
-    mlflow: MlflowSchema
+    mlflow: Annotated[MlflowSchema | AzureMlflowSchema, Field(discriminator="target_")]
     "MLflow logging schema."
     interval: PositiveInt
     "Logging frequency in batches."
+
+    @model_validator(mode="before")
+    def inject_default_target(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+        mlflow_cfg = OmegaConf.to_container(values.get("mlflow"), resolve=True)
+        if mlflow_cfg is not None and isinstance(mlflow_cfg, dict) and "_target_" not in mlflow_cfg:
+            mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
+            values["mlflow"] = mlflow_cfg
+        return values
 
 
 class MemorySchema(BaseModel):
@@ -372,6 +506,17 @@ class BenchmarkProfilerSchema(BaseModel):
     "Memory snapshot if torch.cuda._record_memory_history is available."
 
 
+class ProgressBarSchema(BaseModel):
+    target_: Literal[
+        "pytorch_lightning.callbacks.TQDMProgressBar",
+        "pytorch_lightning.callbacks.RichProgressBar",
+        "anemoi.training.diagnostics.profilers.ProfilerProgressBar",
+    ] = Field(alias="_target_")
+    "TQDMProgressBar object from pytorch lightning."
+    refresh_rate: PositiveInt = Field(default=1)
+    "Refresh rate of the progress bar."
+
+
 class DiagnosticsSchema(BaseModel):
     plot: PlotSchema | None = None
     "Plot schema."
@@ -381,12 +526,12 @@ class DiagnosticsSchema(BaseModel):
     "Benchmark profiler schema for `profile` command."
     debug: Debug
     "Debug schema."
-    profiler: bool
-    "Activate the pytorch profiler and tensorboard logger."
     log: LoggingSchema
     "Log schema."
     enable_progress_bar: bool
     "Activate progress bar."
+    progress_bar: ProgressBarSchema | None = Field(default=None)
+    "Progress bar schema."
     print_memory_summary: bool
     "Print the memory summary."
     enable_checkpointing: bool

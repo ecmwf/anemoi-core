@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
 from typing import Optional
 
 from hydra.utils import instantiate
@@ -18,7 +19,6 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.truncation import BaseTruncation
 from anemoi.models.models import AnemoiModelAutoEncoder
 from anemoi.utils.config import DotDict
 
@@ -32,7 +32,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -50,7 +49,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self._truncation_data = truncation_data
 
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
@@ -72,8 +70,8 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # build networks
         self._build_networks(model_config)
 
-        # build truncation
-        self.truncation = BaseTruncation(self._truncation_data)
+        # build residual connection
+        self.residual = instantiate(model_config.model.residual, graph=graph_data)
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)

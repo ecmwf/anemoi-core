@@ -42,12 +42,9 @@ def log1p_converter(x):
 
 def boxcox_converter(x, lambd=0.5):
     """Convert positive var in to boxcox(var)."""
-    pos_lam = (torch.pow(x, lambd) - 1) / lambd
-    null_lam = torch.log(x)
     if lambd == 0:
-        return null_lam
-    else:
-        return pos_lam
+        return torch.log(x)
+    return (torch.pow(x, lambd) - 1) / lambd
 
 
 def sqrt_converter(x):
@@ -67,9 +64,6 @@ def square_converter(x):
 
 def inverse_boxcox_converter(x, lambd=0.5):
     """Convert back boxcox(var) to var."""
-    pos_lam = torch.pow(x * lambd + 1, 1 / lambd)
-    null_lam = torch.exp(x)
     if lambd == 0:
-        return null_lam
-    else:
-        return pos_lam
+        return torch.exp(x)
+    return torch.pow(x * lambd + 1, 1 / lambd)
