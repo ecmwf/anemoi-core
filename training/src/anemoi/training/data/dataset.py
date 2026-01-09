@@ -19,6 +19,7 @@ import torch
 from einops import rearrange
 from torch.utils.data import IterableDataset
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
@@ -232,16 +233,16 @@ class NativeGridDataset(IterableDataset):
         """
         self.worker_id = worker_id
 
-        # Divide this equally across shards (one shard per group!)
+        # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
+        # note that we need even splits here across DDP ranks, so we might throw away some samples
         shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
         shard_start = self.sample_comm_group_id * shard_size
-        shard_end = (self.sample_comm_group_id + 1) * shard_size
 
-        shard_len = shard_end - shard_start
-        self.n_samples_per_worker = shard_len // n_workers
+        self.n_samples_per_worker = shard_size // n_workers
 
-        low = shard_start + worker_id * self.n_samples_per_worker
-        high = min(shard_start + (worker_id + 1) * self.n_samples_per_worker, shard_end)
+        # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
+        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
+
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
         LOGGER.info(
