@@ -5,6 +5,8 @@ import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
+LOGGER = logging.getLogger(__name__)
+
 
 def _row_normalize_weights(edge_index: torch.Tensor, weights: torch.Tensor, num_target_nodes: int) -> torch.Tensor:
     total = torch.zeros(num_target_nodes, device=weights.device)
@@ -202,6 +204,14 @@ def build_sparse_projector(
     ), "Either file_path or graph and edges_name must be provided."
 
     if file_path is not None:
+        if src_node_weight_attribute is not None:
+            msg = f"Building SparseProjector from file, so src_node_weight_attribute='{src_node_weight_attribute}' will be ignored."
+            LOGGER.warning(msg)
+
+        if edge_weight_attribute is not None:
+            msg = f"Building SparseProjector from file, so edge_weight_attribute='{edge_weight_attribute}' will be ignored."
+            LOGGER.warning(msg)
+
         return SparseProjector.from_file(
             file_path=file_path,
             row_normalize=row_normalize,
