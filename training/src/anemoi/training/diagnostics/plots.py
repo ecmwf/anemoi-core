@@ -919,11 +919,13 @@ def single_plot(
         # Add map features
         try:
             import cartopy.feature as cfeature
+
             ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
             ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
 
-        except ModuleNotFoundError as e:
+        except ModuleNotFoundError:
             import warnings
+
             warnings.warn("Module cartopy not found. Coastlines and borders will not be plotted.")
 
     else:
@@ -943,7 +945,7 @@ def single_plot(
             aspect="auto",
             ax=ax,
         )
-    
+
     if transform is not None:
         ax.set_extent([lon.min() - 0.1, lon.max() + 0.1, lat.min() - 0.1, lat.max() + 0.1], crs=transform)
     else:

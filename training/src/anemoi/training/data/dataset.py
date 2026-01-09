@@ -325,7 +325,7 @@ class NativeGridDataset(IterableDataset):
             else:
                 x = self.data[time_slice, :, :, :]
                 x = x[..., grid_shard]
-         
+
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
 

@@ -175,8 +175,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.config = config
         self.data_indices = data_indices
 
-        self.latlons_data = graph_data[config.graph.data].x
-
         self.save_hyperparameters()
 
         self.statistics_tendencies = statistics_tendencies

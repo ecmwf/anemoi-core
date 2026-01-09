@@ -92,7 +92,6 @@ class BasePlotCallback(Callback, ABC):
 
     def get_focus_mask(self, pl_module: pl.LightningModule) -> np.ndarray | None:
         """Get the focus mask based on the focus area configuration."""
-
         if self.latlons is None:
             self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
             self.latlons = np.rad2deg(self.latlons.cpu().numpy())
