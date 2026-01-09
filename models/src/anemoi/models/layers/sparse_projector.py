@@ -1,9 +1,12 @@
+import logging
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import torch
 from torch_geometric.data import HeteroData
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _row_normalize_weights(edge_index: torch.Tensor, weights: torch.Tensor, num_target_nodes: int) -> torch.Tensor:
@@ -166,6 +169,7 @@ def build_sparse_projector(
     graph: Optional[HeteroData] = None,
     edges_name: Optional[tuple[str, str, str]] = None,
     edge_weight_attribute: Optional[str] = None,
+    src_node_weight_attribute: Optional[str] = None,
     row_normalize: bool = True,
     transpose: bool = True,
     **kwargs,
@@ -182,6 +186,8 @@ def build_sparse_projector(
         Name/identifier for the edge set to use from the graph.
     edge_weight_attribute : str, optional
         Attribute name for edge weights.
+    src_node_weight_attribute : str, optional
+        Attribute name for node weights.
     row_normalize : bool, optional
         Whether to normalize weights per destination node.
     transpose : bool, optional
@@ -199,6 +205,14 @@ def build_sparse_projector(
     ), "Either file_path or graph and edges_name must be provided."
 
     if file_path is not None:
+        if src_node_weight_attribute is not None:
+            msg = f"Building SparseProjector from file, so src_node_weight_attribute='{src_node_weight_attribute}' will be ignored."
+            LOGGER.warning(msg)
+
+        if edge_weight_attribute is not None:
+            msg = f"Building SparseProjector from file, so edge_weight_attribute='{edge_weight_attribute}' will be ignored."
+            LOGGER.warning(msg)
+
         return SparseProjector.from_file(
             file_path=file_path,
             row_normalize=row_normalize,
@@ -211,6 +225,7 @@ def build_sparse_projector(
             graph=graph,
             edges_name=edges_name,
             edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=src_node_weight_attribute,
             row_normalize=row_normalize,
             transpose=transpose,
             **kwargs,
