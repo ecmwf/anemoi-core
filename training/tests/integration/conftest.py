@@ -487,10 +487,7 @@ def diffusion_config(
 @pytest.fixture
 def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str) -> tuple[DictConfig, str]:
     cfg, url = gnn_config
-
     cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
     cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
     cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
-    cfg["diagnostics"]["log"]["mlflow"]["experiment_name"] = "ci_hpc_mlflow"
-
     return cfg, url
