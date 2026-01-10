@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Any
+
 import numpy as np
 import pytest
 import torch
@@ -20,6 +22,11 @@ from torch_geometric.data import HeteroData
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
 pytest_plugins = "anemoi.utils.testing"
+
+PYTEST_MARKED_TESTS = [
+    "multigpu",
+    "mlflow",
+]
 
 
 @pytest.fixture
@@ -59,17 +66,37 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="enable tests marked as requiring multiple GPUs",
     )
+    parser.addoption(
+        "--mlflow",
+        action="store_true",
+        dest="mlflow",
+        default=False,
+        help="enable tests marked as requiring MLFlow test server",
+    )
+    parser.addoption(
+        "--mlflow-server",
+        dest="mlflow_server",
+        default=None,
+        help="MLFlow server for tests requiring MLFlow (only if --mlflow is set)",
+    )
 
 
-def pytest_configure(config: pytest.Config) -> None:
-    """Register the 'multigpu' marker to avoid warnings."""
-    config.addinivalue_line("markers", "multigpu: mark tests as requiring multiple GPUs")
+@pytest.fixture
+def mlflow_server(pytestconfig: Any) -> str:
+    mlflow_server = pytestconfig.getoption("mlflow_server")
+    if pytestconfig.getoption("mlflow") and mlflow_server is None:
+        e = ValueError("MLFlow server must be provided via --mlflow-server when using --mlflow")
+        raise e
+    return mlflow_server
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Automatically skip @pytest.mark.multigpu tests unless --multigpu is used."""
-    if not config.getoption("--multigpu"):
-        skip_marker = pytest.mark.skip(reason="Skipping tests requiring multipe GPUs, use --multigpu to enable")
-        for item in items:
-            if item.get_closest_marker("multigpu"):
-                item.add_marker(skip_marker)
+    """Automatically skip PYTEST_MARKED_TESTS unless options are used in CLI."""
+    for option_name in PYTEST_MARKED_TESTS:
+        if not config.getoption(f"--{option_name}"):
+            skip_marker = pytest.mark.skip(
+                reason=f"Skipping tests requiring {option_name}, use --{option_name} to enable",
+            )
+            for item in items:
+                if item.get_closest_marker(option_name):
+                    item.add_marker(skip_marker)
