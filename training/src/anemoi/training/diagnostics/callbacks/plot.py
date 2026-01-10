@@ -33,7 +33,6 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -747,11 +746,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         model: torch.nn.Module,
         dataset_name: str,
     ) -> dict[tuple[str, str], torch.Tensor]:
-
-        trainable_modules = {
-            (model._graph_name_data, model._graph_name_hidden): model.encoder[dataset_name],
-            (model._graph_name_hidden, model._graph_name_data): model.decoder[dataset_name],
-        }
         # `_graph_name_data` and `_graph_name_hidden` above are the keys for different
         # layers of nodes in the graphs obtained from the config (e.g., "data", "hidden").
         # They are not themselves dictionaries; but the identifiers of the dictionaries
@@ -760,11 +754,36 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         # in the plots for one dataset.
         # Therefore, we don't select `dataset_name` for the `_graph_name_xy`,
         # but only for the modules (encoder/processor/decoder).
+        trainable_modules = {}
 
-        if isinstance(model.processor, GraphEdgeMixin):
-            trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
+        # Check encoder
+        if (
+            hasattr(model.encoder[dataset_name], "graph_provider")
+            and hasattr(model.encoder[dataset_name].graph_provider, "trainable")
+            and model.encoder[dataset_name].graph_provider.trainable is not None
+            and model.encoder[dataset_name].graph_provider.trainable.trainable is not None
+        ):
+            trainable_modules[(dataset_name, model._graph_name_hidden)] = model.encoder[dataset_name].graph_provider
 
-        return {name: module for name, module in trainable_modules.items() if module.trainable.trainable is not None}
+        # Check decoder
+        if (
+            hasattr(model.decoder[dataset_name], "graph_provider")
+            and hasattr(model.decoder[dataset_name].graph_provider, "trainable")
+            and model.decoder[dataset_name].graph_provider.trainable is not None
+            and model.decoder[dataset_name].graph_provider.trainable.trainable is not None
+        ):
+            trainable_modules[(model._graph_name_hidden, dataset_name)] = model.decoder[dataset_name].graph_provider
+
+        # Check processor
+        if (
+            hasattr(model.processor, "graph_provider")
+            and hasattr(model.processor.graph_provider, "trainable")
+            and model.processor.graph_provider.trainable is not None
+            and model.processor.graph_provider.trainable.trainable is not None
+        ):
+            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = model.processor.graph_provider
+
+        return trainable_modules
 
     @rank_zero_only
     def _plot(

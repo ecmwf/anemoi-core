@@ -188,7 +188,7 @@ class RolloutEvalEns(RolloutEval):
         batch_idx: int,
     ) -> None:
         del outputs  # outputs are not used
-        if batch_idx % self.every_n_batches == 0 and pl_module.ens_comm_group_rank == 0:
+        if batch_idx % self.every_n_batches == 0:
             precision_mapping = {
                 "16-mixed": torch.float16,
                 "bf16-mixed": torch.bfloat16,

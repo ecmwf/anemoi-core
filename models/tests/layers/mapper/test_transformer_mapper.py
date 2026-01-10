@@ -17,6 +17,18 @@ from anemoi.models.layers.mapper import TransformerBaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
 
 
+class ConcreteTransformerBaseMapper(TransformerBaseMapper):
+    """Concrete implementation of TransformerBaseMapper for testing."""
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        shapes_src, shapes_dst = shard_shapes
+        x_src, x_dst = x
+        return x_src, x_dst, shapes_src, shapes_dst
+
+    def post_process(self, x_dst, **kwargs):
+        return x_dst
+
+
 class TestTransformerBaseMapper:
     """Test the GraphTransformerBaseMapper class."""
 
@@ -74,7 +86,7 @@ class TestTransformerBaseMapper:
             layer_kernels,
             attention_implementation,
         ) = mapper_init
-        return TransformerBaseMapper(
+        return ConcreteTransformerBaseMapper(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -176,5 +188,5 @@ class TestTransformerBaseMapper:
         x_dst = pair_tensor[1]
         shapes_dst = [list(x_dst.shape)]
 
-        result = mapper.post_process(x_dst, shapes_dst)
+        result = mapper.post_process(x_dst, shapes_dst=shapes_dst)
         assert torch.equal(result, x_dst)
