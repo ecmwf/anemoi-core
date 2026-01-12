@@ -260,7 +260,7 @@ class ICONMultiMesh:
 @typechecked
 class ICONCellDataGrid:
     """Reads cell locations from an ICON grid file; builds grid-to-mesh edges based on ICON topology.
-    
+
     This is a bipartite graph.
     """
 
