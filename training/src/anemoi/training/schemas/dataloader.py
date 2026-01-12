@@ -69,6 +69,8 @@ class DatasetSchema(PydanticBaseModel):
     "Temporal resolution, frequency must be >= to dataset frequency."
     drop: list | None = Field(default=None)
     "List of variables to drop from dataset"
+    shuffle: bool = Field(default=False)
+    "Whether to shuffle the dataset samples."
 
 
 class LoaderSet(BaseModel):
@@ -122,7 +124,7 @@ class DataLoaderSchema(PydanticBaseModel):
     "Validation DatasetSchema."
     test: DatasetSchema | DictConfig
     "Test DatasetSchema."
-    validation_rollout: PositiveInt = Field(example=1)
+    validation_rollout: NonNegativeInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
     # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)

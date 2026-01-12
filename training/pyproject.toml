@@ -80,6 +80,8 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
 ]
 optional-dependencies.plotting = [
+  "cartopy>=0.23",
+
   "distinctipy>=1",
 ]
 optional-dependencies.profile = [
