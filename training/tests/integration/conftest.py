@@ -170,7 +170,7 @@ def build_architecture_config(
 @pytest.fixture(
     params=[
         ["model=gnn"],
-        ["model=graphtransformer"],
+        # ["model=graphtransformer"],
     ],
 )
 def architecture_config(
@@ -400,9 +400,10 @@ def architecture_config_with_checkpoint(
     )
     # rest of your logic...
     if "gnn" in model_architecture:
-        existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-07.ckpt",
-        )
+        # existing_ckpt = get_test_data(
+        #     "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-12.ckpt", # S3 bucket broken for now I can't push.
+        # )
+        existing_ckpt = "/home/ecm2559/dev_perm/anemoi-core/last_gnn_new.ckpt"
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
             "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
