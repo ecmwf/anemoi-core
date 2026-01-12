@@ -41,7 +41,7 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
-def _ensure_without_scalers_has_2(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
+def _ensure_without_scalers_has_grid_dimension(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
     """Temporary fix for https://github.com/ecmwf/anemoi-core/issues/725.
 
     Some pipelines pass numeric scaler indices and rely on excluding scalers over grid dimension
