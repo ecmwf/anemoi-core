@@ -18,10 +18,6 @@ metadata = MigrationMetadata(
     },
 )
 # <-- END DO NOT CHANGE
-import logging
-
-LOGGER = logging.getLogger(__name__)
-
 
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
