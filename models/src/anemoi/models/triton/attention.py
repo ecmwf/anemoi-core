@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -57,7 +57,6 @@ def _attn_fwd_inner(
     start_m,
     qk_scale,  #
     BLOCK_M: tl.constexpr,
-    HEAD_DIM: tl.constexpr,
     BLOCK_N: tl.constexpr,  #
     CAUSAL: tl.constexpr,
     offs_m: tl.constexpr,
@@ -65,11 +64,21 @@ def _attn_fwd_inner(
     N_CTX: tl.constexpr,
     WINDOW: tl.constexpr,
     warp_specialize: tl.constexpr,
-    IS_HOPPER: tl.constexpr,
 ):
-    # range of values handled by this block
+    """
+    Tiled calculation of the attention algorithm.
+    
+    Each program has loaded a BLOCK_M sized section of the context Q
+    This is stored in shared memory throughout.
+    It then loops over K and V in sizes of BLOCK_N until the entire
+    BLOCK_M sized output is accumulated
+    
+    Optionally, causal or sliding window masking can be performed.
+    
+    
+    """
+    # range of values handled by this kernel
     if CAUSAL:
-
         # Attends within the following range
         # X - - - -
         # X X - - -
@@ -77,10 +86,6 @@ def _attn_fwd_inner(
         # X X X X -
         # X X X X X
 
-        # here we are trading code complexity for speed
-        # in the official fused attn example from triton
-        # they call the kernel once for off-band (e.g. full blocks) and once for
-        # on-band (partial blocks) and only apply the mask in the partial block
         lo, hi = 0, (start_m + 1) * BLOCK_M
     elif WINDOW > 0:
         # Attends within the following range (Assuming W=1)
@@ -111,7 +116,6 @@ def _attn_fwd_inner(
         # X X X X X
         # X X X X X
 
-        # here we are trading code complexity for speed
         lo, hi = 0, N_CTX
 
     offsetk_y = offset_y + lo
@@ -125,8 +129,6 @@ def _attn_fwd_inner(
 
         # Apply masking
         if WINDOW > 0:
-            #TODO check if a speedup can be obtained by breaking window computation
-            # into stages based on a tiles position (skip, partial or fullly attend)
             n_pos = start_n + offs_n[None, :]
             m_pos = offs_m[:, None]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
@@ -255,7 +257,6 @@ def _attn_fwd(
     BLOCK_N: tl.constexpr,  #
     CAUSAL: tl.constexpr,  #
     warp_specialize: tl.constexpr,  #
-    IS_HOPPER: tl.constexpr,  #
 ):
     dtype = tl.float16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
@@ -293,6 +294,18 @@ def _attn_fwd(
     # load q: it will stay in SRAM throughout
     q = desc_q.load([qo_offset_y, 0])
 
+    # Attn fwd is split into two kernels for historical and performance reasons
+    # The structure is maintained as a future potential optimisation
+    
+    # The original FusedAttention example implemented causal masking by
+    # calling '_attn_fwd_inner' multiple times with different parameters
+    # depending on where the "BLOCK_M" was within the context dimension
+    # (e.g. fully masked, partially masked or fully present)
+    # Intial attempts to follow this approach for sliding window masking
+    # didn't work. Therefore, we have a single kernel for all positions
+    # within the context. One downside is that the mask has to be computed
+    # and applied even if the block is fully or not at all masked
+    # Therefore a multi-stage approach is likely more performant.
     acc, l_i, m_i = _attn_fwd_inner(
         acc,
         l_i,
@@ -305,7 +318,6 @@ def _attn_fwd(
         start_m,
         qk_scale,  #
         BLOCK_M,
-        HEAD_DIM,
         BLOCK_N,  #
         CAUSAL,
         offs_m,
@@ -313,7 +325,6 @@ def _attn_fwd(
         N_CTX,  #
         WINDOW,
         warp_specialize,
-        IS_HOPPER,
     )
     # epilogue
     m_i += tl.math.log2(l_i)
@@ -733,11 +744,66 @@ def _attn_bwd(
     dq *= LN2
     tl.store(dq_ptrs, dq)
 
+def _system_specific_settings(q, v, k, o, warp_specialize):
+    """ Provides addtional performance settings for specific systems.
+    
+    These performance settings come from the Triton fused attention example
+    and are """
+    HEAD_DIM_Q, HEAD_DIM_K, HEAD_DIM_V = q.shape[-1], k.shape[-1], v.shape[-1]
+    
+    extra_kern_args = {}
+    # Tuning for AMD target
+    if is_hip():
+        waves_per_eu = 3 if HEAD_DIM_K <= 64 else 2
+        extra_kern_args = {"waves_per_eu": waves_per_eu, "allow_flush_denorm": True}
+        
+    if is_blackwell() and warp_specialize:
+        if HEAD_DIM_K == 128 and q.dtype == torch.float16:
+            extra_kern_args["maxnreg"] = 168
+        else:
+            extra_kern_args["maxnreg"] = 80
+            
+    
+    # Use device_descriptor for Hopper + warpspec.
+    if supports_host_descriptor() and not (is_hopper() and warp_specialize):
+        y_dim = q.shape[0] * q.shape[1] * q.shape[2]
+
+        dummy_block = [1, 1]
+        desc_q = TensorDescriptor(q, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
+        desc_v = TensorDescriptor(
+            v, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block
+        )
+        desc_k = TensorDescriptor(k, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
+        desc_o = TensorDescriptor(o, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
+    else:
+        desc_q = q
+        desc_v = v
+        desc_k = k
+        desc_o = o
+        
+    # Defines how memory is allocated by triton
+    # Certain GPUs (e.g. Nvidia Hoppers and Blackwells) support TMA (Tensor Memory Accelerator)
+    # TMA is hardware support for async data movement between global and shared memory
+    # Basically the relevant memory addresses are calculated by dedicated hardware instead of registers
+    # This frees up threads and registers to do other computations
+    # TMA requires global memory allocations, so we set the alloc_fn here
+    def alloc_fn(size: int, align: int, _):
+        return torch.empty(size, dtype=torch.int8, device="cuda")
+    triton.set_allocator(alloc_fn)
+
+    return desc_q, desc_k, desc_v, desc_o, extra_kern_args
 
 class TritonAttention(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, q, k, v, causal, window, sm_scale, warp_specialize=False):
+        """
+        
+        This function implements a tiled version of the attention algorithm.
+        
+        Input matrices are in the shape [BATCH, N_HEAD, N_CTX, HEAD_DIM]
+        
+        """
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K, HEAD_DIM_V = q.shape[-1], k.shape[-1], v.shape[-1]
         assert HEAD_DIM_Q == HEAD_DIM_K and HEAD_DIM_K == HEAD_DIM_V
@@ -745,49 +811,22 @@ class TritonAttention(torch.autograd.Function):
         o = torch.empty_like(q)
         if window is None:
             window = 0
-        assert not (causal and window > 0) #causal and window together not supported
-
-        #TODO refactor hip and tensor descriptor into functions
-        extra_kern_args = {}
-        # Tuning for AMD target
-        if is_hip():
-            waves_per_eu = 3 if HEAD_DIM_K <= 64 else 2
-            extra_kern_args = {"waves_per_eu": waves_per_eu, "allow_flush_denorm": True}
+        assert not (causal and window > 0), "causal and window not supported in combination"
 
         M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        
+        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, warp_specialize)
 
-        # Use device_descriptor for Hopper + warpspec.
-        if supports_host_descriptor() and not (is_hopper() and warp_specialize):
-            y_dim = q.shape[0] * q.shape[1] * q.shape[2]
-
-            dummy_block = [1, 1]
-            desc_q = TensorDescriptor(q, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
-            desc_v = TensorDescriptor(
-                v, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block
-            )
-            desc_k = TensorDescriptor(k, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
-            desc_o = TensorDescriptor(o, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
-        else:
-            desc_q = q
-            desc_v = v
-            desc_k = k
-            desc_o = o
-
-        #defines how memory is allocated by triton
-        def alloc_fn(size: int, align: int, _):
-            return torch.empty(size, dtype=torch.int8, device="cuda")
-        triton.set_allocator(alloc_fn)
-
-        #defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU
+        # defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU
+        # (SMs are essentially processors on a GPU, with typically 1024 threads per SM)
+        # Here a 2D grid is defined: NUM_CTX/BLOCK_M * (BATCH_SIZE * NUM_HEADS)
+        # Meaning there is at least (BATCH_SIZE * NUM_HEADS) SMs
+        # Depending on BLOCK_M, the context window might also be split across SMs
+        # BLOCK_M is a hyperparameter which triton sets at runtime by running small performance tests
         def grid(META):
             return (triton.cdiv(q.shape[2], META["BLOCK_M"]), q.shape[0] * q.shape[1], 1)
-
         ctx.grid = grid
-        if is_blackwell() and warp_specialize:
-            if HEAD_DIM_K == 128 and q.dtype == torch.float16:
-                extra_kern_args["maxnreg"] = 168
-            else:
-                extra_kern_args["maxnreg"] = 80
+        
         _attn_fwd[grid](
             sm_scale,
             M,  #
@@ -802,7 +841,6 @@ class TritonAttention(torch.autograd.Function):
             WINDOW=window,
             CAUSAL=causal,  #
             warp_specialize=warp_specialize,  #
-            IS_HOPPER=is_hopper(),  #
             **extra_kern_args,
         )
 
