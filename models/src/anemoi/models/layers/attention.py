@@ -417,9 +417,12 @@ class TritonAttentionWrapper(nn.Module):
         # Helper function to check if triton is available
         # Prevents strange errors from importing triton functions on unsupported systems
         from anemoi.models.triton.utils import is_triton_available
+
         if not is_triton_available():
-            raise ImportError("Triton is not supported on your system. Either it is not installed or no GPUs are available")
-        
+            raise ImportError(
+                "Triton is not supported on your system. Either it is not installed or no GPUs are available"
+            )
+
         from anemoi.models.triton.attention import TritonAttention
 
         self.attention = TritonAttention

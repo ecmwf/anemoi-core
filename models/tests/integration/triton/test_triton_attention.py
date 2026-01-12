@@ -49,15 +49,15 @@ except BaseException:
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, dtype=torch.float16):
     """Compares Triton flash attention against a naive torch implementation, and optionally flash attention
-    
+
     Since flash attention is more memory efficient, installing it allows larger problem sizes
     to be tested (in this case, an o96 processor setup).
     """
     attention = TritonAttention.apply
-    
+
     if not is_triton_available():
         pytest.skip("Triton not available")
-    
+
     if window > 0 and causal:
         pytest.skip("Causal and sliding window together not supported")
     torch.manual_seed(20)
@@ -72,16 +72,16 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window
     sm_scale = 1 / math.sqrt(q.size(-1))
     # reference implementation
     ref_dtype = dtype
-    
+
     q = q.to(ref_dtype)
     k = k.to(ref_dtype)
     v = v.to(ref_dtype)
-    
+
     # Compute reference values
     if not HAS_FLASH:
         M = torch.tril(torch.ones((N_CTX, N_CTX), device=DEVICE))
         p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
-        
+
         # Optionally mask values
         if causal:
             # Create causal mask
@@ -91,7 +91,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window
             positions = torch.arange(N_CTX, device="cuda")
             mask = abs(positions[:, None] - positions[None, :]) <= window
             p[:, :, ~mask] = float("-inf")
-            
+
         p = torch.softmax(p.float(), dim=-1)
         p = p.to(ref_dtype)
         ref_out = torch.matmul(p, v).half()
@@ -129,12 +129,12 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window
 
     # Compute triton values
     tri_out = attention(q, k, v, causal, window, sm_scale, warp_specialize).half()
-    
+
     if mode == "fwd":
         atol = 1e-2
         torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=0)
         return
-    
+
     tri_out.backward(dout)
     tri_dv, v.grad = v.grad.clone(), None
     tri_dk, k.grad = k.grad.clone(), None
