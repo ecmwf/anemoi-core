@@ -3,9 +3,9 @@ name: nightly-integration-tests-hpc-gpu
  # Controls when the workflow will run
 on:
   schedule:
-    - cron: "0 22 * * *"  # every day at 22pm on default(main) branch
+    - cron: "0 23 * * *"  # every day at 23pm on default(main) branch
   workflow_dispatch:
-
+  merge_group:
 
 jobs:
   check_date:
