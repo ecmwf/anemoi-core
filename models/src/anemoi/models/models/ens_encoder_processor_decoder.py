@@ -196,7 +196,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 dataset_name=dataset_name,
             )
             x_skip_dict[dataset_name] = x_skip
-            x_data_latent_dict[dataset_name] = x_data_latent
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
             x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_ens_size)
@@ -222,6 +221,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 edge_shard_shapes=enc_edge_shard_shapes,
             )
+            x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents

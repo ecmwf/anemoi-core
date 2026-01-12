@@ -290,7 +290,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 x[dataset_name], y_noised[dataset_name], bse, grid_shard_shapes, model_comm_group, dataset_name
             )
             x_skip_dict[dataset_name] = x_skip
-            x_data_latent_dict[dataset_name] = x_data_latent
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
             x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
@@ -318,6 +317,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 edge_shard_shapes=enc_edge_shard_shapes,
                 **fwd_mapper_kwargs[dataset_name],
             )
+            x_data_latent_dict[dataset_name] = x_data_latent
 
         x_latent = sum(dataset_latents.values())
 

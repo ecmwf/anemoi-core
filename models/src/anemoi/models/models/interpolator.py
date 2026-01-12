@@ -177,7 +177,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
                 model_comm_group,
                 dataset_name,
             )
-            x_data_latent_dict[dataset_name] = x_data_latent
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
@@ -204,6 +203,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 edge_shard_shapes=enc_edge_shard_shapes,
             )
+            x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents

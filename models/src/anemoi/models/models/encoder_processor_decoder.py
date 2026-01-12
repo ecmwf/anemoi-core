@@ -240,7 +240,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name=dataset_name,
             )
             x_skip_dict[dataset_name] = x_skip
-            x_data_latent_dict[dataset_name] = x_data_latent
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
             x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
@@ -266,6 +265,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 edge_shard_shapes=enc_edge_shard_shapes,
             )
+            x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
@@ -295,17 +295,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Skip
         x_latent_proc = x_latent_proc + x_latent
 
-        # Compute decoder edges using updated latent representation
-        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
-            dataset_name
-        ].get_edges(
-            batch_size=batch_size,
-            model_comm_group=model_comm_group,
-        )
-
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
+            # Compute decoder edges using updated latent representation
+            decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
+                dataset_name
+            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+
             x_out = self.decoder[dataset_name](
                 (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
