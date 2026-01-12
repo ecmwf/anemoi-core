@@ -15,7 +15,6 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.utils.enums import TensorDim
 
 
 class BaseMask:
@@ -68,34 +67,8 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
         fill_value: torch.Tensor,
         dim: int,
     ) -> torch.Tensor:
-        # Right now there are many possible shapes:
-        #  x  can be (B, E, G, V)  or (B, T, E, G, V)
-        #  fill_value can be (B, E, G, V) or (B, T=1, E, G, V)
-        # For index_copy_ we need the same rank.
-        if fill_value.ndim == x.ndim + 1:
-            # Prefer squeezing a singleton TIME dim from fill_value.
-            if fill_value.shape[TensorDim.TIME] == 1:
-                fill_value = fill_value.squeeze(TensorDim.TIME)
-            else:
-                msg = (
-                    f"Cannot align fill_value with x: fill_value has extra non-singleton TIME dim, "
-                    f"fill_value.shape={tuple(fill_value.shape)}, x.shape={tuple(x.shape)}"
-                )
-                raise ValueError(
-                    msg,
-                )
-        elif fill_value.ndim + 1 == x.ndim:
-            if x.shape[TensorDim.TIME] == 1:
-                x = x.squeeze(TensorDim.TIME)
-            else:
-                msg = (
-                    f"Cannot align x with fill_value: x has extra non-singleton TIME dim, "
-                    f"x.shape={tuple(x.shape)}, fill_value.shape={tuple(fill_value.shape)}"
-                )
-                raise ValueError(
-                    msg,
-                )
-        fill_value = torch.index_select(fill_value, dim, indices)
+        assert fill_value.ndim == 4, "fill_value has to be shape (bs, ens, latlon, nvar)"
+        fill_value = torch.index_select(fill_value, dim, indices)  # The mask is applied over the latlon dim
         return x.index_copy_(dim, indices, fill_value)
 
     @staticmethod
@@ -157,21 +130,13 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
         torch.Tensor
             The updated predicted state tensor with boundary forcing applied.
         """
-        # Support both (B, E, G, V) and (B, T, E, G, V) tensors.
-        if pred_state.ndim == 4:
-            grid_dim = TensorDim.GRID - 1
-        elif pred_state.ndim == 5:
-            grid_dim = TensorDim.GRID
-        else:
-            msg = f"Unexpected pred_state shape {tuple(pred_state.shape)}"
-            raise ValueError(msg)
-
         pred_state[..., data_indices.model.input.prognostic] = self.apply(
             pred_state[..., data_indices.model.input.prognostic],
-            dim=int(grid_dim),
+            dim=2,
             fill_value=true_state[..., data_indices.data.output.prognostic],
             grid_shard_slice=grid_shard_slice,
         )
+
         return pred_state
 
 
