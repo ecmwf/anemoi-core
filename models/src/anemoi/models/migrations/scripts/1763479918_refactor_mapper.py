@@ -19,6 +19,7 @@ metadata = MigrationMetadata(
 )
 # <-- END DO NOT CHANGE
 
+
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
 
