@@ -263,7 +263,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = {}, {}, {}
         for dataset_name in x:
             c_data[dataset_name], c_hidden[dataset_name], _, _, _ = self._generate_noise_conditioning(
-                sigma, dataset_name=dataset_name, edge_conditioning=False
+                sigma[dataset_name], dataset_name=dataset_name, edge_conditioning=False
             )
             shape_c_data[dataset_name] = get_shard_shapes(c_data[dataset_name], 0, model_comm_group=model_comm_group)
             shape_c_hidden[dataset_name] = get_shard_shapes(
@@ -385,7 +385,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self,
         x: dict[str, torch.Tensor],
         y_noised: dict[str, torch.Tensor],
-        sigma: torch.Tensor,
+        sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
     ) -> dict[str, torch.Tensor]:
@@ -393,23 +393,25 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
             x,
-            {key: c_in * y_noised[key] for key in y_noised.keys()},
+            {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
             c_noise,
             model_comm_group=model_comm_group,
             grid_shard_shapes=grid_shard_shapes,
         )  # calls forward ...
-        D_x = {key: c_skip * y_noised[key] + c_out * pred[key] for key in y_noised.keys()}
+        D_x = {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
 
         return D_x
 
     def _get_preconditioning(
-        self, sigma: torch.Tensor, sigma_data: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        self, sigma: dict[str, torch.Tensor], sigma_data: torch.Tensor
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """Compute preconditioning factors."""
-        c_skip = sigma_data**2 / (sigma**2 + sigma_data**2)
-        c_out = sigma * sigma_data / (sigma**2 + sigma_data**2) ** 0.5
-        c_in = 1.0 / (sigma_data**2 + sigma**2) ** 0.5
-        c_noise = sigma.log() / 4.0
+        c_skip, c_out, c_in, c_noise = {}, {}, {}, {}
+        for dataset_name, sigma_i in sigma.items():
+            c_skip[dataset_name] = sigma_data**2 / (sigma_i**2 + sigma_data**2)
+            c_out[dataset_name] = sigma_i * sigma_data / (sigma_i**2 + sigma_data**2) ** 0.5
+            c_in[dataset_name] = 1.0 / (sigma_data**2 + sigma_i**2) ** 0.5
+            c_noise[dataset_name] = sigma_i.log() / 4.0
 
         return c_skip, c_out, c_in, c_noise
 
