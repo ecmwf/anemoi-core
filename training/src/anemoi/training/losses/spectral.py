@@ -146,7 +146,7 @@ class SpectralL2Loss(SpectralLoss):
         result = self.scale(
             diff,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group)
