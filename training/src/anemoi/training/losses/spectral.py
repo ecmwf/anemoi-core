@@ -181,7 +181,7 @@ class LogSpectralDistance(SpectralLoss):
         result = self.scale(
             log_diff**2,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
         return torch.sqrt(self.reduce(result, squash=squash, group=group) + eps)
@@ -213,7 +213,7 @@ class FourierCorrelationLoss(SpectralLoss):
         cross = self.scale(
             cross,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
         numerator = 0.5 * torch.sum(cross, dim=TensorDim.GRID.value, keepdim=True)
