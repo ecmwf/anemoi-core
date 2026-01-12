@@ -285,6 +285,7 @@ class ICONCellDataGrid:
 
         # restrict to level `max_level`:
         self.select_c = np.argwhere(reflvl_cell <= self.max_level)
+        # generate source grid node set:
         self.nodeset = NodeSet(clon[self.select_c], clat[self.select_c])
 
     def get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:
