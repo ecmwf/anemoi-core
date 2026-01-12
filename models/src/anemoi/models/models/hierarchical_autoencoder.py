@@ -25,57 +25,6 @@ from anemoi.utils.config import DotDict
 
 class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
-    def __init__(
-        self,
-        *,
-        model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-    ) -> None:
-        """Initializes the graph neural network.
-
-        Parameters
-        ----------
-        model_config : DotDict
-            Model configuration
-        data_indices : dict
-            Data indices
-        graph_data : HeteroData
-            Graph definition
-        """
-
-        nn.Module.__init__(self)
-        self._graph_data = graph_data
-        self.data_indices = data_indices
-        self.statistics = statistics
-
-        model_config = DotDict(model_config)
-        self._graph_name_data = model_config.graph.data
-        self._graph_hidden_names = model_config.graph.hidden
-        self.num_hidden = len(self._graph_hidden_names)
-        self.multi_step = model_config.training.multistep_input
-        num_channels = model_config.model.num_channels
-
-        # hidden_dims is the dimentionality of features at each depth
-        self.hidden_dims = {hidden: num_channels * (2**i) for i, hidden in enumerate(self._graph_hidden_names)}
-
-        # Unpack config for hierarchical graph
-        self.level_process = model_config.model.enable_hierarchical_level_processing
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
-
-        self._calculate_shapes_and_indices(data_indices)
-        self._assert_matching_indices(data_indices)
-
-        # build networks
-        self._build_networks(model_config)
-
-        # build residual connection
-        self.residual = instantiate(model_config.model.residual, graph=graph_data)
-
-        # build boundings
-        self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
-
     def _calculate_input_dim_latent(self):
         return self.node_attributes.attr_ndims[self._graph_hidden_names[0]]
 

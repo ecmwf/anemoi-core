@@ -176,7 +176,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def ds_train(self) -> NativeGridDataset:
         return self._get_dataset(
             open_dataset(self.config.dataloader.training),
-            shuffle=False,
+            shuffle=self.config.dataloader.training.shuffle,
             label="train",
         )
 
@@ -190,7 +190,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             )
         return self._get_dataset(
             open_dataset(self.config.dataloader.validation),
-            shuffle=False,
+            shuffle=self.config.dataloader.validation.shuffle,
             val_rollout=self.config.dataloader.validation_rollout,
             label="validation",
         )
@@ -207,7 +207,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
         return self._get_dataset(
             open_dataset(self.config.dataloader.test),
-            shuffle=False,
+            shuffle=self.config.dataloader.test.shuffle,
             label="test",
         )
 
