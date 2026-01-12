@@ -146,7 +146,7 @@ which is recommended for interactive terminals and
               sfc_wind: [10u, 10v]
            # Example focusing loss on a predefined mask
            focus_area:
-             spatial_mask: "land_sea_mask"
+             spatial_mask: "cutout_mask"
 
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
            sample_idx: ${diagnostics.plot.sample_idx}

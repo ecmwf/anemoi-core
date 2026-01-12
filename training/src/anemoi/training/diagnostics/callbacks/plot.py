@@ -102,8 +102,13 @@ class BasePlotCallback(Callback, ABC):
 
         if self.focus_area is not None:
             if self.focus_area["spatial_mask"] is not None:
+                mask_key = self.focus_area["spatial_mask"]
+                assert mask_key in pl_module.model.graph_data["data"], (
+                    f"Spatial mask '{mask_key}' not found in graph_data['data']. "
+                    f"Available masks: {list(pl_module.model.graph_data['data'].keys())}"
+                )
                 focus_mask = np.zeros(self.latlons.shape[0], dtype=bool)
-                spatial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spatial_mask"]]
+                spatial_mask_idxs = pl_module.model.graph_data["data"][mask_key]
                 focus_mask[spatial_mask_idxs.squeeze()] = True
                 self.tag = "_spatial_mask"
 

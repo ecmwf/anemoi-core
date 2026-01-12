@@ -81,6 +81,7 @@ optional-dependencies.docs = [
 ]
 optional-dependencies.plotting = [
   "distinctipy>=1",
+  "cartopy>=0.25.0",
 ]
 optional-dependencies.profile = [
   "holistictraceanalysis>=0.2",

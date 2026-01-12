@@ -33,6 +33,7 @@ from torch import nn
 
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
+from anemoi.training.diagnostics.maps import lambert_conformal_from_latlon_points
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
@@ -605,67 +606,6 @@ def plot_flat_sample(
             )
 
 
-def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
-    """Build a Cartopy Lambert Conformal projection suited to a given set of (lat, lon) points.
-
-    The projection is centered on the midpoint of the latitude/longitude
-    extent of the input, and uses two standard parallels placed at ±25% of
-    the latitude span around the central latitude. This gives a reasonable,
-    low-distortion projection for regional maps covering mid-latitudes.
-
-    Parameters
-    ----------
-    latlon : numpy.ndarray
-        Array of shape (N, 2) with columns ``[latitude, longitude]`` in degrees.
-        Longitudes may be in the range [-180, 180] or [0, 360]; values are used
-        as-is to compute the central longitude.
-
-    Returns
-    -------
-    object
-        A ``cartopy.crs.LambertConformal`` instance configured with:
-        - ``central_latitude`` at the midpoint of the latitude extent,
-        - ``central_longitude`` at the midpoint of the longitude extent,
-        - ``standard_parallels`` at ±25% of the latitude span around the center.
-
-    Raises
-    ------
-    ModuleNotFoundError
-        If ``cartopy`` is not installed. Install via the
-        ``optional-dependencies.plotting`` extra.
-
-    Notes
-    -----
-    - This heuristic works well for many regional plots. If your domain is very
-      tall/narrow or crosses the dateline, you may want to choose the
-      ``central_longitude`` or ``standard_parallels`` explicitly.
-    - Input is not validated; ensure ``latlon`` has at least two points and a
-      non-zero latitude span for meaningful standard parallels.
-    """
-    try:
-        import cartopy.crs as ccrs
-
-    except ModuleNotFoundError as e:
-        error_msg = "Module cartopy not found. Install with optional-dependencies.plotting."
-        raise ModuleNotFoundError(error_msg) from e
-
-    lat_min, lon_min = latlon.min(axis=0)
-    lat_max, lon_max = latlon.max(axis=0)
-
-    central_latitude = (lat_min + lat_max) / 2
-    central_longitude = (lon_min + lon_max) / 2
-
-    lat_span = lat_max - lat_min
-    std_parallel_1 = central_latitude - lat_span * 0.25
-    std_parallel_2 = central_latitude + lat_span * 0.25
-
-    return ccrs.LambertConformal(
-        central_latitude=central_latitude,
-        central_longitude=central_longitude,
-        standard_parallels=[std_parallel_1, std_parallel_2],
-    )
-
-
 def plot_predicted_multilevel_flat_recon(
     parameters: dict[str, int],
     n_plots_per_sample: int,
@@ -946,7 +886,6 @@ def single_plot(
         import cartopy.feature as cfeature
 
         if hasattr(ax, "add_feature"):
-            ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
             ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
         else:
             # If it's a regular Axes, add_feature doesn't exist

@@ -99,3 +99,80 @@ class Coastlines:
         # Add the lines to the axis as a collection
         # Note that we have to provide a copy of the lines, because of Matplotlib
         ax.add_collection(copy.copy(self.lines))
+
+
+def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
+    """Build a Cartopy Lambert Conformal projection suited to a given set of (lat, lon) points.
+
+    The projection is centered on the midpoint of the latitude/longitude
+    extent of the input, and uses two standard parallels placed at ±25% of
+    the latitude span around the central latitude. This gives a reasonable,
+    low-distortion projection for regional maps covering mid-latitudes.
+
+    Parameters
+    ----------
+    latlon : numpy.ndarray
+        Array of shape (N, 2) with columns ``[latitude, longitude]`` in degrees.
+        Longitudes may be in the range [-180, 180] or [0, 360]; values are used
+        as-is to compute the central longitude.
+
+    Returns
+    -------
+    object
+        A ``cartopy.crs.LambertConformal`` instance configured with:
+        - ``central_latitude`` at the midpoint of the latitude extent,
+        - ``central_longitude`` at the midpoint of the longitude extent,
+        - ``standard_parallels`` at ±25% of the latitude span around the center.
+
+    Raises
+    ------
+    ModuleNotFoundError
+        If ``cartopy`` is not installed. Install via the
+        ``optional-dependencies.plotting`` extra.
+
+    Notes
+    -----
+    - This heuristic works well for many regional plots. If your domain is very
+      tall/narrow or crosses the dateline, you may want to choose the
+      ``central_longitude`` or ``standard_parallels`` explicitly.
+    - Input is not validated; ensure ``latlon`` has at least two points and a
+      non-zero latitude span for meaningful standard parallels.
+    """
+
+    assert isinstance(latlon, (np.ndarray, list)), "Input must be a numpy array or list."
+    latlon = np.asanyarray(latlon)
+
+    # Shape must be (N, 2)
+    assert latlon.ndim == 2, f"Input must be 2D, but got {latlon.ndim}D."
+    assert latlon.shape[1] == 2, f"Input must have 2 columns [lat, lon], but got {latlon.shape[1]}."
+
+    # Ensure latlon has at least two points
+    assert latlon.shape[0] >= 2, "At least two points are required to calculate a span."
+
+    # Latitude Range for physical reality
+    assert np.all((latlon[:, 0] >= -90) & (latlon[:, 0] <= 90)), "Latitudes must be between -90 and 90."
+
+    try:
+        import cartopy.crs as ccrs
+    except ModuleNotFoundError as e:
+        error_msg = "Module cartopy not found. Install with optional-dependencies.plotting."
+        raise ModuleNotFoundError(error_msg) from e
+
+    lat_min, lon_min = latlon.min(axis=0)
+    lat_max, lon_max = latlon.max(axis=0)
+
+    # Ensure non-zero latitude span
+    lat_span = lat_max - lat_min
+    assert lat_span > 0, "Latitude span must be greater than zero to compute standard parallels."
+
+    central_latitude = (lat_min + lat_max) / 2
+    central_longitude = (lon_min + lon_max) / 2
+
+    std_parallel_1 = central_latitude - lat_span * 0.25
+    std_parallel_2 = central_latitude + lat_span * 0.25
+
+    return ccrs.LambertConformal(
+        central_latitude=central_latitude,
+        central_longitude=central_longitude,
+        standard_parallels=[std_parallel_1, std_parallel_2],
+    )
