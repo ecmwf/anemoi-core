@@ -112,7 +112,7 @@ class SpectralLoss(BaseLoss):
 
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten spectral dimensions."""
-        x_spec = self.transform(x)
+        x_spec = self.transform.forward(x)
         # Be robust to any number of leading dims (batch, time, ensemble, ...)
         return einops.rearrange(x_spec, "... y x v -> ... (y x) v")
 
