@@ -44,7 +44,7 @@ LOGGER = logging.getLogger(__name__)
 def _ensure_without_scalers_has_2(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
     """Temporary fix for https://github.com/ecmwf/anemoi-core/issues/725.
 
-    Some pipelines pass numeric scaler indices and rely on excluding scaler index 2
+    Some pipelines pass numeric scaler indices and rely on excluding scalers over grid dimension
     by default. Ensure this exclusion is present for numeric lists.
     """
     if without_scalers is None:
