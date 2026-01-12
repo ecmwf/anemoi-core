@@ -229,12 +229,15 @@ class EDMHeunSampler(DiffusionSampler):
         num_steps = len(sigmas) - 1
         print("num steps pour l'inference:", num_steps)
         # Heun sampling loop
+        print("compteur de steps : i  = ",0)
         for i in range(num_steps):
+            print("compteur de steps : ", i)
             sigma_i = sigmas[i]
             sigma_next = sigmas[i + 1]
 
             apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
             if apply_churn:
+                print("on passe dans apply churn")
                 gamma = min(S_churn / num_steps, torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1)
                 sigma_effective = sigma_i + gamma * sigma_i
                 epsilon = torch.randn_like(y) * S_noise

@@ -55,11 +55,11 @@ dataloader:
         node_attribute_name: indices_connected_nodes
     training:
         start: "2020-01-01"
-        end: "2023-03-31"
+        end: "2020-01-20"
         select: ['10u', '10v', '2d', '2t', 'msl', 'sp', 'skt', 'z', 'tp', 'q_50', 'q_100', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_700', 'q_850', 'q_925', 'q_1000', 't_50', 't_100', 't_150', 't_200', 't_250', 't_300', 't_400', 't_500', 't_700', 't_850', 't_925', 't_1000', 'u_50', 'u_100', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_500', 'u_700', 'u_850', 'u_925', 'u_1000', 'v_50', 'v_100', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_500', 'v_700', 'v_850', 'v_925', 'v_1000', 'z_50', 'z_100', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_500', 'z_700', 'z_850', 'z_925', 'z_1000', lsm, insolation, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, sin_julian_day, sin_latitude, sin_local_time, sin_longitude]
     validation:
         start: "2023-04-01"
-        end: "2024-03-31"
+        end: "2023-04-31"
         select: ['10u', '10v', '2d', '2t', 'msl', 'sp', 'skt', 'z', 'tp', 'q_50', 'q_100', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_700', 'q_850', 'q_925', 'q_1000', 't_50', 't_100', 't_150', 't_200', 't_250', 't_300', 't_400', 't_500', 't_700', 't_850', 't_925', 't_1000', 'u_50', 'u_100', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_500', 'u_700', 'u_850', 'u_925', 'u_1000', 'v_50', 'v_100', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_500', 'v_700', 'v_850', 'v_925', 'v_1000', 'z_50', 'z_100', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_500', 'z_700', 'z_850', 'z_925', 'z_1000', lsm, insolation, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, sin_julian_day, sin_latitude, sin_local_time, sin_longitude]
     test:
         start: "2024-04-01"

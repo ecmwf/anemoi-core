@@ -25,6 +25,9 @@ model:
         sigma_min: 0.02
         rho: 7.0
         num_steps: 50
+        num_steps_sdedit: 15
+        SDEdit: true
+
       diffusion_sampler:
         sampler: "heun"
         S_churn: 0.0
