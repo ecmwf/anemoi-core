@@ -2,11 +2,11 @@
  Triangular Mesh with ICON Topology
 ####################################
 
-The classes `ICONMultimeshNodes` and `ICONCellGridNodes` define node
+The classes `ICONMultiMeshNodes` and `ICONCellGridNodes` define node
 sets based on an ICON icosahedral mesh:
 
 -  class `ICONCellGridNodes`: data grid, representing cell circumcenters
--  class `ICONMultimeshNodes`: hidden mesh, representing the vertices of
+-  class `ICONMultiMeshNodes`: hidden mesh, representing the vertices of
    a grid hierarchy
 
 Both classes, together with the corresponding edge builders
@@ -27,36 +27,32 @@ file in NetCDF format, making use of the `refinement_level_v` and
    value 0 denotes the cells of the base grid, ie. the icosahedron
    including the step of root subdivision RXXB00.
 
-To avoid multiple runs of the reconstruction algorithm, a separate
-`ICONNodes` instance is created and used by the builders, see the
-following YAML example:
+See the following YAML example:
 
 .. code:: yaml
 
-   nodes:
-     # ICON mesh
-     icon_mesh:
-       node_builder:
-         _target_: anemoi.graphs.nodes.ICONNodes
-         name: "icon_grid_0026_R03B07_G"
-         grid_filename: "icon_grid_0026_R03B07_G.nc"
-         max_level_multimesh: 3
-         max_level_dataset: 3
-     # Data nodes
-     data:
-       node_builder:
-         _target_: anemoi.graphs.nodes.ICONCellGridNodes
-         icon_mesh: "icon_mesh"
-     # Hidden nodes
-     hidden:
-       node_builder:
-         _target_: anemoi.graphs.nodes.ICONMultimeshNodes
-         icon_mesh: "icon_mesh"
+    nodes:
+      # Data nodes
+      data:
+        node_builder:
+          _target_: anemoi.graphs.nodes.ICONCellGridNodes
+          grid_filename: "icon_grid_0026_R03B07_G.nc"
+          max_level: 3
+      # Hidden nodes
+      hidden:
+        node_builder:
+          _target_: anemoi.graphs.nodes.ICONMultiMeshNodes
+          grid_filename: "icon_grid_0026_R03B07_G.nc"
+          max_level: 3
 
-   edges:
-     # Processor configuration
+    edges:
+      # Processor configuration
      - source_name: "hidden"
        target_name: "hidden"
        edge_builders:
        - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
-         icon_mesh: "icon_mesh"
+
+   .. note::
+
+     The `ICONTopologicalEncoderEdges` and `ICONTopologicalDecoderEdges` edge builders produce
+     a set of edges that are structurally identical, but with opposite direction.
