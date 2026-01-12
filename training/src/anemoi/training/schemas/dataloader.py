@@ -72,6 +72,7 @@ class DatasetSchema(PydanticBaseModel):
     shuffle: bool = Field(default=False)
     "Whether to shuffle the dataset samples."
 
+
 class LoaderSet(BaseModel):
     training: NonNegativeInt | None = Field(example=None)
     "Value for training dataset"

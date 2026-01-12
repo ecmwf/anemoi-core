@@ -58,7 +58,7 @@ training:
   end: 2020
   frequency: ${data.frequency}
   drop: []
-  shuffle: True 
+  shuffle: True
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
 

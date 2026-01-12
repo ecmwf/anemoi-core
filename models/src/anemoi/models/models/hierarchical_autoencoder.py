@@ -14,13 +14,9 @@ from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.bounding import build_boundings
-from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.models import AnemoiModelAutoEncoder
-from anemoi.utils.config import DotDict
 
 
 class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
