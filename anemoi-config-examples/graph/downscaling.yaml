@@ -1,0 +1,84 @@
+overwrite: False
+
+in: "in"
+in_hres: "in_hres"
+out: "out"
+hidden: "hidden"
+
+nodes:
+  # in nodes
+  in:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes # options: ZarrDatasetNodes, NPZFileNodes
+      dataset: ${hardware.paths.data}/${hardware.files.dataset_x}
+    attributes: ${graph.attributes.nodes}
+   # in_hres nodes
+  in_hres:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes # options: ZarrDatasetNodes, NPZFileNodes
+      dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+    attributes: ${graph.attributes.nodes}
+   # out nodes
+  out:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes # options: ZarrDatasetNodes, NPZFileNodes
+      dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+    attributes: ${graph.attributes.nodes}
+  # Hidden nodes
+  hidden:
+    node_builder:
+      _target_:  anemoi.graphs.nodes.NPZFileNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
+      grid_definition_path: ${hardware.paths.grids}      
+      resolution: o96 # grid resolution for npz (o32, o48, ...)
+    attributes: ${graph.attributes.nodes}
+
+edges:
+# Encoder in-hidden configuration
+- source_name: ${graph.in}
+  target_name: ${graph.hidden}
+  edge_builder:
+    _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 1 # only for cutoff method
+  attributes: ${graph.attributes.edges}
+# Encoder in_hres-hidden configuration
+- source_name: ${graph.in_hres}
+  target_name: ${graph.hidden}
+  edge_builder:
+    _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 1 # only for cutoff method
+  attributes: ${graph.attributes.edges}
+# in_out mapper configuration
+- source_name: ${graph.in}
+  target_name: ${graph.out}
+  edge_builder:
+    _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 1 # only for cutoff method
+  attributes: ${graph.attributes.edges}
+# Processor configuration
+- source_name: ${graph.hidden}
+  target_name: ${graph.hidden}
+  edge_builder:
+    _target_: anemoi.graphs.edges.CutOffEdges
+    cutoff_factor: 1 # only for cutoff method
+  attributes: ${graph.attributes.edges}
+# Decoder configuration
+- source_name: ${graph.hidden}
+  target_name: ${graph.out}
+  edge_builder:
+    _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    num_nearest_neighbours: 3 # only for knn method
+  attributes: ${graph.attributes.edges}
+
+
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.AreaWeights # options: Area, Uniform
+      norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std

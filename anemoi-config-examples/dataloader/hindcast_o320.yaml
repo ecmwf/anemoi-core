@@ -1,0 +1,154 @@
+prefetch_factor: 2
+pin_memory: True
+read_group_size: 1
+
+
+num_workers:
+  training: 8
+  validation: 8
+  test: 8
+  predict: 8
+batch_size:
+  training: 1
+  validation: 1
+  test: 1
+  predict: 1
+# runs only N training batches [N = integer | null]
+# if null then we run through all the batches
+limit_batches:
+  training: null
+  validation: null
+  test: 20
+  predict: 20
+
+# ============
+# Dataloader definitions
+# ============
+
+steps: [0, 12, 24, 36, 48, 60, 72]
+training_date: 2021
+valid_date: 2022
+test_date: 2023
+
+hres_grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.data}
+
+grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.data}
+
+lres_grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.lres}
+
+training:
+  start: 1900
+  end: 1910
+  frequency: ${data.frequency}
+  dataset:
+    zip:
+    - dataset: 
+      - ${hardware.paths.data}/${hardware.files.dataset_x}
+      name: lres
+      fake_hindcasts: 
+        end: ${dataloader.training_date}
+        steps: ${dataloader.steps}
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
+      name: hres
+      fake_hindcasts: 
+        end:  ${dataloader.training_date}
+        steps: ${dataloader.steps}    
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: out
+      fake_hindcasts: 
+        end:  ${dataloader.training_date}
+        steps: ${dataloader.steps} 
+    adjust:
+    - dates
+
+validation:
+  start: 1900
+  end: 1910
+  frequency: ${data.frequency}
+  dataset:
+    zip:
+    - dataset: 
+        - ${hardware.paths.data}/${hardware.files.dataset_x}
+      name: lres
+      fake_hindcasts: 
+        start: ${dataloader.valid_date}
+        end:  ${dataloader.valid_date}
+        steps: ${dataloader.steps}       
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
+      name: hres
+      fake_hindcasts: 
+        start: ${dataloader.valid_date}
+        end:  ${dataloader.valid_date}
+        steps: ${dataloader.steps}       
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: out
+      fake_hindcasts: 
+        start: ${dataloader.valid_date}
+        end:  ${dataloader.valid_date}
+        steps: ${dataloader.steps}       
+    adjust:
+    - dates
+
+test:
+  start: 1900
+  end: 1910
+  frequency: ${data.frequency}
+  dataset:
+    zip:
+    - dataset: 
+        - ${hardware.paths.data}/${hardware.files.dataset_x}
+      name: lres
+      fake_hindcasts: 
+        start: ${dataloader.test_date}
+        end:  ${dataloader.test_date}
+        steps: ${dataloader.steps}             
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
+      name: hres
+      fake_hindcasts: 
+        start: ${dataloader.test_date}
+        end:  ${dataloader.test_date}
+        steps: ${dataloader.steps}         
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: out
+      fake_hindcasts: 
+        start: ${dataloader.test_date}
+        end:  ${dataloader.test_date}
+        steps: ${dataloader.steps}         
+    adjust:
+    - dates
+
+
+predict:
+  start: 1900
+  end: 1910
+  frequency: "768h"
+  dataset:
+    zip:
+    - dataset: 
+        - ${hardware.paths.data}/${hardware.files.dataset_x_for_predict}
+      name: lres
+      fake_hindcasts: 
+        start: ${dataloader.valid_date}
+        end:  ${dataloader.valid_date}
+        steps: ${dataloader.steps}         
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
+      name: hres
+      fake_hindcasts: 
+        start: ${dataloader.valid_date}
+        end:  ${dataloader.valid_date}
+        steps: ${dataloader.steps}          
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: out
+      fake_hindcasts: 
+        start: ${dataloader.valid_date}
+        end:  ${dataloader.valid_date}
+        steps: ${dataloader.steps}     
+    adjust:
+    - dates
+

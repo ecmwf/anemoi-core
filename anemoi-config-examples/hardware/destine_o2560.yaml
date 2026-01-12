@@ -1,0 +1,11 @@
+defaults:
+  - paths: main
+  - files: destine_o2560
+  
+
+
+# number of GPUs per node and number of nodes (for DDP)
+accelerator: auto
+num_gpus_per_model: 1
+num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
+num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}

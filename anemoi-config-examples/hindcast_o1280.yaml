@@ -1,0 +1,12 @@
+defaults:
+  - data: downscaling_no_precip
+  - dataloader: hindcast_o1280
+  - datamodule: downscaling 
+  - diagnostics: downscaling_no_precip_offline
+  - hardware: hindcast_o1280_1encoder
+  - graph: o320_o1280
+  - model: downscaling_o1280
+  - training: default
+  - _self_
+
+config_validation: False

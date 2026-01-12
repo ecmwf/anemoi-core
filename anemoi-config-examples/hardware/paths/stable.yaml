@@ -1,0 +1,15 @@
+data: ${oc.env:DATA_STABLE_DIR}/
+output: ${oc.env:OUTPUT}/
+grids: ${oc.env:GRID_DIR}/
+inter_mat: ${oc.env:INTER_MAT_DIR}/
+residual_statistics: ${oc.env:RESIDUAL_STATISTICS_DIR}/
+
+logs:
+  base: ${hardware.paths.output}logs/
+  wandb: ${hardware.paths.logs.base}
+  mlflow: ${hardware.paths.logs.base}mlflow/
+  tensorboard: ${hardware.paths.logs.base}tensorboard/
+checkpoints: ${hardware.paths.output}checkpoint/
+plots: ${hardware.paths.output}plots/
+profiler: ${hardware.paths.output}profiler/
+graph: ${hardware.paths.output}graphs/

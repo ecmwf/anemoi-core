@@ -1,0 +1,52 @@
+overwrite: False
+
+
+out: "out"
+hidden: "hidden"
+
+nodes:
+  out:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+    attributes: ${graph.attributes.nodes}
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 7
+    attributes: ${graph.attributes.nodes}
+
+edges:
+- source_name: out
+  target_name: hidden
+  edge_builder:
+    _target_: anemoi.graphs.edges.CutOffEdges
+    cutoff_factor: 0.7
+  attributes: ${graph.attributes.edges}
+- source_name: hidden
+  target_name: out
+  edge_builder:
+    _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+  attributes: ${graph.attributes.edges}
+- source_name: hidden
+  target_name: hidden
+  edge_builder:
+    _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: [6]
+  attributes: ${graph.attributes.edges}
+
+
+attributes:
+  nodes:
+    area_weight: 
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+      norm: unit-max 
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std

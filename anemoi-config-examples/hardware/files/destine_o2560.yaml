@@ -1,0 +1,18 @@
+dataset_x: downscaling-od-fc-oper-0001-mars-o1280-2023-2024-24h-v1.zarr
+dataset_x_forcings: downscaling-od-fc-oper-0001-mars-o1280-2023-2024-24h-v1-forcings.zarr
+dataset_y: downscaling-rd-fc-oper-i4ql-mars-o2560-2023-2024-24h-v1.zarr
+dataset_y_forcings: downscaling-rd-fc-oper-i4ql-mars-o2560-2023-2024-24h-v1-forcings.zarr
+
+
+residual_statistics: o2560_dict_6_72.npy
+
+truncation_inv: interpol_O2560_to_O1280_linear.mat.npz
+truncation: interpol_O1280_to_O2560_linear.mat.npz
+
+graph: o1280_o2560_multi_scale_9.pt
+
+checkpoint:
+  every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+  every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+  every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+warm_start: null

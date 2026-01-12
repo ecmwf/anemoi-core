@@ -1,0 +1,119 @@
+# gaussian layer on top of enfh lres input
+lres_gaussian_layer: False
+input_at_high_res: False
+lres_std_noise: 0.1
+
+
+# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
+run_id: null
+fork_run_id: null
+load_weights_only: null # only load model weights, do not restore optimiser states etc.
+
+# run in deterministic mode ; slows down
+deterministic: False
+
+# miscellaneous
+precision: bf16-mixed
+
+# multistep input
+# 1 = single step scheme, X(t-1) used to predict X(t)
+# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
+# Deepmind use k = 2 in their model
+multistep_input: 1
+
+# gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
+# the effective batch size becomes num-devices * batch_size * k
+accum_grad_batches: 1
+
+# clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
+gradient_clip:
+  val: 1.
+  algorithm: norm
+
+# for diffusion training
+noise:
+  sigma_max: 88
+  sigma_min: 0.02
+  sigma_data: 1.0
+  rho: 7
+  log_normal_mean: -1.2
+  log_normal_std: 1.2
+  exponential_weighting: False
+
+# stochastic weight averaging
+# https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
+swa:
+  enabled: False
+  lr: 1.e-4
+
+# use ZeroRedundancyOptimizer ; saves memory for larger models
+zero_optimizer: False
+
+# dynamic rescaling of the loss gradient
+# see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
+# don't enable this by default until it's been tested and proven beneficial
+loss_gradient_scaling: False
+
+# length of the "rollout" window (see Keisler's paper)
+rollout:
+  start: 1
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  max: 1
+
+max_epochs: 100000
+max_steps: null
+lr:
+  warmup_steps: 1000
+  rate: 10e-4 #local_lr
+  iterations: 6e5
+  min: 0
+
+# Changes in per-gpu batch_size should come with a rescaling of the local_lr
+# in order to keep a constant global_lr
+# global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
+
+# TODO: (@jakob-schloer / @jesper-dramsch): Ideas about how to allow default loss_scaling
+loss_scaling:
+  default: 1
+  pl:
+    q: 2 # no change
+    t: 0.5 # previous was 0.8
+    u: 1.5 # no change
+    v: 1.5 # no change
+    w: 2 #  previous was 1
+    z: 0.1 # previous was 0.5
+  sfc:
+    10u: 2.5
+    10v: 2.5
+    2d: 2
+    2t: 2
+    sp: 1.5
+    tcw: 1
+    skt: 0.1
+    msl: 0.1
+    tp: 2    
+    cp: 2
+  inverse_tendency_variance_scaling: False
+
+metrics:
+- z_500
+- t_850
+- u_850
+- v_850
+
+pressure_level_scaler:
+  _target_: anemoi.training.data.scaling.LinearPressureLevelScaler
+  minimum: 0.0 # only rely on slope ...
+  slope: 0.0001659751037 # 1./6025 -> 1./sum(1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50)
+
+prediction_mode: tendency
+tendency_mode: False
+approach: probabilistic
+graph: dynamic
+halo: 2000
+predict_residuals: True
+
+num_sanity_val_steps: 0
+check_val_every_n_epoch: 1

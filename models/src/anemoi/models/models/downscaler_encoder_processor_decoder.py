@@ -44,6 +44,50 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
     """Downscaling Model."""
 
+    def compute_residuals_advanced(
+        self,
+        y: torch.Tensor,
+        x_in_interp_to_hres: torch.Tensor,
+        pre_processors_state: Callable,
+        list_indices_direct_prediction: list,
+    ) -> torch.Tensor:
+        """Compute the tendency from two states.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            The high-resolution target tensor with shape (bs, ens, latlon, nvar)
+        x_in_interp_to_hres : torch.Tensor
+            The interpolated low-resolution input tensor with shape (bs, ens, latlon, nvar)
+        pre_processors_state : callable
+            Function to pre-process the state variables.
+        list_indices_direct_prediction : list
+            List of indices for direct prediction (not computed as residuals).
+
+        Returns
+        -------
+        torch.Tensor
+            The residuals tensor output from model.
+        """
+
+        inverse_indices = [
+            i
+            for i in self.data_indices.data.output.full
+            if i not in set(list_indices_direct_prediction)
+        ]
+
+        mask = y.new_zeros(y.shape[-1])  # dtype/device matches y
+        mask[inverse_indices] = 1
+
+        # residuals = y for direct channels, and y - x for inverse channels
+        residuals = (
+            y[..., self.data_indices.data.output.full]
+            - x_in_interp_to_hres[..., self.data_indices.data.output.full] * mask
+        )
+
+        norm_target = pre_processors_state(residuals, dataset="output", in_place=False)
+        return norm_target
+
     def compute_residuals(
         self,
         y: torch.Tensor,
@@ -57,7 +101,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         y : torch.Tensor
             The high-resolution target tensor with shape (bs, ens, latlon, nvar)
         x_in_interp_to_hres : torch.Tensor
-            The interpolated low-resolution input tensor with shape (bs, ens, latlon, n
+            The interpolated low-resolution input tensor with shape (bs, ens, latlon, nvar)
 
         Returns
         -------

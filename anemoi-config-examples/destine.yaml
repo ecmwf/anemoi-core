@@ -1,0 +1,12 @@
+defaults:
+  - data: downscaling_no_precip
+  - dataloader: destine_o2560
+  - datamodule: downscaling 
+  - diagnostics: downscaling_no_precip_offline
+  - hardware: destine_o2560
+  - graph: no_overwrite
+  - model: downscaling_512_batch_sharded
+  - training: default
+  - _self_
+
+config_validation: False

@@ -1,0 +1,8 @@
+defaults:
+  - paths: main
+  - files: hindcast_o1280
+  
+accelerator: auto
+num_gpus_per_model: 1
+num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
+num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}

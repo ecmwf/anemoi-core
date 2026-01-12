@@ -1,0 +1,84 @@
+prefetch_factor: 1
+pin_memory: True
+read_group_size: 1
+
+num_workers:
+  training: 1
+  validation: 1
+  test: 1
+  predict: 1
+batch_size:
+  training: 1
+  validation: 1
+  test: 1
+  predict: 1
+# runs only N training batches [N = integer | null]
+# if null then we run through all the batches
+limit_batches:
+  training: null
+  validation: null
+  test: 20
+  predict: 20
+
+# ============
+# Dataloader definitions
+# These follow the ecml-tools patterns
+# You can make these as complicated for merging as you like
+# See Readme: https://github.com/ecwmf-lab/ecml-tools/
+# ============
+
+steps: [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72]
+select: [2t, 10u, 10v, msl] 
+select_forcings: [cos_julian_day, cos_latitude, cos_local_time, cos_longitude, lsm, sin_julian_day, sin_latitude, sin_local_time, sin_longitude, z]
+
+
+hres_grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.data}
+
+grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.data}
+
+lres_grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.lres}
+
+
+training:
+  start: 1900
+  end: 1901
+  frequency: ${data.frequency}
+  dataset:
+    zip:
+    - dataset: 
+      - ${hardware.paths.data}/${hardware.files.dataset_x}
+      name: lres
+      select: ${dataloader.select}
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: hres
+      select: ${dataloader.select_forcings}
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: out
+      select: ${dataloader.select}
+    adjust:
+    - dates
+
+validation:
+  start: 1900
+  end: 1901  
+  frequency: ${data.frequency}
+  dataset:
+    zip:
+    - dataset: 
+        - ${hardware.paths.data}/${hardware.files.dataset_x}
+      name: lres
+      select: ${dataloader.select}
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: hres
+      select: ${dataloader.select_forcings}
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: out
+      select: ${dataloader.select}
+    adjust:
+    - dates

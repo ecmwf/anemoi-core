@@ -22,6 +22,7 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.train.tasks.base import BaseGraphModule
 from hydra.utils import instantiate
+from omegaconf import OmegaConf
 
 if TYPE_CHECKING:
 
@@ -96,6 +97,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lres_grid_shard_slice = None
         self.hres_grid_shard_shapes = None
         self.hres_grid_shard_slice = None
+
+        fields_direct_prediction = getattr(config.data, "direct_prediction", None)
+        self.indices_direct_prediction = ...
 
     def forward(
         self,
@@ -211,6 +215,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         # prediction, fwd_with_preconditioning
         # time_for_pred = time.time()
+
         y_pred = self(
             x_in_interp_to_hres,
             x_in_hres,
@@ -267,7 +272,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         elif self.training_approach == "deterministic":
             sigma = torch.full(
                 shape,
-                fill_value=5000.0,
+                fill_value=500000.0,
                 device=device,
             )
 

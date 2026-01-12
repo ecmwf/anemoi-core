@@ -1,0 +1,77 @@
+activation: GELU
+choice: downscaling
+activate_processor: True
+version: two_encoder
+
+encoder:
+  - name: in
+    _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+    _convert_: all
+    trainable_size: ${model.trainable_parameters.in2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    activation: ${model.activation}
+    num_chunks: 1
+    mlp_hidden_ratio: 4
+    num_heads: 4
+    hidden_dim: 256
+  - name: in_hres
+    _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+    _convert_: all
+    trainable_size: ${model.trainable_parameters.in_hres2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    activation: ${model.activation}
+    num_chunks: 1
+    mlp_hidden_ratio: 4
+    num_heads: 4
+    hidden_dim: 256
+
+in_out_mapper:
+  _target_: anemoi.models.layers.ds_mapper.GraphTransformerInterpolator
+  _convert_: all
+  trainable_size: ${model.trainable_parameters.in2out}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  activation: ${model.activation}
+  num_chunks: 1
+  mlp_hidden_ratio: 2
+  num_heads: 4
+  hidden_dim: 256
+
+processor:
+  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  _convert_: all
+  activation: ${model.activation}
+  trainable_size: ${model.trainable_parameters.hidden2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_layers: 16
+  num_chunks: 2
+  mlp_hidden_ratio: 4 
+  num_heads: 4 
+
+decoder:
+  _target_: anemoi.models.layers.ds_mapper.DownscalingGraphTransformerBackwardMapper
+  _convert_: all
+  trainable_size: ${model.trainable_parameters.hidden2out}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  activation: ${model.activation}
+  num_chunks: 1
+  mlp_hidden_ratio: 4
+  num_heads: 4
+
+trainable_parameters:
+  in: 0
+  out: 0
+  in_hres: 0
+  hidden: 0
+  in2hidden: 0
+  in_hres2hidden: 0
+  hidden2out: 0
+  hidden2hidden: 0
+  in2out: 0
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+node_loss_weight: area_weight
