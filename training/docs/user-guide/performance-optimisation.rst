@@ -168,18 +168,18 @@ memory is not a constraint:
        gradient_checkpointing: False
 
 You can also enable/disable checkpointing independently for each component.
-For example, to only checkpoint the processor (which typically has the most
-layers):
+For example, to only checkpoint the mappers (encoder and decoder), which
+typically have the highest peak memory usage:
 
 .. code:: yaml
 
    model:
      encoder:
-       gradient_checkpointing: False
+       gradient_checkpointing: True
      processor:
-       gradient_checkpointing: True  # Only checkpoint the processor
-     decoder:
        gradient_checkpointing: False
+     decoder:
+       gradient_checkpointing: True
 
 .. note::
 
