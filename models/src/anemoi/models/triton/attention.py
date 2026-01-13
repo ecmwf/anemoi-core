@@ -291,18 +291,6 @@ def _attn_fwd(
     # load q: it will stay in SRAM throughout
     q = desc_q.load([qo_offset_y, 0])
 
-    # Attn fwd is split into two kernels for historical and performance reasons
-    # The structure is maintained as a future potential optimisation
-
-    # The original FusedAttention example implemented causal masking by
-    # calling '_attn_fwd_inner' multiple times with different parameters
-    # depending on where the "BLOCK_M" was within the context dimension
-    # (e.g. fully masked, partially masked or fully present)
-    # Intial attempts to follow this approach for sliding window masking
-    # didn't work. Therefore, we have a single kernel for all positions
-    # within the context. One downside is that the mask has to be computed
-    # and applied even if the block is fully or not at all masked
-    # Therefore a multi-stage approach is likely more performant.
     acc, l_i, m_i = _attn_fwd_inner(
         acc,
         l_i,
