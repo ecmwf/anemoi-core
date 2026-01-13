@@ -1191,7 +1191,6 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
 
 
-
 class PlotReconstruction(BasePlotAdditionalMetrics):
     """Plots a post-processed sample: input, reconstruction and error. Used in Autoencoder training."""
 
