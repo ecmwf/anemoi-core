@@ -62,10 +62,10 @@ plot-related tasks asynchronously and efficiently in the background.
 
 Plotting callbacks (such as ``PlotSample``, ``PlotLoss``, and ``LongRolloutPlots``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
 
-* **Spatial Mask**: A ``spatial_mask`` string referencing a boolean mask defined within the graph data.
-* **Lat/Lon Bounds**: A ``latlon_bounds`` list specifying a bounding box: ``[[lat_min, lon_min], [lat_max, lon_max]]``.
+* **Mask Name**: A ``mask_attr_name`` string referencing a boolean mask defined within the graph data.
+* **Lat/Lon Bounds**: A ``latlon_bbox`` list specifying a bounding box: ``[lat_min, lon_min, lat_max, lon_max]``.
 
-When a focus area is applied, the plot filenames and experiment log tags will automatically include a suffix (e.g., ``_spatial_mask`` or ``_latlon_bounds``) to distinguish them from global plots.
+When a focus area is applied, the plot filenames and experiment log tags will automatically include a suffix (e.g., ``_mask_attr_name`` or ``_latlon_bbox``) to distinguish them from global plots.
 
 .. code:: yaml
 
@@ -74,7 +74,7 @@ When a focus area is applied, the plot filenames and experiment log tags will au
      sample_idx: ${diagnostics.plot.sample_idx}
      parameters: ${diagnostics.plot.parameters}
      focus_area:
-       latlon_bounds: [[30.0, -20.0], [60.0, 40.0]]
+       latlon_bbox: [30.0, -20.0, 60.0, 40.0]
 
 **Rendering Methods**
 
@@ -146,7 +146,7 @@ which is recommended for interactive terminals and
               sfc_wind: [10u, 10v]
            # Example focusing loss on a predefined mask
            focus_area:
-             spatial_mask: "cutout_mask"
+             mask_attr_name: "cutout_mask"
 
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
            sample_idx: ${diagnostics.plot.sample_idx}

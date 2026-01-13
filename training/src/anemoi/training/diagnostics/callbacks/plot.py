@@ -66,8 +66,8 @@ class BasePlotCallback(Callback, ABC):
         focus_area : dict | None, optional
             Area or point indices to focus the plot on.
             Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
+            - {"mask_attr_name": str}
+            - {"latlon_bbox": [lat_min, lon_min, lat_max, lon_max]}
         """
         super().__init__()
         self.config = config
@@ -101,25 +101,25 @@ class BasePlotCallback(Callback, ABC):
         self.tag = None
 
         if self.focus_area is not None:
-            if self.focus_area["spatial_mask"] is not None:
-                mask_key = self.focus_area["spatial_mask"]
+            if self.focus_area["mask_attr_name"] is not None:
+                mask_key = self.focus_area["mask_attr_name"]
                 assert mask_key in pl_module.model.graph_data["data"], (
                     f"Spatial mask '{mask_key}' not found in graph_data['data']. "
                     f"Available masks: {list(pl_module.model.graph_data['data'].keys())}"
                 )
                 focus_mask = np.zeros(self.latlons.shape[0], dtype=bool)
-                spatial_mask_idxs = pl_module.model.graph_data["data"][mask_key]
-                focus_mask[spatial_mask_idxs.squeeze()] = True
-                self.tag = "_spatial_mask"
+                mask_attr_name_idxs = pl_module.model.graph_data["data"][mask_key]
+                focus_mask[mask_attr_name_idxs.squeeze()] = True
+                self.tag = self.focus_area["mask_attr_name"]
 
-            elif self.focus_area["latlon_bounds"] is not None:
-                (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
+            elif self.focus_area["latlon_bbox"] is not None:
+                (lat_min, lon_min, lat_max, lon_max) = self.focus_area["latlon_bbox"]
                 lat, lon = self.latlons[:, 0], self.latlons[:, 1]
                 focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
-                self.tag = "_latlon_bounds"
+                self.tag = f"_bbox_lat-{lat_min}-{lat_max}_lon-{lon_min}-{lon_max}"
 
             else:
-                msg = "focus_area must contain either 'spatial_mask' or 'latlon_bounds'."
+                msg = "focus_area must contain either 'mask_attr_name' or 'latlon_bbox'."
                 raise ValueError(msg)
 
         return focus_mask
@@ -432,8 +432,8 @@ class LongRolloutPlots(BasePlotCallback):
         focus_area : dict | None, optional
             Area or point indices to focus the plot on.
             Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
+            - {"mask_attr_name": str}
+            - {"latlon_bbox": [lat_min, lon_min, lat_max, lon_max]}
         """
         super().__init__(config)
 
@@ -841,8 +841,8 @@ class PlotLoss(BasePerBatchPlotCallback):
             Override for batch frequency, by default None
         focus_area : dict | None, optional
             Area or point indices to focus the plot on. Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
+            - {"mask_attr_name": str}
+            - {"latlon_bbox": [lat_min, lon_min, lat_max, lon_max]}
         """
         super().__init__(config, every_n_batches=every_n_batches)
         self.parameter_names = None
@@ -1112,8 +1112,8 @@ class PlotSample(BasePlotAdditionalMetrics):
             Batch frequency to plot at, by default None
         focus_area : dict | None, optional
             Area or point indices to focus the plot on. Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
+            - {"mask_attr_name": str}
+            - {"latlon_bbox": [lat_min, lon_min, lat_max, lon_max]}
         """
         del kwargs
         super().__init__(config, every_n_batches=every_n_batches)
@@ -1191,6 +1191,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
 
 
+
 class PlotReconstruction(BasePlotAdditionalMetrics):
     """Plots a post-processed sample: input, reconstruction and error. Used in Autoencoder training."""
 
@@ -1229,8 +1230,8 @@ class PlotReconstruction(BasePlotAdditionalMetrics):
             Batch frequency to plot at, by default None
         focus_area : dict | None, optional
             Area or point indices to focus the plot on. Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
+            - {"mask_attr_name": str}
+            - {"latlon_bbox": [lat_min, lon_min, lat_max, lon_max]}
         """
         del kwargs
         super().__init__(config, every_n_batches=every_n_batches)
@@ -1337,8 +1338,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             Override for batch frequency, by default None
         focus_area : dict | None, optional
             Area or point indices to focus the plot on. Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
+            - {"mask_attr_name": str}
+            - {"latlon_bbox": [lat_min, lon_min, lat_max, lon_max]}
         """
         super().__init__(config, every_n_batches=every_n_batches)
         self.sample_idx = sample_idx

@@ -34,16 +34,16 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
 
 
 class FocusAreaSchema(BaseModel):
-    spatial_mask: str | None = Field(default=None)
+    mask_attr_name: str | None = Field(default=None)
     "Name of the node attribute to use as masking. eg. cutout_mask"
 
-    latlon_bounds: list[list[float]] | None = Field(default=None, min_items=2, max_items=2)
-    "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
+    latlon_bbox: list[float] | None = Field(default=None, min_items=4, max_items=4)
+    "Latitude and longitude bounds as [lat_min, lon_min, lat_max, lon_max]."
 
     @model_validator(mode="after")
     def exactly_one_present(self) -> "FocusAreaSchema":
-        if (self.spatial_mask is None) == (self.latlon_bounds is None):
-            msg = "Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both)."
+        if (self.mask_attr_name is None) == (self.latlon_bbox is None):
+            msg = "Provide exactly one of 'mask_attr_name' or 'latlon_bbox' (not both)."
             raise ValueError(msg)
         return self
 
@@ -56,7 +56,7 @@ class PlotLossSchema(BaseModel):
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
     focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -118,7 +118,7 @@ class LongRolloutPlotsSchema(BaseModel):
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotSampleSchema(BaseModel):
@@ -141,7 +141,7 @@ class PlotSampleSchema(BaseModel):
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotReconstructionSchema(BaseModel):
@@ -164,7 +164,7 @@ class PlotReconstructionSchema(BaseModel):
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotSpectrumSchema(BaseModel):
@@ -177,7 +177,7 @@ class PlotSpectrumSchema(BaseModel):
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotHistogramSchema(BaseModel):
