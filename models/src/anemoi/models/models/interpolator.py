@@ -226,7 +226,10 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             shard_shapes=shard_shapes_hidden,
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
             edge_shard_shapes=proc_edge_shard_shapes,
         )
 

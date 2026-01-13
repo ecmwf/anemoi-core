@@ -246,6 +246,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
         )
 
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=batch_ens_size,
+            model_comm_group=model_comm_group,
+        )
+
         processor_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
 
         # Processor
@@ -255,12 +260,21 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             shard_shapes=shard_shapes_hidden,
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
             edge_shard_shapes=proc_edge_shard_shapes,
             **processor_kwargs,
         )
 
         x_latent_proc = x_latent_proc + x_latent
+
+        # Compute decoder edges using updated latent representation
+        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider.get_edges(
+            batch_size=batch_ens_size,
+            model_comm_group=model_comm_group,
+        )
 
         x_out_dict = {}
         for dataset_name in dataset_names:

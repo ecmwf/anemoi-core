@@ -27,6 +27,7 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -69,6 +70,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
 
+        # Create graph providers
+        self.encoder_graph_provider = create_graph_provider(
+            graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.encoder.get("trainable_size", 0),
+        )
+
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
@@ -109,6 +119,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
+            edge_dim=self.processor_graph_provider.edge_dim,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
 
@@ -336,10 +347,17 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             model_comm_group=model_comm_group,
         )
 
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=bse,
+            model_comm_group=model_comm_group,
+        )
+
         x_latent_proc = self.processor(
             x=x_latent,
             batch_size=bse,
             shard_shapes=shard_shapes_hidden,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
@@ -349,6 +367,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         # Processor skip connection
         x_latent_proc = x_latent_proc + x_latent
+
+        # Compute decoder edges using updated latent representation
+        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider.get_edges(
+            batch_size=bse,
+            model_comm_group=model_comm_group,
+        )
 
         # Decoder
         x_out_dict = {}
