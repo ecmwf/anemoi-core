@@ -192,7 +192,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             rollout=self.rollout,
             validation_mode=validation_mode,
         ):
-            loss += loss_next
+            loss = loss + loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
