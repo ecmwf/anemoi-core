@@ -371,7 +371,7 @@ def _attn_bwd_dkdv(
     start_m,
     CAUSAL: tl.constexpr,
     WINDOW: tl.constexpr,
-     warp_specialize: tl.constexpr,
+    warp_specialize: tl.constexpr,
 ):
     """Computes dK and dV with respect to dO.
 
@@ -404,22 +404,22 @@ def _attn_bwd_dkdv(
         kv_lower_bound = offs_n[:, None] - WINDOW
         kv_upper_bound = offs_n[:, None] + WINDOW
     elif CAUSAL:
-        #lo, hi = start_n, N_CTX 
+        # lo, hi = start_n, N_CTX
         # start_n, rounded down to lowest multiple if not even
         lo, hi = (start_n // BLOCK_M1) * BLOCK_M1, N_CTX
-         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
+        # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
         lo = tl.multiple_of(lo, BLOCK_M1)
         hi = tl.multiple_of(hi, BLOCK_M1)
-        
+
     else:
-        lo : tl.constexpr = 0
-        hi : tl.constexpr = N_CTX
+        lo: tl.constexpr = 0
+        hi: tl.constexpr = N_CTX
 
     # skip up to 'lo'
     qT_ptrs += lo * stride_tok
     do_ptrs += lo * stride_tok
 
-    #for _ in range(num_steps):
+    # for _ in range(num_steps):
     for curr_m in tl.range(lo, hi, step_m, warp_specialize=warp_specialize):
 
         qT = tl.load(qT_ptrs)
@@ -451,7 +451,7 @@ def _attn_bwd_dkdv(
         dsT = pT * (dpT - Di[None, :])
         dsT = dsT.to(tl.float16)
         dk += tl.dot(dsT, tl.trans(qT))
-        
+
         # Increment pointers.
         qT_ptrs += step_m * stride_tok
         do_ptrs += step_m * stride_tok
@@ -514,14 +514,14 @@ def _attn_bwd_dq(
         q_upper_bound = offs_m[:, None] + WINDOW
     elif CAUSAL:
         # hi is block after start_m, rounded up to nearest multiple of step_n
-        lo, hi = 0, ((start_m + BLOCK_M2)// BLOCK_N2) * BLOCK_N2
+        lo, hi = 0, ((start_m + BLOCK_M2) // BLOCK_N2) * BLOCK_N2
         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
         lo = tl.multiple_of(lo, BLOCK_N2)
         hi = tl.multiple_of(hi, BLOCK_N2)
     else:
-        lo : tl.constexpr = 0
-        hi : tl.constexpr = N_CTX
-    
+        lo: tl.constexpr = 0
+        hi: tl.constexpr = N_CTX
+
     # skip up to 'lo'
     kT_ptrs += lo * stride_tok
     vT_ptrs += lo * stride_tok
@@ -549,7 +549,7 @@ def _attn_bwd_dq(
         # Compute dQ.
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
         dq += tl.dot(ds, tl.trans(kT))
-        
+
         kT_ptrs += step_n * stride_tok
         vT_ptrs += step_n * stride_tok
     return dq
@@ -788,7 +788,7 @@ class TritonAttention(torch.autograd.Function):
         ctx.HEAD_DIM = HEAD_DIM_K
         ctx.causal = causal
         ctx.window = window
-        ctx.warp_specialize=warp_specialize
+        ctx.warp_specialize = warp_specialize
         return o
 
     @staticmethod
@@ -851,7 +851,7 @@ class TritonAttention(torch.autograd.Function):
             num_stages=NUM_STAGES,  #
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,
-            #bwd kernels don't compile with warp_spec=true (GH200, triton 3.4)
+            # bwd kernels don't compile with warp_spec=true (GH200, triton 3.4)
             warp_specialize=False,
         )
 
