@@ -17,7 +17,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
-from anemoi.models.layers.graph_providers import create_graph_provider
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
