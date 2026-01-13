@@ -64,7 +64,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.down_level_processor_graph_providers = nn.ModuleDict()
             self.up_level_processor = nn.ModuleDict()
             self.up_level_processor_graph_providers = nn.ModuleDict()
-
             for i in range(0, self.num_hidden - 1):
                 nodes_names = self._graph_name_hidden[i]
 
@@ -123,7 +122,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Downscale
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
-
         for i in range(0, self.num_hidden - 1):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
@@ -362,6 +360,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         for i in range(self.num_hidden - 1, 0, -1):
             src_hidden_name = self._graph_name_hidden[i]
             dst_hidden_name = self._graph_name_hidden[i - 1]
+
+            # Compute edges for upscale mapper
+            upscale_edge_attr, upscale_edge_index, us_edge_shard_shapes = self.upscale_graph_providers[
+                src_hidden_name
+            ].get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
 
             # Compute edges for upscale mapper
             upscale_edge_attr, upscale_edge_index, us_edge_shard_shapes = self.upscale_graph_providers[

@@ -99,23 +99,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
         # Decoder hidden -> data
-        self.decoder_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_data],
-            trainable_size=model_config.model.decoder.get("trainable_size", 0),
-        )
-
-        self.decoder = instantiate(
-            model_config.model.decoder,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.num_channels,
-            in_channels_dst=self.input_dim,
-            hidden_dim=self.num_channels,
-            out_channels_dst=self.num_output_channels,
-            edge_dim=self.decoder_graph_provider.edge_dim,
-        )
+        self.decoder_graph_provider = torch.nn.ModuleDict()
+        self.decoder = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.decoder_graph_provider[dataset_name] = create_graph_provider(
+                graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
+                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            )
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         x_skip = x[:, -1, ...]
