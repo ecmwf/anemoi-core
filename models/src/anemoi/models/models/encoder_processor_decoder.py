@@ -21,7 +21,6 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
 
@@ -74,11 +73,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
-            edge_dim=self.processor_graph_provider.edge_dim,
         )
 
         # Decoder hidden -> data
-
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
@@ -290,10 +287,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             shard_shapes=shard_shapes_hidden,
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
-            edge_shard_shapes=proc_edge_shard_shapes,
             edge_shard_shapes=proc_edge_shard_shapes,
         )
 

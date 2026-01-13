@@ -18,7 +18,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
@@ -66,11 +65,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         if self.level_process:
             self.down_level_processor = nn.ModuleDict()
             self.down_level_processor_graph_providers = nn.ModuleDict()
-            self.down_level_processor_graph_providers = nn.ModuleDict()
             self.up_level_processor = nn.ModuleDict()
             self.up_level_processor_graph_providers = nn.ModuleDict()
-            self.up_level_processor_graph_providers = nn.ModuleDict()
-
             for i in range(0, self.num_hidden - 1):
                 nodes_names = self._graph_name_hidden[i]
 
@@ -88,7 +84,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
-                    edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.model.level_process_num_layers,
                 )
 
@@ -105,7 +100,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     model_config.model.processor,
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
-                    edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
                     edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.model.level_process_num_layers,
                 )
@@ -126,14 +120,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.hidden_dims[self._graph_name_hidden[self.num_hidden - 1]],
             edge_dim=self.processor_graph_provider.edge_dim,
-            edge_dim=self.processor_graph_provider.edge_dim,
         )
 
         # Downscale
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
-        self.downscale_graph_providers = nn.ModuleDict()
-
         for i in range(0, self.num_hidden - 1):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
@@ -152,7 +143,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.node_attributes[first_dataset_name].attr_ndims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[dst_nodes_name],
-                edge_dim=self.downscale_graph_providers[src_nodes_name].edge_dim,
                 edge_dim=self.downscale_graph_providers[src_nodes_name].edge_dim,
             )
 
@@ -178,7 +168,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_dst=self.hidden_dims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
-                edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
                 edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
             )
 
@@ -356,7 +345,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 edge_shard_shapes=ds_edge_shard_shapes,
-                edge_shard_shapes=ds_edge_shard_shapes,
             )
 
         # Processing hidden-most level
@@ -408,7 +396,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 x_src_is_sharded=in_out_sharded,
                 x_dst_is_sharded=in_out_sharded,
                 keep_x_dst_sharded=in_out_sharded,
-                edge_shard_shapes=us_edge_shard_shapes,
                 edge_shard_shapes=us_edge_shard_shapes,
             )
 

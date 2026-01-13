@@ -27,7 +27,6 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -119,7 +118,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            edge_dim=self.processor_graph_provider.edge_dim,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
 
@@ -347,17 +345,10 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             model_comm_group=model_comm_group,
         )
 
-        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
-
         x_latent_proc = self.processor(
             x=x_latent,
             batch_size=bse,
             shard_shapes=shard_shapes_hidden,
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
