@@ -148,5 +148,6 @@ def test_aicon_training(trained_aicon: tuple) -> None:
     _, initial_sum, final_sum = trained_aicon
     assert initial_sum != final_sum
 
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s", "-k", "test_aicon_metadata"])
