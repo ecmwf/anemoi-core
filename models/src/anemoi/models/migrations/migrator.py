@@ -161,9 +161,11 @@ class Migration:
         import cloudpickle
 
         serialized_rollback: _SerializedRollback | None = None
+        print("rollback:", self.rollback)
         if self.rollback is not None:
             cloudpickle.register_pickle_by_value(sys.modules[self.rollback.__module__])
             rollback_bytes = cloudpickle.dumps(self.rollback)
+            print(self.rollback, rollback_bytes)
             serialized_rollback = _SerializedRollback(rollback_bytes)
         serialized_rollback_setup: SerializedMigrationContext | None = None
         if self.migrate_setup is not None:
@@ -646,6 +648,7 @@ class Migrator:
         ckpt = _load_ckpt(path, replace_attrs)
         ckpt["hyper_parameters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])
         for op in ops:
+            print("rollback:", op, isinstance(op, RollbackOp))
             if isinstance(op, RollbackOp):
                 ckpt = op.run(ckpt)
                 ckpt[_ckpt_migration_key].pop()
