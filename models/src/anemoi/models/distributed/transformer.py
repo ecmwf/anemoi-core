@@ -15,17 +15,8 @@ import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.utils import get_memory_format
-
-
-def _get_split_sizes(total: int, num_chunks: int) -> list[int]:
-    """Compute split sizes.
-
-    Example: _get_split_sizes(4, 3) -> [2, 1, 1]
-    """
-    base = total // num_chunks
-    remainder = total % num_chunks
-    return [base + 1 if i < remainder else base for i in range(num_chunks)]
 
 
 def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
@@ -82,7 +73,7 @@ def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] =
 
     num_heads = input_.shape[-3]
     assert num_heads >= comm_size, f"Number of heads ({num_heads}) must be >= number of GPUs ({comm_size})"
-    head_split_sizes = _get_split_sizes(num_heads, comm_size)
+    head_split_sizes = get_balanced_partition_sizes(num_heads, comm_size)
     input_list = [x.contiguous() for x in torch.split(input_, head_split_sizes, dim=-3)]
 
     input_shape = [x.shape for x in input_list]  # (b h n c)
@@ -127,7 +118,7 @@ def _seqalltoall(input_: Tensor, shapes: list, num_heads: int, group: Optional[P
     input_list = [x.contiguous() for x in torch.split(input_, seq_per_rank, dim=-2)]
 
     input_shape = [x.shape for x in input_list]
-    heads_per_rank = _get_split_sizes(num_heads, comm_size)
+    heads_per_rank = get_balanced_partition_sizes(num_heads, comm_size)
     channels_per_rank = [x.shape[-1] for x in input_list]
 
     output_list = [
