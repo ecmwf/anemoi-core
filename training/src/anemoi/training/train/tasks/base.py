@@ -248,7 +248,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             reader_group_size=reader_group_size,
         )
         self.grid_indices.setup(graph_data)
-        self.grid_dim = TensorDim.GRID
+        self.grid_dim = -2
 
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
@@ -585,16 +585,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         grid_shard_shapes = self.grid_indices.shard_shapes
         grid_size = self.grid_indices.grid_size
 
-        # Most tensors in the training loop follow the canonical layout
-        # (B, T, E, G, V) and therefore use TensorDim.GRID (=3). However,
-        # diagnostic callbacks and some mask utilities use this method with
-        # tensors that omit one or more dims, e.g. (B, E, G, V)...
-        grid_dim = -2
-
-        if grid_size == batch.shape[grid_dim] or self.reader_group_size == 1:
+        if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
-        shard_shapes = apply_shard_shapes(batch, grid_dim, grid_shard_shapes)
+        shard_shapes = apply_shard_shapes(batch, self.grid_dim, grid_shard_shapes)
         tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
 
         torch.distributed.all_gather(
@@ -602,8 +596,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             batch,
             group=self.reader_groups[self.reader_group_id],
         )
-
-        return torch.cat(tensor_list, dim=grid_dim)
+        return torch.cat(tensor_list, dim=self.grid_dim)
 
     def calculate_val_metrics(
         self,

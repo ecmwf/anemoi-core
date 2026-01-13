@@ -48,7 +48,6 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.tasks import GraphInterpolator
-from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
@@ -191,11 +190,8 @@ class BasePlotCallback(Callback, ABC):
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
         if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
-            data = pl_module.output_mask.apply(
-                data,
-                dim=-2,  # grid dimension
-                fill_value=np.nan,
-            )
+            # Fill with NaNs values where the mask is False
+            data[:, :, :, ~pl_module.output_mask, :] = np.nan
         return data
 
     @abstractmethod
@@ -930,20 +926,6 @@ class PlotLoss(BasePerBatchPlotCallback):
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
-
-            # Some tasks/models return predictions/targets without an explicit
-            # time dimension.
-            #
-            # - deterministic: (B, G, V)
-            # - ensemble:      (B, E, G, V)
-            # - time-aware:    (B, T, ...)
-            #
-            # Losses/scalers generally assume a TIME axis exists.
-            if y_hat.ndim in (3, 4):
-                y_hat = y_hat.unsqueeze(TensorDim.TIME)
-            if y_true.ndim in (3, 4):
-                y_true = y_true.unsqueeze(TensorDim.TIME)
-
             loss = reduce_to_last_dim(self.loss(y_hat, y_true, squash=False).detach().cpu().numpy())
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
@@ -971,7 +953,10 @@ class PlotLoss(BasePerBatchPlotCallback):
             self.loss = copy.deepcopy(pl_module.loss)
 
             # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
-            if hasattr(self.loss.scaler, "nan_mask_weights") and self.loss.scaler.nan_mask_weights.shape[-2] != 1:
+            if (
+                hasattr(self.loss.scaler, "nan_mask_weights")
+                and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+            ):
                 self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
 
             super().on_validation_batch_end(
@@ -1015,9 +1000,6 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        # `output_tensor` / `data` can be shaped either as (B, T, E, G, V)
-        # or (B, E, G, V) depending on task/model.
-        # Use -2 to always target the grid dimension (variables are last).
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=-2, fill_value=np.nan)
         data = data.numpy()
@@ -1197,7 +1179,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 self.latlons,
                 data[init_step, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
-                output_tensor[rollout_step, ...].squeeze(),
+                output_tensor[rollout_step, ...],
                 min_delta=self.min_delta,
             )
 
