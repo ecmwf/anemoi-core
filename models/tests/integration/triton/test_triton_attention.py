@@ -44,7 +44,9 @@ except BaseException:
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("warp_specialize", [False])
 @pytest.mark.parametrize(
-    "window", [0, 512, 1120] if HAS_FLASH else [0, 512]
+    "window",
+    [0, 512, 1120] if HAS_FLASH else [0, 512],
+    # "window", [0]
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, dtype=torch.float16):
@@ -130,8 +132,8 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window
     # Compute triton values
     tri_out = attention(q, k, v, causal, window, sm_scale, warp_specialize).half()
 
+    atol = 1e-3
     if mode == "fwd":
-        atol = 1e-2
         torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=0)
         return
 
@@ -141,12 +143,16 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window
     tri_dq, q.grad = q.grad.clone(), None
 
     # compare
-    torch.testing.assert_close(tri_out, ref_out, atol=1e-2, rtol=0)
+    torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=0)
     rtol = 0.0
     # Relative tolerance workaround for known hardware limitation of CDNA2 GPU.
     # For details see https://pytorch.org/docs/stable/notes/numerical_accuracy.html#reduced-precision-fp16-and-bf16-gemms-and-convolutions-on-amd-instinct-mi200-devices
     if is_hip() and triton.runtime.driver.active.get_current_target().arch == "gfx90a":
         rtol = 1e-2
-    torch.testing.assert_close(tri_dv, ref_dv, atol=1e-2, rtol=rtol)
-    torch.testing.assert_close(tri_dk, ref_dk, atol=1e-2, rtol=rtol)
-    torch.testing.assert_close(tri_dq, ref_dq, atol=1e-2, rtol=rtol)
+
+    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=rtol)
+    torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=rtol)
+    dv_atol = (
+        1e-2 if causal and mode == "bwd" else atol
+    )  # TODO(cathal) 0.0% mismatch in the early context for this configuration
+    torch.testing.assert_close(tri_dv, ref_dv, atol=dv_atol, rtol=rtol)

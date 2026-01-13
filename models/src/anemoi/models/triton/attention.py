@@ -427,22 +427,23 @@ def _attn_bwd_dkdv(
         offs_m = curr_m + tl.arange(0, BLOCK_M1)
         m = tl.load(M + offs_m)
         qkT = tl.dot(k, qT)
-        pT = tl.math.exp2(qkT - m[None, :])
         # Apply masking.
         if CAUSAL:
             mask = offs_m[None, :] >= offs_n[:, None]
-            pT = tl.where(mask, pT, -1.0e6)
+            qkT = tl.where(mask, qkT, float("-inf"))
 
         if WINDOW > 0:
             m_pos = offs_m[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
             mask = (kv_lower_bound <= m_pos) & (kv_upper_bound >= m_pos)
-            pT = tl.where(mask, pT, -1.0e6)
+            qkT = tl.where(mask, qkT, float("-inf"))
+
+        # Apply exponent after masking, improves numerical stability and accuracy
+        pT = tl.math.exp2(qkT - m[None, :])
 
         do = tl.load(do_ptrs)
         # Compute dV.
-        ppT = pT
-        ppT = ppT.to(tl.float16)
+        ppT = pT.to(tl.float16)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m)
@@ -530,18 +531,19 @@ def _attn_bwd_dq(
         kT = tl.load(kT_ptrs)
         vT = tl.load(vT_ptrs)
         qk = tl.dot(q, kT)
-        p = tl.math.exp2(qk - m)
         # Apply masking based on the position of the current K and V blocks.
         if CAUSAL:
             offs_n = curr_n + tl.arange(0, BLOCK_N2)
             mask = offs_m[:, None] >= offs_n[None, :]
-            p = tl.where(mask, p, -1.0e6)
+            qk = tl.where(mask, qk, float("-inf"))
 
         if WINDOW > 0:
             offs_n = curr_n + tl.arange(0, BLOCK_N2)
             mask = (offs_n[None, :] <= q_upper_bound) & (offs_n[None, :] >= q_lower_bound)
-            p = tl.where(mask, p, -1.0e6)
+            qk = tl.where(mask, qk, float("-inf"))
 
+        # Apply exponent after masking, improves numerical stability and accuracy
+        p = tl.math.exp2(qk - m)
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
