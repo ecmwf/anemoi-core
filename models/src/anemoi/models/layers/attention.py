@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from typing import Any
 from typing import Optional
 
@@ -28,6 +29,9 @@ from anemoi.models.distributed.transformer import shard_sequence
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+# Change attention implementation during inference runtime
+ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
 
 
 class MultiHeadSelfAttention(nn.Module):
@@ -107,6 +111,15 @@ class MultiHeadSelfAttention(nn.Module):
         ), f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
 
         self.attention_implementation = attention_implementation
+        # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
+        if ATTENTION_BACKEND != "":
+            LOGGER.info(
+                "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from %s to %s",
+                self.attention_implementation,
+                ATTENTION_BACKEND,
+            )
+            self.attention_implementation = ATTENTION_BACKEND
+
         self.use_alibi_slopes = use_alibi_slopes
 
         self.num_heads = num_heads
@@ -144,6 +157,7 @@ class MultiHeadSelfAttention(nn.Module):
             "scaled_dot_product_attention": SDPAAttentionWrapper,
             "triton": TritonAttentionWrapper,
         }
+
         assert (
             self.attention_implementation in attn_funcs
         ), f"{self.attention_implementation} not supported. \

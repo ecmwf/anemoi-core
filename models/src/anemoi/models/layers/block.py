@@ -45,7 +45,9 @@ LOGGER = logging.getLogger(__name__)
 
 # Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/66)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
-NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
+NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMAOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
+# Change attention implementation during inference runtime
+ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", "")
 
 
 class BaseBlock(nn.Module, ABC):
@@ -519,6 +521,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             self.edge_pre_mlp = nn.Identity()
 
         self.graph_attention_backend = graph_attention_backend
+        # Check if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set
+        if ATTENTION_BACKEND != "":
+            LOGGER.info(
+                "'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from %s to %s",
+                self.graph_attention_backend,
+                ATTENTION_BACKEND,
+            )
+            self.graph_attention_backend = ATTENTION_BACKEND
+
         assert self.graph_attention_backend in [
             "triton",
             "pyg",
