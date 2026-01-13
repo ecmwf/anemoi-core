@@ -58,7 +58,7 @@ def migrate(ckpt: CkptType) -> CkptType:
         # Adjust model components
         for model_component in ["encoder", "encoder_graph_provider", "decoder", "decoder_graph_provider"]:
             prefix = f"model.model.{model_component}."
-            
+
             if key.startswith(prefix):
                 new_key = key.replace(prefix, f"{prefix}{dummy_dataset_name}.")
                 updates[new_key] = ckpt["state_dict"][key]
