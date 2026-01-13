@@ -116,71 +116,48 @@ def _attn_fwd_inner(
 
         lo, hi = 0, N_CTX
 
-    skip_block = False
-    partial_block = False
-
     offsetk_y = offset_y + lo
     offsetv_y = offset_y + lo
     # loop over k, v and update accumulator
     for start_n in tl.range(lo, hi, BLOCK_N, warp_specialize=warp_specialize):
         start_n = tl.multiple_of(start_n, BLOCK_N)
 
-        # If masking is being used, determine the blocks position in the global context
-        # to determine how it should be masked
-        if CAUSAL:
-            if start_n >= hi:
-                skip_block = True
-            elif start_n >= lo and start_n <= hi:
-                partial_block = True
+        # -- compute qk ----
+        k = desc_k.load([offsetk_y, 0]).T
+        qk = tl.dot(q, k) * qk_scale
 
+        # apply masking
         if WINDOW > 0:
-            if start_n < lo or start_n > hi:
-                skip_block = True
-            else:
-                partial_block = True
+            m_pos = offs_m[:, None]
+            n_pos = start_n + offs_n[None, :]
+            # Mask condition: keep if (q - window_size <= k <= q + window size)
+            mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
+            qk = tl.where(mask, qk, -1.0e6)
 
-        # Apply masking
-        if not skip_block:
-            # -- compute qk ----
-            k = desc_k.load([offsetk_y, 0]).T
-            qk = tl.dot(q, k) * qk_scale
+        elif CAUSAL:
+            mask = offs_m[:, None] >= (start_n + offs_n[None, :])
+            qk = tl.where(mask, qk, -1.0e6)
 
-            # optionally apply masking
-            if partial_block:
-                m_pos = offs_m[:, None]
-                n_pos = start_n + offs_n[None, :]
-                if WINDOW > 0:
-                    # Mask condition: keep if (q - window_size <= k <= q + window size)
-                    mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
-                    qk = tl.where(mask, qk, -1.0e6)
+        # global attention
+        m_ij = tl.maximum(m_i, tl.max(qk, 1))
+        qk -= m_ij[:, None]
 
-                elif CAUSAL:
-                    mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-                    qk = tl.where(mask, qk, -1.0e6)
+        p = tl.math.exp2(qk)
+        # -- compute correction factor
+        alpha = tl.math.exp2(m_i - m_ij)
+        l_ij = tl.sum(p, 1)
+        # -- update output accumulator --
+        acc = acc * alpha[:, None]
+        # prepare p and v for the dot
+        v = desc_v.load([offsetv_y, 0])
+        p = p.to(dtype)
+        acc = tl.dot(p, v, acc)
 
-            # global attention
-            m_ij = tl.maximum(m_i, tl.max(qk, 1))
-            qk -= m_ij[:, None]
+        # update m_i and l_i
+        # place this at the end of the loop to reduce register pressure
+        l_i = l_i * alpha + l_ij
+        m_i = m_ij
 
-            p = tl.math.exp2(qk)
-            # -- compute correction factor
-            alpha = tl.math.exp2(m_i - m_ij)
-            l_ij = tl.sum(p, 1)
-            # -- update output accumulator --
-            acc = acc * alpha[:, None]
-            # prepare p and v for the dot
-            v = desc_v.load([offsetv_y, 0])
-            p = p.to(dtype)
-            acc = tl.dot(p, v, acc)
-
-            # update m_i and l_i
-            # place this at the end of the loop to reduce register pressure
-            l_i = l_i * alpha + l_ij
-            m_i = m_ij
-
-        # reset masking state before next block
-        skip_block = False
-        partial_block = False
         # Move to next block
         offsetk_y += BLOCK_N
         offsetv_y += BLOCK_N
@@ -392,9 +369,9 @@ def _attn_bwd_dkdv(
     # Filled in by the wrapper.
     start_n,
     start_m,
-    num_steps,  #
     CAUSAL: tl.constexpr,
     WINDOW: tl.constexpr,
+     warp_specialize: tl.constexpr,
 ):
     """Computes dK and dV with respect to dO.
 
@@ -414,12 +391,11 @@ def _attn_bwd_dkdv(
     # This is a single stage kernel, which loops over columns of Q
     # When masking (causal or sliding-window) is used, it must determine where the
     # current block is in the global matrix to determine how it is masked
-    # There are 3 options:
+    # There are 2 options:
     #   fully masked out => skip block
-    #   partially masked => apply MASK to block
-    #   fully included => don't mask
+    #   masked => apply MASK to block
 
-    # Calculate the upper and lower bounds when using sliding window
+    # Calculate the upper and lower bounds when using masking
     if WINDOW > 0:
         # Rather then iterating across the whole context, we iterate
         # Over a window around the position of the K and V blocks
@@ -427,64 +403,58 @@ def _attn_bwd_dkdv(
         hi = tl.minimum(N_CTX, (start_n + BLOCK_N1) + WINDOW)
         kv_lower_bound = offs_n[:, None] - WINDOW
         kv_upper_bound = offs_n[:, None] + WINDOW
+    elif CAUSAL:
+        #lo, hi = start_n, N_CTX 
+        # start_n, rounded down to lowest multiple if not even
+        lo, hi = (start_n // BLOCK_M1) * BLOCK_M1, N_CTX
+         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
+        lo = tl.multiple_of(lo, BLOCK_M1)
+        hi = tl.multiple_of(hi, BLOCK_M1)
+        
+    else:
+        lo : tl.constexpr = 0
+        hi : tl.constexpr = N_CTX
 
-    skip_block = False
-    partial_block = False
+    # skip up to 'lo'
+    qT_ptrs += lo * stride_tok
+    do_ptrs += lo * stride_tok
 
-    for _ in range(num_steps):
+    #for _ in range(num_steps):
+    for curr_m in tl.range(lo, hi, step_m, warp_specialize=warp_specialize):
 
-        # If masking is used, determine how the current block should be masked
-        # TODO(cathal) precompute mask outside of loop
+        qT = tl.load(qT_ptrs)
+        # Load m before computing qk to reduce pipeline stall.
+        offs_m = curr_m + tl.arange(0, BLOCK_M1)
+        m = tl.load(M + offs_m)
+        qkT = tl.dot(k, qT)
+        pT = tl.math.exp2(qkT - m[None, :])
+        # Apply masking.
         if CAUSAL:
-            if curr_m < start_n:
-                skip_block = True
-            elif curr_m >= start_n and curr_m <= start_n + BLOCK_N1:
-                partial_block = True
+            mask = offs_m[None, :] >= offs_n[:, None]
+            pT = tl.where(mask, pT, -1.0e6)
 
         if WINDOW > 0:
-            if curr_m < lo or curr_m > hi:
-                skip_block = True
-            else:
-                partial_block = True
+            m_pos = offs_m[None, :]
+            # Mask condition: keep if (q - window_size <= k <= q + window size)
+            mask = (kv_lower_bound <= m_pos) & (kv_upper_bound >= m_pos)
+            pT = tl.where(mask, pT, -1.0e6)
 
-        if not skip_block:
-            qT = tl.load(qT_ptrs)
-            # Load m before computing qk to reduce pipeline stall.
-            offs_m = curr_m + tl.arange(0, BLOCK_M1)
-            m = tl.load(M + offs_m)
-            qkT = tl.dot(k, qT)
-            pT = tl.math.exp2(qkT - m[None, :])
-            # Apply masking.
-            if partial_block:
-                if CAUSAL:
-                    mask = offs_m[None, :] >= offs_n[:, None]
-                    pT = tl.where(mask, pT, 0.0)
-
-                if WINDOW > 0:
-                    m_pos = offs_m[None, :]
-                    # Mask condition: keep if (q - window_size <= k <= q + window size)
-                    mask = (kv_lower_bound <= m_pos) & (kv_upper_bound >= m_pos)
-                    pT = tl.where(mask, pT, 0.0)
-
-            do = tl.load(do_ptrs)
-            # Compute dV.
-            ppT = pT
-            ppT = ppT.to(tl.float16)
-            dv += tl.dot(ppT, do)
-            # D (= delta) is pre-divided by ds_scale.
-            Di = tl.load(D + offs_m)
-            # Compute dP and dS.
-            dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
-            dsT = pT * (dpT - Di[None, :])
-            dsT = dsT.to(tl.float16)
-            dk += tl.dot(dsT, tl.trans(qT))
+        do = tl.load(do_ptrs)
+        # Compute dV.
+        ppT = pT
+        ppT = ppT.to(tl.float16)
+        dv += tl.dot(ppT, do)
+        # D (= delta) is pre-divided by ds_scale.
+        Di = tl.load(D + offs_m)
+        # Compute dP and dS.
+        dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
+        dsT = pT * (dpT - Di[None, :])
+        dsT = dsT.to(tl.float16)
+        dk += tl.dot(dsT, tl.trans(qT))
+        
         # Increment pointers.
-        curr_m += step_m
         qT_ptrs += step_m * stride_tok
         do_ptrs += step_m * stride_tok
-        # reset masking mode before next block
-        skip_block = False
-        partial_block = False
     return dk, dv
 
 
@@ -508,9 +478,9 @@ def _attn_bwd_dq(
     # Filled in by the wrapper.
     start_m,
     start_n,
-    num_steps,  #
     CAUSAL: tl.constexpr,  #
     WINDOW: tl.constexpr,
+    warp_specialize: tl.constexpr,
 ):
     """Computes dQ with respect to dO.
 
@@ -532,68 +502,56 @@ def _attn_bwd_dq(
     # This is a single stage kernel, which loops over columns of K and V
     # When masking (causal or sliding-window) is used, it must determine where the
     # current block is in the global matrix to determine how it is masked
-    # There are 3 options:
+    # There are 2 options:
     #   fully masked out => skip block
-    #   partially masked => apply MASK to block
-    #   fully included => don't mask
+    #   masked => apply MASK to block
 
-    # Calculate the upper and lower bounds when using sliding window
+    # Calculate the upper and lower bounds when using masking
     if WINDOW > 0:
         lo = tl.maximum(0, start_m - WINDOW)
         hi = tl.minimum(N_CTX, (start_m + BLOCK_M2) + WINDOW)
         q_lower_bound = offs_m[:, None] - WINDOW
         q_upper_bound = offs_m[:, None] + WINDOW
+    elif CAUSAL:
+        # hi is block after start_m, rounded up to nearest multiple of step_n
+        lo, hi = 0, ((start_m + BLOCK_M2)// BLOCK_N2) * BLOCK_N2
+        # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
+        lo = tl.multiple_of(lo, BLOCK_N2)
+        hi = tl.multiple_of(hi, BLOCK_N2)
+    else:
+        lo : tl.constexpr = 0
+        hi : tl.constexpr = N_CTX
+    
+    # skip up to 'lo'
+    kT_ptrs += lo * stride_tok
+    vT_ptrs += lo * stride_tok
 
-    skip_block = False
-    partial_block = False
-
-    for _ in range(num_steps):
-
+    for curr_n in tl.range(lo, hi, step_n, warp_specialize=warp_specialize):
+        kT = tl.load(kT_ptrs)
+        vT = tl.load(vT_ptrs)
+        qk = tl.dot(q, kT)
+        p = tl.math.exp2(qk - m)
+        # Apply masking based on the position of the current K and V blocks.
         if CAUSAL:
-            if curr_n > start_m + BLOCK_M2:
-                skip_block = True
-            elif curr_n >= start_m and curr_n <= start_m + BLOCK_M2:
-                partial_block = True
+            offs_n = curr_n + tl.arange(0, BLOCK_N2)
+            mask = offs_m[:, None] >= offs_n[None, :]
+            p = tl.where(mask, p, -1.0e6)
 
         if WINDOW > 0:
-            if curr_n < lo or curr_n > hi:
-                skip_block = True
-            else:
-                partial_block = True
+            offs_n = curr_n + tl.arange(0, BLOCK_N2)
+            mask = (offs_n[None, :] <= q_upper_bound) & (offs_n[None, :] >= q_lower_bound)
+            p = tl.where(mask, p, -1.0e6)
 
-        if not skip_block:
-            kT = tl.load(kT_ptrs)
-            vT = tl.load(vT_ptrs)
-            qk = tl.dot(q, kT)
-            p = tl.math.exp2(qk - m)
-            # Apply masking based on the position of the current K and V blocks.
-            if partial_block:
-
-                offs_n = curr_n + tl.arange(0, BLOCK_N2)
-                n_pos = offs_n[None, :]
-
-                if CAUSAL:
-                    mask = offs_m[:, None] >= n_pos
-                    p = tl.where(mask, p, 0.0)
-
-                if WINDOW > 0:
-                    mask = (n_pos <= q_upper_bound) & (n_pos >= q_lower_bound)
-                    p = tl.where(mask, p, 0.0)
-
-            # Compute dP and dS.
-            dp = tl.dot(do, vT).to(tl.float32)
-            ds = p * (dp - Di[:, None])
-            ds = ds.to(tl.float16)
-            # Compute dQ.
-            # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
-            dq += tl.dot(ds, tl.trans(kT))
-        # Increment pointers.
-        curr_n += step_n
+        # Compute dP and dS.
+        dp = tl.dot(do, vT).to(tl.float32)
+        ds = p * (dp - Di[:, None])
+        ds = ds.to(tl.float16)
+        # Compute dQ.
+        # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
+        dq += tl.dot(ds, tl.trans(kT))
+        
         kT_ptrs += step_n * stride_tok
         vT_ptrs += step_n * stride_tok
-        # reset masking mode before next block
-        skip_block = False
-        partial_block = False
     return dq
 
 
@@ -622,6 +580,7 @@ def _attn_bwd(
     HEAD_DIM: tl.constexpr,  #
     CAUSAL: tl.constexpr,
     WINDOW: tl.constexpr,
+    warp_specialize: tl.constexpr,
 ):
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
 
@@ -657,7 +616,6 @@ def _attn_bwd(
     v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
     # Compute dK and dV for non-masked blocks.
-    num_steps = (N_CTX - start_m) // BLOCK_M1
     dk, dv = _attn_bwd_dkdv(  #
         dk,
         dv,  #
@@ -675,9 +633,9 @@ def _attn_bwd(
         HEAD_DIM,  #
         start_n,
         start_m,
-        num_steps,  #
         CAUSAL=CAUSAL,  #
         WINDOW=WINDOW,  #
+        warp_specialize=warp_specialize,
     )
 
     # Store computed dK and dV
@@ -690,7 +648,6 @@ def _attn_bwd(
     # Compute dQ
     start_m = pid * BLOCK_M2
     start_n = 0
-    num_steps = N_CTX // BLOCK_N2
 
     offs_m = start_m + tl.arange(0, BLOCK_M2)
 
@@ -717,9 +674,9 @@ def _attn_bwd(
         HEAD_DIM,  #
         start_m,
         start_n,
-        num_steps,  #
         CAUSAL=CAUSAL,  #
         WINDOW=WINDOW,  #
+        warp_specialize=warp_specialize,
     )
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
@@ -831,6 +788,7 @@ class TritonAttention(torch.autograd.Function):
         ctx.HEAD_DIM = HEAD_DIM_K
         ctx.causal = causal
         ctx.window = window
+        ctx.warp_specialize=warp_specialize
         return o
 
     @staticmethod
@@ -893,6 +851,8 @@ class TritonAttention(torch.autograd.Function):
             num_stages=NUM_STAGES,  #
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,
+            #bwd kernels don't compile with warp_spec=true (GH200, triton 3.4)
+            warp_specialize=False,
         )
 
         return dq, dk, dv, None, None, None, None
