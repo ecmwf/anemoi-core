@@ -74,6 +74,15 @@ This environment variable controls the number of chunks used in the
    :no-undoc-members:
    :show-inheritance:
 
+*****************
+ Graph Providers
+*****************
+
+.. automodule:: anemoi.models.layers.graph_provider
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
 ******
  Conv
 ******
