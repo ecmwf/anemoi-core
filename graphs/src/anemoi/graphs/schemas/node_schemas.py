@@ -72,30 +72,19 @@ class ReducedGaussianGridNodeSchema(BaseModel):
     "Reduced gaussian grid."
 
 
-class ICONNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.ICONNodes"] = Field(..., alias="_target_")
-    "ICON grid object from anemoi.graphs.nodes."
-    name: str
-    "Name of ICON grid."
-    grid_filename: str
-    "Name of NetCDF ICON grid file."
-    max_level_multimesh: int
-    "Maximum refinement level of the multi mesh."
-    max_level_dataset: int
-    "Maximum refinement level of the cell grid."
-
-
 class ICONMeshNodeSchema(BaseModel):
     target_: Literal[
-        "anemoi.graphs.nodes.ICONMultimeshNodes",
+        "anemoi.graphs.nodes.ICONMultiMeshNodes",
         "anemoi.graphs.nodes.ICONCellGridNodes",
     ] = Field(
         ...,
         alias="_target_",
     )
     "Mesh based on ICON grid class implementation from anemoi.graphs.nodes."
-    icon_mesh: str
-    "Key corresponding to the ICON mesh (cells and vertices)."
+    grid_filename: str
+    "Name of NetCDF ICON grid file."
+    max_level: int
+    "Maximum refinement level of the multi mesh / cell grid."
 
 
 class LimitedAreaNPZFileNodesSchema(BaseModel):
@@ -160,7 +149,6 @@ NodeBuilderSchemas = Annotated[
     AnemoiDatasetNodeSchema
     | NPZnodeSchema
     | TextNodeSchema
-    | ICONNodeSchema
     | ICONMeshNodeSchema
     | LimitedAreaNPZFileNodesSchema
     | ReducedGaussianGridNodeSchema
