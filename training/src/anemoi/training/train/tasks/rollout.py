@@ -89,29 +89,40 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         batch: torch.Tensor,
         rollout_step: int,
     ) -> torch.Tensor:
-        x = x.roll(-1, dims=1)
+        """Default implementation used by simple rollout tasks.
 
-        # Get prognostic variables
-        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
-            ...,
-            self.data_indices.model.output.prognostic,
-        ]
+        Supports model outputs shaped like:
+        - (B, T, E, G, V)
+        """
+        x = x.roll(-self.multi_out, dims=1)
 
-        x[:, -1] = self.output_mask.rollout_boundary(
-            x[:, -1],
-            batch[:, self.multi_step + rollout_step],
-            self.data_indices,
-            grid_shard_slice=self.grid_shard_slice,
-        )
+        # TODO(dieter): see if we can replace for loop with tensor operations
+        for i in range(self.multi_out):
+            # Get prognostic variables
+            x[:, -(i + 1), :, :, self.data_indices.model.input.prognostic] = y_pred[
+                :,
+                -(i + 1),
+                ...,
+                self.data_indices.model.output.prognostic,
+            ]
 
-        # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
-            :,
-            self.multi_step + rollout_step,
-            :,
-            :,
-            self.data_indices.data.input.forcing,
-        ]
+            batch_time_index = self.multi_step + (rollout_step + 1) * self.multi_out - (i + 1)
+
+            x[:, -(i + 1)] = self.output_mask.rollout_boundary(
+                x[:, -(i + 1)],
+                batch[:, batch_time_index],
+                self.data_indices,
+                grid_shard_slice=self.grid_shard_slice,
+            )
+
+            # get new "constants" needed for time-varying fields
+            x[:, -(i + 1), :, :, self.data_indices.model.input.forcing] = batch[
+                :,
+                batch_time_index,
+                :,
+                :,
+                self.data_indices.data.input.forcing,
+            ]
         return x
 
     def _compute_metrics(

@@ -148,9 +148,9 @@ def test_ensemble_plot_mixin_process():
     # tensor after post_processors: bs, ensemble, latlon, nvar
     mock_post_processors.side_effect = [
         data_tensor,
-        torch.randn(2, 1, 100, 5),
-        torch.randn(2, 1, 100, 5),
-        torch.randn(2, 1, 100, 5),
+        torch.randn(2, 1, 1, 100, 5),
+        torch.randn(2, 1, 1, 100, 5),
+        torch.randn(2, 1, 1, 100, 5),
     ]
     mock_post_processors.cpu.return_value = mock_post_processors
     pl_module.model.post_processors = mock_post_processors

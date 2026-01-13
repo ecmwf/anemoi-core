@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.utils.enums import TensorDim
+
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -52,6 +54,8 @@ class BaseDiffusionForecaster(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
+        assert self.multi_out == 1, "BaseDiffusionForecaster currently only supports single-output models!"
+
         self.rho = config.model.model.diffusion.rho
 
     def get_input(self, batch: torch.Tensor) -> torch.Tensor:
@@ -69,7 +73,9 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
     def get_target(self, batch: torch.Tensor) -> torch.Tensor:
         """Get target tensor shape for diffusion model."""
-        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
+        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full].unsqueeze(
+            TensorDim.TIME,
+        )  # (bs, 1, ens, latlon, nvar)
         LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
         return y
 
@@ -169,11 +175,11 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, 1, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
-            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
+            shape=(x.shape[0],) + (1,) * (x.ndim - 1),
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
@@ -181,13 +187,9 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
             device=x.device,
         )
 
-        # get noised targets
         y_noised = self._noise_target(y, sigma)
-
         # prediction, fwd_with_preconditioning
-        y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
-
-        # Use checkpoint for compute_loss_metrics
+        y_pred = self(x, y_noised, sigma)  # shape is (bs, time, ens, latlon, nvar)
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
@@ -316,9 +318,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             input_post_processor=self.model.post_processors,
         )
 
-        # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
-            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
+            shape=(x.shape[0],) + (1,) * (x.ndim - 1),
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
@@ -329,7 +330,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         tendency_target_noised = self._noise_target(tendency_target, sigma)
 
         # prediction, fwd_with_preconditioning
-        tendency_pred = self(x, tendency_target_noised, sigma)  # shape is (bs, ens, latlon, nvar)
+        tendency_pred = self(x, tendency_target_noised, sigma)  # shape is (bs, time, ens, latlon, nvar)
 
         y_pred = None
         if validation_mode:
@@ -342,7 +343,6 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 output_pre_processor=self.model.pre_processors,
             )
 
-        # compute_loss_metrics
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             tendency_pred,

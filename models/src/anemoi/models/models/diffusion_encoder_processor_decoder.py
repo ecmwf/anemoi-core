@@ -28,6 +28,7 @@ from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
+from anemoi.training.utils.enums import TensorDim
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -126,7 +127,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -145,13 +146,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             ensemble=ensemble_size,
         ).to(dtype=dtype)
 
-        return x_out
+        return x_out.unsqueeze(TensorDim.TIME)  # add time dim
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
         out = einops.repeat(
-            noise_emb, "batch ensemble noise_level vars -> batch ensemble (repeat noise_level) vars", repeat=repeat
+            noise_emb,
+            "batch time ensemble noise_level vars -> batch time ensemble (repeat noise_level) vars",
+            repeat=repeat,
         )
-        out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
+        out = einops.rearrange(out, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
         return out
 
     def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
@@ -510,8 +513,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         sigmas = scheduler.get_schedule(x.device, torch.float64)
 
         # Initialize output with noise
-        batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
-        shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
+        batch_size, time_size, ensemble_size, grid_size = x.shape[0], x.shape[1], x.shape[2], x.shape[-2]
+        shape = (batch_size, time_size, ensemble_size, grid_size, self.num_output_channels)
         y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
@@ -572,8 +575,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         x_skip = self.residual(x, grid_shard_shapes, model_comm_group)[..., self._internal_input_idx]
-        x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
         # Get node attributes
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
 
@@ -588,7 +591,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -737,7 +740,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
         # Dimensions are batch, timesteps, grid, variables
         x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
-        x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension
+        x_t0 = batch[:, -1:, None, ...]  # add dummy ensemble dimension
 
         grid_shard_shapes = None
         if model_comm_group is not None:
@@ -775,7 +778,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         # truncate x_t0 if needed
         x_t0 = self.apply_reference_state_truncation(x_t0, grid_shard_shapes, model_comm_group)
-
         # Convert tendency to state
         out = self.add_tendency_to_state(
             x_t0,
@@ -808,5 +810,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Truncated tensor with same shape as input
         """
         x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
-        # x_skip.shape: (bs, ens, latlon, nvar)
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        # x_skip.shape: (bs, time, ens, latlon, nvar)
         return x_skip[..., self.data_indices.model.input.prognostic]
