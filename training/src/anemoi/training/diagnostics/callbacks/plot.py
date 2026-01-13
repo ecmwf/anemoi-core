@@ -701,30 +701,27 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
 
         # Check encoder
         if (
-            hasattr(model.encoder, "graph_provider")
-            and hasattr(model.encoder.graph_provider, "trainable")
-            and model.encoder.graph_provider.trainable is not None
-            and model.encoder.graph_provider.trainable.trainable is not None
+            hasattr(model, "encoder_graph_provider")
+            and model.encoder_graph_provider.trainable is not None
+            and model.encoder_graph_provider.trainable.trainable is not None
         ):
-            trainable_modules[(model._graph_name_data, model._graph_name_hidden)] = model.encoder.graph_provider
+            trainable_modules[(model._graph_name_data, model._graph_name_hidden)] = model.encoder_graph_provider
 
         # Check decoder
         if (
-            hasattr(model.decoder, "graph_provider")
-            and hasattr(model.decoder.graph_provider, "trainable")
-            and model.decoder.graph_provider.trainable is not None
-            and model.decoder.graph_provider.trainable.trainable is not None
+            hasattr(model, "decoder_graph_provider")
+            and model.decoder_graph_provider.trainable is not None
+            and model.decoder_graph_provider.trainable.trainable is not None
         ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_data)] = model.decoder.graph_provider
+            trainable_modules[(model._graph_name_hidden, model._graph_name_data)] = model.decoder_graph_provider
 
         # Check processor
         if (
-            hasattr(model.processor, "graph_provider")
-            and hasattr(model.processor.graph_provider, "trainable")
-            and model.processor.graph_provider.trainable is not None
-            and model.processor.graph_provider.trainable.trainable is not None
+            hasattr(model, "processor_graph_provider")
+            and model.processor_graph_provider.trainable is not None
+            and model.processor_graph_provider.trainable.trainable is not None
         ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = model.processor.graph_provider
+            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = model.processor_graph_provider
 
         return trainable_modules
 
