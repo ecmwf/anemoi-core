@@ -60,6 +60,12 @@ class Rollout(BaseModel):
     "Number of epochs to increment the rollout."
     max: PositiveInt = Field(example=1)
     "Maximum number of rollouts."
+    random_probability: NonNegativeFloat = Field(default=0.0, le=1.0)
+    "Probability of using extended rollout instead of single step (0.0 = disabled)."
+    random_min: PositiveInt = Field(default=2)
+    "Minimum rollout length when random rollout is triggered."
+    random_max: PositiveInt = Field(default=3)
+    "Maximum rollout length when random rollout is triggered."
 
 
 class LR(BaseModel):

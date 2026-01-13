@@ -25,48 +25,11 @@ METRIC_RANGE_DTYPE = dict[str, list[int]]
 LOGGER = logging.getLogger(__name__)
 
 
-def _add_scalers_to_loss(
-    loss_function: BaseLoss,
-    scalers: dict[str, TENSOR_SPEC],
-    scalers_to_include: list[str],
-    data_indices: dict | None,
-) -> None:
-    """Add scalers to the loss function.
-
-    Parameters
-    ----------
-    loss_function : BaseLoss
-        The loss function to add scalers to
-    scalers : dict[str, TENSOR_SPEC]
-        Available scalers
-    scalers_to_include : list[str]
-        List of scaler names to include
-    data_indices : dict | None
-        Indices of the training data
-    """
-    for key in scalers_to_include:
-        if key not in scalers or []:
-            error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
-            raise ValueError(error_msg)
-        if key in ["stdev_tendency", "var_tendency"]:
-            for var_key, idx in data_indices.model.output.name_to_index.items():
-                if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
-                    var_key,
-                ):
-                    scaling = scalers[key][1][idx]
-                    LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
-        loss_function.add_scaler(*scalers[key], name=key)
-
-        if hasattr(loss_function, "set_data_indices"):
-            loss_function.set_data_indices(data_indices)
-
-
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: dict | None = None,
-    denorm_params: tuple | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -84,10 +47,6 @@ def get_loss_function(
         `variable` will be added to the scaler of the loss function.
     data_indices : dict, optional
         Indices of the training data
-    denorm_params : tuple, optional
-        Tuple of (norm_mul, norm_add) tensors from the normalizer for denormalization.
-        Required for physics-based loss functions like HydrostaticLoss that need to
-        convert normalized predictions back to physical units.
     kwargs : Any
         Additional arguments to pass to the loss function
 
@@ -118,13 +77,21 @@ def get_loss_function(
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
+    for key in scalers_to_include:
+        if key not in scalers or []:
+            error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
+            raise ValueError(error_msg)
+        if key in ["stdev_tendency", "var_tendency"]:
+            for var_key, idx in data_indices.model.output.name_to_index.items():
+                if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
+                    var_key,
+                ):
+                    scaling = scalers[key][1][idx]
+                    LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
+        loss_function.add_scaler(*scalers[key], name=key)
 
-    _add_scalers_to_loss(loss_function, scalers, scalers_to_include, data_indices)
-
-    # Set denormalization parameters for physics-based losses
-    if denorm_params is not None and hasattr(loss_function, "set_denorm_params"):
-        norm_mul, norm_add = denorm_params
-        loss_function.set_denorm_params(norm_mul, norm_add)
+        if hasattr(loss_function, "set_data_indices"):
+            loss_function.set_data_indices(data_indices)
 
     return loss_function
 

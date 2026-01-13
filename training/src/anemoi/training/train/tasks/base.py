@@ -203,10 +203,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metadata_extractor=metadata_extractor,
         )
 
+        # Extract denormalization parameters from the normalizer preprocessor if available
+        denorm_params = None
+        if hasattr(self.model, "pre_processors") and hasattr(self.model.pre_processors, "processors"):
+            processors = self.model.pre_processors.processors
+            if "normalizer" in processors:
+                normalizer = processors["normalizer"]
+                if hasattr(normalizer, "_norm_mul") and hasattr(normalizer, "_norm_add"):
+                    denorm_params = (normalizer._norm_mul, normalizer._norm_add)
+
         self.loss = get_loss_function(
             config.model_dump(by_alias=True).training.training_loss,
             scalers=self.scalers,
             data_indices=self.data_indices,
+            denorm_params=denorm_params,
         )
         self._scaling_values_log = print_variable_scaling(
             self.loss,
@@ -458,8 +468,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
-        step : int, optional
-            Current step
         validation_mode : bool, optional
             Whether to compute validation metrics
         **kwargs
@@ -614,8 +622,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted ensemble
         y: torch.Tensor
             Ground truth (target).
-        step: int, optional
+        grid_shard_slice: slice | None, optional
+            Grid shard slice for distributed training
+        step: int | None, optional
             Step number
+        **_kwargs
+            Additional keyword arguments (ignored)
 
         Returns
         -------
@@ -701,7 +713,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 "val_" + mname,
                 mvalue,
                 on_epoch=True,
-                on_step=False,
+                on_step=False,  # Enable step-level logging for per-variable metrics
                 prog_bar=False,
                 logger=self.logger_enabled,
                 batch_size=batch.shape[0],

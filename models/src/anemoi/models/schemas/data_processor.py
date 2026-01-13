@@ -232,11 +232,21 @@ class RemapperSchema(BaseModel):
     "Variables not to be remapped."
 
 
+class RandomSpatialDropoutSchema(BaseModel):
+    dropout_prob: Union[float, None] = Field(default=0.0, ge=0.0, le=1.0)
+    "Probability of dropping a valid grid cell to NaN (0.0-1.0)."
+    dropout_variables: Union[list[str], None] = Field(default=None)
+    "List of variables to apply dropout to. If None, applies to all non-forcing variables."
+    multi_step: Union[int, None] = Field(default=2, ge=1)
+    "Number of input timesteps to apply dropout to."
+
+
 class PreprocessorTarget(str, Enum):
     normalizer = "anemoi.models.preprocessing.normalizer.InputNormalizer"
     imputer = "anemoi.models.preprocessing.imputer.InputImputer"
     const_imputer = "anemoi.models.preprocessing.imputer.ConstantImputer"
     remapper = "anemoi.models.preprocessing.remapper.Remapper"
+    spatial_dropout = "anemoi.models.preprocessing.spatial_dropout.RandomSpatialDropout"
     postprocessor = "anemoi.models.preprocessing.postprocessor.Postprocessor"
     conditional_zero_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalZeroPostprocessor"
     conditional_nan_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalNaNPostprocessor"
@@ -248,11 +258,35 @@ target_to_schema = {
     PreprocessorTarget.imputer: ImputerSchema,
     PreprocessorTarget.const_imputer: ConstantImputerSchema,
     PreprocessorTarget.remapper: RemapperSchema,
+    PreprocessorTarget.spatial_dropout: RandomSpatialDropoutSchema,
     PreprocessorTarget.postprocessor: PostprocessorSchema,
     PreprocessorTarget.conditional_zero_postprocessor: ConditionalZeroPostprocessorSchema,
     PreprocessorTarget.conditional_nan_postprocessor: ConditionalNaNPostprocessorSchema,
     PreprocessorTarget.normalized_relu_postprocessor: NormalizedReluPostprocessorSchema,
 }
+
+
+# class PreprocessorTarget(str, Enum):
+#     normalizer = "anemoi.models.preprocessing.normalizer.InputNormalizer"
+#     imputer = "anemoi.models.preprocessing.imputer.InputImputer"
+#     const_imputer = "anemoi.models.preprocessing.imputer.ConstantImputer"
+#     remapper = "anemoi.models.preprocessing.remapper.Remapper"
+#     postprocessor = "anemoi.models.preprocessing.postprocessor.Postprocessor"
+#     conditional_zero_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalZeroPostprocessor"
+#     conditional_nan_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalNaNPostprocessor"
+#     normalized_relu_postprocessor = "anemoi.models.preprocessing.postprocessor.NormalizedReluPostprocessor"
+
+
+# target_to_schema = {
+#     PreprocessorTarget.normalizer: NormalizerSchema,
+#     PreprocessorTarget.imputer: ImputerSchema,
+#     PreprocessorTarget.const_imputer: ConstantImputerSchema,
+#     PreprocessorTarget.remapper: RemapperSchema,
+#     PreprocessorTarget.postprocessor: PostprocessorSchema,
+#     PreprocessorTarget.conditional_zero_postprocessor: ConditionalZeroPostprocessorSchema,
+#     PreprocessorTarget.conditional_nan_postprocessor: ConditionalNaNPostprocessorSchema,
+#     PreprocessorTarget.normalized_relu_postprocessor: NormalizedReluPostprocessorSchema,
+# }
 
 
 class PreprocessorSchema(BaseModel, validate_assignment=False):
