@@ -452,7 +452,7 @@ class TritonAttentionWrapper(nn.Module):
         msg = ""
         if dropout_p != 0.0:
             msg += "dropout_p, "
-        if softcap is not None and softcap != 0.0 :
+        if softcap is not None and softcap != 0.0:
             msg += "softcap, "
         if alibi_slopes is not None:
             msg += "alibi slobes, "
