@@ -16,7 +16,7 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.graph_providers import create_graph_provider
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper

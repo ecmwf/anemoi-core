@@ -14,7 +14,7 @@ from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph_providers import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import load_layer_kernels

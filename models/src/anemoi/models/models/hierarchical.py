@@ -17,7 +17,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph_providers import create_graph_provider
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)

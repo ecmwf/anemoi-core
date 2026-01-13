@@ -78,7 +78,7 @@ This environment variable controls the number of chunks used in the
  Graph Providers
 *****************
 
-.. automodule:: anemoi.models.layers.graph_providers
+.. automodule:: anemoi.models.layers.graph_provider
    :members:
    :no-undoc-members:
    :show-inheritance:

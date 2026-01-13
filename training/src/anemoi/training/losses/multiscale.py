@@ -18,7 +18,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.layers.graph_providers import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 

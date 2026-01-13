@@ -13,7 +13,7 @@ from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.graph_providers import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
