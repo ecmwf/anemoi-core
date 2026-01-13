@@ -32,6 +32,7 @@ try:
 except BaseException:
     HAS_FLASH = False
 
+
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("Z", [1, 4])
