@@ -440,8 +440,7 @@ class TritonAttentionWrapper(nn.Module):
         alibi_slopes: torch.Tensor = None,
     ):
 
-        softcap = None
-        self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
+        self._not_implemented(dropout_p, softcap, alibi_slopes)
 
         softmax_scale = 1 / math.sqrt(query.size(-1))
 
@@ -449,11 +448,11 @@ class TritonAttentionWrapper(nn.Module):
 
         return out
 
-    def _not_implemented(self, causal: bool, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
+    def _not_implemented(self, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
         msg = ""
         if dropout_p != 0.0:
             msg += "dropout_p, "
-        if softcap is not None:
+        if softcap is not None and softcap != 0.0 :
             msg += "softcap, "
         if alibi_slopes is not None:
             msg += "alibi slobes, "

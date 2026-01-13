@@ -32,7 +32,6 @@ try:
 except BaseException:
     HAS_FLASH = False
 
-
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("Z", [1, 4])
@@ -46,7 +45,6 @@ except BaseException:
 @pytest.mark.parametrize(
     "window",
     [0, 512, 1120] if HAS_FLASH else [0, 512],
-    # "window", [0]
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, dtype=torch.float16):
