@@ -138,7 +138,6 @@ def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
     - Input is not validated; ensure ``latlon`` has at least two points and a
       non-zero latitude span for meaningful standard parallels.
     """
-
     assert isinstance(latlon, (np.ndarray, list)), "Input must be a numpy array or list."
     latlon = np.asanyarray(latlon)
 
