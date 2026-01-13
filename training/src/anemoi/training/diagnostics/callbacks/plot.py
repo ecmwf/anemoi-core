@@ -43,7 +43,6 @@ from anemoi.training.diagnostics.plots import plot_graph_node_features
 from anemoi.training.diagnostics.plots import plot_histogram
 from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
-from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_recon
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
@@ -1189,121 +1188,6 @@ class PlotSample(BasePlotAdditionalMetrics):
                 tag=f"pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
                 exp_log_tag=f"val_pred_sample_rstep{rollout_step:02d}_rank{local_rank:01d}",
             )
-
-
-class PlotReconstruction(BasePlotAdditionalMetrics):
-    """Plots a post-processed sample: input, reconstruction and error. Used in Autoencoder training."""
-
-    def __init__(
-        self,
-        config: OmegaConf,
-        sample_idx: int,
-        parameters: list[str],
-        accumulation_levels_plot: list[float],
-        precip_and_related_fields: list[str] | None = None,
-        colormaps: dict[str, Colormap] | None = None,
-        per_sample: int = 3,
-        every_n_batches: int | None = None,
-        focus_area: dict | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """Initialise the PlotReconstruction callback.
-
-        Parameters
-        ----------
-        config : OmegaConf
-            Config object
-        sample_idx : int
-            Sample to plot
-        parameters : list[str]
-            Parameters to plot
-        accumulation_levels_plot : list[float]
-            Accumulation levels to plot
-        precip_and_related_fields : list[str] | None, optional
-            Precip variable names, by default None
-        colormaps : dict[str, Colormap] | None, optional
-            Dictionary of colormaps, by default None
-        per_sample : int, optional
-            Number of plots per sample, by default 6
-        every_n_batches : int, optional
-            Batch frequency to plot at, by default None
-        focus_area : dict | None, optional
-            Area or point indices to focus the plot on. Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
-        """
-        del kwargs
-        super().__init__(config, every_n_batches=every_n_batches)
-        self.sample_idx = sample_idx
-        self.parameters = parameters
-
-        self.precip_and_related_fields = precip_and_related_fields
-        self.accumulation_levels_plot = accumulation_levels_plot
-        self.per_sample = per_sample
-        self.colormaps = colormaps
-        self.focus_area = focus_area
-
-        LOGGER.info(
-            "Using defined accumulation colormap for fields: %s",
-            self.precip_and_related_fields,
-        )
-
-    @rank_zero_only
-    def _plot(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
-        batch_idx: int,
-        epoch: int,
-        output_times: tuple,
-    ) -> None:
-        logger = trainer.logger
-
-        # Build dictionary of indices and parameters to be plotted
-        diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
-        plot_parameters_dict = {
-            pl_module.data_indices.model.output.name_to_index[name]: (
-                name,
-                name not in diagnostics,
-            )
-            for name in self.parameters
-        }
-
-        data, reconstruction = self.process(pl_module, outputs, batch, output_times)
-
-        local_rank = pl_module.local_rank
-
-        # Get focus mask
-        focus_mask = self.get_focus_mask(pl_module)
-
-        data = data[0, 0, focus_mask, :]
-        reconstruction = reconstruction[0, 0, focus_mask, :]
-        diff = np.abs(data - reconstruction)
-        latlons = self.latlons[focus_mask]
-
-        # Plotting
-        fig = plot_predicted_multilevel_flat_recon(
-            plot_parameters_dict,
-            self.per_sample,
-            latlons,
-            self.accumulation_levels_plot,
-            data,
-            reconstruction,
-            diff,
-            datashader=self.datashader_plotting,
-            precip_and_related_fields=self.precip_and_related_fields,
-            colormaps=self.colormaps,
-        )
-
-        self._output_figure(
-            logger,
-            fig,
-            epoch=epoch,
-            tag=f"reconstruction_val_sample_batch{batch_idx:04d}_rank0{self.tag}",
-            exp_log_tag=f"val_pred_sample_rank{local_rank:01d}",
-        )
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
