@@ -393,6 +393,13 @@ def architecture_config_with_checkpoint(
 ) -> tuple[OmegaConf, str]:
     # Reuse the same overrides that architecture_config gets
     overrides = request.param
+
+    # ✅ Skip ONLY gnn on Python 3.10
+    import sys
+
+    if sys.version_info[:2] == (3, 10) and any("model=gnn" in o for o in overrides):
+        pytest.skip("GNN checkpoint incompatible with Python 3.10")
+
     cfg, dataset_url, model_architecture = build_architecture_config(
         overrides,
         testing_modifications_with_temp_dir,
@@ -401,7 +408,7 @@ def architecture_config_with_checkpoint(
     # rest of your logic...
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2025-07-31.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-12.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
@@ -482,3 +489,12 @@ def diffusion_config(
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, dataset_urls[0]
+
+
+@pytest.fixture
+def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str) -> tuple[DictConfig, str]:
+    cfg, url = gnn_config
+    cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
+    cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
+    cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
+    return cfg, url
