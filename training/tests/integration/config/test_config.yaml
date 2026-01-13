@@ -13,7 +13,6 @@ dataloader:
     datasets:
       data:
         start: 1979-01-08 18:00:00
-    start: 1979-01-08 18:00:00
 
 diagnostics:
   log:
