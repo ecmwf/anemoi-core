@@ -156,8 +156,10 @@ class ExtractVariableGroupAndLevel:
                     self.get_group_specification(group_name),
                 )
                 return group_name
-        
-        raise ValueError(f"{self.__class__.__name__} only supports variables found in the dataset. Variable {variable_name} not found.")
+
+        raise ValueError(
+            f"{self.__class__.__name__} only supports variables found in the dataset. Variable {variable_name} not found.",
+        )
 
     def _is_metadata_trusted(self, variable_name: str) -> bool:
         """Check if the metadata for a variable is trusted.

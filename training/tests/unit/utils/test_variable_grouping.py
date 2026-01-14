@@ -124,6 +124,7 @@ def test_group_variable_not_found(variable_name: str) -> None:
     with pytest.raises(ValueError):
         ExtractVariableGroupAndLevel(COMPLEX_METADATA_LESS_GROUPS, {}).get_group(variable_name)
 
+
 @pytest.fixture
 def mocked_variable_lacking_metadata() -> dict[str, Variable]:
     return {}
