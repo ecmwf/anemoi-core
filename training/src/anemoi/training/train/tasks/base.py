@@ -208,7 +208,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             scalers=self.scalers,
             data_indices=self.data_indices,
         )
-        self.loss.set_data_indices(self.data_indices)
+
         self._scaling_values_log = print_variable_scaling(
             self.loss,
             data_indices,

@@ -68,7 +68,7 @@ class FilteringLossWrapper(BaseLoss):
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
 
-    def set_data_indices(self, data_indices: IndexCollection) -> None:
+    def set_data_indices(self, data_indices: IndexCollection) -> BaseLoss:
         """Hook to set the data indices for the loss."""
         self.data_indices = data_indices
         name_to_index = data_indices.data.output.name_to_index
@@ -90,6 +90,7 @@ class FilteringLossWrapper(BaseLoss):
 
         self.predicted_indices = predicted_indices
         self.target_indices = target_indices
+        return self
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs) -> torch.Tensor:
         squash = kwargs.get("squash", True)

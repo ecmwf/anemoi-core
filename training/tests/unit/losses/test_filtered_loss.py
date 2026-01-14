@@ -44,7 +44,6 @@ def test_filtered_loss() -> None:
     assert hasattr(loss.loss, "y_dim")
     assert hasattr(loss.loss, "x_dim")
 
-    loss.set_data_indices(data_indices)
     assert hasattr(loss, "predicted_indices")
 
     assert loss.predicted_variables == ["tp"]
@@ -77,7 +76,6 @@ def test_filtered_loss() -> None:
         ),
         data_indices=data_indices,
     )
-    loss.set_data_indices(data_indices)
 
     assert isinstance(loss, BaseLoss)
     assert isinstance(loss.loss, FunctionalLoss)

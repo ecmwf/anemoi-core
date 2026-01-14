@@ -18,6 +18,7 @@ from omegaconf import OmegaConf
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -31,7 +32,7 @@ LOGGER = logging.getLogger(__name__)
 def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
-    data_indices: dict | None | IndexCollection = None,
+    data_indices: IndexCollection | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -47,7 +48,7 @@ def get_loss_function(
         If a scaler is to be added to the loss, ensure it is in `scalers` in the loss config.
         For instance, if `scalers: ['variable']` is set in the config, and `variable` in `scalers`
         `variable` will be added to the scaler of the loss function.
-    data_indices : dict, optional
+    data_indices : IndexCollection, optional
         Indices of the training data
     kwargs : Any
         Additional arguments to pass to the loss function
@@ -66,6 +67,8 @@ def get_loss_function(
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
+    predicted_variables = loss_config.pop("predicted_variables", None)
+    target_variables = loss_config.pop("target_variables", None)
 
     if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
@@ -84,15 +87,22 @@ def get_loss_function(
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
-
-    return loss_function
+    return (
+        FilteringLossWrapper(
+            loss=loss_function,
+            predicted_variables=predicted_variables,
+            target_variables=target_variables,
+        ).set_data_indices(data_indices)
+        if data_indices is not None
+        else loss_function
+    )
 
 
 def _apply_scalers(
     loss_function: BaseLoss,
     scalers_to_include: list,
     scalers: dict[str, TENSOR_SPEC] | None,
-    data_indices: dict | None,
+    data_indices: IndexCollection | None,
 ) -> None:
     """Attach scalers to a loss function and set data indices if needed."""
     for key in scalers_to_include:
