@@ -201,22 +201,23 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             f"got ({x.shape[1]}, {x.shape[2]})!"
         )
 
+        required_time_steps = rollout * self.multi_out + self.multi_step
         msg = (
             "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
+            f", {batch.shape[1]} !>= {required_time_steps}"
         )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
+        assert batch.shape[1] >= required_time_steps, msg
 
         for rollout_step in range(rollout or self.rollout):
-            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
+            # prediction at rollout step rollout_step, shape = (bs, multi_out, ens_size, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
             LOGGER.debug("SHAPE: y_pred.shape = %s", list(y_pred.shape))
-
-            y = batch[:, self.multi_step + rollout_step, 0, :, self.data_indices.data.output.full].unsqueeze(
-                TensorDim.TIME,
-            )  # add time dim
-            LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
+            # truth at rollout step rollout_step, final shape = (bs, multi_out, latlon, nvar)
+            fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
+            y = batch[:, fc_times, ...]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
+            y = y[:, :, 0, :, self.data_indices.data.output.full]
+            LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
             loss, metrics_next, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,
