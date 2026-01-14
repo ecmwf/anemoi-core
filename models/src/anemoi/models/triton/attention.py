@@ -264,7 +264,7 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
     configs=_generate_configs(),
     key=["N_CTX", "HEAD_DIM"],
     prune_configs_by={"early_config_prune": _prune_invalid_configs_fwd},
-    cache_results=True
+    cache_results=True,
 )
 @triton.jit
 def _attn_fwd(
