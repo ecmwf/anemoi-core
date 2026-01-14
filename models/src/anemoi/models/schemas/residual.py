@@ -86,6 +86,8 @@ class TruncatedConnectionSchema(BaseModel):
                     "When using graph-based projection, do not specify truncation_up_file_path or truncation_down_file_path."
                 )
 
+        return self
+
 
 ResidualConnectionSchema = Annotated[
     SkipConnectionSchema | TruncatedConnectionSchema,
