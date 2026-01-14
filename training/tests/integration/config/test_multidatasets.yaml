@@ -7,19 +7,13 @@ system:
 dataloader:
   training:
     datasets:
-      era:
+      era5:
         end: 1979-01-08 12:00:00
       cerra:
         end: 1979-01-08 12:00:00
   validation:
     datasets:
-      era:
+      era5:
         start: 1979-01-08 18:00:00
       cerra:
         start: 1979-01-08 18:00:00
-
-diagnostics:
-  log:
-    mlflow:
-      authentication: True
-      experiment_name: 'ci_hpc_mlflow'
