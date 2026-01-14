@@ -23,25 +23,11 @@ import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
-
-def is_hip():
-    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "hip"
-
-
-def is_cuda():
-    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "cuda"
-
-
-def supports_host_descriptor():
-    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
-
-
-def is_blackwell():
-    return is_cuda() and torch.cuda.get_device_capability()[0] == 10
-
-
-def is_hopper():
-    return is_cuda() and torch.cuda.get_device_capability()[0] == 9
+from anemoi.models.triton.utils import is_blackwell
+from anemoi.models.triton.utils import is_hip
+from anemoi.models.triton.utils import is_hopper
+from anemoi.models.triton.utils import supports_host_descriptor
+from anemoi.models.triton.utils import torch_dtype_to_triton
 
 
 @triton.jit
@@ -246,6 +232,7 @@ def _generate_configs_bwd():
         ]
     return configs
 
+
 def _prune_invalid_configs_fwd(configs, named_args, **kwargs):
     N_CTX = kwargs["N_CTX"]
 
@@ -315,8 +302,8 @@ def _attn_fwd(
     BLOCK_N: tl.constexpr,  #
     CAUSAL: tl.constexpr,  #
     warp_specialize: tl.constexpr,  #
+    dtype: tl.constexpr,
 ):
-    dtype = tl.float16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
@@ -427,6 +414,7 @@ def _attn_bwd_dkdv(
     CAUSAL: tl.constexpr,
     WINDOW: tl.constexpr,
     warp_specialize: tl.constexpr,
+    dtype: tl.constexpr,
 ):
     """Computes dK and dV with respect to dO.
 
@@ -498,14 +486,14 @@ def _attn_bwd_dkdv(
 
         do = tl.load(do_ptrs)
         # Compute dV.
-        ppT = pT.to(tl.float16)
+        ppT = pT.to(dtype)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
-        dsT = dsT.to(tl.float16)
+        dsT = dsT.to(dtype)
         dk += tl.dot(dsT, tl.trans(qT))
 
         # Increment pointers.
@@ -537,6 +525,7 @@ def _attn_bwd_dq(
     CAUSAL: tl.constexpr,  #
     WINDOW: tl.constexpr,
     warp_specialize: tl.constexpr,
+    dtype: tl.constexpr,
 ):
     """Computes dQ with respect to dO.
 
@@ -602,7 +591,7 @@ def _attn_bwd_dq(
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
-        ds = ds.to(tl.float16)
+        ds = ds.to(dtype)
         # Compute dQ.
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
         dq += tl.dot(ds, tl.trans(kT))
@@ -612,7 +601,9 @@ def _attn_bwd_dq(
     return dq
 
 
-@triton.autotune(
+@triton.autotune( 
+    # Autotuning is curucial to get good performance at larger head dims
+    # For an o96 2048c configuration, got a 3x speedup from autotuning 
     configs=_generate_configs_bwd(),
     key=["N_CTX", "HEAD_DIM", "warp_specialize"],
     prune_configs_by={"early_config_prune": _prune_invalid_configs_bwd},
@@ -643,6 +634,7 @@ def _attn_bwd(
     CAUSAL: tl.constexpr,
     WINDOW: tl.constexpr,
     warp_specialize: tl.constexpr,
+    dtype: tl.constexpr,
 ):
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
 
@@ -698,6 +690,7 @@ def _attn_bwd(
         CAUSAL=CAUSAL,  #
         WINDOW=WINDOW,  #
         warp_specialize=warp_specialize,
+        dtype=dtype,
     )
 
     # Store computed dK and dV
@@ -739,6 +732,7 @@ def _attn_bwd(
         CAUSAL=CAUSAL,  #
         WINDOW=WINDOW,  #
         warp_specialize=warp_specialize,
+        dtype=dtype,
     )
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
@@ -842,6 +836,7 @@ class TritonAttention(torch.autograd.Function):
             WINDOW=window,
             CAUSAL=causal,  #
             warp_specialize=warp_specialize,  #
+            dtype=torch_dtype_to_triton(q.dtype),
             **extra_kern_args,
         )
 
@@ -916,6 +911,7 @@ class TritonAttention(torch.autograd.Function):
             WINDOW=ctx.window,
             # bwd kernels don't compile with warp_spec=true (GH200, triton 3.4)
             warp_specialize=False,
+            dtype=torch_dtype_to_triton(q.dtype),
         )
 
         return dq, dk, dv, None, None, None, None

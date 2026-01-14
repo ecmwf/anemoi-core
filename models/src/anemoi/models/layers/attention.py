@@ -458,7 +458,7 @@ class TritonAttentionWrapper(nn.Module):
 
         softmax_scale = 1 / math.sqrt(query.size(-1))
 
-        out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).half()
+        out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)
 
         return out
 
