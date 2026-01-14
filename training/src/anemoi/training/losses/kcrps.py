@@ -47,14 +47,14 @@ class KernelCRPS(BaseLoss):
         Parameters
         ----------
         preds : torch.Tensor
-            Predicted ensemble, shape (batch_size, n_vars, latlon, ens_size)
+            Predicted ensemble, shape (batch_size, n_out_steps, n_vars, latlon, ens_size)
         targets : torch.Tensor
-            Ground truth, shape (batch_size, n_vars, latlon)
+            Ground truth, shape (batch_size, n_out_steps, n_vars, latlon)
 
         Returns
         -------
         kCRPS : torch.Tensor
-            The point-wise kernel CRPS, shape (batch_size, 1, latlon).
+            The point-wise kernel CRPS, shape (batch_size, n_out_steps, n_vars, latlon).
         """
         ens_size = preds.shape[-1]
         mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
@@ -133,9 +133,9 @@ class AlmostFairKernelCRPS(BaseLoss):
         Parameters
         ----------
         preds : torch.Tensor
-            Predicted ensemble, shape (batch_size, output_steps, n_vars, latlon, ens_size)
+            Predicted ensemble, shape (batch_size, n_out_steps, n_vars, latlon, ens_size)
         targets : torch.Tensor
-            Ground truth, shape (batch_size, n_vars, latlon)
+            Ground truth, shape (batch_size, n_out_steps, n_vars, latlon)
         alpha : float
             Factor for linear combination of fair (unbiased, ensemble variance component weighted by (ens-size-1)^-1)
             and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)
@@ -143,7 +143,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         Returns
         -------
         kCRPS : torch.Tensor
-            The point-wise kernel CRPS, shape (batch_size, 1, latlon).
+            The point-wise kernel CRPS, shape (batch_size, n_out_steps, n_vars, latlon).
         """
         ens_size = preds.shape[-1]
 
