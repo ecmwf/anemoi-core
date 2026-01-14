@@ -96,7 +96,7 @@ def _attn_fwd_inner(
         lo = tl.maximum(0, (start_m * BLOCK_M) - WINDOW)
         hi = tl.minimum(N_CTX, (start_m + 1) * BLOCK_M + WINDOW)
 
-        # round up to lowest multiple if not even
+        # round down to lowest multiple if not even
         if lo % BLOCK_N != 0:
             lo = (lo // BLOCK_N) * BLOCK_N
         # round up to highest multiple if not even
