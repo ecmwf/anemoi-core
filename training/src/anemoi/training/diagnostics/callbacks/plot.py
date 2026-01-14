@@ -920,7 +920,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
         for rollout_step in range(output_times[0]):
             y_hat = outputs[1][rollout_step]
-
+            # analog to rollout for (ens)forecaster
             fc_times = [
                 pl_module.multi_step + rollout_step * pl_module.multi_out + i for i in range(pl_module.multi_out)
             ]
