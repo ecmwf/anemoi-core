@@ -760,7 +760,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         if (
             hasattr(model, "encoder_graph_provider")
             and dataset_name in model.encoder_graph_provider
-            and hasattr(model.encoder_graph_provider[dataset_name].graph_provider, "trainable")
+            and hasattr(model.encoder_graph_provider[dataset_name], "trainable")
             and model.encoder_graph_provider[dataset_name].trainable is not None
             and model.encoder_graph_provider[dataset_name].trainable.trainable is not None
         ):
