@@ -17,6 +17,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
@@ -36,63 +37,101 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self.num_hidden = len(self._graph_name_hidden)
 
         # Encoder data -> hidden
+        self.encoder_graph_provider = create_graph_provider(
+            graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden[0])],
+            edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
+            trainable_size=model_config.model.encoder.get("trainable_size", 0),
+        )
+
         self.encoder = instantiate(
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.input_dim,
             in_channels_dst=self.input_dim_latent,
             hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
-            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden[0])],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
+            edge_dim=self.encoder_graph_provider.edge_dim,
         )
 
         # Level processors
         self.level_process = model_config.model.enable_hierarchical_level_processing
         if self.level_process:
             self.down_level_processor = nn.ModuleDict()
+            self.down_level_processor_graph_providers = nn.ModuleDict()
             self.up_level_processor = nn.ModuleDict()
+            self.up_level_processor_graph_providers = nn.ModuleDict()
 
             for i in range(0, self.num_hidden - 1):
                 nodes_names = self._graph_name_hidden[i]
+
+                # Create graph providers for down level processor
+                self.down_level_processor_graph_providers[nodes_names] = create_graph_provider(
+                    graph=self._graph_data[(nodes_names, "to", nodes_names)],
+                    edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+                    src_size=self.node_attributes.num_nodes[nodes_names],
+                    dst_size=self.node_attributes.num_nodes[nodes_names],
+                    trainable_size=model_config.model.processor.get("trainable_size", 0),
+                )
 
                 self.down_level_processor[nodes_names] = instantiate(
                     model_config.model.processor,
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
-                    sub_graph=self._graph_data[(nodes_names, "to", nodes_names)],
-                    src_grid_size=self.node_attributes.num_nodes[nodes_names],
-                    dst_grid_size=self.node_attributes.num_nodes[nodes_names],
+                    edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.model.level_process_num_layers,
+                )
+
+                # Create graph providers for up level processor
+                self.up_level_processor_graph_providers[nodes_names] = create_graph_provider(
+                    graph=self._graph_data[(nodes_names, "to", nodes_names)],
+                    edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+                    src_size=self.node_attributes.num_nodes[nodes_names],
+                    dst_size=self.node_attributes.num_nodes[nodes_names],
+                    trainable_size=model_config.model.processor.get("trainable_size", 0),
                 )
 
                 self.up_level_processor[nodes_names] = instantiate(
                     model_config.model.processor,
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
-                    sub_graph=self._graph_data[(nodes_names, "to", nodes_names)],
-                    src_grid_size=self.node_attributes.num_nodes[nodes_names],
-                    dst_grid_size=self.node_attributes.num_nodes[nodes_names],
+                    edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.model.level_process_num_layers,
                 )
+
+        # Main processor at deepest level
+        self.processor_graph_provider = create_graph_provider(
+            graph=self._graph_data[
+                (self._graph_name_hidden[self.num_hidden - 1], "to", self._graph_name_hidden[self.num_hidden - 1])
+            ],
+            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+        )
 
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.hidden_dims[self._graph_name_hidden[self.num_hidden - 1]],
-            sub_graph=self._graph_data[
-                (self._graph_name_hidden[self.num_hidden - 1], "to", self._graph_name_hidden[self.num_hidden - 1])
-            ],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
+            edge_dim=self.processor_graph_provider.edge_dim,
         )
 
         # Downscale
         self.downscale = nn.ModuleDict()
+        self.downscale_graph_providers = nn.ModuleDict()
 
         for i in range(0, self.num_hidden - 1):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
+
+            self.downscale_graph_providers[src_nodes_name] = create_graph_provider(
+                graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
+                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes.num_nodes[src_nodes_name],
+                dst_size=self.node_attributes.num_nodes[dst_nodes_name],
+                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            )
 
             self.downscale[src_nodes_name] = instantiate(
                 model_config.model.encoder,
@@ -100,17 +139,24 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.node_attributes.attr_ndims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[dst_nodes_name],
-                sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
-                src_grid_size=self.node_attributes.num_nodes[src_nodes_name],
-                dst_grid_size=self.node_attributes.num_nodes[dst_nodes_name],
+                edge_dim=self.downscale_graph_providers[src_nodes_name].edge_dim,
             )
 
         # Upscale
         self.upscale = nn.ModuleDict()
+        self.upscale_graph_providers = nn.ModuleDict()
 
         for i in range(1, self.num_hidden):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i - 1]
+
+            self.upscale_graph_providers[src_nodes_name] = create_graph_provider(
+                graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
+                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes.num_nodes[src_nodes_name],
+                dst_size=self.node_attributes.num_nodes[dst_nodes_name],
+                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            )
 
             self.upscale[src_nodes_name] = instantiate(
                 model_config.model.decoder,
@@ -119,12 +165,18 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_dst=self.hidden_dims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
-                sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
-                src_grid_size=self.node_attributes.num_nodes[src_nodes_name],
-                dst_grid_size=self.node_attributes.num_nodes[dst_nodes_name],
+                edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
             )
 
         # Decoder hidden -> data
+        self.decoder_graph_provider = create_graph_provider(
+            graph=self._graph_data[(self._graph_name_hidden[0], "to", self._graph_name_data)],
+            edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_data],
+            trainable_size=model_config.model.decoder.get("trainable_size", 0),
+        )
+
         self.decoder = instantiate(
             model_config.model.decoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -132,9 +184,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             in_channels_dst=self.input_dim,
             hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
             out_channels_dst=self.num_output_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden[0], "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            edge_dim=self.decoder_graph_provider.edge_dim,
         )
 
     def forward(
@@ -184,15 +234,24 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         for hidden, x_latent in x_hidden_latents.items():
             shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group=model_comm_group)
 
+        # Compute encoder edges at model level
+        encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider.get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+
         # Run encoder
         x_data_latent, curr_latent = self.encoder(
             (x_data_latent, x_hidden_latents[self._graph_name_hidden[0]]),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hiddens[self._graph_name_hidden[0]]),
+            edge_attr=encoder_edge_attr,
+            edge_index=encoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            edge_shard_shapes=enc_edge_shard_shapes,
         )
 
         x_encoded_latents = {}
@@ -205,33 +264,66 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             # Processing at same level
             if self.level_process:
+                # Compute edges for down level processor
+                (
+                    down_level_edge_attr,
+                    down_level_edge_index,
+                    down_edge_shard_shapes,
+                ) = self.down_level_processor_graph_providers[src_hidden_name].get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                )
+
                 curr_latent = self.down_level_processor[src_hidden_name](
                     curr_latent,
                     batch_size=batch_size,
                     shard_shapes=shard_shapes_hiddens[src_hidden_name],
+                    edge_attr=down_level_edge_attr,
+                    edge_index=down_level_edge_index,
                     model_comm_group=model_comm_group,
+                    edge_shard_shapes=down_edge_shard_shapes,
                 )
 
             # store latents for skip connections
             skip_connections[src_hidden_name] = curr_latent
+
+            # Compute edges for downscale mapper
+            downscale_edge_attr, downscale_edge_index, ds_edge_shard_shapes = self.downscale_graph_providers[
+                src_hidden_name
+            ].get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
 
             # Encode to next hidden level
             x_encoded_latents[src_hidden_name], curr_latent = self.downscale[src_hidden_name](
                 (curr_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
+                edge_attr=downscale_edge_attr,
+                edge_index=downscale_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=True,
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                edge_shard_shapes=ds_edge_shard_shapes,
             )
 
         # Processing hidden-most level
+        # Compute edges for main processor
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+
         curr_latent = self.processor(
             curr_latent,
             batch_size=batch_size,
             shard_shapes=shard_shapes_hiddens[dst_hidden_name],
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
         )
 
         ## Upscale
@@ -239,15 +331,26 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             src_hidden_name = self._graph_name_hidden[i]
             dst_hidden_name = self._graph_name_hidden[i - 1]
 
+            # Compute edges for upscale mapper
+            upscale_edge_attr, upscale_edge_index, us_edge_shard_shapes = self.upscale_graph_providers[
+                src_hidden_name
+            ].get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
+
             # Decode to next level
             curr_latent = self.upscale[src_hidden_name](
                 (curr_latent, x_encoded_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
+                edge_attr=upscale_edge_attr,
+                edge_index=upscale_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=in_out_sharded,
                 x_dst_is_sharded=in_out_sharded,
                 keep_x_dst_sharded=in_out_sharded,
+                edge_shard_shapes=us_edge_shard_shapes,
             )
 
             # Add skip connections
@@ -255,22 +358,42 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             # Processing at same level
             if self.level_process:
+                # Compute edges for up level processor
+                up_level_edge_attr, up_level_edge_index, up_edge_shard_shapes = self.up_level_processor_graph_providers[
+                    dst_hidden_name
+                ].get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                )
+
                 curr_latent = self.up_level_processor[dst_hidden_name](
                     curr_latent,
                     batch_size=batch_size,
                     shard_shapes=shard_shapes_hiddens[dst_hidden_name],
+                    edge_attr=up_level_edge_attr,
+                    edge_index=up_level_edge_index,
                     model_comm_group=model_comm_group,
+                    edge_shard_shapes=up_edge_shard_shapes,
                 )
+
+        # Compute decoder edges
+        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider.get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
 
         # Run decoder
         x_out = self.decoder(
             (curr_latent, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hiddens[self._graph_name_hidden[0]], shard_shapes_data),
+            edge_attr=decoder_edge_attr,
+            edge_index=decoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+            edge_shard_shapes=dec_edge_shard_shapes,
         )
 
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
