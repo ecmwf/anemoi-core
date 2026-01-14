@@ -30,7 +30,12 @@ class BaseLoss(nn.Module, ABC):
 
     scaler: ScaleTensor
 
-    def __init__(self, ignore_nans: bool = False) -> None:
+    def __init__(
+        self,
+        ignore_nans: bool = False,
+        predicted_variables: list[str] | None = None,
+        target_variables: list[str] | None = None,
+    ) -> None:
         """Node- and feature_weighted Loss.
 
         Exposes:
@@ -56,6 +61,10 @@ class BaseLoss(nn.Module, ABC):
         super().__init__()
 
         self.add_module("scaler", ScaleTensor())
+        self.predicted_variables = predicted_variables
+        self.target_variables = target_variables
+        self.predicted_indices = None
+        self.target_indices = None
 
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
@@ -73,6 +82,30 @@ class BaseLoss(nn.Module, ABC):
 
     def set_data_indices(self, data_indices: IndexCollection) -> None:
         """Hook to set the data indices for the loss."""
+        if data_indices is not None:
+            self.data_indices = data_indices
+            name_to_index = data_indices.data.output.name_to_index
+            model_output = data_indices.model.output
+            output_indices = model_output.full
+
+            if self.predicted_variables is not None:
+                predicted_indices = [model_output.name_to_index[name] for name in self.predicted_variables]
+            else:
+                predicted_indices = output_indices
+            if self.target_variables is not None:
+                target_indices = [name_to_index[name] for name in self.target_variables]
+            else:
+                target_indices = output_indices
+
+            assert len(predicted_indices) == len(
+                target_indices,
+            ), "predicted and target variables must have the same length for loss computation"
+
+            self.predicted_indices = predicted_indices
+            self.target_indices = target_indices
+        else:
+            msg = "data_indices cannot be None for setting data indices in loss."
+            raise ValueError(msg)
 
     def scale(
         self,

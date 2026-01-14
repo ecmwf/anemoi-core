@@ -31,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
-    data_indices: dict | None = None,
+    data_indices: dict | None | IndexCollection = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -107,9 +107,6 @@ def _apply_scalers(
                     scaling = scalers[key][1][idx]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
-
-        if hasattr(loss_function, "set_data_indices"):
-            loss_function.set_data_indices(data_indices)
 
 
 def _get_metric_ranges(

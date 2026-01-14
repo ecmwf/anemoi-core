@@ -15,6 +15,7 @@ from typing import Any
 import torch
 from omegaconf import DictConfig
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scaler_tensor import ScaleTensor
@@ -125,18 +126,23 @@ class CombinedLoss(BaseLoss):
         for i, loss in enumerate(losses):
             if isinstance(loss, DictConfig | dict):
                 self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
-                self.losses.append(get_loss_function(loss, scalers={}, **dict(kwargs)))
+                loss_instance = get_loss_function(loss, scalers={}, **dict(kwargs))
             elif isinstance(loss, type):
                 self._loss_scaler_specification[i] = ["*"]
-                self.losses.append(loss(**kwargs))
+                loss_instance = loss(**kwargs)
             else:
                 assert isinstance(loss, BaseLoss)
                 self._loss_scaler_specification[i] = loss.scaler
-                self.losses.append(loss)
+                loss_instance = loss
+            self.losses.append(loss_instance)
 
             self.add_module(str(i), self.losses[-1])  # (self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
         del self.scaler  # Remove scaler property from parent class, as it is not used here
+
+    def set_data_indices(self, data_indices: IndexCollection | None) -> None:
+        for i, loss_fct in enumerate(self.losses):
+            self.losses[i] = loss_fct.set_data_indices(data_indices)
 
     def forward(
         self,
@@ -161,8 +167,19 @@ class CombinedLoss(BaseLoss):
         torch.Tensor
             Combined loss
         """
-        loss = None
-        for i, loss_fn in enumerate(self.losses):
+        squash = kwargs.get("squash", True)
+        if not squash:
+            len_model_output = pred.shape[-1]
+            loss = torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
+            for i, loss_fn in enumerate(self.losses):
+                loss_per_variable = loss_fn(
+                    pred[..., loss_fn.predicted_indices],
+                    target[..., loss_fn.target_indices],
+                    **kwargs,
+                )
+                loss[self.predicted_indices] += self.loss_weights[i] * loss_per_variable
+        else:
+            loss = None
             if loss is not None:
                 loss += self.loss_weights[i] * loss_fn(pred, target, **kwargs)
             else:

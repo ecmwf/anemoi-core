@@ -69,7 +69,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
     def get_target(self, batch: torch.Tensor) -> torch.Tensor:
         """Get target tensor shape for diffusion model."""
-        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
+        y = batch[:, self.multi_step, ...]
         LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
         return y
 

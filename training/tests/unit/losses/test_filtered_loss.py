@@ -13,7 +13,6 @@ from omegaconf import DictConfig
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
-from anemoi.training.losses.filtering import FilteringLossWrapper
 
 
 def test_filtered_loss() -> None:
@@ -27,7 +26,7 @@ def test_filtered_loss() -> None:
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
+                "_target_": "anemoi.training.losses.spatial.LogFFT2Distance",
                 "predicted_variables": ["tp"],
                 "target_variables": ["tp"],
                 "loss": {
@@ -80,5 +79,5 @@ def test_filtered_loss() -> None:
     )
     loss.set_data_indices(data_indices)
 
-    assert isinstance(loss, FilteringLossWrapper)
+    assert isinstance(loss, BaseLoss)
     assert isinstance(loss.loss, FunctionalLoss)
