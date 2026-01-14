@@ -853,7 +853,7 @@ The benchmarking tests can also be run locally.
    pytest -s -vvv -v training/tests/integration/ --slow --multigpu -k "test_benchmark_training_cycle"
 
 The server location is read from a file
-"~/.config/anemoi-benchmark.yaml". The expected format is
+"~/.config/anemoi/anemoi-benchmark.yaml". The expected format is
 
 .. code:: yaml
 
