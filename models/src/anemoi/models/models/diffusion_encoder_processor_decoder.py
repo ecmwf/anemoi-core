@@ -72,16 +72,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
-
-        # Create graph providers
-        self.encoder_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-            edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            trainable_size=model_config.model.encoder.get("trainable_size", 0),
-        )
-
         # Encoder data -> hidden
         self.encoder = instantiate(
             model_config.model.encoder,
