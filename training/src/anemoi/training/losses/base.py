@@ -216,9 +216,9 @@ class BaseLoss(nn.Module, ABC):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
         squash : bool, optional
             Average last dimension, by default True
         scaler_indices: tuple[int,...], optional
