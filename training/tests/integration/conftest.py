@@ -239,7 +239,8 @@ def lam_config_with_graph(
     cfg, urls = lam_config
     cfg.graph = existing_graph_config
 
-    url_graph = cfg.system.input.graph
+    dataset_name = "data" # default name
+    url_graph = f"anemoi-integration-tests/training/graphs/lam-graph_{dataset_name}.pt"
     tmp_path_graph = get_test_data(url_graph)
     cfg.system.input.graph = Path(tmp_path_graph)
     return cfg, urls
@@ -504,3 +505,12 @@ def diffusion_config(
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, dataset_urls[0]
+
+
+@pytest.fixture
+def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str) -> tuple[DictConfig, str]:
+    cfg, url = gnn_config
+    cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
+    cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
+    cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
+    return cfg, url
