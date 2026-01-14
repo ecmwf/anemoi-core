@@ -25,7 +25,6 @@ from triton.tools.tensor_descriptor import TensorDescriptor
 
 from anemoi.models.triton.utils import is_blackwell
 from anemoi.models.triton.utils import is_hip
-from anemoi.models.triton.utils import is_hopper
 from anemoi.models.triton.utils import supports_host_descriptor
 from anemoi.models.triton.utils import torch_dtype_to_triton
 
@@ -151,18 +150,17 @@ def _attn_fwd_inner(
 
 
 def _host_descriptor_pre_hook(nargs):
-    """ Updates the tensor descriptor to use the block size determined by autotuning"""
+    """Updates the tensor descriptor to use the block size determined by autotuning"""
     try:
         if not isinstance(nargs["desc_q"], TensorDescriptor):
-            #If the input is not a tensor descriptor, return
+            # If the input is not a tensor descriptor, return
             return
     except KeyError:
         return
-    
-    #fwd pass
-    # TODO rewrite fwd pass to use FIXED_BLOCK and ITER_BLOCK
+
+    # Must determine of this is operating on fwd or bwd pass
     if "BLOCK_M" in nargs:
-        BLOCK_M = nargs["BLOCK_M"] 
+        BLOCK_M = nargs["BLOCK_M"]
         BLOCK_N = nargs["BLOCK_N"]
         HEAD_DIM = nargs["HEAD_DIM"]
         if not isinstance(nargs["desc_q"], TensorDescriptor):
@@ -172,18 +170,29 @@ def _host_descriptor_pre_hook(nargs):
         nargs["desc_k"].block_shape = [BLOCK_N, HEAD_DIM]
         nargs["desc_o"].block_shape = [BLOCK_M, HEAD_DIM]
     else:
-        #BWD pass (dkdv only)
-        BLOCK_ITER = nargs["BLOCK_ITER"] 
+        # BWD pass (dkdv only)
+        BLOCK_ITER = nargs["BLOCK_ITER"]
         BLOCK_FIXED = nargs["BLOCK_FIXED"]
         HEAD_DIM = nargs["HEAD_DIM"]
-        
-        #TODO need to determine which is fixed or iter
-        nargs["desc_q"].block_shape = [BLOCK_ITER, HEAD_DIM]
-        nargs["desc_v"].block_shape = [BLOCK_FIXED, HEAD_DIM]
-        nargs["desc_k"].block_shape = [BLOCK_FIXED, HEAD_DIM]
-        nargs["desc_do"].block_shape = [BLOCK_ITER, HEAD_DIM]
-        nargs["desc_dv"].block_shape = [BLOCK_FIXED, HEAD_DIM]
-        nargs["desc_dk"].block_shape = [BLOCK_FIXED, HEAD_DIM]
+
+        # Must determine if this is for bwd_dkdv or _bwd_dq to
+        # determine which tensors have fixed and iterating blocks
+
+        # Determine kernel by checking kernel args
+        if "desc_dq" in nargs:  # _bwd_dq
+            nargs["desc_q"].block_shape = [BLOCK_FIXED, HEAD_DIM]
+            nargs["desc_v"].block_shape = [BLOCK_ITER, HEAD_DIM]
+            nargs["desc_k"].block_shape = [BLOCK_ITER, HEAD_DIM]
+            nargs["desc_do"].block_shape = [BLOCK_FIXED, HEAD_DIM]
+            nargs["desc_dq"].block_shape = [BLOCK_FIXED, HEAD_DIM]
+
+        else:  # _bwd_dkdv
+            nargs["desc_q"].block_shape = [BLOCK_ITER, HEAD_DIM]
+            nargs["desc_v"].block_shape = [BLOCK_FIXED, HEAD_DIM]
+            nargs["desc_k"].block_shape = [BLOCK_FIXED, HEAD_DIM]
+            nargs["desc_do"].block_shape = [BLOCK_ITER, HEAD_DIM]
+            nargs["desc_dv"].block_shape = [BLOCK_FIXED, HEAD_DIM]
+            nargs["desc_dk"].block_shape = [BLOCK_FIXED, HEAD_DIM]
 
 
 def _generate_configs_fwd():
@@ -200,7 +209,12 @@ def _generate_configs_fwd():
         NUM_STAGES_OPTIONS = [2, 3, 4]
 
     configs = [
-        triton.Config({"BLOCK_M": BM, "BLOCK_N": BN, "WARP_SPECIALIZE": WS}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook)
+        triton.Config(
+            {"BLOCK_M": BM, "BLOCK_N": BN, "WARP_SPECIALIZE": WS},
+            num_stages=s,
+            num_warps=w,
+            pre_hook=_host_descriptor_pre_hook,
+        )
         for BM in [64, 128]
         for BN in [32, 64, 128]
         for s in NUM_STAGES_OPTIONS
@@ -211,7 +225,12 @@ def _generate_configs_fwd():
     if "PYTEST_VERSION" in os.environ:
         # Use a single config in testing for reproducibility
         configs = [
-            triton.Config(dict(BLOCK_M=128, BLOCK_N=64), num_stages=2, num_warps=4, pre_hook=_host_descriptor_pre_hook),
+            triton.Config(
+                dict(BLOCK_M=128, BLOCK_N=64, WARP_SPECIALIZE=False),
+                num_stages=2,
+                num_warps=4,
+                pre_hook=_host_descriptor_pre_hook,
+            ),
         ]
     return configs
 
@@ -231,15 +250,17 @@ def _generate_configs_bwd(try_warp_spec=True):
     else:
         NUM_STAGES_OPTIONS = [2, 3, 4]
 
-    # Note: the 'pre_hook=_host_descriptor_pre_hook' used in _generate_configs_fwd() has been removed here since host-descriptors aren't used in bwd pass
     configs = [
-        triton.Config({"BLOCK_FIXED": BM, "BLOCK_ITER": BN, "WARP_SPECIALIZE": WS}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook)
-        #for BM in [64, 128] # some block sizes dont work w warp spec
-        #for BN in [32, 64, 128]
-        for BM in [128]
-        for BN in [32]
+        triton.Config(
+            {"BLOCK_FIXED": BM, "BLOCK_ITER": BN, "WARP_SPECIALIZE": WS},
+            num_stages=s,
+            num_warps=w,
+            pre_hook=_host_descriptor_pre_hook,
+        )
+        for BM in [64, 128]
+        for BN in [32, 64, 128]
         for s in NUM_STAGES_OPTIONS
-        for w in [4, 8] 
+        for w in [4, 8]
         for WS in ([True, False] if try_warp_spec else [False])
     ]
 
@@ -247,10 +268,10 @@ def _generate_configs_bwd(try_warp_spec=True):
         # Use a single config in testing for reproducibility
         configs = [
             triton.Config(
-                dict(BLOCK_FIXED=128, BLOCK_ITER=32),
+                dict(BLOCK_FIXED=128, BLOCK_ITER=32, WARP_SPECIALIZE=False),
                 num_stages=2,
                 num_warps=4,
-                pre_hook=_host_descriptor_pre_hook
+                pre_hook=_host_descriptor_pre_hook,
             )
         ]
     return configs
@@ -273,8 +294,6 @@ def _prune_invalid_configs_bwd(configs, named_args, **kwargs):
             # Filter out configs where BLOCK_* > N_CTX
             conf.kwargs.get("BLOCK_FIXED", 0) <= N_CTX
             and conf.kwargs.get("BLOCK_ITER", 0) <= N_CTX
-            # 8 warps on hopper doesnt work with warp-spec
-            #and (conf.num_warps != 8 and is_hopper())  
             # BLOCK_FIXED must divide evenly into BLOCK_ITER (static assert in _bwd_dvdk and _bwd_dq)
             and conf.kwargs.get("BLOCK_FIXED", 0) % conf.kwargs.get("BLOCK_ITER", 0) == 0
         )
@@ -287,9 +306,6 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
         return desc_or_ptr
     else:
         return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
-        #offsets : tl.constexpr = (offset,0)
-        #order : tl.constexpr= (1,0)
-        #return tl.make_block_ptr(desc_or_ptr, shape, strides, offsets, block_shape, order)
 
 
 @triton.autotune(
@@ -324,22 +340,31 @@ def _attn_fwd(
 
     y_dim = Z * H * N_CTX
 
-    # This confusing bit of code can be ignored
-    # Depending on specific settings and what type of GPU is used,
-    # (see _system_specific_settings())
-    # a different wrapper class on top of tensors is used
-    # This is done to support further use of hardware features like TMA
+    # If tensor_descriptors weren't created on host (in system_specific_settings())
+    # Then they are created here
     desc_q = _maybe_make_tensor_descriptor(
-        desc_q, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_M, HEAD_DIM],
+        desc_q,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_M, HEAD_DIM],
     )
     desc_v = _maybe_make_tensor_descriptor(
-        desc_v, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_N, HEAD_DIM], 
+        desc_v,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_N, HEAD_DIM],
     )
     desc_k = _maybe_make_tensor_descriptor(
-        desc_k, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_N, HEAD_DIM], 
+        desc_k,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_N, HEAD_DIM],
     )
     desc_o = _maybe_make_tensor_descriptor(
-        desc_o, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_M, HEAD_DIM], 
+        desc_o,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_M, HEAD_DIM],
     )
 
     offset_y = off_z * (N_CTX * H) + off_h * N_CTX
@@ -402,11 +427,10 @@ def _attn_bwd_preprocess(Out, DO, Delta, N_CTX, BLOCK_M: tl.constexpr, HEAD_DIM:
     tl.store(Delta + off_hz * N_CTX + off_m, delta)
 
 
-# The main inner-loop logic for computing dK and dV.
 @triton.autotune(
     # Autotuning is crucial to get good performance at larger head dims
     # For an o96 2048c configuration, got a 3x speedup from autotuning
-    configs=_generate_configs_bwd(),
+    configs=_generate_configs_bwd(try_warp_spec=False),
     key=["N_CTX", "HEAD_DIM"],
     prune_configs_by={"early_config_prune": _prune_invalid_configs_bwd},
 )
@@ -422,10 +446,6 @@ def _attn_bwd_dkdv(
     D,  #
     sm_scale: tl.constexpr,
     # shared by Q/K/V/DO.
-    stride_z,
-    stride_h,
-    stride_tok,
-    stride_d,  #
     Z: tl.constexpr,
     H: tl.constexpr,
     N_CTX: tl.constexpr,
@@ -443,55 +463,60 @@ def _attn_bwd_dkdv(
     It then iterates over a column of Q in blocks of BLOCK_ITER.
     """
 
-    # Index into head and batch
-    bhid = tl.program_id(2)
-    off_chz = (bhid * N_CTX).to(tl.int64)
-    adj = (stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)
-    pid = tl.program_id(0)
     # index into context
+    pid = tl.program_id(0)
     start_n = pid * BLOCK_FIXED
     start_m = 0
-    
+
+    # Index into head and batch
     off_hz = tl.program_id(2)
+    off_chz = (off_hz * N_CTX).to(tl.int64)
     off_z = off_hz // H
     off_h = off_hz % H
     iter_offset_y = off_z * (N_CTX * H) + off_h * N_CTX
-    #fixed_offset_y = iter_offset_y + start_n * BLOCK_FIXED
     fixed_offset_y = iter_offset_y + start_n
-    
-    
+
     y_dim = Z * H * N_CTX
     desc_q = _maybe_make_tensor_descriptor(
-        desc_q, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_ITER, HEAD_DIM],
+        desc_q,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_ITER, HEAD_DIM],
     )
     desc_v = _maybe_make_tensor_descriptor(
-        desc_v, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_FIXED, HEAD_DIM], 
+        desc_v,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
     desc_k = _maybe_make_tensor_descriptor(
-        desc_k, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_FIXED, HEAD_DIM], 
+        desc_k,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
     desc_do = _maybe_make_tensor_descriptor(
-        desc_do, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_ITER, HEAD_DIM], 
+        desc_do,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_ITER, HEAD_DIM],
     )
     desc_dk = _maybe_make_tensor_descriptor(
-        desc_dk, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_FIXED, HEAD_DIM], 
+        desc_dk,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
     desc_dv = _maybe_make_tensor_descriptor(
-        desc_dv, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_FIXED, HEAD_DIM], 
+        desc_dv,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
 
     # offset pointers for batch/head
-    #Q += adj
-    #K += adj
-    #V += adj
-    #DO += adj
-    #DK += adj
-    #DV += adj
     M += off_chz
     D += off_chz
-
-    # load scales
-    offs_k = tl.arange(0, HEAD_DIM)
 
     offs_n = start_n + tl.arange(0, BLOCK_FIXED)
 
@@ -504,8 +529,6 @@ def _attn_bwd_dkdv(
 
     offs_m = start_m + tl.arange(0, BLOCK_ITER)
     offs_n = start_n + tl.arange(0, BLOCK_FIXED)
-    offs_k = tl.arange(0, HEAD_DIM)
-# BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
     curr_m = start_m
     step_m = BLOCK_ITER
@@ -540,10 +563,8 @@ def _attn_bwd_dkdv(
     # skip up to 'lo'
     iter_offset_y += lo
 
-    # for _ in range(num_steps):
     for curr_m in tl.range(lo, hi, step_m, warp_specialize=WARP_SPECIALIZE):
 
-        #qT = tl.load(qT_ptrs)
         qT = desc_q.load([iter_offset_y, 0]).T
         # Load m before computing qk to reduce pipeline stall.
         offs_m = curr_m + tl.arange(0, BLOCK_ITER)
@@ -575,24 +596,15 @@ def _attn_bwd_dkdv(
         dsT = dsT.to(dtype)
         dk += tl.dot(dsT, tl.trans(qT))
 
-        # Increment pointers.
-        #qT_ptrs += step_m * stride_tok
-        #do_ptrs += step_m * stride_tok
+        # Move to next iter block
         iter_offset_y = iter_offset_y + step_m
 
     # Store computed dK and dV
-    #dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-    #tl.store(dv_ptrs, dv)
     desc_dv.store([fixed_offset_y, 0], dv.to(dtype))
     dk *= sm_scale
     desc_dk.store([fixed_offset_y, 0], dk.to(dtype))
-    #dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-    #tl.store(dk_ptrs, dk)
-    
-    #desc_o.store([qo_offset_y, 0], acc.to(dtype))
 
 
-# the main inner-loop logic for computing dQ
 @triton.autotune(
     # Autotuning is crucial to get good performance at larger head dims
     # For an o96 2048c configuration, got a 3x speedup from autotuning
@@ -602,24 +614,21 @@ def _attn_bwd_dkdv(
 )
 @triton.jit
 def _attn_bwd_dq(
-    Q,
-    K,
-    V,
-    DO,
-    DQ,
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_do,
+    desc_dq,
     M,
     D,
     # shared by Q/K/V/DO.
-    stride_z,
-    stride_h,
-    stride_tok,
-    stride_d,  #
+    Z: tl.constexpr,
     H: tl.constexpr,
-    N_CTX: tl.constexpr,  #
-    BLOCK_ITER: tl.constexpr,  # Formerly BLOCK_N2
-    BLOCK_FIXED: tl.constexpr,  # Formerly BLOCK_M2
+    N_CTX: tl.constexpr,
+    BLOCK_ITER: tl.constexpr,
+    BLOCK_FIXED: tl.constexpr,
     HEAD_DIM: tl.constexpr,
-    CAUSAL: tl.constexpr,  #
+    CAUSAL: tl.constexpr,
     WINDOW: tl.constexpr,
     WARP_SPECIALIZE: tl.constexpr,
     dtype: tl.constexpr,
@@ -632,44 +641,66 @@ def _attn_bwd_dq(
 
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
 
-    # Index into head and batch
-    bhid = tl.program_id(2)
-    off_chz = (bhid * N_CTX).to(tl.int64)
-    adj = (stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)
-    pid = tl.program_id(0)
     # index into context
+    pid = tl.program_id(0)
     start_m = pid * BLOCK_FIXED
     start_n = 0
 
+    # Index into head and batch
+    off_hz = tl.program_id(2)
+    off_chz = (off_hz * N_CTX).to(tl.int64)
+    off_z = off_hz // H
+    off_h = off_hz % H
+    iter_offset_y = off_z * (N_CTX * H) + off_h * N_CTX
+    fixed_offset_y = iter_offset_y + start_m
+
+    # Build tensor descriptors if they havent already been built in _system_specific_settings()
+    y_dim = Z * H * N_CTX
+    desc_q = _maybe_make_tensor_descriptor(
+        desc_q,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
+    )
+    desc_v = _maybe_make_tensor_descriptor(
+        desc_v,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_ITER, HEAD_DIM],
+    )
+    desc_k = _maybe_make_tensor_descriptor(
+        desc_k,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_ITER, HEAD_DIM],
+    )
+    desc_do = _maybe_make_tensor_descriptor(
+        desc_do,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
+    )
+    desc_dq = _maybe_make_tensor_descriptor(
+        desc_dq,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
+    )
+
     # offset pointers for batch/head
-    Q += adj
-    K += adj
-    V += adj
-    DO += adj
-    DQ += adj
     M += off_chz
     D += off_chz
 
-    # load scales
-    offs_k = tl.arange(0, HEAD_DIM)
-
-    # Compute dQ
-    start_m = pid * BLOCK_FIXED
-    start_n = 0
-
     offs_m = start_m + tl.arange(0, BLOCK_FIXED)
 
-    q = tl.load(Q + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
+    q = desc_q.load([fixed_offset_y, 0])
     dq = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
-    do = tl.load(DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
+    do = desc_do.load([fixed_offset_y, 0])
 
     m = tl.load(M + offs_m)
     m = m[:, None]
 
     offs_n = start_n + tl.arange(0, BLOCK_ITER)
-    offs_k = tl.arange(0, HEAD_DIM)
-    kT_ptrs = K + offs_n[None, :] * stride_tok + offs_k[:, None] * stride_d
-    vT_ptrs = V + offs_n[None, :] * stride_tok + offs_k[:, None] * stride_d
     # D (= delta) is pre-divided by ds_scale.
     Di = tl.load(D + offs_m)
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
@@ -701,12 +732,11 @@ def _attn_bwd_dq(
         hi: tl.constexpr = N_CTX
 
     # skip up to 'lo'
-    kT_ptrs += lo * stride_tok
-    vT_ptrs += lo * stride_tok
+    iter_offset_y += lo
 
     for curr_n in tl.range(lo, hi, step_n, warp_specialize=WARP_SPECIALIZE):
-        kT = tl.load(kT_ptrs)
-        vT = tl.load(vT_ptrs)
+        kT = desc_k.load([iter_offset_y, 0]).T
+        vT = desc_v.load([iter_offset_y, 0]).T
         qk = tl.dot(q, kT)
         # Apply masking based on the position of the current K and V blocks.
         if CAUSAL:
@@ -729,13 +759,12 @@ def _attn_bwd_dq(
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
         dq += tl.dot(ds, tl.trans(kT))
 
-        kT_ptrs += step_n * stride_tok
-        vT_ptrs += step_n * stride_tok
+        # move to the nect iter_block
+        iter_offset_y = iter_offset_y + step_n
 
     # Write back dQ.
-    dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
     dq *= LN2
-    tl.store(dq_ptrs, dq)
+    desc_dq.store([fixed_offset_y, 0], dq.to(dtype))
 
 
 def _system_specific_settings(q, k, v, o, warp_specialize):
@@ -758,11 +787,14 @@ def _system_specific_settings(q, k, v, o, warp_specialize):
         else:
             extra_kern_args["maxnreg"] = 80
 
-    # Use device_descriptor for Hopper + warpspec.
-    if supports_host_descriptor() and not (is_hopper() and warp_specialize):
+    # If host descriptor isnt supported, the descriptors will be created on device at the start of the kernels
+    if supports_host_descriptor():
         y_dim = q.shape[0] * q.shape[1] * q.shape[2]
 
-        dummy_block = [1, 1] # will be overwritten after autotuning is complete by the optimal block size
+        dummy_block = [
+            1,
+            1,
+        ]  # After autotuning, block_shape will be overwritten with the optimal block size in host_descriptor_pre_hook()
         desc_q = TensorDescriptor(q, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
         desc_v = TensorDescriptor(v, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
         desc_k = TensorDescriptor(k, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
@@ -847,10 +879,9 @@ class TritonAttention(torch.autograd.Function):
 
         if do.shape == o.shape and do.stride() != o.stride():
             do = do.reshape(o.shape).contiguous()
-            
+
         if not do.is_contiguous():
             do = do.contiguous()
-            
 
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
@@ -864,7 +895,7 @@ class TritonAttention(torch.autograd.Function):
         assert N_CTX % PRE_BLOCK == 0
         pre_grid = (N_CTX // PRE_BLOCK, BATCH * N_HEAD)
         delta = torch.empty_like(M)
-        
+
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
         desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, True)
 
@@ -880,7 +911,7 @@ class TritonAttention(torch.autograd.Function):
 
         def grid_dq(META):
             return (triton.cdiv(N_CTX, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
-        
+
         # Compute dK and dV
         _attn_bwd_dkdv[grid_dkdv](
             desc_q,
@@ -892,10 +923,6 @@ class TritonAttention(torch.autograd.Function):
             M,
             delta,  #
             ctx.sm_scale,
-            q.stride(0),  # stride_z
-            q.stride(1),  # stride_h
-            q.stride(2),  # stride_tok
-            q.stride(3),  # stride_d
             Z=BATCH,
             H=N_HEAD,
             N_CTX=N_CTX,  #
@@ -908,17 +935,14 @@ class TritonAttention(torch.autograd.Function):
 
         # Compute dQ
         _attn_bwd_dq[grid_dq](
-            q,
-            k,
-            v,
-            do,
-            dq,
+            desc_q,
+            desc_k,
+            desc_v,
+            desc_do,
+            desc_dq,
             M,
             delta,  #
-            q.stride(0),  # stride_z
-            q.stride(1),  # stride_h
-            q.stride(2),  # stride_tok
-            q.stride(3),  # stride_d
+            Z=BATCH,
             H=N_HEAD,
             N_CTX=N_CTX,  #
             HEAD_DIM=HEAD_DIM,  #
