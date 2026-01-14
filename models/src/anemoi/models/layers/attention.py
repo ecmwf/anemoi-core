@@ -454,7 +454,7 @@ class TritonAttentionWrapper(nn.Module):
         alibi_slopes: torch.Tensor = None,
     ):
 
-        self._not_implemented(dropout_p, softcap, alibi_slopes)
+        self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
 
         softmax_scale = 1 / math.sqrt(query.size(-1))
 
@@ -462,7 +462,7 @@ class TritonAttentionWrapper(nn.Module):
 
         return out
 
-    def _not_implemented(self, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
+    def _not_implemented(self, causal: bool, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
         msg = ""
         if dropout_p != 0.0:
             msg += "dropout_p, "
@@ -470,8 +470,14 @@ class TritonAttentionWrapper(nn.Module):
             msg += "softcap, "
         if alibi_slopes is not None:
             msg += "alibi slobes, "
+        if causal:
+            msg += "causal, "
         if len(msg) > 0:
-            msg = "The following features you requested are not yet implemented in the Triton-Attention backend: " + msg
+            msg = (
+                "The following features you requested are not yet implemented in the Triton-Attention backend: "
+                + msg
+                + "\nPlease use a different attention backend, or create a ticket on the anemoi-core repository"
+            )
             raise NotImplementedError(msg)
 
 

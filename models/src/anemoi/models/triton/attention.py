@@ -601,9 +601,9 @@ def _attn_bwd_dq(
     return dq
 
 
-@triton.autotune( 
+@triton.autotune(
     # Autotuning is curucial to get good performance at larger head dims
-    # For an o96 2048c configuration, got a 3x speedup from autotuning 
+    # For an o96 2048c configuration, got a 3x speedup from autotuning
     configs=_generate_configs_bwd(),
     key=["N_CTX", "HEAD_DIM", "warp_specialize"],
     prune_configs_by={"early_config_prune": _prune_invalid_configs_bwd},
