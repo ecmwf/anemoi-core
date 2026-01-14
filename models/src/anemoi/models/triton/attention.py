@@ -225,13 +225,12 @@ def _generate_configs_bwd():
     else:
         NUM_STAGES_OPTIONS = [2, 3, 4]
 
-    # Note: the 'pre_hook=_host_descriptor_pre_hook' used in _generate_configs_fwd() has been removed here
+    # Note: the 'pre_hook=_host_descriptor_pre_hook' used in _generate_configs_fwd() has been removed here since host-descriptors aren't used in bwd pass
     configs = [
-        triton.Config({"BLOCK_M1": BM1, "BLOCK_N1": BN1, "BLOCK_M2": BM2, "BLOCK_N2": BN2}, num_stages=s, num_warps=w)
-        for BM1 in [64, 128]
-        for BN1 in [32, 64, 128]
-        for BM2 in [64, 128]
-        for BN2 in [32, 64, 128]
+        #TODO(cathal) tune N1,M1,N2 and M2 seperately (complex due to dependacnies between them due to shared grid layout)
+        triton.Config({"BLOCK_M1": BM, "BLOCK_N1": BN, "BLOCK_M2": BM, "BLOCK_N2": BN}, num_stages=s, num_warps=w)
+        for BM in [32, 64, 128]
+        for BN in [32, 64, 128]
         for s in NUM_STAGES_OPTIONS
         for w in [4, 8]
     ]
