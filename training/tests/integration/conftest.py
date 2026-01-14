@@ -239,7 +239,8 @@ def lam_config_with_graph(
     cfg, urls = lam_config
     cfg.graph = existing_graph_config
 
-    url_graph = "anemoi-integration-tests/training/graphs/lam-graph.pt"
+    dataset_name = "data" # default name
+    url_graph = f"anemoi-integration-tests/training/graphs/lam-graph_{dataset_name}.pt"
     tmp_path_graph = get_test_data(url_graph)
     cfg.system.input.graph = Path(tmp_path_graph)
     return cfg, urls
