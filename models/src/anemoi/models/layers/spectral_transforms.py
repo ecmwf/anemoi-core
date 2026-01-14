@@ -15,6 +15,8 @@ import einops
 import torch
 import torch.fft
 
+from anemoi.training.utils.enums import TensorDim
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -68,13 +70,18 @@ class FFT2D(SpectralTransform):
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = data[:, :, self.nodes_slice, :]
-        batch_size, ens, _, var = data.shape
-        # [batch, ens, y*x, variables] -> [batch*ens*variables, y, x]
-        data = einops.rearrange(data, "b e (y x) v -> (b e v) y x", x=self.x_dim, y=self.y_dim)
-        fft_data = torch.fft.fft2(data)
-        # [batch**ens*variables, y, x] -> [batch, ens y, x, variables]
-        return einops.rearrange(fft_data, "(b e v) y x -> b e y x v", b=batch_size, e=ens, v=var)
+        data = torch.index_select(
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
+        )
+        var = data.shape[-1]
+        try:
+            data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+        except Exception as e:
+            raise einops.EinopsError(
+                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
+                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
+            ) from e
+        return torch.fft.fft2(data, dim=(-2, -3))
 
 
 class SHT(SpectralTransform):

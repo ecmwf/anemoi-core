@@ -27,6 +27,7 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.spectral import SpectralLoss
 from anemoi.training.utils.enums import TensorDim
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
@@ -357,7 +358,6 @@ def test_logfft2dist_loss() -> None:
 
 
 def test_fcl_loss() -> None:
-    # TODO (Ophelia): edit this when multi ouptuts get merged
     """Test that FourierCorrelationLoss can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
@@ -370,6 +370,7 @@ def test_fcl_loss() -> None:
         ),
     )
     assert isinstance(loss, BaseLoss)
+    assert isinstance(loss, SpectralLoss)
     assert hasattr(loss, "x_dim")
     assert hasattr(loss, "y_dim")
 
@@ -384,5 +385,7 @@ def test_fcl_loss() -> None:
     assert loss_total.numel() == 1, "Expected a single aggregated loss value"
 
     wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    with pytest.raises(einops.EinopsError):
+        _ = loss._to_spectral_flat(wrong[0])
     with pytest.raises(einops.EinopsError):
         _ = loss(*wrong, squash=True)
