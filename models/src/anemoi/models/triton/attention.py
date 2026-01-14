@@ -176,7 +176,14 @@ def _host_descriptor_pre_hook(nargs):
     nargs["desc_o"].block_shape = [BLOCK_M, HEAD_DIM]
 
 
-def _generate_configs():
+def _generate_configs_fwd():
+    """Generates a list of runtime configs for triton autotuning.
+
+    Returns a list of different performance-related hyperparams
+
+    Triton will benchmark all the configs after initalising and will
+    run with the best config.
+    """
     if is_hip():
         NUM_STAGES_OPTIONS = [1]
     elif supports_host_descriptor():
@@ -200,22 +207,97 @@ def _generate_configs():
     return configs
 
 
-def _keep(conf):
-    BLOCK_M = conf.kwargs["BLOCK_M"]
-    BLOCK_N = conf.kwargs["BLOCK_N"]
-    return not (
-        is_cuda()
-        and torch.cuda.get_device_capability()[0] == 9
-        and BLOCK_M * BLOCK_N < 128 * 128
-        and conf.num_warps == 8
-    )
+def _generate_configs_bwd():
+    """Generates a list of runtime configs for triton autotuning.
+
+    Returns a list of different performance-related hyperparams
+
+    Triton will benchmark all the configs after initalising and will
+    run with the best config.
+
+    backward configs has more constraints. warp-spec doesnt compile (triton v3.4 on GH200)
+    and BLOCK_M2 must be >= BLOCK_N1 because the single bwd grid layout is based on N1.
+    """
+    if is_hip():
+        NUM_STAGES_OPTIONS = [1]
+    elif supports_host_descriptor():
+        NUM_STAGES_OPTIONS = [2, 3, 4]
+    else:
+        NUM_STAGES_OPTIONS = [2, 3, 4]
+
+    # Note: the 'pre_hook=_host_descriptor_pre_hook' used in _generate_configs_fwd() has been removed here
+    configs = [
+        triton.Config({"BLOCK_M1": BM1, "BLOCK_N1": BN1, "BLOCK_M2": BM2, "BLOCK_N2": BN2}, num_stages=s, num_warps=w)
+        for BM1 in [64, 128]
+        for BN1 in [32, 64, 128]
+        for BM2 in [64, 128]
+        for BN2 in [32, 64, 128]
+        for s in NUM_STAGES_OPTIONS
+        for w in [4, 8]
+    ]
+
+    if "PYTEST_VERSION" in os.environ:
+        # Use a single config in testing for reproducibility
+        configs = [
+            triton.Config(
+                dict(BLOCK_M1=32, BLOCK_N1=128, BLOCK_M2=128, BLOCK_N2=32),
+                num_stages=2,
+                num_warps=4,
+            )
+        ]
+    return configs
 
 
-def _prune_invalid_configs(configs, named_args, **kwargs):
+# TODO remove?
+# This removes some configs when running with 8 warps when running on Hopper GPUs
+# def _keep(conf):
+#    BLOCK_M = conf.kwargs["BLOCK_M"]
+#    BLOCK_N = conf.kwargs["BLOCK_N"]
+#    return not (
+#        is_cuda()
+#        and torch.cuda.get_device_capability()[0] == 9
+#        and BLOCK_M * BLOCK_N < 128 * 128
+#        and conf.num_warps == 8
+#    )
+
+
+def _prune_invalid_configs_fwd(configs, named_args, **kwargs):
     N_CTX = kwargs["N_CTX"]
 
     # Filter out configs where BLOCK_M > N_CTX
     return [conf for conf in configs if conf.kwargs.get("BLOCK_M", 0) <= N_CTX]
+
+
+def _prune_invalid_configs_bwd(configs, named_args, **kwargs):
+    N_CTX = kwargs["N_CTX"]
+    warp_spec = ["warp_specialize"]
+
+    # Filter out configs where BLOCK_M > N_CTX
+    # Warp-spec doesnt compile in the bwd pass, so filter it out
+    # BLOCK_N must be a multiple of BLOCK_M
+    # and BLOCK_M2 must be >= BLOCK_N1 (until each kernel has its own grid)
+    return [
+        conf
+        for conf in configs
+        if (
+            conf.kwargs.get("BLOCK_M1", 0) <= N_CTX
+            and conf.kwargs.get("BLOCK_M2", 0) <= N_CTX
+            and
+            # Warp-spec doesnt compile in the bwd pass, so filter it out
+            warp_spec
+            and
+            # Block N1 must divide evenly into BLOCK_M1 (static assert in _bwd_dvdk)
+            conf.kwargs.get("BLOCK_N1", 0) % conf.kwargs.get("BLOCK_M1", 0) == 0
+            and
+            # Block M2 must divide evenly into BLOCK_N2 (static assert in _bwd_dq)
+            conf.kwargs.get("BLOCK_M2", 0) % conf.kwargs.get("BLOCK_N2", 0) == 0
+            and
+            # Grid is based on BLOCK_N1, so BLOCK_M2 can't be smaller then it
+            # temporary until each bwd kernel has a seperate grid
+            conf.kwargs.get("BLOCK_M2", 0) >= conf.kwargs.get("BLOCK_N1", 0)
+            and conf.kwargs.get("BLOCK_N2", 0) >= conf.kwargs.get("BLOCK_N1", 0)
+        )
+    ]
 
 
 @triton.jit
@@ -227,9 +309,9 @@ def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
 
 
 @triton.autotune(
-    configs=list(filter(_keep, _generate_configs())),
+    configs=_generate_configs_fwd(),
     key=["N_CTX", "HEAD_DIM", "warp_specialize"],
-    prune_configs_by={"early_config_prune": _prune_invalid_configs},
+    prune_configs_by={"early_config_prune": _prune_invalid_configs_fwd},
 )
 @triton.jit
 def _attn_fwd(
@@ -320,7 +402,7 @@ def _attn_fwd(
 
 
 @triton.jit
-def _attn_bwd_preprocess(Out, DO, Delta, Z, H, N_CTX, BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr):  #  #  #  #
+def _attn_bwd_preprocess(Out, DO, Delta, N_CTX, BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr):  #  #  #  #
     """Calculates a per-token scalar Delta needed for backwards softmax computation.
 
     Pre-computing and storing it here prevents repeated recomputation during inner backward computation.
@@ -545,6 +627,11 @@ def _attn_bwd_dq(
     return dq
 
 
+@triton.autotune(
+    configs=_generate_configs_bwd(),
+    key=["N_CTX", "HEAD_DIM", "warp_specialize"],
+    prune_configs_by={"early_config_prune": _prune_invalid_configs_bwd},
+)
 @triton.jit
 def _attn_bwd(
     Q,
@@ -791,13 +878,20 @@ class TritonAttention(torch.autograd.Function):
         if do.shape == o.shape and do.stride() != o.stride():
             do = do.reshape(o.shape).contiguous()
 
+        # TODO make into host descriptor
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
-        BATCH, N_HEAD, N_CTX = q.shape[:3]
+        BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
         PRE_BLOCK = 128
-        NUM_WARPS, NUM_STAGES = 4, 5
-        BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
+
+        # TODO(cathal) use autotuning to find block sizes instead of hardcoding
+        # BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
+        # if HEAD_DIM >= 128:
+        #    BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 64, 64, 32
+        # illegal mem access error
+        # grid is reused for dkdv and dq on BLOCK_N1
+        # so there seemes BLOCK_M2 must be at least BLOCK_N1
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
         arg_k = k
         arg_k = arg_k * (ctx.sm_scale * RCP_LN2)
@@ -807,14 +901,21 @@ class TritonAttention(torch.autograd.Function):
         delta = torch.empty_like(M)
 
         # precompute 'delta' value needed for softmax computation
-        _attn_bwd_preprocess[pre_grid](
-            o, do, delta, BATCH, N_HEAD, N_CTX, BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM  #  #  #  #
-        )
-        grid = (N_CTX // BLOCK_N1, 1, BATCH * N_HEAD)
+        _attn_bwd_preprocess[pre_grid](o, do, delta, N_CTX, BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM)  #  #  #  #
+
+        # defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU
+        # (SMs are essentially processors on a GPU, with typically 1024 threads per SM)
+        def grid(META):
+            return (triton.cdiv(q.shape[2], META["BLOCK_N1"]), 1, q.shape[0] * q.shape[1])
+            # fwd uses BLOCK_M
 
         # Compute backward pass.
         # There is at least one kernel per BATCH * NUM_HEAD.
         # Depending on BLOCK_N1, the context dimension can be further split across kernels
+
+        # TODO(cathal) replace with calls to _attn_bwd_dkdv and _attn_bwd_dq
+        # I will have to do loading inside the kernels, which might lead to more loads
+        # But i can use a different grid for both kernels
         _attn_bwd[grid](
             q,
             arg_k,
@@ -830,15 +931,9 @@ class TritonAttention(torch.autograd.Function):
             q.stride(1),
             q.stride(2),
             q.stride(3),  #
-            N_HEAD,
-            N_CTX,  #
-            BLOCK_M1=BLOCK_M1,
-            BLOCK_N1=BLOCK_N1,  #
-            BLOCK_M2=BLOCK_M2,
-            BLOCK_N2=BLOCK_N2,  #
+            H=N_HEAD,
+            N_CTX=N_CTX,  #
             HEAD_DIM=ctx.HEAD_DIM,  #
-            num_warps=NUM_WARPS,  #
-            num_stages=NUM_STAGES,  #
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,
             # bwd kernels don't compile with warp_spec=true (GH200, triton 3.4)
