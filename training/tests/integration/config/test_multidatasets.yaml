@@ -1,0 +1,25 @@
+# Modifications for the basic template "config.yaml"
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+    dataset_b: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+
+dataloader:
+  training:
+    datasets:
+      era:
+        end: 1979-01-08 12:00:00
+      cerra:
+        end: 1979-01-08 12:00:00
+  validation:
+    datasets:
+      era:
+        start: 1979-01-08 18:00:00
+      cerra:
+        start: 1979-01-08 18:00:00
+
+diagnostics:
+  log:
+    mlflow:
+      authentication: True
+      experiment_name: 'ci_hpc_mlflow'

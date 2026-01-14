@@ -209,6 +209,28 @@ def stretched_config(
 
 
 @pytest.fixture
+def multidatasets_config(
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, list[str]]:
+    with initialize( version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidatasets"):
+        template = compose(config_name="multi")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "dataset_b"])
+    dataset, dataset_b = rel_paths
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
+    use_case_modifications.system.input.dataset_b = str(Path(tmp_dir, dataset_b))
+
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls
+
+
+@pytest.fixture
 def lam_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
