@@ -227,7 +227,7 @@ def _generate_configs_bwd():
 
     # Note: the 'pre_hook=_host_descriptor_pre_hook' used in _generate_configs_fwd() has been removed here since host-descriptors aren't used in bwd pass
     configs = [
-        #TODO(cathal) tune N1,M1,N2 and M2 seperately (complex due to dependacnies between them due to shared grid layout)
+        # TODO(cathal) tune N1,M1,N2 and M2 seperately (complex due to dependancies between them due to shared grid layout)
         triton.Config({"BLOCK_M1": BM, "BLOCK_N1": BN, "BLOCK_M2": BM, "BLOCK_N2": BN}, num_stages=s, num_warps=w)
         for BM in [32, 64, 128]
         for BN in [32, 64, 128]
@@ -245,20 +245,6 @@ def _generate_configs_bwd():
             )
         ]
     return configs
-
-
-# TODO remove?
-# This removes some configs when running with 8 warps when running on Hopper GPUs
-# def _keep(conf):
-#    BLOCK_M = conf.kwargs["BLOCK_M"]
-#    BLOCK_N = conf.kwargs["BLOCK_N"]
-#    return not (
-#        is_cuda()
-#        and torch.cuda.get_device_capability()[0] == 9
-#        and BLOCK_M * BLOCK_N < 128 * 128
-#        and conf.num_warps == 8
-#    )
-
 
 def _prune_invalid_configs_fwd(configs, named_args, **kwargs):
     N_CTX = kwargs["N_CTX"]
@@ -884,13 +870,6 @@ class TritonAttention(torch.autograd.Function):
         BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
         PRE_BLOCK = 128
 
-        # TODO(cathal) use autotuning to find block sizes instead of hardcoding
-        # BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
-        # if HEAD_DIM >= 128:
-        #    BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 64, 64, 32
-        # illegal mem access error
-        # grid is reused for dkdv and dq on BLOCK_N1
-        # so there seemes BLOCK_M2 must be at least BLOCK_N1
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
         arg_k = k
         arg_k = arg_k * (ctx.sm_scale * RCP_LN2)
