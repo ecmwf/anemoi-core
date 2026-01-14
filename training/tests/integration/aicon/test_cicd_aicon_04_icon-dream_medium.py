@@ -94,7 +94,7 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
     for keys in metadata_keys:
         try:
             reduce(getitem, keys, metadata)
-        except KeyError:  # noqa: PERF203
+        except KeyError:
             keys = "".join(f"[{k!r}]" for k in keys)
             errors.append("missing metadata" + keys)
     if errors:
