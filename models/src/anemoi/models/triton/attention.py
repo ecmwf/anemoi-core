@@ -209,7 +209,7 @@ def _generate_configs(try_warp_spec=True):
             num_warps=w,
             pre_hook=_host_descriptor_pre_hook,
         )
-        for BM in [64, 128]
+        for BM in [32, 64, 128]
         for BN in [32, 64, 128]
         for s in NUM_STAGES_OPTIONS
         for w in [4, 8]
@@ -264,6 +264,7 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
     configs=_generate_configs(),
     key=["N_CTX", "HEAD_DIM"],
     prune_configs_by={"early_config_prune": _prune_invalid_configs_fwd},
+    cache_results=True
 )
 @triton.jit
 def _attn_fwd(
@@ -385,6 +386,7 @@ def _attn_bwd_preprocess(Out, DO, Delta, N_CTX, PRE_BLOCK: tl.constexpr, HEAD_DI
     configs=_generate_configs(try_warp_spec=False),
     key=["N_CTX", "HEAD_DIM"],
     prune_configs_by={"early_config_prune": _prune_invalid_configs_bwd},
+    cache_results=True,
 )
 @triton.jit
 def _attn_bwd_dkdv(
@@ -563,6 +565,7 @@ def _attn_bwd_dkdv(
     configs=_generate_configs(try_warp_spec=False),
     key=["N_CTX", "HEAD_DIM"],
     prune_configs_by={"early_config_prune": _prune_invalid_configs_bwd},
+    cache_results=True,
 )
 @triton.jit
 def _attn_bwd_dq(
