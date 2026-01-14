@@ -920,12 +920,13 @@ class PlotLoss(BasePerBatchPlotCallback):
 
         for rollout_step in range(output_times[0]):
             y_hat = outputs[1][rollout_step]
-            y_true = batch[
-                :,
-                pl_module.multi_step + rollout_step,
-                ...,
-                pl_module.data_indices.data.output.full,
+
+            fc_times = [
+                pl_module.multi_step + rollout_step * pl_module.multi_out + i for i in range(pl_module.multi_out)
             ]
+            y_true = batch[:, fc_times, ...]
+            y_true = y_true[..., pl_module.data_indices.data.output.full]
+
             loss = reduce_to_last_dim(self.loss(y_hat, y_true, squash=False).detach().cpu().numpy())
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
@@ -1179,7 +1180,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 self.latlons,
                 data[init_step, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
-                output_tensor[rollout_step, ...],
+                output_tensor[rollout_step, ...].squeeze(),
                 min_delta=self.min_delta,
             )
 

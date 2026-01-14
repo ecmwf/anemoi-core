@@ -119,7 +119,7 @@ class EnsemblePlotMixin:
             tuple(
                 self.post_processors(x.detach().cpu(), in_place=False)[
                     self.sample_idx : self.sample_idx + 1,
-                    0,
+                    :,
                     members,
                     ...,
                 ]
