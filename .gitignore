@@ -2,7 +2,6 @@
 __pycache__/
 *.py[cod]
 *$py.class
-outputs
 *.so
 .Python
 __pypackages__/
