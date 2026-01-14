@@ -454,6 +454,13 @@ class ProjectionGraphProvider(BaseGraphProvider):
         super().__init__()
 
         if file_path is not None:
+            if src_node_weight_attribute is not None:
+                msg = f"Building ProjectionGraphProvider from file, so src_node_weight_attribute='{src_node_weight_attribute}' will be ignored."
+                LOGGER.warning(msg)
+
+            if edge_weight_attribute is not None:
+                msg = f"Building ProjectionGraphProvider from file, so edge_weight_attribute='{edge_weight_attribute}' will be ignored."
+                LOGGER.warning(msg)
             self._build_from_file(file_path, row_normalize)
         else:
             assert (
