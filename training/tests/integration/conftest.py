@@ -213,7 +213,7 @@ def multidatasets_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, list[str]]:
-    with initialize( version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidatasets"):
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidatasets"):
         template = compose(config_name="multi")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")

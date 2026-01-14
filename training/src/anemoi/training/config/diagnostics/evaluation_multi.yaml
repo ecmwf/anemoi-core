@@ -39,6 +39,7 @@ log:
   tensorboard:
     enabled: False
   mlflow:
+    _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
     enabled: True
     offline: False
     experiment_name: 'test_plotting_multi_datasets'
