@@ -221,6 +221,8 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
     combined = "anemoi.training.losses.combined.CombinedLoss"
+    fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
+    lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
 
 
 class BaseLossSchema(BaseModel):
@@ -266,8 +268,20 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
+class SpectralLossSchema(BaseLossSchema):
+    """Spectral loss class."""
+
+    transform: Literal["fft2d", "sht"] = Field(..., example="fft2d")
+    """Type of spectral transform to use."""
+
+    class Config(BaseModel.Config):
+        """Override to allow extra parameters for spectral transforms."""
+
+        extra = "allow"
+
+
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema] = Field(min_length=1)
+    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -300,6 +314,7 @@ LossSchemas = (
     | CombinedLossSchema
     | AlmostFairKernelCRPSSchema
     | KernelCRPSSchema
+    | SpectralLossSchema
     | MultiScaleLossSchema
 )
 
