@@ -38,7 +38,7 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
         from anemoi.graphs.generate import tri_icosahedron
 
         if x_hops == 1:
-            LOGGER.debug("Using tri-mesh only strategy for x_hops=1 multiscale-edge building.")
+            LOGGER.debug("The 1-hop edges are obtained directly from the trimesh.Trimesh object's 'edges' attribute.")
             # Compute the multiscale edges directly and store them in the node storage
             # No need of the networkx graph
             multiscale_edges = tri_icosahedron.add_1_hop_edges(
