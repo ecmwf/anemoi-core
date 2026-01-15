@@ -77,6 +77,34 @@ deterministic:
       _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
       # loss function kwargs here
 
+***************************
+ Multisclae Loss Functions
+***************************
+
+The `MultiscaleLossWrapper` implements the multiscale loss formulation
+presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
+functions such as the `AlmostFairKernelCRPSLoss` to provide scale-aware
+model training.
+
+The config for the multiscale loss functions is the following:
+
+.. code:: yaml
+
+   training_loss:
+      _target_: anemoi.training.losses.MultiscaleLossWrapper
+      loss_matrices_path: ${system.input.loss_matrices_path}
+      loss_matrices: ["matrix.npz", null]
+      weights:
+         - 1.0
+         - 1.0
+
+      per_scale_loss:
+         _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+         scalers: ['node_weights']
+         ignore_nans: False
+         no_autocast: True
+         alpha: 1.0
+
 ************************
  Spatial Loss Functions
 ************************

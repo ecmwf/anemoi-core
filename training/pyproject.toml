@@ -50,7 +50,7 @@ dependencies = [
   "hydra-core>=1.3",
   "matplotlib>=3.7.1",
   "mlflow-skinny>=2.11.1",
-  "numpy<2",                                         # Pinned until we can confirm it works with anemoi graphs
+  "numpy",
   "nvidia-ml-py>=13.580.82",
   "pydantic>=2.9",
   "pyshtools>=4.13",
@@ -74,7 +74,8 @@ optional-dependencies.docs = [
   "autodoc-pydantic",
   "nbsphinx",
   "pandoc",
-  "sphinx<8.2",       # Fixed until nbsphinx updates
+  "sphinx<8.2; python_version<'3.11'",   # Fixed until nbsphinx updates
+  "sphinx>=8.2; python_version>='3.11'",
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]

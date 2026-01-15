@@ -49,6 +49,9 @@ First, let's take the model configuration ``transformer.yaml``:
      mlp_hidden_ratio: 4
      num_heads: 16
 
+   residual:
+      _target_: anemoi.models.layers.residual.SkipConnection
+
    attributes:
      edges:
      - edge_length
@@ -200,15 +203,23 @@ In this example, ``model_interface.model`` is the following:
 .. code:: python
 
    AnemoiModelEncProcDec(
-     (encoder): GraphTransformerForwardMapper(
+     (encoder_graph_provider): StaticGraphProvider(
        (trainable): TrainableTensor()
+     )
+     (encoder): GraphTransformerForwardMapper(
        (proc): GraphTransformerMapperBlock(
          (lin_key): Linear(in_features=1024, out_features=1024, bias=True)
          ...
        )
      )
+     (processor_graph_provider): StaticGraphProvider(
+       (trainable): TrainableTensor()
+     )
      (processor): TransformerProcessor(
        ...
+     )
+     (decoder_graph_provider): StaticGraphProvider(
+       (trainable): TrainableTensor()
      )
      (decoder): GraphTransformerBackwardMapper(
        (proc): GraphTransformerMapperBlock(
@@ -216,6 +227,11 @@ In this example, ``model_interface.model`` is the following:
          ...
      )
    )
+
+Note that each encoder, processor, and decoder has a corresponding
+``*_graph_provider`` that manages the graph edges and trainable edge
+parameters. The graph providers supply edge attributes and indices to
+their corresponding mappers/processors during the forward pass.
 
 .. _layer-kernels:
 

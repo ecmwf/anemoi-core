@@ -35,7 +35,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -58,11 +57,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
-            truncation_data=truncation_data,
         )
 
         self.latent_skip = model_config.model.latent_skip
-        self.grid_skip = model_config.model.grid_skip
 
     # Overwrite base class
     def _calculate_input_dim(self):
@@ -93,16 +90,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
-        if self.grid_skip is not None:
-            x_skip = x[:, self.grid_skip, ...]
-            if self.truncation.A_down is not None or self.truncation.A_up is not None:
-                x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-                x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
-                x_skip = einops.rearrange(
-                    x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size
-                )
-        else:
-            x_skip = None
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
 
         return x_data_latent, x_skip, shard_shapes_data
 
@@ -148,37 +136,62 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
+        encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider.get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+
         # Run encoder
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+            edge_attr=encoder_edge_attr,
+            edge_index=encoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            edge_shard_shapes=enc_edge_shard_shapes,
+        )
+
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
         )
 
         x_latent_proc = self.processor(
             x_latent,
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
         )
 
         # add skip connection (hidden -> hidden)
         if self.latent_skip:
             x_latent_proc = x_latent_proc + x_latent
 
+        # Compute decoder edges using updated latent representation
+        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider.get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+
         # Run decoder
         x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            edge_attr=decoder_edge_attr,
+            edge_index=decoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+            edge_shard_shapes=dec_edge_shard_shapes,
         )
 
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
