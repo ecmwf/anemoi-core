@@ -4,6 +4,8 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: stretched_grid
+- loss_graphs: none
+- truncation: none
 - model: graphtransformer
 - training: stretched
 - _self_

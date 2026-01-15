@@ -1,0 +1,53 @@
+---
+data: "data"
+truncation: "trunc"
+
+graphs_path: null
+
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.dataset}
+  trunc:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+      grid: o32
+
+graph:
+  graph_config:
+    nodes: ${truncation.nodes}
+    edges:
+      - source_name: ${truncation.data}
+        target_name: ${truncation.truncation}
+        edge_builders:
+          - _target_: anemoi.graphs.edges.CutOffEdges
+            cutoff_distance_km: 400
+            max_num_neighbours: 256
+        attributes:
+          gauss_weight:
+            _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+            norm: l1
+            # Sigma is in radians (haversine distance). Convert from km using sigma_km / 6371.0.
+            sigma: 0.03139
+      - source_name: ${truncation.truncation}
+        target_name: ${truncation.data}
+        edge_builders:
+          - _target_: anemoi.graphs.edges.CutOffEdges
+            cutoff_distance_km: 400
+            max_num_neighbours: 256
+        attributes:
+          gauss_weight:
+            _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+            norm: l1
+            # Sigma is in radians (haversine distance). Convert from km using sigma_km / 6371.0.
+            sigma: 0.03139
+    post_processors: []
+  down_edges_name: [data, to, trunc]
+  up_edges_name: [trunc, to, data]
+  edge_weight_attribute: gauss_weight
+
+residual:
+  _target_: anemoi.models.layers.residual.TruncatedConnection
+  truncation_graphs_path: ${truncation.graphs_path}
+  truncation_graph: ${truncation.graph}

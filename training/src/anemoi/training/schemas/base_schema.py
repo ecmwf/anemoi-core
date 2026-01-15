@@ -104,6 +104,10 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """System configuration, including filesystem and hardware specification."""
     graph: BaseGraphSchema
     """Graph configuration."""
+    loss_graphs: dict[str, Any] | None = None
+    """Loss graph configuration."""
+    truncation: dict[str, Any] | None = None
+    """Truncation configuration."""
     model: ModelSchema
     """Model configuration."""
     training: TrainingSchema
@@ -148,6 +152,10 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Hardware configuration."""
     graph: Any
     """Graph configuration."""
+    loss_graphs: Any
+    """Loss graph configuration."""
+    truncation: Any
+    """Truncation configuration."""
     model: Any
     """Model configuration."""
     training: Any

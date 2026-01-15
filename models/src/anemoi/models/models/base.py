@@ -72,7 +72,7 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build residual connection
-        self.residual = instantiate(model_config.model.residual, graph=graph_data)
+        self.residual = instantiate(model_config.model.residual)
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)

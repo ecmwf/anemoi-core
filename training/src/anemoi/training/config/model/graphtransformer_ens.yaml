@@ -115,12 +115,7 @@ decoder:
   edge_pre_mlp: False
 
 
-residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
-#  _target_: anemoi.models.layers.residual.TruncatedConnection
-#  truncation_up_file_path: ${system.input.truncation}
-#  truncation_down_file_path:  ${system.input.truncation_inv}
+residual: ${truncation.residual}
 
 trainable_parameters:
   data: 8

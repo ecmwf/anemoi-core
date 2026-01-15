@@ -4,6 +4,8 @@ defaults:
 - diagnostics: evaluation_ens
 - system: example
 - graph: encoder_decoder_only
+- loss_graphs: none
+- truncation: none
 - model: transformer_ens
 - training: ensemble
 - _self_
@@ -24,8 +26,6 @@ system:
   input:
     graph: graph_anemoi_new_${data.resolution}.pt
     dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6.zarr
-    truncation: ${data.resolution}-o32-linear.mat.npz
-    truncation_inv: o32-${data.resolution}-linear.mat.npz
     loss_matrices_path: null
   hardware:
     accelerator: auto

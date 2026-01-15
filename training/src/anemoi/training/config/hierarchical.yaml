@@ -4,6 +4,8 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: hierarchical_3level
+- loss_graphs: none
+- truncation: none
 - model: graphtransformer_hierarchical
 - training: default
 - _self_

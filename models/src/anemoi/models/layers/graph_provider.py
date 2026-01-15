@@ -514,6 +514,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
     ) -> None:
         """Create sparse projection matrix."""
 
+        edge_index = edge_index.long()
+
         if row_normalize:
             weights = self._row_normalize_weights(edge_index, weights, src_size)
 

@@ -4,6 +4,8 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: multi_scale
+- loss_graphs: none
+- truncation: none
 - model: gnn
 - training: default
 - _self_

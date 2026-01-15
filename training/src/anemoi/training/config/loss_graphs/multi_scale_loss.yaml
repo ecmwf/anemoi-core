@@ -1,0 +1,67 @@
+---
+# Example multi-scale loss graphs for dataset nodes.
+data: "data"
+
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.dataset}
+
+scales:
+  - graph_config:
+      nodes: ${loss_graphs.nodes}
+      edges:
+        - source_name: ${loss_graphs.data}
+          target_name: ${loss_graphs.data}
+          edge_builders:
+            - _target_: anemoi.graphs.edges.CutOffEdges
+              cutoff_distance_km: 200
+              max_num_neighbours: 256
+          attributes:
+            gauss_weight:
+              _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+              norm: l1
+              # Sigma is in radians (haversine distance). Convert from km using sigma_km / 6371.0.
+              # 2σ cutoff example: 200 km -> sigma ≈ 0.01570 rad.
+              sigma: 0.01570
+    edges_name: [data, to, data]
+    edge_weight_attribute: gauss_weight
+
+  - graph_config:
+      nodes: ${loss_graphs.nodes}
+      edges:
+        - source_name: ${loss_graphs.data}
+          target_name: ${loss_graphs.data}
+          edge_builders:
+            - _target_: anemoi.graphs.edges.CutOffEdges
+              cutoff_distance_km: 400
+              max_num_neighbours: 256
+          attributes:
+            gauss_weight:
+              _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+              norm: l1
+              # Sigma is in radians (haversine distance). Convert from km using sigma_km / 6371.0.
+              # 2σ cutoff example: 400 km -> sigma ≈ 0.03139 rad.
+              sigma: 0.03139
+    edges_name: [data, to, data]
+    edge_weight_attribute: gauss_weight
+
+  - graph_config:
+      nodes: ${loss_graphs.nodes}
+      edges:
+        - source_name: ${loss_graphs.data}
+          target_name: ${loss_graphs.data}
+          edge_builders:
+            - _target_: anemoi.graphs.edges.CutOffEdges
+              cutoff_distance_km: 800
+              max_num_neighbours: 256
+          attributes:
+            gauss_weight:
+              _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+              norm: l1
+              # Sigma is in radians (haversine distance). Convert from km using sigma_km / 6371.0.
+              # 2σ cutoff example: 800 km -> sigma ≈ 0.06279 rad.
+              sigma: 0.06279
+    edges_name: [data, to, data]
+    edge_weight_attribute: gauss_weight

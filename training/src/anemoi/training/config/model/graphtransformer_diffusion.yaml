@@ -108,9 +108,7 @@ decoder:
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
-residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
+residual: ${truncation.residual}
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
