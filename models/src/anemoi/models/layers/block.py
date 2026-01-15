@@ -521,10 +521,17 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             self.edge_pre_mlp = nn.Identity()
 
         self.graph_attention_backend = graph_attention_backend
+        self.set_attention_function()
+
+    def set_attention_function(self):
         # Check if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set
         if ATTENTION_BACKEND != "":
+            if ATTENTION_BACKEND == self.graph_attention_backend:
+                # Attention backend has already been updated, return early
+                return
+
             LOGGER.info(
-                "'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from %s to %s",
+                "'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
                 self.graph_attention_backend,
                 ATTENTION_BACKEND,
             )
@@ -533,7 +540,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         assert self.graph_attention_backend in [
             "triton",
             "pyg",
-        ], f"Backend {self.graph_attention_backend} not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
+        ], f"Backend '{self.graph_attention_backend}' not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
 
         if not is_triton_available():
             LOGGER.warning(
@@ -614,6 +621,10 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
     ) -> Tensor:
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
+
+        # Check at runtime if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set and update backend if so
+        if ATTENTION_BACKEND != "":
+            self.set_attention_function()
 
         if self.graph_attention_backend == "triton":
             csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)

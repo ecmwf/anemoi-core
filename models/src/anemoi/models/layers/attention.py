@@ -111,14 +111,6 @@ class MultiHeadSelfAttention(nn.Module):
         ), f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
 
         self.attention_implementation = attention_implementation
-        # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
-        if ATTENTION_BACKEND != "":
-            LOGGER.info(
-                "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from %s to %s",
-                self.attention_implementation,
-                ATTENTION_BACKEND,
-            )
-            self.attention_implementation = ATTENTION_BACKEND
 
         self.use_alibi_slopes = use_alibi_slopes
 
@@ -158,9 +150,21 @@ class MultiHeadSelfAttention(nn.Module):
             "triton": TritonAttentionWrapper,
         }
 
+        # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
+        if ATTENTION_BACKEND != "":
+            if ATTENTION_BACKEND == self.attention_implementation:
+                # Attention backend has already been updated, return early
+                return
+            LOGGER.info(
+                "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
+                self.attention_implementation,
+                ATTENTION_BACKEND,
+            )
+            self.attention_implementation = ATTENTION_BACKEND
+
         assert (
             self.attention_implementation in attn_funcs
-        ), f"{self.attention_implementation} not supported. \
+        ), f"backend '{self.attention_implementation}' not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
 
         # initalise the attn func here
@@ -230,6 +234,10 @@ class MultiHeadSelfAttention(nn.Module):
         query = self.lin_q(x)
         key = self.lin_k(x)
         value = self.lin_v(x)
+
+        # Check at runtime if the Attention backend env var has been set, and update attention backend accordingly
+        if ATTENTION_BACKEND != "":
+            self.set_attention_function()
 
         return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
 
