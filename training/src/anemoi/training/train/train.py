@@ -368,6 +368,7 @@ class AnemoiTrainer(ABC):
         self.datamodule.fill_metadata(md_dict)
         return map_config_to_primitives(md_dict)
 
+
     @cached_property
     def supporting_arrays(self) -> dict:
         return self.datamodule.supporting_arrays
