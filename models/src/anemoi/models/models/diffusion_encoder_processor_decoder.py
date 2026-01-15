@@ -275,7 +275,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         """Forward pass with pre-conditioning of EDM diffusion model."""
 
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
-        print("pendant l'inférence on passe dans le fwd de conditionnel, x", x)
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )  # calls forward ...
@@ -432,7 +431,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             assert (
                 len(batch.shape) == 4
             ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
-            print("shape de batch avant before sampling data dans predict step : ", batch.shape, batch)
             # Before sampling hook
             before_sampling_data, grid_shard_shapes = self._before_sampling(
                 batch,
@@ -445,7 +443,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             )
 
             x = before_sampling_data[0]
-            print("dans predict step après before sampling data x : ", x.shape)
             out = self.sample(
                 x,
                 model_comm_group,
@@ -509,20 +506,14 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             noise_scheduler_config.update(noise_scheduler_params)
 
         warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") #param de steps (dont sdedit) est dedans
-        print("noise_scheduler_config : ", noise_scheduler_config)
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
 
         if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
             raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
-        # print("actual_schedule type :", actual_schedule_type) : karras
-        print("noise scheduler config :", noise_scheduler_config) #: {'sigma_max': 100.0, 'sigma_min': 0.02, 'rho': 7.0, 'num_steps': 50}
         scheduler = scheduler_cls(**noise_scheduler_config)
-        # print("scheduler :", scheduler) : scheduler : <anemoi.models.samplers.diffusion_samplers.KarrasScheduler object at 0x14fd162cacd0>
         sigmas = scheduler.get_schedule(x.device, torch.float64)
-        # print("sigmas dans smaple enc proc dec", sigmas, sigmas.shape) : bruit décroissant (100 -> 0.02)
-        # print("si je prends un sigma un peu au hsard :", sigmas[-1]) : 0.02
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
         shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
@@ -530,7 +521,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
-        print('diffusion sampler config', diffusion_sampler_config)
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
@@ -549,23 +539,14 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         if diffusion_sampler_config['SDEdit']:
             
             forcings = self.data_indices["forcing"] #TODO faire une fonction qui permet de choisir les bons indices pour pas avoir à faire ça ici
-            # print(self.data_indices)
             name_to_index = self.data_indices["name_to_index"]
             idx_to_drop = torch.tensor([name_to_index[var] for var in forcings])
-            print("shape de idc to drop :", idx_to_drop.shape, idx_to_drop)
             mask_idx = torch.ones(x.size(-1), dtype=torch.bool)
-            print("shape de mask idx ", mask_idx.shape)
-            # mask_idx[idx_to_drop] = False  
             x_removed = x[:,0,:,:,mask_idx]
-            print("x drop : ", x.shape)
             num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
             num_steps = len(sigmas) #total number of denoising steps when not using sdedit
-            print(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
             init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
-            # y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * init_sigma + x
             sigmas = sigmas[num_steps - num_steps_sdedit :]
-            print('longueur de sigma : ', sigmas, len(sigmas))
-        # rank_zero_info(f"[DEBUG] dans sample d encprodec x no cond: {x_no_cond}")
             C = x.shape[-1]
             idx_remove = []
             removed_names = []
@@ -577,7 +558,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                         idx_remove.append(idx)
                         removed_names.append(name)
 
-            print("remove:", list(zip(removed_names, idx_remove)), len(idx_remove))
         return sampler_instance.sample(
             x,
             y_init,
@@ -753,7 +733,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         torch.Tensor
             Sampled output (after post-processing)
         """
-        print("noise_ scheduelr params = ", noise_scheduler_params)
 
         with torch.no_grad():
 
@@ -835,20 +814,14 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
             noise_scheduler_config.update(noise_scheduler_params)
 
         warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") #param de steps (dont sdedit) est dedans
-        print("noise_scheduler_config : ", noise_scheduler_config)
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
 
         if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
             raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
-        # print("actual_schedule type :", actual_schedule_type) : karras
-        print("noise scheduler config :", noise_scheduler_config) #: {'sigma_max': 100.0, 'sigma_min': 0.02, 'rho': 7.0, 'num_steps': 50}
         scheduler = scheduler_cls(**noise_scheduler_config)
-        # print("scheduler :", scheduler) : scheduler : <anemoi.models.samplers.diffusion_samplers.KarrasScheduler object at 0x14fd162cacd0>
         sigmas = scheduler.get_schedule(x.device, torch.float64)
-        # print("sigmas dans smaple enc proc dec", sigmas, sigmas.shape) : bruit décroissant (100 -> 0.02)
-        # print("si je prends un sigma un peu au hsard :", sigmas[-1]) : 0.02
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
         shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
@@ -856,7 +829,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
-        print('diffusion sampler config', diffusion_sampler_config)
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
@@ -870,8 +842,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
-        print("noise scheduler params : ", noise_scheduler_params)
-        print("noise scheduler config : ", noise_scheduler_config)
         if noise_scheduler_config['SDEdit']:
 
             num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
@@ -879,14 +849,11 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
             num_steps = len(sigmas) #total number of denoising steps when not using sdedit
             
             assert num_steps_sdedit <= num_steps, f"num_steps_sdedit ({num_steps_sdedit}) must be <= num_steps ({num_steps})"
-            print(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
             
             init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
-            print("init sigma : ", init_sigma)
             sigmas = sigmas[num_steps - num_steps_sdedit :]
             y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
             x_zeros = torch.zeros_like(x,device=x.device)
-            print("x zeros :", x_zeros)
         return sampler_instance.sample(
             x_zeros,
             y_init,
@@ -940,9 +907,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         mask[idx_to_drop] = False
         x = x[:,1,:,:,mask] #We take only the time t= t0 (dim 1 corresponding to time = (t0-1, t0))
         y_init = (torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma + x).to(x.device)
-        print("bruit tenseur preapre sample : torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma")
-        print("x dans le prepare sample :", x)
-        print("shape de y_init :", y_init.shape)
 
         return y_init
     
