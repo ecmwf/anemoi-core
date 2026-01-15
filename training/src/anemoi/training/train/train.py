@@ -29,6 +29,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -39,7 +40,6 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -361,13 +361,12 @@ class AnemoiTrainer(ABC):
             "dataset": None,  # will be populated in DataModule
             "data_indices": None,  # will be populated in DataModule
             "provenance_training": gather_provenance_info(),
-            "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
+            "timestamp": datetime.datetime.now(tz=datetime.UTC),
             "metadata_inference": metadata_inference,
             "uuid": None,  # will be populated in checkpoint callback
         }
         self.datamodule.fill_metadata(md_dict)
         return map_config_to_primitives(md_dict)
-
 
     @cached_property
     def supporting_arrays(self) -> dict:

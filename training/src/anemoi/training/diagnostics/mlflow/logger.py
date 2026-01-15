@@ -22,11 +22,11 @@ from pathlib import Path
 from threading import Thread
 from typing import Any
 from typing import Literal
-from omegaconf import DictConfig
 from weakref import WeakValueDictionary
 
 import mlflow
 from mlflow.tracking import MlflowClient
+from omegaconf import DictConfig
 from pytorch_lightning.callbacks import Checkpoint
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params

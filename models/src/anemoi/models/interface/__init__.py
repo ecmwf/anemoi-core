@@ -16,8 +16,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
-from anemoi.utils.config import DotDict
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.utils.config import DotDict
 
 
 class AnemoiModelInterface(torch.nn.Module):
