@@ -545,7 +545,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return self.loss[dataset_name](
             y_pred,
             y,
-            grid_shard_slice=grid_shard_slice[dataset_name] if grid_shard_slice is not None else None,
+            grid_shard_slice=grid_shard_slice if type(grid_shard_slice) == slice else (grid_shard_slice[dataset_name] if grid_shard_slice is not None else None),
             group=self.model_comm_group,
         )
 
