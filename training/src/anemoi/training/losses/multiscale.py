@@ -41,7 +41,6 @@ class MultiscaleLossWrapper(BaseLoss):
         loss_matrices_path: Path | str | None = None,
         loss_matrices: list[Path | str] | None = None,
         autocast: bool = False,
-        loss_graphs_path: Path | str | None = None,
         loss_graphs: list[dict[str, Any] | None] | None = None,
     ) -> None:
         """Wrapper for multi-scale loss computation.
@@ -60,8 +59,6 @@ class MultiscaleLossWrapper(BaseLoss):
             Filenames of the smoothing matrices (must preserve grid size)
         autocast : bool
             Whether to use automatic mixed precision for the projections
-        loss_graphs_path : Path | str | None
-            Optional base path for loss graph configs
         loss_graphs : list[dict[str, Any] | None] | None
             Graph-based smoothing specs (cannot be combined with loss_matrices)
         """
@@ -70,7 +67,6 @@ class MultiscaleLossWrapper(BaseLoss):
         self.smoothing_matrices = self._load_smoothing_matrices(
             loss_matrices_path,
             loss_matrices,
-            loss_graphs_path,
             loss_graphs,
         )
         self.num_scales = len(self.smoothing_matrices)
@@ -103,7 +99,6 @@ class MultiscaleLossWrapper(BaseLoss):
         self,
         loss_matrices_path: Path | str | None,
         loss_matrices: list[Path | str] | None,
-        loss_graphs_path: Path | str | None,
         loss_graphs: list[dict[str, Any] | None] | None,
     ) -> list[ProjectionGraphProvider | None]:
         """Load smoothing sources for multi-scale loss computation."""
@@ -112,22 +107,12 @@ class MultiscaleLossWrapper(BaseLoss):
         ), "loss_matrices and loss_graphs are mutually exclusive"
 
         if loss_graphs is not None:
-            return self._load_smoothing_graphs(loss_graphs_path, loss_graphs)
+            return self._load_smoothing_graphs(loss_graphs)
 
         return self._load_smoothing_matrices_from_files(loss_matrices_path, loss_matrices)
 
-    @staticmethod
-    def _resolve_graph_config(graph_config: Any, loss_graphs_path: Path | str | None) -> Any:
-        if isinstance(graph_config, (str, Path)):
-            graph_path = Path(graph_config)
-            if loss_graphs_path and not graph_path.is_absolute():
-                graph_path = Path(loss_graphs_path) / graph_path
-            return graph_path
-        return graph_config
-
-    def _build_loss_graph(self, graph_config: Any, loss_graphs_path: Path | str | None) -> HeteroData:
-        resolved_config = self._resolve_graph_config(graph_config, loss_graphs_path)
-        graph_creator = GraphCreator(config=resolved_config)
+    def _build_loss_graph(self, graph_config: dict[str, Any] | DictConfig) -> HeteroData:
+        graph_creator = GraphCreator(config=graph_config)
         graph = HeteroData()
         graph = graph_creator.update_graph(graph)
         graph = graph_creator.clean(graph)
@@ -135,7 +120,6 @@ class MultiscaleLossWrapper(BaseLoss):
 
     def _load_smoothing_graphs(
         self,
-        loss_graphs_path: Path | str | None,
         loss_graphs: list[dict[str, Any] | None] | None,
     ) -> list[ProjectionGraphProvider | None]:
         """Load smoothing graphs for multi-scale loss computation."""
@@ -153,7 +137,7 @@ class MultiscaleLossWrapper(BaseLoss):
 
             assert isinstance(graph_spec, (dict, DictConfig)), "loss_graphs entries must be mappings"
             graph_config = graph_spec.get("graph_config")
-            assert graph_config is not None, "loss_graphs entries must define graph_config"
+            assert isinstance(graph_config, (dict, DictConfig)), "loss_graphs.graph_config must be a mapping"
             edges_name = graph_spec.get("edges_name")
             assert edges_name is not None, "loss_graphs entries must define edges_name"
             assert len(edges_name) == 3, "edges_name must be [src, relation, dst]"
@@ -161,7 +145,7 @@ class MultiscaleLossWrapper(BaseLoss):
             edge_weight_attribute = graph_spec.get("edge_weight_attribute")
             row_normalize = bool(graph_spec.get("row_normalize", False))
 
-            graph = self._build_loss_graph(graph_config, loss_graphs_path)
+            graph = self._build_loss_graph(graph_config)
             provider = ProjectionGraphProvider(
                 graph=graph,
                 edges_name=tuple(edges_name),

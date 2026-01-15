@@ -247,7 +247,7 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
 
 
 class LossGraphSpecSchema(BaseModel):
-    graph_config: dict[str, Any] | str
+    graph_config: dict[str, Any]
     edges_name: list[str]
     edge_weight_attribute: str | None = None
     row_normalize: bool = False
@@ -260,7 +260,6 @@ class MultiScaleLossSchema(BaseModel):
     keep_batch_sharded: bool
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
-    loss_graphs_path: str | None = None
     loss_graphs: list[LossGraphSpecSchema | None] | None = None
 
     @field_validator("weights")
