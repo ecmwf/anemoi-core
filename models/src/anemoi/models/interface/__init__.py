@@ -159,15 +159,15 @@ class AnemoiModelInterface(torch.nn.Module):
         # noise_scheduler_params = inference_cfg.noise_scheduled_params
         # print("type de noise scheduler ", type(noise_scheduler_params))
         # print("noise scheduler params dans inference cfg :", noise_scheduler_params)
-        kwargs = {
-            "noise_scheduler_params" : {
-                 "schedule_type": "karras",
-                 "sigma_max": 100.0,
-                 "sigma_min": 0.02,
-                 "rho": 7.0,
-                 "num_steps": 50,
-                 "num_steps_sdedit": 23,
-                 "SDEdit": False,}
-        }
+        # kwargs = {
+        #     "noise_scheduler_config" : {
+        #          "schedule_type": "karras",
+        #          "sigma_max": 100.0,
+        #          "sigma_min": 0.02,
+        #          "rho": 7.0,
+        #          "num_steps": 50,
+        #          "num_steps_sdedit": 25,
+        #          "SDEdit": True,}
+        # }
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)

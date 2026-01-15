@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import logging
 import warnings
 from typing import Callable
@@ -773,7 +772,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
             )
 
             x = before_sampling_data[0]
-            x = torch.zeros_like(x)
             out = self.sample(
                 x,
                 model_comm_group,
@@ -872,8 +870,9 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
-        
-        if diffusion_sampler_config['SDEdit']:
+        print("noise scheduler params : ", noise_scheduler_params)
+        print("noise scheduler config : ", noise_scheduler_config)
+        if noise_scheduler_config['SDEdit']:
 
             num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
             
@@ -883,11 +882,13 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
             print(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
             
             init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
+            print("init sigma : ", init_sigma)
             sigmas = sigmas[num_steps - num_steps_sdedit :]
             y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
-
+            x_zeros = torch.zeros_like(x,device=x.device)
+            print("x zeros :", x_zeros)
         return sampler_instance.sample(
-            x,
+            x_zeros,
             y_init,
             sigmas,
             self.fwd_with_preconditioning,
@@ -939,7 +940,10 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         mask[idx_to_drop] = False
         x = x[:,1,:,:,mask] #We take only the time t= t0 (dim 1 corresponding to time = (t0-1, t0))
         y_init = (torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma + x).to(x.device)
-        
+        print("bruit tenseur preapre sample : torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma")
+        print("x dans le prepare sample :", x)
+        print("shape de y_init :", y_init.shape)
+
         return y_init
     
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
