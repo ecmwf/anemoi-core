@@ -33,6 +33,7 @@ from torch import nn
 
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
+from anemoi.training.diagnostics.maps import lambert_conformal_from_latlon_points
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
@@ -605,6 +606,196 @@ def plot_flat_sample(
             )
 
 
+def plot_predicted_multilevel_flat_recon(
+    parameters: dict[str, int],
+    n_plots_per_sample: int,
+    latlons: np.ndarray,
+    clevels: float,
+    sample: np.ndarray,
+    reconstruction: np.ndarray,
+    difference: np.ndarray,
+    datashader: bool = True,
+    precip_and_related_fields: list | None = None,
+    colormaps: dict[str, Colormap] | None = None,
+) -> Figure:
+    """Plot input, reconstruction, and error maps for multiple flat 2D fields.
+
+    Parameters
+    ----------
+    parameters : dict[str, int]
+        Dictionary of variable names and indices
+    n_plots_per_sample : int
+        Number of plots per variable (typically 3: input, reconstruction, error)
+    latlons : np.ndarray
+        Lat/lon coordinates array of shape (N, 2)
+    clevels : float
+        Accumulation levels for precipitation variables
+    sample : np.ndarray
+        Ground truth input data, shape (N, nvar*level)
+    reconstruction : np.ndarray
+        Reconstructed prediction data, shape (N, nvar*level)
+    difference : np.ndarray
+        Error or difference array, same shape as above
+    datashader : bool, optional
+        Whether to use scatter plots for irregular grids
+    precip_and_related_fields : list[str], optional
+        List of variable names to rescale (e.g., precipitation fields)
+    colormaps : dict[str, Colormap], optional
+        Optional dictionary of colormaps: can include 'default', 'error', and per-variable maps
+
+    Returns
+    -------
+    Figure
+        Matplotlib Figure object
+    """
+    output_vars = [(i, vname) for i, (vname, output_only) in (parameters.items()) if output_only]
+    n_vars = len(output_vars)
+    proj = lambert_conformal_from_latlon_points(latlons)
+    datashader = False
+    fig, ax = plt.subplots(
+        n_vars,
+        n_plots_per_sample,
+        figsize=(n_plots_per_sample * 4, n_vars * 3),
+        layout="constrained",
+        subplot_kw={"projection": proj},
+    )
+
+    if n_vars == 1:
+        ax = np.expand_dims(ax, axis=0)
+
+    pc_lat, pc_lon = latlons[:, 0], latlons[:, 1]
+    colormaps = colormaps or {}
+
+    for row_idx, (var_idx, var_name) in enumerate(output_vars):
+        sample_t = sample[..., var_idx].squeeze()
+        reconstruction_t = reconstruction[..., var_idx].squeeze()
+        difference_t = difference[..., var_idx].squeeze()
+
+        # Colormaps
+        cmap = colormaps.get("default", cm.get_cmap("viridis"))
+        error_cmap = colormaps.get("error", cm.get_cmap("magma"))
+        for key, cmap_obj in colormaps.items():
+            if key not in ["default", "error"] and hasattr(cmap_obj, "variables") and var_name in cmap_obj.variables:
+                cmap = cmap_obj.get_cmap()
+
+        plot_flat_recon(
+            fig,
+            ax[row_idx],
+            pc_lon,
+            pc_lat,
+            sample_t,
+            reconstruction_t,
+            difference_t,
+            var_name,
+            clevels,
+            datashader,
+            precip_and_related_fields,
+            cmap=cmap,
+            error_cmap=error_cmap,
+        )
+
+    return fig
+
+
+def plot_flat_recon(
+    fig: Figure,
+    ax: np.ndarray,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    sample: np.ndarray,
+    reconstruction: np.ndarray,
+    difference: np.ndarray,
+    vname: str,
+    clevels: float,
+    datashader: bool = False,
+    precip_and_related_fields: list | None = None,
+    cmap: Colormap | None = None,
+    error_cmap: Colormap | None = None,
+) -> None:
+    """Plot one variable's input, reconstruction, and error map on a flat lat/lon grid.
+
+    Parameters
+    ----------
+    fig : Figure
+        Matplotlib figure object
+    ax : np.ndarray
+        Array of three Axes: [input, reconstruction, error]
+    lon : np.ndarray
+        Longitudes, shape (N,)
+    lat : np.ndarray
+        Latitudes, shape (N,)
+    sample : np.ndarray
+        Ground truth data, shape (N,)
+    reconstruction : np.ndarray
+        Predicted data, shape (N,)
+    difference : np.ndarray
+        Difference data (e.g., squared error), shape (N,)
+    vname : str
+        Variable name
+    clevels : float
+        Levels for precipitation colorbar
+    datashader : bool
+        If True, use scatter plots (recommended for unstructured grids)
+    precip_and_related_fields : list[str] or None
+        Variables to scale (e.g., precipitation from m → mm)
+    cmap : Colormap
+        Colormap for input and reconstruction
+    error_cmap : Colormap
+        Colormap for error map
+    """
+    try:
+        import cartopy.crs as ccrs
+
+    except ModuleNotFoundError as e:
+        error_msg = "Module cartopy not found. Install with optional-dependencies.plotting."
+        raise ModuleNotFoundError(error_msg) from e
+
+    precip_and_related_fields = precip_and_related_fields or []
+
+    if vname in precip_and_related_fields:
+        scale_factor = 1000.0
+        sample *= scale_factor
+        reconstruction *= scale_factor
+        difference *= scale_factor
+
+    data = [sample, reconstruction, difference]
+    titles = [f"{vname} input", f"{vname} reconstruction", f"{vname} error map"]
+    cmaps = [cmap, cmap, error_cmap]
+    norms = [None, None, None]
+
+    # Normalize for input and reconstruction
+    combined_data = np.concatenate([sample, reconstruction])
+    if vname in precip_and_related_fields:
+        norm = BoundaryNorm(clevels, len(clevels) + 1)
+        norms[0] = norm
+        norms[1] = norm
+    else:
+        norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
+        norms[0] = norm
+        norms[1] = norm
+
+    # Clip extreme errors for more readable plots
+    clipped_diff = np.clip(difference, 0, np.nanpercentile(difference, 99))
+
+    # Set a fixed linear color normalization
+    norms[2] = Normalize(vmin=0.0, vmax=np.nanmax(clipped_diff))
+
+    for i in range(3):
+        if data[i] is not None:
+            single_plot(
+                fig,
+                ax[i],
+                lon,
+                lat,
+                data[i],
+                cmap=cmaps[i],
+                norm=norms[i],
+                title=titles[i],
+                datashader=datashader,
+                transform=ccrs.PlateCarree() if not datashader else None,
+            )
+
+
 def single_plot(
     fig: Figure,
     ax: plt.axes,
@@ -615,6 +806,7 @@ def single_plot(
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
+    transform: object | None = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -641,6 +833,8 @@ def single_plot(
         Title for plot, by default None
     datashader: bool, optional
         Scatter plot, by default False
+    transform:
+        Projection for the plot, by default None
 
     Returns
     -------
@@ -658,7 +852,9 @@ def single_plot(
             alpha=1.0,
             norm=norm,
             rasterized=False,
+            transform=transform,
         )
+
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
         # Adjust binning to match the resolution of the data
@@ -677,10 +873,26 @@ def single_plot(
             ax=ax,
         )
 
-    xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
-    ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
-    ax.set_xlim((xmin - 0.1, xmax + 0.1))
-    ax.set_ylim((ymin - 0.1, ymax + 0.1))
+    if transform is not None:
+        ax.set_extent([lon.min() - 0.1, lon.max() + 0.1, lat.min() - 0.1, lat.max() + 0.1], crs=transform)
+    else:
+        xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
+        ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
+        ax.set_xlim((xmin - 0.1, xmax + 0.1))
+        ax.set_ylim((ymin - 0.1, ymax + 0.1))
+
+    # Add map features
+    try:
+        import cartopy.feature as cfeature
+
+        if hasattr(ax, "add_feature"):
+            ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
+        else:
+            # If it's a regular Axes, add_feature doesn't exist
+            LOGGER.warning("Axis is not a GeoAxes; skipping cartopy features.")
+
+    except ModuleNotFoundError:
+        LOGGER.warning("Module cartopy not found. Coastlines and borders will not be plotted.")
 
     continents.plot_continents(ax)
 
@@ -814,6 +1026,7 @@ def plot_graph_node_features(
                 data=node_features[..., i],
                 title=f"{mesh} trainable feature #{i + 1}",
                 datashader=datashader,
+                transform=None,
             )
 
     return fig
