@@ -9,24 +9,15 @@
 
 
 import logging
-import sys
 from abc import ABC
 from abc import abstractmethod
+from enum import StrEnum
 
 import torch
 
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.utils.enums import TensorDim
-
-if sys.version_info < (3, 11):
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
-
-else:
-    from enum import StrEnum
 
 LOGGER = logging.getLogger(__name__)
 

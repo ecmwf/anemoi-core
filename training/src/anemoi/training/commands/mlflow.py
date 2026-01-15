@@ -12,6 +12,7 @@ import argparse
 import getpass
 import json
 import logging
+from datetime import UTC
 from pathlib import Path
 
 from anemoi.training.commands import Command
@@ -214,7 +215,6 @@ class MlFlow(Command):
     def run(args: argparse.Namespace) -> None:  # noqa: C901
         if args.subcommand == "login":
             from datetime import datetime
-            from datetime import timezone
 
             from anemoi.utils.mlflow.auth import TokenAuth
 
@@ -225,8 +225,8 @@ class MlFlow(Command):
                     return
                 LOGGER.info("Known servers:")
                 for url, refresh_expires in servers:
-                    expires = datetime.fromtimestamp(refresh_expires, tz=timezone.utc)
-                    if expires < datetime.now(tz=timezone.utc):
+                    expires = datetime.fromtimestamp(refresh_expires, tz=UTC)
+                    if expires < datetime.now(tz=UTC):
                         LOGGER.info(" - %s (expired, login required)", url)
                         continue
                     LOGGER.info(" - %s (expires: %s UTC)", url, expires.strftime("%Y-%m-%d %H:%M:%S"))
