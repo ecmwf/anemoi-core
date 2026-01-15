@@ -125,7 +125,7 @@ class TestMultiScaleEdgesStretched:
     def tri_graph(self, mocker) -> HeteroData:
         """Return a HeteroData object with stretched Tri nodes."""
         graph = HeteroData()
-        node_builder = StretchedTriNodes(5, 7, "hidden", None, None)
+        node_builder = StretchedTriNodes(4, 6, "hidden", None, None)
         node_builder.area_mask_builder = KNNAreaMaskBuilder("hidden", 400)
         node_builder.area_mask_builder.fit_coords(np.array([[0, 0]]))
         # We are considering a 400km radius circle centered at (0, 0) as the area of
@@ -142,3 +142,31 @@ class TestMultiScaleEdgesStretched:
         graph = edges.update_graph(tri_graph)
         assert ("hidden", "to", "hidden") in graph.edge_types
         assert len(graph[("hidden", "to", "hidden")].edge_index) > 0
+
+    @pytest.mark.parametrize("edge_resolutions", [[1], [0, 1, 2, 3, 4, 5, 6], [4, 6], [6]])
+    def test_fast_1_hop_method(selg, tri_graph: HeteroData, edge_resolutions):
+        nodes = tri_graph["hidden"]
+        all_points_mask_builder = KNNAreaMaskBuilder("all_nodes", 1.0)
+        all_points_mask_builder.fit_coords(nodes.x.numpy())
+
+        fast_edges = tri_icosahedron.add_1_hop_edges(
+            nodes_coords_rad=nodes["x"],
+            node_resolutions=nodes["_resolutions"],
+            edge_resolutions=edge_resolutions,
+            node_ordering=nodes["_node_ordering"],
+            area_mask_builder=all_points_mask_builder,
+        )
+
+        nx_graph = tri_icosahedron.add_edges_to_nx_graph(
+            nodes["_nx_graph"],
+            resolutions=edge_resolutions,
+            x_hops=1,
+            area_mask_builder=all_points_mask_builder,
+        )
+        adjmat = nx.to_scipy_sparse_array(nx_graph, format="coo")
+        slow_edges = np.stack([adjmat.col, adjmat.row], axis=0)
+
+        # Order of the edges might be different, so lets make sets of the pairs
+        fast_edge_pairs = set(map(tuple, fast_edges.T))
+        slow_edge_pairs = set(map(tuple, slow_edges.T))
+        assert fast_edge_pairs == slow_edge_pairs
