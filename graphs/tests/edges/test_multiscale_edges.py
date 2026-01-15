@@ -7,11 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import networkx as nx
 import numpy as np
 import pytest
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import MultiScaleEdges
+from anemoi.graphs.generate import tri_icosahedron
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.nodes import HexNodes
 from anemoi.graphs.nodes import StretchedTriNodes
@@ -69,6 +71,29 @@ class TestMultiScaleEdgesTransform:
         edges = MultiScaleEdges("test_tri_nodes", "test_tri_nodes", 1, None)
         graph = edges.update_graph(tri_ico_graph)
         assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
+
+    @pytest.mark.parametrize("edge_resolutions", [[0], [0, 1, 2], [0, 2], [2]])
+    def test_fast_1_hop_method(selg, tri_ico_graph: HeteroData, edge_resolutions):
+        nodes = tri_ico_graph["test_tri_nodes"]
+        fast_edges = tri_icosahedron.add_1_hop_edges(
+            nodes_coords_rad=nodes["x"],
+            node_resolutions=nodes["_resolutions"],
+            edge_resolutions=edge_resolutions,
+            node_ordering=nodes["_node_ordering"],
+            area_mask_builder=nodes.get("_area_mask_builder", None),
+        )
+        nx_graph = tri_icosahedron.add_edges_to_nx_graph(
+            nodes["_nx_graph"],
+            resolutions=edge_resolutions,
+            x_hops=1,
+            area_mask_builder=nodes.get("_area_mask_builder", None),
+        )
+        adjmat = nx.to_scipy_sparse_array(nx_graph, format="coo")
+        slow_edges = np.stack([adjmat.col, adjmat.row], axis=0)
+        # Order of the edges might be different, so lets make sets of the pairs
+        fast_edge_pairs = set(map(tuple, fast_edges.T))
+        slow_edge_pairs = set(map(tuple, slow_edges.T))
+        assert fast_edge_pairs == slow_edge_pairs
 
     def test_transform_same_src_dst_hex_nodes(self, hex_ico_graph: HeteroData):
         """Test MultiScaleEdges update method."""
