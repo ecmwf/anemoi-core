@@ -22,7 +22,7 @@ from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
-from anemoi.training.utils.config_utils import get_multiple_datasets_config
+from anemoi.utils.multiple_datasets import get_multiple_datasets_config
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 

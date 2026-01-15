@@ -39,7 +39,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.training.utils.config_utils import get_multiple_datasets_config
+from anemoi.utils.multiple_datasets import get_multiple_datasets_config
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -401,18 +401,16 @@ class AnemoiTrainer(ABC):
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
-        # Log number of variables (features)
-        # Multi-dataset case: log per dataset
-        from anemoi.training.utils.config_utils import get_dataset_data_config
-
+        # Log number of variables (features) per dataset
+        data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name, data in self.datamodule.ds_train.data.items():
-            dataset_data_config = get_dataset_data_config(self.config, dataset_name)
-            num_fc_features = len(data.variables) - len(dataset_data_config.forcing)
+            num_forcing_features = len(data_config[dataset_name].forcing)
+            num_fc_features = len(data.variables) - num_forcing_features
             LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
             LOGGER.info(
                 "Dataset '%s' - Total number of auxiliary variables: %d",
                 dataset_name,
-                len(dataset_data_config.forcing),
+                num_forcing_features,
             )
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node

@@ -17,6 +17,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.utils.config import DotDict
+from anemoi.utils.multiple_datasets import get_multiple_datasets_config
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -78,14 +79,18 @@ class AnemoiModelInterface(torch.nn.Module):
         self._update_metadata()
 
     def _build_processors_for_dataset(
-        self, dataset_name: str, statistics: dict, data_indices: dict, statistics_tendencies: dict = None
+        self,
+        processors_configs: dict,
+        statistics: dict,
+        data_indices: dict,
+        statistics_tendencies: dict = None,
     ):
         """Build processors for a single dataset.
 
         Parameters
         ----------
-        dataset_name : str
-            Name of the dataset
+        processors_configs : dict
+            Configuration for the processors
         statistics : dict
             Statistics for the dataset
         data_indices : dict
@@ -98,15 +103,10 @@ class AnemoiModelInterface(torch.nn.Module):
         tuple
             (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies)
         """
-        from anemoi.training.utils.config_utils import get_dataset_data_config
-
-        # Get dataset-specific data config
-        dataset_data_config = get_dataset_data_config(self.config, dataset_name)
-
         # Build processors for the dataset
         processors = [
             [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
-            for name, processor in dataset_data_config.processors.items()
+            for name, processor in processors_configs.items()
         ]
 
         pre_processors = Processors(processors)
@@ -118,7 +118,7 @@ class AnemoiModelInterface(torch.nn.Module):
         if statistics_tendencies is not None:
             processors_tendencies = [
                 [name, instantiate(processor, data_indices=data_indices, statistics=statistics_tendencies)]
-                for name, processor in dataset_data_config.processors.items()
+                for name, processor in processors_configs.items()
             ]
             pre_processors_tendencies = Processors(processors_tendencies)
             post_processors_tendencies = Processors(processors_tendencies, inverse=True)
@@ -133,10 +133,11 @@ class AnemoiModelInterface(torch.nn.Module):
         self.pre_processors_tendencies = torch.nn.ModuleDict()
         self.post_processors_tendencies = torch.nn.ModuleDict()
 
+        data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name in self.statistics.keys():
             # Build processors for each dataset
             pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
-                dataset_name,
+                data_config[dataset_name].processors,
                 self.statistics[dataset_name],
                 self.data_indices[dataset_name],
                 self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
