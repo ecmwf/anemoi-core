@@ -63,15 +63,11 @@ def test_filtered_loss() -> None:
     assert (
         loss_total == loss_value[0]
     ), "Loss output with squash=True should be the value of loss for predicted variables"
-
-    # test instantiation with a str loss
+    # test instantiation without filtering variables
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
-                "predicted_variables": ["tp"],
-                "target_variables": ["tp"],
-                "loss": "anemoi.training.losses.MSELoss",
+                "_target_": "anemoi.training.losses.MSELoss",
             },
         ),
         data_indices=data_indices,
@@ -79,3 +75,20 @@ def test_filtered_loss() -> None:
 
     assert isinstance(loss, BaseLoss)
     assert isinstance(loss.loss, FunctionalLoss)
+    # not filtering indices
+    assert (loss.predicted_indices == data_indices.model.output.full).all()
+    assert (loss.target_indices == data_indices.model.output.full).all()
+    assert loss.predicted_variables == list(name_to_index.keys())
+    assert loss.target_variables == list(name_to_index.keys())
+    loss_value = loss(*right_shaped_pred_output_pair, squash=False)
+    assert loss_value.shape[0] == len(
+        name_to_index.keys(),
+    ), "Loss output with squash=False should match length of all variables"
+    assert loss_value.nonzero().shape[0] == len(
+        name_to_index.keys(),
+    ), "All variables should have non-zero loss when not filtering"
+    assert torch.allclose(
+        loss_value,
+        torch.as_tensor([710 * 640] * len(name_to_index), dtype=loss_value.dtype),
+    ), " MSE "
+    "loss value should be averaged over batch and ensemble dims and summed over grids without scaler"
