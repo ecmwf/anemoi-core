@@ -6,6 +6,23 @@ keep_batch_sharded: True
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
 
+graph_providers:
+  encoder:
+    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+    edges: [data, to, hidden]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.data2hidden}
+  processor:
+    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+    edges: [hidden, to, hidden]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2hidden}
+  decoder:
+    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+    edges: [hidden, to, data]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2data}
+
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
@@ -18,8 +35,8 @@ layer_kernels:
 
 processor:
   _target_: anemoi.models.layers.processor.GNNProcessor
-  trainable_size: ${model.trainable_parameters.hidden2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
+  trainable_size: ${model.graph_providers.processor.trainable_size}
+  sub_graph_edge_attributes: ${model.graph_providers.processor.edge_attributes}
   num_layers: 16
   num_chunks: 2
   mlp_extra_layers: 0
@@ -28,8 +45,8 @@ processor:
 
 encoder:
   _target_: anemoi.models.layers.mapper.GNNForwardMapper
-  trainable_size: ${model.trainable_parameters.data2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
+  trainable_size: ${model.graph_providers.encoder.trainable_size}
+  sub_graph_edge_attributes: ${model.graph_providers.encoder.edge_attributes}
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
@@ -37,8 +54,8 @@ encoder:
 
 decoder:
   _target_: anemoi.models.layers.mapper.GNNBackwardMapper
-  trainable_size: ${model.trainable_parameters.hidden2data}
-  sub_graph_edge_attributes: ${model.attributes.edges}
+  trainable_size: ${model.graph_providers.decoder.trainable_size}
+  sub_graph_edge_attributes: ${model.graph_providers.decoder.edge_attributes}
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}

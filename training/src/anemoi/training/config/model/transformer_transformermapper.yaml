@@ -6,6 +6,14 @@ keep_batch_sharded: True
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
+graph_providers:
+  encoder:
+    _target_: anemoi.models.layers.graph_providers.NoOpGraphProvider
+  processor:
+    _target_: anemoi.models.layers.graph_providers.NoOpGraphProvider
+  decoder:
+    _target_: anemoi.models.layers.graph_providers.NoOpGraphProvider
+
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:

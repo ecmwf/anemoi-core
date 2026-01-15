@@ -176,6 +176,52 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class GraphProviderSchema(BaseModel):
+    target_: Literal[
+        "anemoi.models.layers.graph_providers.StaticGraphProvider",
+        "anemoi.models.layers.graph_providers.NoOpGraphProvider",
+    ] = Field(..., alias="_target_")
+    edges: Optional[list[str]] = None
+    edge_attributes: Optional[list[str]] = None
+    trainable_size: Optional[NonNegativeInt] = None
+
+    @model_validator(mode="after")
+    def validate_graph_provider(self) -> "GraphProviderSchema":
+        if self.target_ == "anemoi.models.layers.graph_providers.StaticGraphProvider":
+            if not self.edges:
+                raise ValueError("StaticGraphProvider requires edges.")
+            if len(self.edges) != 3:
+                raise ValueError("edges must be [src, relation, dst].")
+            if not self.edge_attributes:
+                raise ValueError("StaticGraphProvider requires edge_attributes.")
+            if self.trainable_size is None:
+                raise ValueError("StaticGraphProvider requires trainable_size.")
+        else:
+            if self.edges is not None:
+                raise ValueError("NoOpGraphProvider does not accept edges.")
+            if self.edge_attributes is not None:
+                raise ValueError("NoOpGraphProvider does not accept edge_attributes.")
+            if self.trainable_size is not None:
+                raise ValueError("NoOpGraphProvider does not accept trainable_size.")
+        return self
+
+
+class GraphProvidersSchema(BaseModel):
+    encoder: GraphProviderSchema
+    processor: GraphProviderSchema
+    decoder: GraphProviderSchema
+
+
+class HierarchicalGraphProvidersSchema(BaseModel):
+    encoder: GraphProviderSchema
+    processor: GraphProviderSchema
+    decoder: GraphProviderSchema
+    downscale: dict[str, GraphProviderSchema]
+    upscale: dict[str, GraphProviderSchema]
+    down_level_processor: Optional[dict[str, GraphProviderSchema]] = None
+    up_level_processor: Optional[dict[str, GraphProviderSchema]] = None
+
+
 class DiffusionSchema(BaseModel):
     sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
     "Data scaling parameter"
@@ -227,6 +273,8 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN decoder schema.",
+    graph_providers: GraphProvidersSchema
+    "Graph provider configuration for encoder, processor, and decoder."
     residual: ResidualConnectionSchema = Field(
         ...,
         discriminator="target_",
@@ -314,10 +362,21 @@ class DiffusionTendModelSchema(DiffusionModelSchema):
 
 
 class HierarchicalModelSchema(BaseModelSchema):
+    graph_providers: HierarchicalGraphProvidersSchema
+    "Graph provider configuration for hierarchical models."
+    presets: Optional[dict[str, Any]] = None
+    "Reusable config presets for hierarchical model components."
     enable_hierarchical_level_processing: bool = Field(default=False)
     "Toggle to do message passing at every downscaling and upscaling step"
     level_process_num_layers: NonNegativeInt = Field(default=1)
     "Number of message passing steps at each level"
+
+    @model_validator(mode="after")
+    def validate_level_processors(self) -> "HierarchicalModelSchema":
+        if self.enable_hierarchical_level_processing:
+            if not self.graph_providers.down_level_processor or not self.graph_providers.up_level_processor:
+                raise ValueError("Level processor graph providers must be set when hierarchical processing is enabled.")
+        return self
 
 
 ModelSchema = Union[

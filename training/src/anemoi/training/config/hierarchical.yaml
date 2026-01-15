@@ -4,7 +4,7 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: hierarchical_3level
-- model: graphtransformer
+- model: graphtransformer_hierarchical
 - training: default
 - _self_
 
@@ -20,8 +20,6 @@ config_validation: True
 
 model:
   keep_batch_sharded: False # not yet supported for Hierarchical
-  model:
-    _target_: anemoi.models.models.AnemoiModelEncProcDecHierarchical
   enable_hierarchical_level_processing: True
   level_process_num_layers: 2
   processor:

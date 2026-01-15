@@ -1,42 +1,76 @@
 num_channels: 1024
-condition_on_residual: False
-output_mask:
-  _target_: anemoi.training.utils.masks.NoOutputMask
 cpu_offload: False
 
 keep_batch_sharded: True
 
 model:
-  _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
+  _target_: anemoi.models.models.AnemoiModelEncProcDecHierarchical
 
+presets:
+  providers:
+    data_to_hidden1:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [data, to, hidden_1]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.data2hidden}
+    hidden1_to_data:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [hidden_1, to, data]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2data}
+    hidden1_self:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [hidden_1, to, hidden_1]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2hidden}
+    hidden2_self:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [hidden_2, to, hidden_2]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2hidden}
+    hidden3_self:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [hidden_3, to, hidden_3]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2hidden}
+    down_1_2:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [hidden_1, to, hidden_2]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.data2hidden}
+    down_2_3:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [hidden_2, to, hidden_3]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.data2hidden}
+    up_3_2:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [hidden_3, to, hidden_2]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2data}
+    up_2_1:
+      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      edges: [hidden_2, to, hidden_1]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2data}
+
+# Edges must match graph/hierarchical_3level.yaml exactly.
 graph_providers:
-  encoder:
-    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
-    edges: [data, to, hidden]
-    edge_attributes: ${model.attributes.edges}
-    trainable_size: ${model.trainable_parameters.data2hidden}
-  processor:
-    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
-    edges: [hidden, to, hidden]
-    edge_attributes: ${model.attributes.edges}
-    trainable_size: ${model.trainable_parameters.hidden2hidden}
-  decoder:
-    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
-    edges: [hidden, to, data]
-    edge_attributes: ${model.attributes.edges}
-    trainable_size: ${model.trainable_parameters.hidden2data}
-
-noise_injector:
-  _target_: anemoi.models.layers.ensemble.NoiseConditioning
-  noise_std: 1
-  noise_channels_dim: 4
-  noise_mlp_hidden_dim: 32
-  noise_matrix: null
-  row_normalize_noise_matrix: false
-  autocast: false
-  layer_kernels:
-    Activation:
-      _target_: torch.nn.GELU
+  encoder: ${model.presets.providers.data_to_hidden1}
+  decoder: ${model.presets.providers.hidden1_to_data}
+  processor: ${model.presets.providers.hidden3_self}
+  downscale:
+    hidden_1: ${model.presets.providers.down_1_2}
+    hidden_2: ${model.presets.providers.down_2_3}
+  upscale:
+    hidden_2: ${model.presets.providers.up_2_1}
+    hidden_3: ${model.presets.providers.up_3_2}
+  down_level_processor:
+    hidden_1: ${model.presets.providers.hidden1_self}
+    hidden_2: ${model.presets.providers.hidden2_self}
+  up_level_processor:
+    hidden_1: ${model.presets.providers.hidden1_self}
+    hidden_2: ${model.presets.providers.hidden2_self}
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
@@ -58,31 +92,14 @@ processor:
   trainable_size: ${model.graph_providers.processor.trainable_size}
   sub_graph_edge_attributes: ${model.graph_providers.processor.edge_attributes}
   num_layers: 16
-  num_chunks: 2
+  num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: True # Transformer and GraphTransformer only
+  qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
-  layer_kernels:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-      normalized_shape: ${model.num_channels}
-      condition_shape: ${model.noise_injector.noise_channels_dim}
-      zero_init: True
-      autocast: false
-      #Any arguments to your chosen function go here
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: torch.nn.GELU
-    QueryNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      bias: False
-    KeyNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      bias: False
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -97,7 +114,6 @@ encoder:
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
-
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -114,13 +130,12 @@ decoder:
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
 
-
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
   step: -1 # use the latest step as skip connection
-#  _target_: anemoi.models.layers.residual.TruncatedConnection
-#  truncation_up_file_path: ${system.input.truncation}
-#  truncation_down_file_path:  ${system.input.truncation_inv}
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
   data: 8
@@ -128,12 +143,6 @@ trainable_parameters:
   data2hidden: 8
   hidden2data: 8
   hidden2hidden: 8 # GNN and GraphTransformer Processor only
-
-attributes:
-  edges:
-    - edge_length
-    - edge_dirs
-  nodes: []
 
 # Torch compile configuration
 # A list of modules present in the model, which will be compiled
@@ -158,7 +167,12 @@ attributes:
 # options (dict): a dict of further options which can be passed to torch.compile
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
-  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+
+attributes:
+  edges:
+    - edge_length
+    - edge_dirs
+  nodes: []
 
 # Bounding configuration
 bounding: #These are applied in order

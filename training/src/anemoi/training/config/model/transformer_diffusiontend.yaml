@@ -32,6 +32,20 @@ model:
         S_max: .inf
         S_noise: 1.0
 
+graph_providers:
+  encoder:
+    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+    edges: [data, to, hidden]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.data2hidden}
+  processor:
+    _target_: anemoi.models.layers.graph_providers.NoOpGraphProvider
+  decoder:
+    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+    edges: [hidden, to, data]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2data}
+
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
@@ -69,8 +83,8 @@ processor:
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-  trainable_size: ${model.trainable_parameters.data2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
+  trainable_size: ${model.graph_providers.encoder.trainable_size}
+  sub_graph_edge_attributes: ${model.graph_providers.encoder.edge_attributes}
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -82,8 +96,8 @@ encoder:
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-  trainable_size: ${model.trainable_parameters.hidden2data}
-  sub_graph_edge_attributes: ${model.attributes.edges}
+  trainable_size: ${model.graph_providers.decoder.trainable_size}
+  sub_graph_edge_attributes: ${model.graph_providers.decoder.edge_attributes}
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
