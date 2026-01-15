@@ -834,21 +834,19 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         if noise_scheduler_params is not None:
             noise_scheduler_config.update(noise_scheduler_params)
 
-        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") #param de steps (dont sdedit) est dedans
-        print("noise_scheduler_config : ", noise_scheduler_config)
+        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") 
+
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
 
         if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
             raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
-        # print("actual_schedule type :", actual_schedule_type) : karras
-        print("noise scheduler config :", noise_scheduler_config) #: {'sigma_max': 100.0, 'sigma_min': 0.02, 'rho': 7.0, 'num_steps': 50}
+
         scheduler = scheduler_cls(**noise_scheduler_config)
-        # print("scheduler :", scheduler) : scheduler : <anemoi.models.samplers.diffusion_samplers.KarrasScheduler object at 0x14fd162cacd0>
+
         sigmas = scheduler.get_schedule(x.device, torch.float64)
-        # print("sigmas dans smaple enc proc dec", sigmas, sigmas.shape) : bruit décroissant (100 -> 0.02)
-        # print("si je prends un sigma un peu au hsard :", sigmas[-1]) : 0.02
+
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
         shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
@@ -856,12 +854,11 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
-        print('diffusion sampler config', diffusion_sampler_config)
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
         
-        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}") #param de sdedit est dedans.
+        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}") 
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
 
@@ -870,25 +867,28 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
-        print("noise scheduler params : ", noise_scheduler_params)
-        print("noise scheduler config : ", noise_scheduler_config)
-        if noise_scheduler_config['SDEdit']:
 
-            num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
-            
-            num_steps = len(sigmas) #total number of denoising steps when not using sdedit
-            
-            assert num_steps_sdedit <= num_steps, f"num_steps_sdedit ({num_steps_sdedit}) must be <= num_steps ({num_steps})"
-            print(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
-            
-            init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
-            print("init sigma : ", init_sigma)
-            sigmas = sigmas[num_steps - num_steps_sdedit :]
-            y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
-            x_zeros = torch.zeros_like(x,device=x.device)
-            print("x zeros :", x_zeros)
+        sdedit_in_config = "SDEdit" in noise_scheduler_config.keys()
+
+        if sdedit_in_config :
+            if noise_scheduler_config['SDEdit']:
+
+                num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
+                
+                num_steps = len(sigmas) #total number of denoising steps when not using sdedit
+                
+                assert num_steps_sdedit <= num_steps, f"num_steps_sdedit ({num_steps_sdedit}) must be <= num_steps ({num_steps})"
+                warnings.warn(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
+                
+                init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
+                print("init sigma : ", init_sigma)
+                sigmas = sigmas[num_steps - num_steps_sdedit :]
+                y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
+
+        x = torch.zeros_like(x, device=x.device)
+
         return sampler_instance.sample(
-            x_zeros,
+            x,
             y_init,
             sigmas,
             self.fwd_with_preconditioning,
@@ -936,14 +936,11 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         variables_removed = [var for var in forcings if name_to_index[var]]        
         warnings.warn(f"Variables that are being removed : {variables_removed}")
 
-        mask = torch.ones(x.shape[-1], dtype=torch.bool, device=x.device) #creating a mask to removed the forcing variables
+        mask = torch.ones(x.shape[-1], dtype=torch.bool, device=x.device) #creating a mask to removed the forcing variables, keeping only the prognostics variables
         mask[idx_to_drop] = False
         x = x[:,1,:,:,mask] #We take only the time t= t0 (dim 1 corresponding to time = (t0-1, t0))
         y_init = (torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma + x).to(x.device)
-        print("bruit tenseur preapre sample : torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma")
-        print("x dans le prepare sample :", x)
-        print("shape de y_init :", y_init.shape)
-
+        
         return y_init
     
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):

@@ -213,10 +213,7 @@ class EDMHeunSampler(DiffusionSampler):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
-        # rank_zero_info("[DEBUG] Le sample utilisé est le EDMHeun")
-        # rank_zero_info(f"[DEBUG] x dans heun sampler : {x}")
-        print(f"x dans heun sampler : {x.shape}")
-        print("shape de y dans heun sampler :", y.shape, y)
+
         # Override instance defaults with any kwargs
         S_churn = kwargs.get("S_churn", self.S_churn)
         S_min = kwargs.get("S_min", self.S_min)
@@ -227,17 +224,15 @@ class EDMHeunSampler(DiffusionSampler):
 
         batch_size, ensemble_size = x.shape[0], x.shape[2]
         num_steps = len(sigmas) - 1
-        print("num steps pour l'inference:", num_steps)
+        
+        print("inference number of steps: ", num_steps)
         # Heun sampling loop
-        print("compteur de steps : i  = ",0)
         for i in range(num_steps):
-            print("compteur de steps : ", i)
             sigma_i = sigmas[i]
             sigma_next = sigmas[i + 1]
 
             apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
             if apply_churn:
-                print("on passe dans apply churn")
                 gamma = min(S_churn / num_steps, torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1)
                 sigma_effective = sigma_i + gamma * sigma_i
                 epsilon = torch.randn_like(y) * S_noise
