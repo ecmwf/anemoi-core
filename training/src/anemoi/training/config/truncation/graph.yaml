@@ -2,7 +2,6 @@
 data: "data"
 truncation: "trunc"
 
-graphs_path: null
 
 nodes:
   data:
@@ -29,7 +28,7 @@ graph:
             _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
             norm: l1
             # Sigma is in radians (haversine distance). Convert from km using sigma_km / 6371.0.
-            sigma: 0.03139
+            sigma: 0.06278
       - source_name: ${truncation.truncation}
         target_name: ${truncation.data}
         edge_builders:
@@ -41,7 +40,7 @@ graph:
             _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
             norm: l1
             # Sigma is in radians (haversine distance). Convert from km using sigma_km / 6371.0.
-            sigma: 0.03139
+            sigma: 0.06278
     post_processors: []
   down_edges_name: [data, to, trunc]
   up_edges_name: [trunc, to, data]
@@ -49,5 +48,4 @@ graph:
 
 residual:
   _target_: anemoi.models.layers.residual.TruncatedConnection
-  truncation_graphs_path: ${truncation.graphs_path}
   truncation_graph: ${truncation.graph}

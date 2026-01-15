@@ -77,8 +77,6 @@ class TruncatedConnection(BaseResidualConnection):
         File path (.npz) to load the down-projection matrix from.
     truncation_matrices_path : str | Path, optional
         Optional base path for resolving truncation matrix file paths.
-    truncation_graphs_path : str | Path, optional
-        Optional base path for resolving truncation graph configs.
     truncation_graph : dict, optional
         Graph-based truncation specification (graph_config + edge definitions).
     autocast : bool, default False
@@ -89,7 +87,11 @@ class TruncatedConnection(BaseResidualConnection):
     >>> import torch
     >>> # Example using a truncation graph definition
     >>> truncation_graph = {
-    ...     "graph_config": "truncation_graph.yaml",
+    ...     "graph_config": {
+    ...         "nodes": {"data": {...}, "trunc": {...}},
+    ...         "edges": [...],
+    ...         "post_processors": [],
+    ...     },
     ...     "down_edges_name": ["data", "to", "trunc"],
     ...     "up_edges_name": ["trunc", "to", "data"],
     ...     "edge_weight_attribute": "gauss_weight",
@@ -117,7 +119,6 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_file_path: Optional[str | Path] = None,
         autocast: bool = False,
         truncation_matrices_path: str | Path | None = None,
-        truncation_graphs_path: str | Path | None = None,
         truncation_graph: dict[str, Any] | DictConfig | None = None,
     ) -> None:
         super().__init__()
@@ -133,7 +134,7 @@ class TruncatedConnection(BaseResidualConnection):
                 down_edges,
                 edge_weight_attribute,
                 src_node_weight_attribute,
-            ) = self._load_truncation_graph(truncation_graph, truncation_graphs_path)
+            ) = self._load_truncation_graph(truncation_graph)
             truncation_up_file_path = None
             truncation_down_file_path = None
         else:
@@ -173,18 +174,8 @@ class TruncatedConnection(BaseResidualConnection):
             resolved = Path(base_path) / resolved
         return resolved
 
-    @staticmethod
-    def _resolve_graph_config(graph_config: Any, base_path: str | Path | None) -> Any:
-        if isinstance(graph_config, (str, Path)):
-            graph_path = Path(graph_config)
-            if base_path and not graph_path.is_absolute():
-                graph_path = Path(base_path) / graph_path
-            return graph_path
-        return graph_config
-
-    def _build_truncation_graph(self, graph_config: Any, base_path: str | Path | None) -> HeteroData:
-        resolved_config = self._resolve_graph_config(graph_config, base_path)
-        graph_creator = GraphCreator(config=resolved_config)
+    def _build_truncation_graph(self, graph_config: dict[str, Any] | DictConfig) -> HeteroData:
+        graph_creator = GraphCreator(config=graph_config)
         graph = HeteroData()
         graph = graph_creator.update_graph(graph)
         graph = graph_creator.clean(graph)
@@ -193,11 +184,10 @@ class TruncatedConnection(BaseResidualConnection):
     def _load_truncation_graph(
         self,
         truncation_graph: dict[str, Any] | DictConfig,
-        truncation_graphs_path: str | Path | None,
     ) -> tuple[HeteroData, tuple[str, str, str], tuple[str, str, str], Optional[str], Optional[str]]:
         assert isinstance(truncation_graph, (dict, DictConfig)), "truncation_graph must be a mapping"
         graph_config = truncation_graph.get("graph_config")
-        assert graph_config is not None, "truncation_graph must define graph_config"
+        assert isinstance(graph_config, (dict, DictConfig)), "truncation_graph.graph_config must be a mapping"
         down_edges_name = truncation_graph.get("down_edges_name")
         up_edges_name = truncation_graph.get("up_edges_name")
         assert (
@@ -206,7 +196,7 @@ class TruncatedConnection(BaseResidualConnection):
         assert len(down_edges_name) == 3, "down_edges_name must be [src, relation, dst]"
         assert len(up_edges_name) == 3, "up_edges_name must be [src, relation, dst]"
 
-        graph = self._build_truncation_graph(graph_config, truncation_graphs_path)
+        graph = self._build_truncation_graph(graph_config)
         down_edges = tuple(down_edges_name)
         up_edges = tuple(up_edges_name)
         assert down_edges in graph.edge_types, f"Graph must contain edges {down_edges} for down-projection."

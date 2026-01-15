@@ -22,7 +22,7 @@ class SkipConnectionSchema(BaseModel):
 class TruncationGraphSchema(BaseModel):
     """Schema for graph-based truncation."""
 
-    graph_config: dict[str, Any] | str
+    graph_config: dict[str, Any]
     down_edges_name: list[str]
     up_edges_name: list[str]
     edge_weight_attribute: str | None = None
@@ -51,10 +51,6 @@ class TruncatedConnectionSchema(BaseModel):
         None,
         description="Optional base path for resolving truncation matrix file paths.",
     )
-    truncation_graphs_path: str | None = Field(
-        None,
-        description="Optional base path for resolving truncation graph configs.",
-    )
     truncation_graph: TruncationGraphSchema | None = Field(
         None,
         description="Graph-based truncation specification (graph_config + edge definitions).",
@@ -74,14 +70,9 @@ class TruncatedConnectionSchema(BaseModel):
         if self.truncation_matrices_path is not None and not file_based:
             raise ValueError("truncation_matrices_path requires truncation_up_file_path and truncation_down_file_path.")
 
-        if self.truncation_graphs_path is not None and not graph_config_based:
-            raise ValueError("truncation_graphs_path requires truncation_graph.")
-
         if file_based:
             if self.truncation_graph is not None:
                 raise ValueError("When using file-based projection, do not specify truncation_graph.")
-            if self.truncation_graphs_path is not None:
-                raise ValueError("When using file-based projection, do not specify truncation_graphs_path.")
 
         if graph_config_based:
             if self.truncation_up_file_path is not None or self.truncation_down_file_path is not None:
