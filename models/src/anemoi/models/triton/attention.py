@@ -37,15 +37,15 @@ def _attn_fwd_inner(
     q,  #
     desc_k,
     desc_v,  #
-    offset_y,
+    iter_offset,
     dtype: tl.constexpr,
     start_m,
     qk_scale,  #
     BLOCK_FIXED: tl.constexpr,
     BLOCK_ITER: tl.constexpr,  #
     CAUSAL: tl.constexpr,
-    offs_m: tl.constexpr,
-    offs_n: tl.constexpr,  #
+    offs_fixed: tl.constexpr,
+    offs_iter: tl.constexpr,  #
     N_CTX: tl.constexpr,
     WINDOW: tl.constexpr,
     WARP_SPECIALIZE: tl.constexpr,
@@ -101,26 +101,27 @@ def _attn_fwd_inner(
 
         lo, hi = 0, N_CTX
 
-    offsetk_y = offset_y + lo
-    offsetv_y = offset_y + lo
+    iter_offset = iter_offset + lo
     # loop over k, v and update accumulator
-    for start_n in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
-        start_n = tl.multiple_of(start_n, BLOCK_ITER)
+    for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
+        curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
 
         # -- compute qk ----
-        k = desc_k.load([offsetk_y, 0]).T
+        k = desc_k.load([iter_offset, 0]).T
         qk = tl.dot(q, k) * qk_scale
 
         # apply masking
         if WINDOW > 0:
-            m_pos = offs_m[:, None]
-            n_pos = start_n + offs_n[None, :]
+            fixed_pos = offs_fixed[:, None]
+            iter_pos = curr_iter + offs_iter[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
-            mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
+            mask = (iter_pos <= fixed_pos + WINDOW) & (iter_pos >= fixed_pos - WINDOW)
             qk = tl.where(mask, qk, -1.0e6)
 
         elif CAUSAL:
-            mask = offs_m[:, None] >= (start_n + offs_n[None, :])
+            fixed_pos = offs_fixed[:, None]
+            iter_pos = curr_iter + offs_iter[None, :]
+            mask = fixed_pos >= iter_pos
             qk = tl.where(mask, qk, -1.0e6)
 
         # global attention
@@ -134,7 +135,7 @@ def _attn_fwd_inner(
         # -- update output accumulator --
         acc = acc * alpha[:, None]
         # prepare p and v for the dot
-        v = desc_v.load([offsetv_y, 0])
+        v = desc_v.load([iter_offset, 0])
         p = p.to(dtype)
         acc = tl.dot(p, v, acc)
 
@@ -144,8 +145,7 @@ def _attn_fwd_inner(
         m_i = m_ij
 
         # Move to next block
-        offsetk_y += BLOCK_ITER
-        offsetv_y += BLOCK_ITER
+        iter_offset += BLOCK_ITER
     return acc, l_i, m_i
 
 
@@ -286,11 +286,12 @@ def _attn_fwd(
     dtype: tl.constexpr,
 ):
     tl.static_assert(BLOCK_ITER <= HEAD_DIM)
-    start_m = tl.program_id(0)
+    start_fixed = tl.program_id(0)
     off_hz = tl.program_id(1)
     off_z = off_hz // H
     off_h = off_hz % H
 
+    # number of elements in all non-head-dim dimensions
     y_dim = Z * H * N_CTX
 
     # If tensor_descriptors weren't created on host (in system_specific_settings())
@@ -320,20 +321,23 @@ def _attn_fwd(
         block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
 
-    offset_y = off_z * (N_CTX * H) + off_h * N_CTX
-    qo_offset_y = offset_y + start_m * BLOCK_FIXED
-    # initialize offsets
-    offs_m = start_m * BLOCK_FIXED + tl.arange(0, BLOCK_FIXED)
-    offs_n = tl.arange(0, BLOCK_ITER)
+    # Offsets into the start of the tensor which this kernel will iterate over
+    iter_offset = off_z * (N_CTX * H) + off_h * N_CTX
+    # Offsets into the region of the tensor which this kernel will keep in memory
+    fixed_offset = iter_offset + start_fixed * BLOCK_FIXED  # (used for Tensor Descriptors)
+    # initialize offset pointers
+    offs_fixed = start_fixed * BLOCK_FIXED + tl.arange(0, BLOCK_FIXED)  # (used for normal tensors)
+    offs_iter = tl.arange(0, BLOCK_ITER)
+
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) + 1.0
     acc = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
     # load scales
     qk_scale = sm_scale
-    qk_scale *= 1.44269504  # 1/log(2)
+    qk_scale *= 1.44269504  # 1/log(2) #hack to make calculating exponent faster, by merging 1/ln(2) now the cheaper exp2() fn can be called later instead of exp()
     # load q: it will stay in SRAM throughout
-    q = desc_q.load([qo_offset_y, 0])
+    q = desc_q.load([fixed_offset, 0])
 
     acc, l_i, m_i = _attn_fwd_inner(
         acc,
@@ -342,15 +346,15 @@ def _attn_fwd(
         q,  #
         desc_k,
         desc_v,  #
-        offset_y,
+        iter_offset,
         dtype,
-        start_m,
+        start_fixed,
         qk_scale,  #
         BLOCK_FIXED,
         BLOCK_ITER,  #
         CAUSAL,
-        offs_m,
-        offs_n,
+        offs_fixed,
+        offs_iter,
         N_CTX,  #
         WINDOW,
         WARP_SPECIALIZE,
@@ -358,9 +362,9 @@ def _attn_fwd(
     # epilogue
     m_i += tl.math.log2(l_i)
     acc = acc / l_i[:, None]
-    m_ptrs = M + off_hz * N_CTX + offs_m
+    m_ptrs = M + off_hz * N_CTX + offs_fixed
     tl.store(m_ptrs, m_i)
-    desc_o.store([qo_offset_y, 0], acc.to(dtype))
+    desc_o.store([fixed_offset, 0], acc.to(dtype))
 
 
 @triton.jit
@@ -419,18 +423,19 @@ def _attn_bwd_dkdv(
 
     # index into context
     pid = tl.program_id(0)
-    start_n = pid * BLOCK_FIXED
-    start_m = 0
+    start_fixed = pid * BLOCK_FIXED
+    start_iter = 0
 
     # Index into head and batch
     off_hz = tl.program_id(2)
     off_chz = (off_hz * N_CTX).to(tl.int64)
     off_z = off_hz // H
     off_h = off_hz % H
-    iter_offset_y = off_z * (N_CTX * H) + off_h * N_CTX
-    fixed_offset_y = iter_offset_y + start_n
+    iter_offset = off_z * (N_CTX * H) + off_h * N_CTX
+    fixed_offset = iter_offset + start_fixed
 
-    y_dim = Z * H * N_CTX
+    # number of elements in all non-head-dim dimensions
+    y_dim: tl.constexpr = Z * H * N_CTX
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
         shape=[y_dim, HEAD_DIM],
@@ -472,20 +477,21 @@ def _attn_bwd_dkdv(
     M += off_chz
     D += off_chz
 
-    offs_n = start_n + tl.arange(0, BLOCK_FIXED)
+    offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
 
     dv = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
     dk = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
 
     # load K and V: they stay in SRAM throughout the inner loop.
-    k = desc_k.load([fixed_offset_y, 0])
-    v = desc_v.load([fixed_offset_y, 0])
+    k = desc_k.load([fixed_offset, 0])
+    v = desc_v.load([fixed_offset, 0])
 
-    offs_m = start_m + tl.arange(0, BLOCK_ITER)
-    offs_n = start_n + tl.arange(0, BLOCK_FIXED)
+    # Create offset pointers for tensors
+    offs_iter = start_iter + tl.arange(0, BLOCK_ITER)
+    offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
+
     tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
-    curr_m = start_m
-    step_m = BLOCK_ITER
+    curr_iter = start_iter
 
     # This is a single stage kernel, which loops over columns of Q
     # When masking (causal or sliding-window) is used, it must determine where the
@@ -498,14 +504,15 @@ def _attn_bwd_dkdv(
     if WINDOW > 0:
         # Rather then iterating across the whole context, we iterate
         # Over a window around the position of the K and V blocks
-        lo = tl.maximum(0, start_n - WINDOW)
-        hi = tl.minimum(N_CTX, (start_n + BLOCK_FIXED) + WINDOW)
-        kv_lower_bound = offs_n[:, None] - WINDOW
-        kv_upper_bound = offs_n[:, None] + WINDOW
+        lo: tl.constexpr = tl.maximum(0, start_fixed - WINDOW)
+        hi: tl.constexpr = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
+        kv_lower_bound: tl.constexpr = offs_fixed[:, None] - WINDOW
+        kv_upper_bound: tl.constexpr = offs_fixed[:, None] + WINDOW
     elif CAUSAL:
         # lo, hi = start_n, N_CTX
-        # start_n, rounded down to lowest multiple if not even
-        lo, hi = (start_n // BLOCK_ITER) * BLOCK_ITER, N_CTX
+        # start_fixed, rounded down to lowest multiple if not even
+        lo: tl.constexpr = (start_fixed // BLOCK_ITER) * BLOCK_ITER
+        hi: tl.constexpr = N_CTX
         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
         lo = tl.multiple_of(lo, BLOCK_ITER)
         hi = tl.multiple_of(hi, BLOCK_ITER)
@@ -515,35 +522,35 @@ def _attn_bwd_dkdv(
         hi: tl.constexpr = N_CTX
 
     # skip up to 'lo'
-    iter_offset_y += lo
+    iter_offset += lo
 
-    for curr_m in tl.range(lo, hi, step_m, warp_specialize=WARP_SPECIALIZE):
+    for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
 
-        qT = desc_q.load([iter_offset_y, 0]).T
+        qT = desc_q.load([iter_offset, 0]).T
         # Load m before computing qk to reduce pipeline stall.
-        offs_m = curr_m + tl.arange(0, BLOCK_ITER)
-        m = tl.load(M + offs_m)
+        offs_iter = curr_iter + tl.arange(0, BLOCK_ITER)
+        m = tl.load(M + offs_iter)
         qkT = tl.dot(k, qT)
         # Apply masking.
         if CAUSAL:
-            mask = offs_m[None, :] >= offs_n[:, None]
+            mask = offs_iter[None, :] >= offs_fixed[:, None]
             qkT = tl.where(mask, qkT, float("-inf"))
 
         if WINDOW > 0:
-            m_pos = offs_m[None, :]
+            iter_pos = offs_iter[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
-            mask = (kv_lower_bound <= m_pos) & (kv_upper_bound >= m_pos)
+            mask = (kv_lower_bound <= iter_pos) & (kv_upper_bound >= iter_pos)
             qkT = tl.where(mask, qkT, float("-inf"))
 
         # Apply exponent after masking, improves numerical stability and accuracy
         pT = tl.math.exp2(qkT - m[None, :])
 
-        do = desc_do.load([iter_offset_y, 0])
+        do = desc_do.load([iter_offset, 0])
         # Compute dV.
         ppT = pT.to(dtype)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
-        Di = tl.load(D + offs_m)
+        Di = tl.load(D + offs_iter)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
@@ -551,12 +558,12 @@ def _attn_bwd_dkdv(
         dk += tl.dot(dsT, tl.trans(qT))
 
         # Move to next iter block
-        iter_offset_y = iter_offset_y + step_m
+        iter_offset += BLOCK_ITER
 
     # Store computed dK and dV
-    desc_dv.store([fixed_offset_y, 0], dv.to(dtype))
+    desc_dv.store([fixed_offset, 0], dv.to(dtype))
     dk *= sm_scale
-    desc_dk.store([fixed_offset_y, 0], dk.to(dtype))
+    desc_dk.store([fixed_offset, 0], dk.to(dtype))
 
 
 @triton.autotune(
@@ -598,19 +605,20 @@ def _attn_bwd_dq(
 
     # index into context
     pid = tl.program_id(0)
-    start_m = pid * BLOCK_FIXED
-    start_n = 0
+    start_fixed = pid * BLOCK_FIXED
+    start_iter = 0
 
     # Index into head and batch
     off_hz = tl.program_id(2)
     off_chz = (off_hz * N_CTX).to(tl.int64)
     off_z = off_hz // H
     off_h = off_hz % H
-    iter_offset_y = off_z * (N_CTX * H) + off_h * N_CTX
-    fixed_offset_y = iter_offset_y + start_m
+    iter_offset = off_z * (N_CTX * H) + off_h * N_CTX
+    fixed_offset = iter_offset + start_fixed
 
-    # Build tensor descriptors if they havent already been built in _system_specific_settings()
+    # How many elements in the first 3 dimensaions
     y_dim = Z * H * N_CTX
+    # Build tensor descriptors if they havent already been built in _system_specific_settings()
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
         shape=[y_dim, HEAD_DIM],
@@ -646,21 +654,20 @@ def _attn_bwd_dq(
     M += off_chz
     D += off_chz
 
-    offs_m = start_m + tl.arange(0, BLOCK_FIXED)
+    # generate offset array for fixed block
+    offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
 
-    q = desc_q.load([fixed_offset_y, 0])
+    q = desc_q.load([fixed_offset, 0])
     dq = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
-    do = desc_do.load([fixed_offset_y, 0])
+    do = desc_do.load([fixed_offset, 0])
 
-    m = tl.load(M + offs_m)
+    m = tl.load(M + offs_fixed)
     m = m[:, None]
 
-    offs_n = start_n + tl.arange(0, BLOCK_ITER)
     # D (= delta) is pre-divided by ds_scale.
-    Di = tl.load(D + offs_m)
+    Di = tl.load(D + offs_fixed)
     tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
-    curr_n = start_n
-    step_n = BLOCK_ITER
+    curr_iter = start_iter
 
     # This is a single stage kernel, which loops over columns of K and V
     # When masking (causal or sliding-window) is used, it must determine where the
@@ -671,13 +678,14 @@ def _attn_bwd_dq(
 
     # Calculate the upper and lower bounds when using masking
     if WINDOW > 0:
-        lo = tl.maximum(0, start_m - WINDOW)
-        hi = tl.minimum(N_CTX, (start_m + BLOCK_FIXED) + WINDOW)
-        q_lower_bound = offs_m[:, None] - WINDOW
-        q_upper_bound = offs_m[:, None] + WINDOW
+        lo: tl.constexpr = tl.maximum(0, start_fixed - WINDOW)
+        hi: tl.constexpr = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
+        q_lower_bound: tl.constexpr = offs_fixed[:, None] - WINDOW
+        q_upper_bound: tl.constexpr = offs_fixed[:, None] + WINDOW
     elif CAUSAL:
         # hi is block after start_m, rounded up to nearest multiple of step_n
-        lo, hi = 0, ((start_m + BLOCK_FIXED) // BLOCK_ITER) * BLOCK_ITER
+        lo: tl.constexpr = 0
+        hi: tl.constexpr = ((start_fixed + BLOCK_FIXED) // BLOCK_ITER) * BLOCK_ITER
         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
         lo = tl.multiple_of(lo, BLOCK_ITER)
         hi = tl.multiple_of(hi, BLOCK_ITER)
@@ -686,21 +694,24 @@ def _attn_bwd_dq(
         hi: tl.constexpr = N_CTX
 
     # skip up to 'lo'
-    iter_offset_y += lo
+    iter_offset += lo
 
-    for curr_n in tl.range(lo, hi, step_n, warp_specialize=WARP_SPECIALIZE):
-        kT = desc_k.load([iter_offset_y, 0]).T
-        vT = desc_v.load([iter_offset_y, 0]).T
+    for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
+        kT = desc_k.load([iter_offset, 0]).T
+        vT = desc_v.load([iter_offset, 0]).T
         qk = tl.dot(q, kT)
         # Apply masking based on the position of the current K and V blocks.
         if CAUSAL:
-            offs_n = curr_n + tl.arange(0, BLOCK_ITER)
-            mask = offs_m[:, None] >= offs_n[None, :]
+            offs_iter = curr_iter + tl.arange(0, BLOCK_ITER)
+            iter_pos = offs_iter[None, :]
+            fixed_pos = offs_fixed[:, None]
+            mask = fixed_pos >= iter_pos
             qk = tl.where(mask, qk, float("-inf"))
 
         if WINDOW > 0:
-            offs_n = curr_n + tl.arange(0, BLOCK_ITER)
-            mask = (offs_n[None, :] <= q_upper_bound) & (offs_n[None, :] >= q_lower_bound)
+            offs_iter = curr_iter + tl.arange(0, BLOCK_ITER)
+            iter_pos = offs_iter[None, :]
+            mask = (iter_pos <= q_upper_bound) & (iter_pos >= q_lower_bound)
             qk = tl.where(mask, qk, float("-inf"))
 
         # Apply exponent after masking, improves numerical stability and accuracy
@@ -713,12 +724,12 @@ def _attn_bwd_dq(
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
         dq += tl.dot(ds, tl.trans(kT))
 
-        # move to the nect iter_block
-        iter_offset_y = iter_offset_y + step_n
+        # move to the next iter_block
+        iter_offset += BLOCK_ITER
 
     # Write back dQ.
     dq *= LN2
-    desc_dq.store([fixed_offset_y, 0], dq.to(dtype))
+    desc_dq.store([fixed_offset, 0], dq.to(dtype))
 
 
 def _system_specific_settings(q, k, v, o, warp_specialize):
