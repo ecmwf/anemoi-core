@@ -96,6 +96,23 @@ def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[st
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_multidatasets(
+    multidatasets_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multidatasets_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = multidatasets_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_archive: GetTestArchive) -> None:
     cfg, urls = lam_config
     for url in urls:
@@ -230,3 +247,27 @@ def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_
 def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
     cfg, _ = diffusion_config
     BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.mlflow
+def test_training_cycle_mlflow_dry_run(
+    mlflow_dry_run_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    from anemoi.training.commands.mlflow import prepare_mlflow_run_id
+
+    cfg, url = mlflow_dry_run_config
+
+    # Generate a dry run ID and set it in the config
+    run_id, _ = prepare_mlflow_run_id(
+        config=cfg,
+    )
+    cfg["training"]["run_id"] = run_id
+
+    # Get training data
+    get_test_archive(url)
+
+    # Run training
+    AnemoiTrainer(cfg).train()
