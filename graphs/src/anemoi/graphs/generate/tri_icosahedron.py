@@ -286,7 +286,6 @@ def get_neighbours_within_hops(
     return neighbours
 
 
-# IS THIS FUNCTION USED ANYWHERE?
 def add_neigbours_edges(
     graph: nx.Graph,
     node_idx: int,
