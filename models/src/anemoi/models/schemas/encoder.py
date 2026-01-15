@@ -58,8 +58,8 @@ class TransformerEncoderSchema(TransformerModelComponent):
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"
-    attention_implementation: str = Field(example="flash_attention")
-    "Attention implementation to use. Default to 'flash_attention'."
+    attention_implementation: str = Field(example="triton_attention")
+    "Attention implementation to use. Default to 'triton_attention'."
     softcap: NonNegativeFloat = Field(example=0.0)
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)

@@ -86,8 +86,10 @@ Transformer
 ===========
 
 The Transformer uses a multi-head self attention on the processor. Note
-that this requires `flash-attention
-<https://github.com/Dao-AILab/flash-attention>`__ to be installed.
+that this requires an optimised attention implementation to be installed.
+Anemoi offers a triton attention implementation, which is supported on GPUs.
+Another option is to install the `flash-attention
+<https://github.com/Dao-AILab/flash-attention>`__ library.
 
 The attention windows are chosen in such a way that a complete grid
 neighbourhood is always included (see Figure below). Like with the
