@@ -238,16 +238,30 @@ def lam_config_with_graph(
     cfg, urls = lam_config
     cfg.graph = existing_graph_config
 
-    url_graph = cfg.system.input.graph
+    url_graph = "anemoi-integration-tests/training/graphs/lam-graph.pt"
     tmp_path_graph = get_test_data(url_graph)
     cfg.system.input.graph = Path(tmp_path_graph)
     return cfg, urls
+
+
+def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> DictConfig:
+    url_loss_matrices = cfg.system.input.loss_matrices_path
+    tmp_path_loss_matrices = None
+    for file in cfg.training.training_loss.loss_matrices:
+        if file is not None:
+            tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+    if tmp_path_loss_matrices is not None:
+        cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
+        cfg.training.training_loss.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+        cfg.training.validation_metrics.multiscale.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+    return cfg
 
 
 @pytest.fixture
 def ensemble_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
+    get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
@@ -262,6 +276,9 @@ def ensemble_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
+
+    cfg = handle_truncation_matrices(cfg, get_test_data)
+
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls[0]
 
@@ -314,6 +331,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 def benchmark_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
+    get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
     base_config = "config"  # which config we start from in anemoi/training/configs/
@@ -330,7 +348,7 @@ def benchmark_config(
         overrides = []
         base_config = "lam"
     elif test_case == "ensemble_crps":
-        overrides = ["model=graphtransformer", "graph=multi_scale"]
+        overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
         base_config = "ensemble_crps"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
@@ -341,7 +359,6 @@ def benchmark_config(
 
     # Settings for benchmarking in general (sets atos paths, enables profiling, disables plotting etc)
     base_benchmark_config = OmegaConf.load(Path.cwd() / Path("training/tests/integration/config/benchmark/base.yaml"))
-
     # Settings for the specific benchmark test case
     use_case_modifications = OmegaConf.load(
         Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
@@ -350,6 +367,9 @@ def benchmark_config(
 
     cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
     OmegaConf.resolve(cfg)
+
+    if test_case == "ensemble_crps":
+        cfg = handle_truncation_matrices(cfg, get_test_data)
     return cfg, test_case
 
 
@@ -373,6 +393,13 @@ def architecture_config_with_checkpoint(
 ) -> tuple[OmegaConf, str]:
     # Reuse the same overrides that architecture_config gets
     overrides = request.param
+
+    # ✅ Skip ONLY gnn on Python 3.10
+    import sys
+
+    if sys.version_info[:2] == (3, 10) and any("model=gnn" in o for o in overrides):
+        pytest.skip("GNN checkpoint incompatible with Python 3.10")
+
     cfg, dataset_url, model_architecture = build_architecture_config(
         overrides,
         testing_modifications_with_temp_dir,
@@ -381,7 +408,7 @@ def architecture_config_with_checkpoint(
     # rest of your logic...
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2025-07-31.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-12.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
@@ -462,3 +489,12 @@ def diffusion_config(
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, dataset_urls[0]
+
+
+@pytest.fixture
+def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str) -> tuple[DictConfig, str]:
+    cfg, url = gnn_config
+    cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
+    cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
+    cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
+    return cfg, url

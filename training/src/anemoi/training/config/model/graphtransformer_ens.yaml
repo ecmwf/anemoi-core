@@ -15,7 +15,6 @@ noise_injector:
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
   noise_matrix: null
-  transpose_noise_matrix: false
   row_normalize_noise_matrix: false
   autocast: false
   layer_kernels:
@@ -103,8 +102,8 @@ residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
   step: -1 # use the latest step as skip connection
 #  _target_: anemoi.models.layers.residual.TruncatedConnection
-#  truncation_up_file_path: ${hardware.paths.truncation}/${hardware.files.truncation}
-#  truncation_down_file_path:  ${hardware.paths.truncation}/${hardware.files.truncation_inv}
+#  truncation_up_file_path: ${system.input.truncation}
+#  truncation_down_file_path:  ${system.input.truncation_inv}
 
 trainable_parameters:
   data: 8

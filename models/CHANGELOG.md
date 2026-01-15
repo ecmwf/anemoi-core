@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.11.3](https://github.com/ecmwf/anemoi-core/compare/models-0.11.2...models-0.11.3) (2026-01-14)
+
+
+### Features
+
+* Introduce spectral losses module ([#678](https://github.com/ecmwf/anemoi-core/issues/678)) ([9745b46](https://github.com/ecmwf/anemoi-core/commit/9745b4688482986f62c0590b53a2bf4d551e077d))
+* **models:** Mapper refactor ([#574](https://github.com/ecmwf/anemoi-core/issues/574)) ([83820c8](https://github.com/ecmwf/anemoi-core/commit/83820c8ad049d8dfd4ed4b737b5e4f597b9f2b1f))
+
+
+### Bug Fixes
+
+* **models:** Fix TruncatedConnection schema and initialization ([#787](https://github.com/ecmwf/anemoi-core/issues/787)) ([c24c195](https://github.com/ecmwf/anemoi-core/commit/c24c1955f7a5f291dae12dcae98e83617a67b681))
+* **training:** Dataloader worker ranges ([#764](https://github.com/ecmwf/anemoi-core/issues/764)) ([3ce36ae](https://github.com/ecmwf/anemoi-core/commit/3ce36ae54cbfe4181434dbb9fb35c613d5aa541c))
+
+## [0.11.2](https://github.com/ecmwf/anemoi-core/compare/models-0.11.1...models-0.11.2) (2025-12-18)
+
+
+### Features
+
+* **models:** Triton gt more shapes ([#752](https://github.com/ecmwf/anemoi-core/issues/752)) ([0608acf](https://github.com/ecmwf/anemoi-core/commit/0608acf0f66498e33c54f1cf45e297b082bf34a4))
+
+
+### Bug Fixes
+
+* Correct for dimensions of skipped connection in conditioning ([4551e51](https://github.com/ecmwf/anemoi-core/commit/4551e5169354373340d006ea8a9f4ec7065aa2e2))
+* Fix-pytest-triton-error ([#740](https://github.com/ecmwf/anemoi-core/issues/740)) ([00b38c9](https://github.com/ecmwf/anemoi-core/commit/00b38c9fd721b7e22aa4603c325f0e69b48cc713))
+* **residual:** Fix conditioning on skipped connection ([#742](https://github.com/ecmwf/anemoi-core/issues/742)) ([4551e51](https://github.com/ecmwf/anemoi-core/commit/4551e5169354373340d006ea8a9f4ec7065aa2e2))
+
 ## [0.11.1](https://github.com/ecmwf/anemoi-core/compare/models-0.11.0...models-0.11.1) (2025-12-08)
 
 
