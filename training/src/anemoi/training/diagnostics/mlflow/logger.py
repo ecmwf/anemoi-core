@@ -22,6 +22,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any
 from typing import Literal
+from omegaconf import DictConfig
 from weakref import WeakValueDictionary
 
 import mlflow
