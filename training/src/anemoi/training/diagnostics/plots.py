@@ -615,6 +615,7 @@ def single_plot(
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
+    transform: object | None = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -641,6 +642,8 @@ def single_plot(
         Title for plot, by default None
     datashader: bool, optional
         Scatter plot, by default False
+    transform:
+        Projection for the plot, by default None
 
     Returns
     -------
@@ -658,7 +661,9 @@ def single_plot(
             alpha=1.0,
             norm=norm,
             rasterized=False,
+            transform=transform,
         )
+
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
         # Adjust binning to match the resolution of the data
@@ -677,10 +682,26 @@ def single_plot(
             ax=ax,
         )
 
-    xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
-    ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
-    ax.set_xlim((xmin - 0.1, xmax + 0.1))
-    ax.set_ylim((ymin - 0.1, ymax + 0.1))
+    if transform is not None:
+        ax.set_extent([lon.min() - 0.1, lon.max() + 0.1, lat.min() - 0.1, lat.max() + 0.1], crs=transform)
+    else:
+        xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
+        ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
+        ax.set_xlim((xmin - 0.1, xmax + 0.1))
+        ax.set_ylim((ymin - 0.1, ymax + 0.1))
+
+    # Add map features
+    try:
+        import cartopy.feature as cfeature
+
+        if hasattr(ax, "add_feature"):
+            ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
+        else:
+            # If it's a regular Axes, add_feature doesn't exist
+            LOGGER.warning("Axis is not a GeoAxes; skipping cartopy features.")
+
+    except ModuleNotFoundError:
+        LOGGER.warning("Module cartopy not found. Coastlines and borders will not be plotted.")
 
     continents.plot_continents(ax)
 
@@ -814,6 +835,7 @@ def plot_graph_node_features(
                 data=node_features[..., i],
                 title=f"{mesh} trainable feature #{i + 1}",
                 datashader=datashader,
+                transform=None,
             )
 
     return fig
