@@ -1026,7 +1026,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # The conditions should be separate, but are combined due to pre-commit hook
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
             # Log hyperparameters on rank 0
-            hyper_params = OmegaConf.to_container(convert_to_omegaconf(self.config), resolve=True)
+            hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)

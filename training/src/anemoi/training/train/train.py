@@ -183,7 +183,7 @@ class AnemoiTrainer(ABC):
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
         graphs = {}
-        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
+        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
         for dataset_name, dataset_config in dataset_configs.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
             graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
@@ -402,9 +402,8 @@ class AnemoiTrainer(ABC):
 
     def _log_information(self) -> None:
         # Log number of variables (features) per dataset
-        data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name, data in self.datamodule.ds_train.data.items():
-            num_forcing_features = len(data_config[dataset_name].forcing)
+            num_forcing_features = len(self.data_indices[dataset_name].forcing)
             num_fc_features = len(data.variables) - num_forcing_features
             LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
             LOGGER.info(

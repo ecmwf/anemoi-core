@@ -22,6 +22,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any
 from typing import Literal
+from omegaconf import DictConfig
 from weakref import WeakValueDictionary
 
 import mlflow
@@ -597,7 +598,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
             if config := params.get("config"):
-                params["config"] = config.model_dump(by_alias=True)
+                params["config"] = config if isinstance(config, dict | DictConfig) else config.model_dump(by_alias=True)
 
             self.log_hyperparams_as_mlflow_artifact(
                 client=self.experiment,
