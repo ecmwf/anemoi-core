@@ -327,7 +327,7 @@ class AnemoiTrainer(ABC):
                 "dataset": self.datamodule.metadata,
                 "data_indices": self.datamodule.data_indices,
                 "provenance_training": gather_provenance_info(),
-                "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
+                "timestamp": datetime.datetime.now(tz=datetime.UTC),
             },
         )
 
