@@ -19,7 +19,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.tasks.base import BaseGraphModule
-from anemoi.utils.multiple_datasets import get_multiple_datasets_config
+from anemoi.models.utils.config import get_multiple_datasets_config
 
 LOGGER = logging.getLogger(__name__)
 

@@ -17,7 +17,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.utils.config import DotDict
-from anemoi.utils.multiple_datasets import get_multiple_datasets_config
+from anemoi.models.utils.config import get_multiple_datasets_config
 
 
 class AnemoiModelInterface(torch.nn.Module):

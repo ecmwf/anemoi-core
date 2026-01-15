@@ -23,7 +23,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.utils.multiple_datasets import get_multiple_datasets_config
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_seconds
 
