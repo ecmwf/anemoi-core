@@ -12,11 +12,9 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
-from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.loss import get_loss_function
 
 
 # TODO(Harrison): Consider renaming and reworking to a RemappingLossWrapper or similar, as it remaps variables
@@ -28,7 +26,6 @@ class FilteringLossWrapper(BaseLoss):
         loss: dict[str, Any] | Callable | BaseLoss,
         predicted_variables: list[str] | None = None,
         target_variables: list[str] | None = None,
-        **kwargs,
     ):
         """Loss wrapper to filter variables to compute the loss on.
 
@@ -49,22 +46,11 @@ class FilteringLossWrapper(BaseLoss):
         super().__init__()
 
         self._loss_scaler_specification = {}
-        if isinstance(loss, str):
-            self._loss_scaler_specification = ["*"]
-            self.loss = get_loss_function(DictConfig({"_target_": loss}), scalers={}, **dict(kwargs))
-        elif isinstance(loss, DictConfig | dict):
-            self._loss_scaler_specification = loss.pop("scalers", ["*"])
-            self.loss = get_loss_function(loss, scalers={}, **dict(kwargs))
-        elif isinstance(loss, type):
-            self._loss_scaler_specification = ["*"]
-            self.loss = loss(**kwargs)
-        elif isinstance(loss, BaseLoss):
-            self._loss_scaler_specification = loss.scaler
-            self.loss = loss
-        else:
-            msg = f"Invalid loss type provided: {type(loss)}. Expected a str or dict or BaseLoss."
-            raise TypeError(msg)
-
+        assert isinstance(
+            loss,
+            BaseLoss,
+        ), f"Invalid loss type provided: {type(loss)}. Expected a str or dict or BaseLoss."
+        self.loss = loss
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
 
@@ -79,10 +65,12 @@ class FilteringLossWrapper(BaseLoss):
             predicted_indices = [model_output.name_to_index[name] for name in self.predicted_variables]
         else:
             predicted_indices = output_indices
+            self.predicted_variables = list(name_to_index.keys())
         if self.target_variables is not None:
             target_indices = [name_to_index[name] for name in self.target_variables]
         else:
             target_indices = output_indices
+            self.target_variables = list(name_to_index.keys())
 
         assert len(predicted_indices) == len(
             target_indices,

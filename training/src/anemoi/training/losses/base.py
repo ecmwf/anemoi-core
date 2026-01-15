@@ -256,7 +256,7 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,  # noqa: ARG002
+        **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -287,4 +287,4 @@ class FunctionalLoss(BaseLoss):
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(out, squash, group=group if is_sharded else None)
+        return self.reduce(out, squash, group=group if is_sharded else None, **kwargs)
