@@ -793,11 +793,18 @@ class TritonAttention(torch.autograd.Function):
         Input matrices are in the shape [BATCH, N_HEAD, N_CTX, HEAD_DIM]
 
         """
+
+        # Ensure inputs are contiguous, important when working with pointers later
+        assert (
+            q.is_contiguous() and k.is_contiguous() and v.is_contiguous()
+        ), "Error. Input tensors to TritonAttention must be contiguous"
+
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K, HEAD_DIM_V = q.shape[-1], k.shape[-1], v.shape[-1]
         assert HEAD_DIM_Q == HEAD_DIM_K and HEAD_DIM_K == HEAD_DIM_V
         assert HEAD_DIM_K in {16, 32, 64, 128, 256}
         o = torch.empty_like(q)
+
         if window is None:
             window = 0
         assert not (causal and window > 0), "causal and window not supported in combination"
@@ -843,14 +850,13 @@ class TritonAttention(torch.autograd.Function):
         q, k, v, o, M = ctx.saved_tensors
 
         if do.shape == o.shape and do.stride() != o.stride():
-            do = do.reshape(o.shape).contiguous()
+            do = do.reshape(o.shape)
 
-        if not do.is_contiguous():
-            do = do.contiguous()
+        do = do.contiguous()
 
-        dq = torch.empty_like(q)
-        dk = torch.empty_like(k)
-        dv = torch.empty_like(v)
+        dq = torch.empty_like(q).contiguous()
+        dk = torch.empty_like(k).contiguous()
+        dv = torch.empty_like(v).contiguous()
         BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
 
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
