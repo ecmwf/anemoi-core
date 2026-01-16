@@ -26,6 +26,7 @@ from weakref import WeakValueDictionary
 
 import mlflow
 from mlflow.tracking import MlflowClient
+from omegaconf import DictConfig
 from pytorch_lightning.callbacks import Checkpoint
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
@@ -597,7 +598,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
             if config := params.get("config"):
-                params["config"] = config.model_dump(by_alias=True)
+                params["config"] = config if isinstance(config, dict | DictConfig) else config.model_dump(by_alias=True)
 
             self.log_hyperparams_as_mlflow_artifact(
                 client=self.experiment,

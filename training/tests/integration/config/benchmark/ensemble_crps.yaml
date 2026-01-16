@@ -13,18 +13,26 @@ system:
 training:
   ensemble_size_per_device: 1
   training_loss:
-    loss_matrices: [ null]
-    weights: [1.0]
+    datasets:
+      data:
+        loss_matrices: [ null]
+        weights: [1.0]
   validation_metrics:
-    multiscale:
-      loss_matrices: [null]
-      weights: [1.0]
+    datasets:
+      data:
+        multiscale:
+          loss_matrices: [null]
+          weights: [1.0]
 
 dataloader:
   training:
-    end: 2020-11-30
+    datasets:
+      data:
+        end: 2020-11-30
   validation:
-    start: 2020-12-31
+    datasets:
+      data:
+        start: 2020-12-31
 
 graph:
   nodes:
