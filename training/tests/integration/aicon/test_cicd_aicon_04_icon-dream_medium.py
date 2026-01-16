@@ -63,8 +63,11 @@ def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data:
 
     Downloading the grid is required as the AICON grid is currently required as a netCDF file.
     """
-    aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = get_test_data(
-        aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename,
+    aicon_config_with_tmp_dir.graph.nodes.data.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.data.node_builder.grid_filename,
+    )
+    aicon_config_with_tmp_dir.graph.nodes.hidden.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.hidden.node_builder.grid_filename,
     )
     return aicon_config_with_tmp_dir
 
@@ -91,7 +94,7 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
     for keys in metadata_keys:
         try:
             reduce(getitem, keys, metadata)
-        except KeyError:  # noqa: PERF203
+        except KeyError:
             keys = "".join(f"[{k!r}]" for k in keys)
             errors.append("missing metadata" + keys)
     if errors:
@@ -116,7 +119,8 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     assert_metadatakeys(
         trainer.metadata,
         ("config", "data", "timestep"),
-        ("config", "graph", "nodes", "icon_mesh", "node_builder", "max_level_dataset"),
+        ("config", "graph", "nodes", "data", "node_builder", "max_level"),
+        ("config", "graph", "nodes", "hidden", "node_builder", "max_level"),
         ("config", "training", "precision"),
         ("data_indices", "data", "input", "diagnostic"),
         ("data_indices", "data", "input", "full"),
@@ -143,3 +147,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
 def test_aicon_training(trained_aicon: tuple) -> None:
     _, initial_sum, final_sum = trained_aicon
     assert initial_sum != final_sum
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s", "-k", "test_aicon_metadata"])

@@ -15,18 +15,26 @@ from .logcosh import LogCoshLoss
 from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
+from .multiscale import MultiscaleLossWrapper
 from .rmse import RMSELoss
+from .spectral import FourierCorrelationLoss
+from .spectral import LogSpectralDistance
+from .spectral import SpectralL2Loss
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
     "AlmostFairKernelCRPS",
     "CombinedLoss",
+    "FourierCorrelationLoss",
     "HuberLoss",
     "KernelCRPS",
     "LogCoshLoss",
+    "LogSpectralDistance",
     "MAELoss",
     "MSELoss",
+    "MultiscaleLossWrapper",
     "RMSELoss",
+    "SpectralL2Loss",
     "WeightedMSELoss",
     "get_loss_function",
 ]

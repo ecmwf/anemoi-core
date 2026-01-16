@@ -34,9 +34,12 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
-from anemoi.models.triton.gt import GraphTransformerFunction
 from anemoi.models.triton.utils import edge_index_to_csc
+from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
+
+if is_triton_available():
+    from anemoi.models.triton.gt import GraphTransformerFunction
 
 LOGGER = logging.getLogger(__name__)
 
@@ -446,6 +449,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -471,6 +475,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Defined in config/models/<model>.yaml
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
         super().__init__(**kwargs)
 
@@ -482,6 +488,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
+        Activation = layer_kernels.Activation
         self.lin_key = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_query = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_value = Linear(in_channels, num_heads * self.out_channels_conv)
@@ -498,9 +505,18 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
         self.node_dst_mlp = nn.Sequential(
             Linear(out_channels, hidden_dim),
-            layer_kernels.Activation(),
+            Activation(),
             Linear(hidden_dim, out_channels),
         )
+
+        # Optional edge preprocessing MLP
+        if edge_pre_mlp:
+            self.edge_pre_mlp = nn.Sequential(
+                Linear(edge_dim, edge_dim),
+                Activation(),
+            )
+        else:
+            self.edge_pre_mlp = nn.Identity()
 
         self.graph_attention_backend = graph_attention_backend
         assert self.graph_attention_backend in [
@@ -508,11 +524,16 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             "pyg",
         ], f"Backend {self.graph_attention_backend} not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
 
+        if not is_triton_available():
+            LOGGER.warning(
+                f"{self.__class__.__name__} requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend."
+            )
+            self.graph_attention_backend = "pyg"
+
         if self.graph_attention_backend == "triton":
             LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
             self.conv = GraphTransformerFunction.apply
         else:
-            LOGGER.warning(f"{self.__class__.__name__} using pyg graph attention backend, consider using 'triton'.")
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
@@ -528,7 +549,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         query = self.lin_query(x_dst)
         key = self.lin_key(x_src)
         value = self.lin_value(x_src)
-        edges = self.lin_edge(edge_attr)
+        edges = self.lin_edge(self.edge_pre_mlp(edge_attr))
 
         return query, key, value, edges
 
@@ -629,7 +650,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         shape_dst_nodes = shapes[1]
 
         out = einops.rearrange(out, "(batch grid) heads vars -> batch heads grid vars", batch=batch_size)
-        out = shard_sequence(out, shapes=shape_dst_nodes, mgroup=model_comm_group)
+        out = shard_sequence(out, shapes=shape_dst_nodes, num_heads=self.num_heads, mgroup=model_comm_group)
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         return out
@@ -665,6 +686,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         layer_kernels: DotDict,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -694,6 +716,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Strategy to shard tensors
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
 
         super().__init__(
@@ -707,6 +731,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
             **kwargs,
         )
 
@@ -825,6 +850,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -850,6 +876,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             Defined in config/models/<model>.yaml
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
 
         super().__init__(
@@ -863,6 +891,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
             **kwargs,
         )
 

@@ -14,7 +14,9 @@ noise_injector:
   noise_std: 1
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
-  inject_noise: True
+  noise_matrix: null
+  row_normalize_noise_matrix: false
+  autocast: false
   layer_kernels:
     Activation:
       _target_: torch.nn.GELU
@@ -45,6 +47,7 @@ processor:
   qk_norm: True # Transformer and GraphTransformer only
   cpu_offload: ${model.cpu_offload}
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  edge_pre_mlp: False
   layer_kernels:
     LayerNorm:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
@@ -76,6 +79,8 @@ encoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  edge_pre_mlp: False
+
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -90,13 +95,15 @@ decoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  edge_pre_mlp: False
+
 
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
   step: -1 # use the latest step as skip connection
 #  _target_: anemoi.models.layers.residual.TruncatedConnection
-#  truncation_up_file_path: ${hardware.paths.truncation}/${hardware.files.truncation}
-#  truncation_down_file_path:  ${hardware.paths.truncation}/${hardware.files.truncation_inv}
+#  truncation_up_file_path: ${system.input.truncation}
+#  truncation_down_file_path:  ${system.input.truncation_inv}
 
 trainable_parameters:
   data: 8

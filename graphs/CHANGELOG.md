@@ -8,6 +8,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.3](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.2...graphs-0.8.3) (2026-01-14)
+
+
+### Bug Fixes
+
+* Remove limit on numpy version ([#688](https://github.com/ecmwf/anemoi-core/issues/688)) ([bc6c6cb](https://github.com/ecmwf/anemoi-core/commit/bc6c6cbaacb0968c3bb10bbaa5cb71f09b49ce28))
+
+## [0.8.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.1...graphs-0.8.2) (2026-01-05)
+
+
+### Features
+
+* **graphs:** Add utility function to transform between sincos and latlon_rad ([#761](https://github.com/ecmwf/anemoi-core/issues/761)) ([4e962d5](https://github.com/ecmwf/anemoi-core/commit/4e962d5c0afa5d51bada78a580ef71378cb13e20))
+
+
+### Bug Fixes
+
+* Pin Netcdf4 package to 1.7.3 as max version ([#776](https://github.com/ecmwf/anemoi-core/issues/776)) ([0050ad9](https://github.com/ecmwf/anemoi-core/commit/0050ad99dfd9a75a59cce5c42c28d83ed7ce3ca0))
+
+## [0.8.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.0...graphs-0.8.1) (2025-12-08)
+
+
+### Bug Fixes
+
+* **graphs,multi-scale:** Set default scale_resolutions from 1 ([#733](https://github.com/ecmwf/anemoi-core/issues/733)) ([e621fc9](https://github.com/ecmwf/anemoi-core/commit/e621fc93115688e2a3666596c67f482137fd3171))
+* **graphs:** Allow scale_resolutions to be 0 in MultiScaleEdges ([#731](https://github.com/ecmwf/anemoi-core/issues/731)) ([11af322](https://github.com/ecmwf/anemoi-core/commit/11af3223163fedcec6ffb2d4a96b5388c7ba126b))
+
+## [0.8.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.2...graphs-0.8.0) (2025-12-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **edges:** Edge feature revision #643 ([#727](https://github.com/ecmwf/anemoi-core/issues/727))
+
+### Features
+
+* **edges:** Edge feature revision ([#643](https://github.com/ecmwf/anemoi-core/issues/643)) ([720f4d8](https://github.com/ecmwf/anemoi-core/commit/720f4d8938f0b71425788940547cca23dd1345be))
+* **edges:** Edge feature revision [#643](https://github.com/ecmwf/anemoi-core/issues/643) ([#727](https://github.com/ecmwf/anemoi-core/issues/727)) ([d1372cf](https://github.com/ecmwf/anemoi-core/commit/d1372cfd89cb1052fd1e9da2a9a90c785ec9ddd9))
+* **graphs:** Support for multi-scale connections with HEALPix hidden grid ([#691](https://github.com/ecmwf/anemoi-core/issues/691)) ([1450787](https://github.com/ecmwf/anemoi-core/commit/1450787d9f5fd15271472244ccf154a75665d7e9))
+
+
+### Bug Fixes
+
+* Revert "feat(edges): Edge feature revision" ([#726](https://github.com/ecmwf/anemoi-core/issues/726)) ([db1f940](https://github.com/ecmwf/anemoi-core/commit/db1f94005894f58b82d97f5e57252e3e943dc50c))
+* Sparse export ([#686](https://github.com/ecmwf/anemoi-core/issues/686)) ([969b787](https://github.com/ecmwf/anemoi-core/commit/969b787409dcdd3e347fd96b7ffc2fa6ce153ae3))
+* Target docs ([#704](https://github.com/ecmwf/anemoi-core/issues/704)) ([200101e](https://github.com/ecmwf/anemoi-core/commit/200101e539f24c208c9167bad3a86052152b634e))
+
 ## [0.7.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.1...graphs-0.7.2) (2025-11-17)
 
 

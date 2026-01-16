@@ -34,7 +34,6 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -45,6 +44,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.tasks import GraphInterpolator
 
@@ -445,7 +445,7 @@ class LongRolloutPlots(BasePlotCallback):
         }
         if self.latlons is None:
             self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = self.latlons.cpu().numpy()
+            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
 
         assert batch.shape[1] >= self.max_rollout + pl_module.multi_step, (
             "Batch length not sufficient for requested validation rollout length! "
@@ -697,15 +697,33 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         }
 
     def get_edge_trainable_modules(self, model: torch.nn.Module) -> dict[tuple[str, str], torch.Tensor]:
-        trainable_modules = {
-            (model._graph_name_data, model._graph_name_hidden): model.encoder,
-            (model._graph_name_hidden, model._graph_name_data): model.decoder,
-        }
+        trainable_modules = {}
 
-        if isinstance(model.processor, GraphEdgeMixin):
-            trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
+        # Check encoder
+        if (
+            hasattr(model, "encoder_graph_provider")
+            and model.encoder_graph_provider.trainable is not None
+            and model.encoder_graph_provider.trainable.trainable is not None
+        ):
+            trainable_modules[(model._graph_name_data, model._graph_name_hidden)] = model.encoder_graph_provider
 
-        return {name: module for name, module in trainable_modules.items() if module.trainable.trainable is not None}
+        # Check decoder
+        if (
+            hasattr(model, "decoder_graph_provider")
+            and model.decoder_graph_provider.trainable is not None
+            and model.decoder_graph_provider.trainable.trainable is not None
+        ):
+            trainable_modules[(model._graph_name_hidden, model._graph_name_data)] = model.decoder_graph_provider
+
+        # Check processor
+        if (
+            hasattr(model, "processor_graph_provider")
+            and model.processor_graph_provider.trainable is not None
+            and model.processor_graph_provider.trainable.trainable is not None
+        ):
+            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = model.processor_graph_provider
+
+        return trainable_modules
 
     @rank_zero_only
     def _plot(
@@ -925,8 +943,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
-            loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
-
+            loss = reduce_to_last_dim(self.loss(y_hat, y_true, squash=False).detach().cpu().numpy())
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
             fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
@@ -981,7 +998,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         if self.latlons is None:
             self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = self.latlons.cpu().numpy()
+            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
 
         input_tensor = (
             batch[
