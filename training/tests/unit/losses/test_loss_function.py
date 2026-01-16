@@ -396,7 +396,7 @@ def test_logfft2dist_loss() -> None:
 
     # wrong grid size should fail (FFT2D reshape/assert)
     wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
-    with pytest.raises(einops.EinopsError):
+    with pytest.raises(AssertionError):
         _ = loss(*wrong, squash=True)
 
 
