@@ -315,7 +315,7 @@ LossSchemas = (
     | KernelCRPSSchema
     | SpectralLossSchema
     | MultiScaleLossSchema
-)
+) | SpectralLossSchema
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):

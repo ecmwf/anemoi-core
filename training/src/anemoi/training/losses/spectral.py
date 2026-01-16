@@ -29,14 +29,18 @@ from typing import Literal
 import einops
 import torch
 
-if TYPE_CHECKING:
-    from torch.distributed.distributed_c10d import ProcessGroup
-
+from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
-from anemoi.models.layers.spectral_transforms import SHT
+from anemoi.models.layers.spectral_transforms import CartesianSHT
+from anemoi.models.layers.spectral_transforms import EcTransOctahedralSHT
+from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.kcrps import KernelCRPS
 from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,10 +67,14 @@ class SpectralLoss(BaseLoss):
 
     def __init__(
         self,
-        transform: Literal["fft2d", "sht"] = "fft2d",
+        transform: Literal[
+            "fft2d",
+            "cartesian_sht",
+            "octahedral_sht",
+            "ectrans_octahedral_sht",
+            "dct2d",
+        ] = "fft2d",
         *,
-        x_dim: int | None = None,
-        y_dim: int | None = None,
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -94,26 +102,28 @@ class SpectralLoss(BaseLoss):
         _ = scalers  # intentionally unused
         kwargs.pop("scalers", None)
 
-        if x_dim is not None:
-            kwargs.setdefault("x_dim", x_dim)
-        if y_dim is not None:
-            kwargs.setdefault("y_dim", y_dim)
-
         if transform == "fft2d":
             self.transform = FFT2D(**kwargs)
-            # expose dims on the loss (legacy API + tests)
-            self.x_dim = int(kwargs.get("x_dim"))
-            self.y_dim = int(kwargs.get("y_dim"))
-        elif transform == "sht":
-            self.transform = SHT()
+        elif transform == "dct2d":
+            self.transform = DCT2D(**kwargs)
+        elif transform == "cartesian_sht":
+            # expected additional args: grid (and optional nodes_slice)
+            self.transform = CartesianSHT(**kwargs)
+        elif transform == "octahedral_sht":
+            # expected additional args: lmax/mmax/folding/nodes_slice
+            self.transform = OctahedralSHT(**kwargs)
+        elif transform == "ectrans_octahedral_sht":
+            # expected args: truncation (+ optional dtype, filepath)
+            self.transform = EcTransOctahedralSHT(**kwargs)
         else:
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
+        self.x_dim = self.transform.x_dim
+        self.y_dim = self.transform.y_dim
 
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten spectral dimensions."""
-        x_spec = self.transform.forward(x)
-        # Be robust to any number of leading dims (batch, time, ensemble, ...)
+        x_spec = self.transform(x)
         return einops.rearrange(x_spec, "... y x v -> ... (y x) v")
 
 
@@ -246,3 +256,98 @@ class LogFFT2Distance(LogSpectralDistance):
             scalers=scalers,
             **kwargs,
         )
+
+
+class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
+    """CRPS computed in spectral space using arbitrary spectral transforms.
+
+    Works with:
+      - FFT2D
+      - DCT2D
+      - Cartesian SHT
+      - Octahedral SHT
+    """
+
+    def __init__(
+        self,
+        transform: Literal[
+            "fft2d",
+            "dct2d",
+            "cartesian_sht",
+            "octahedral_sht",
+        ] = "fft2d",
+        *,
+        x_dim: int | None = None,
+        y_dim: int | None = None,
+        cutoff_ratio: float | None = None,
+        ignore_nans: bool = False,
+        scalers: list | None = None,
+        **kwargs,
+    ) -> None:
+        SpectralLoss.__init__(
+            self,
+            transform=transform,
+            x_dim=x_dim,
+            y_dim=y_dim,
+            ignore_nans=ignore_nans,
+            scalers=scalers,
+            **kwargs,
+        )
+        KernelCRPS.__init__(self, ignore_nans=ignore_nans)
+
+        self.cutoff_ratio = cutoff_ratio
+
+    @staticmethod
+    def _apply_cutoff(
+        pred: torch.Tensor,
+        tgt: torch.Tensor,
+        cutoff_ratio: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Keep only the lowest spectral modes."""
+        if not (0.0 < cutoff_ratio <= 1.0):
+            msg = "cutoff_ratio must be in (0, 1]."
+            raise ValueError(msg)
+
+        n_modes = pred.shape[-2]
+        keep = max(1, int(cutoff_ratio * n_modes))
+        return pred[:, :, :keep, :], tgt[:, :, :keep, :]
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+    ) -> torch.Tensor:
+        is_sharded = grid_shard_slice is not None
+        group = group if is_sharded else None
+
+        # → [..., modes, vars]
+        pred_spec = self._to_spectral_flat(pred)
+        tgt_spec = self._to_spectral_flat(target)
+        if self.cutoff_ratio is not None:
+            pred_spec, tgt_spec = self._apply_cutoff(
+                pred_spec,
+                tgt_spec,
+                self.cutoff_ratio,
+            )
+        tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
+        pred_spec = einops.rearrange(pred_spec, "b e m v -> b v m e")  # ensemble dim last for preds
+        crps = self._kernel_crps(pred_spec, tgt_spec)
+        crps = einops.rearrange(crps, "b v m -> b 1 m v")  # consistent with tensordim
+
+        scaled = self.scale(
+            crps,
+            scaler_indices,
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            grid_shard_slice=grid_shard_slice,
+        )
+        return self.reduce(scaled, squash=squash, group=group)
+
+    @property
+    def name(self) -> str:
+        return "CRPS-Spectral"
