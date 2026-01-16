@@ -9,47 +9,47 @@ model:
 presets:
   providers:
     data_to_hidden1:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [data, to, hidden_1]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.data2hidden}
     hidden1_to_data:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [hidden_1, to, data]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.hidden2data}
     hidden1_self:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [hidden_1, to, hidden_1]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.hidden2hidden}
     hidden2_self:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [hidden_2, to, hidden_2]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.hidden2hidden}
     hidden3_self:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [hidden_3, to, hidden_3]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.hidden2hidden}
     down_1_2:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [hidden_1, to, hidden_2]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.data2hidden}
     down_2_3:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [hidden_2, to, hidden_3]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.data2hidden}
     up_3_2:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [hidden_3, to, hidden_2]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.hidden2data}
     up_2_1:
-      _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
       edges: [hidden_2, to, hidden_1]
       edge_attributes: ${model.attributes.edges}
       trainable_size: ${model.trainable_parameters.hidden2data}

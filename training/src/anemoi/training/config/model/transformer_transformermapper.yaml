@@ -8,11 +8,11 @@ model:
 
 graph_providers:
   encoder:
-    _target_: anemoi.models.layers.graph_providers.NoOpGraphProvider
+    _target_: anemoi.models.layers.graph_provider.NoOpGraphProvider
   processor:
-    _target_: anemoi.models.layers.graph_providers.NoOpGraphProvider
+    _target_: anemoi.models.layers.graph_provider.NoOpGraphProvider
   decoder:
-    _target_: anemoi.models.layers.graph_providers.NoOpGraphProvider
+    _target_: anemoi.models.layers.graph_provider.NoOpGraphProvider
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.

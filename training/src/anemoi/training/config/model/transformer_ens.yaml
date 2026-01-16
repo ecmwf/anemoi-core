@@ -9,14 +9,14 @@ model:
 
 graph_providers:
   encoder:
-    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
     edges: [data, to, hidden]
     edge_attributes: ${model.attributes.edges}
     trainable_size: ${model.trainable_parameters.data2hidden}
   processor:
-    _target_: anemoi.models.layers.graph_providers.NoOpGraphProvider
+    _target_: anemoi.models.layers.graph_provider.NoOpGraphProvider
   decoder:
-    _target_: anemoi.models.layers.graph_providers.StaticGraphProvider
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
     edges: [hidden, to, data]
     edge_attributes: ${model.attributes.edges}
     trainable_size: ${model.trainable_parameters.hidden2data}
