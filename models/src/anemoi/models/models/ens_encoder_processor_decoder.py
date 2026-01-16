@@ -21,7 +21,6 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.training.utils.enums import TensorDim
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -100,20 +99,25 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         return x_data_latent, x_skip, shard_shapes_data
 
     def _assemble_output(self, x_out, x_skip, batch_size, batch_ens_size, dtype):
-        x_out = einops.rearrange(x_out, "(bse n) f -> bse n f", bse=batch_ens_size)
-        x_out = einops.rearrange(x_out, "(bs e) n f -> bs e n f", bs=batch_size).to(dtype=dtype).clone()
+        x_out = einops.rearrange(x_out, "(bse n) (t f) -> bse t n f", bse=batch_ens_size, t=self.multi_out)
+        x_out = einops.rearrange(x_out, "(bs e) t n f -> bs t e n f", bs=batch_size).to(dtype=dtype).clone()
 
-        # residual connection (just for the prognostic variables)
+        # residual connection
+        # add time dimension and extend along output steps
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1)
+        # just for the prognostic variables
         x_out[..., self._internal_output_idx] += einops.rearrange(
             x_skip,
-            "(batch ensemble) grid var -> batch ensemble grid var",
+            "(batch ensemble) time grid var -> batch ensemble time grid var",
             batch=batch_size,
         ).to(dtype=dtype)
 
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
-        return x_out.unsqueeze(TensorDim.TIME)  # add time dim
+        # TODO(dieter): verify if this is needed or can be solved alternatively
+        x_out = x_out.contiguous()  # necessary after expand()
+        return x_out
 
     def forward(
         self,
