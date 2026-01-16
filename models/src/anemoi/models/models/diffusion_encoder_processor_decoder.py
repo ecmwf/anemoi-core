@@ -26,6 +26,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -68,6 +69,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
 
+        # Create graph providers
+        self.encoder_graph_provider = create_graph_provider(
+            graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.encoder.get("trainable_size", 0),
+        )
+
         # Encoder data -> hidden
         self.encoder = instantiate(
             model_config.model.encoder,
@@ -75,22 +85,34 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             in_channels_src=self.input_dim,
             in_channels_dst=self.input_dim_latent,
             hidden_dim=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            edge_dim=self.encoder_graph_provider.edge_dim,
         )
 
         # Processor hidden -> hidden
+        self.processor_graph_provider = create_graph_provider(
+            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+        )
+
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            edge_dim=self.processor_graph_provider.edge_dim,
         )
 
         # Decoder hidden -> data
+        self.decoder_graph_provider = create_graph_provider(
+            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_size=self.node_attributes.num_nodes[self._graph_name_data],
+            trainable_size=model_config.model.decoder.get("trainable_size", 0),
+        )
+
         self.decoder = instantiate(
             model_config.model.decoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -98,9 +120,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
             out_channels_dst=self.num_output_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            edge_dim=self.decoder_graph_provider.edge_dim,
         )
 
     def _calculate_input_dim(self):
@@ -219,35 +239,60 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
+        encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider.get_edges(
+            batch_size=bse,
+            model_comm_group=model_comm_group,
+        )
+
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+            edge_attr=encoder_edge_attr,
+            edge_index=encoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            edge_shard_shapes=enc_edge_shard_shapes,
             **fwd_mapper_kwargs,
+        )
+
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=bse,
+            model_comm_group=model_comm_group,
         )
 
         x_latent_proc = self.processor(
             x=x_latent,
             batch_size=bse,
             shard_shapes=shard_shapes_hidden,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
             **processor_kwargs,
         )
 
         x_latent_proc = x_latent_proc + x_latent
 
+        # Compute decoder edges using updated latent representation
+        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider.get_edges(
+            batch_size=bse,
+            model_comm_group=model_comm_group,
+        )
+
         x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            edge_attr=decoder_edge_attr,
+            edge_index=decoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+            edge_shard_shapes=dec_edge_shard_shapes,
             **bwd_mapper_kwargs,
         )
 
@@ -618,7 +663,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_t1 : torch.Tensor
             The state at time t1 with full input variables.
         x_t0 : torch.Tensor
-            The state at time t0 with full input variables.
+            The state at time t0 with prognostic input variables.
         pre_processors_state : callable
             Function to pre-process the state variables.
         pre_processors_tendencies : callable
@@ -635,24 +680,14 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
 
         if input_post_processor is not None:
-            x_t1 = input_post_processor(
-                x_t1[..., self.data_indices.data.output.full],
-                in_place=False,
-                data_index=self.data_indices.data.output.full,
-            )
-            x_t0 = input_post_processor(
-                x_t0[..., self.data_indices.data.output.full],
-                in_place=False,
-                data_index=self.data_indices.data.output.full,
-            )
-        else:
-            x_t1 = x_t1[..., self.data_indices.data.output.full]
-            x_t0 = x_t0[..., self.data_indices.data.output.full]
+            x_t1 = input_post_processor(x_t1, in_place=False, data_index=self.data_indices.data.output.full)
+            x_t0 = input_post_processor(x_t0, in_place=False, data_index=self.data_indices.data.output.prognostic)
 
-        tendency = pre_processors_tendencies(
-            x_t1 - x_t0,
+        tendency = x_t1.clone()
+        tendency[..., self.data_indices.model.output.prognostic] = pre_processors_tendencies(
+            x_t1[..., self.data_indices.model.output.prognostic] - x_t0,
             in_place=False,
-            data_index=self.data_indices.data.output.full,
+            data_index=self.data_indices.data.output.prognostic,
         )
         # diagnostic variables are taken from x_t1, normalised as full fields:
         tendency[..., self.data_indices.model.output.diagnostic] = pre_processors_state(
@@ -676,7 +711,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         Parameters
         ----------
         state_inp : torch.Tensor
-            The normalized input state tensor with full input variables.
+            The normalized input state tensor with prognostic input variables.
         tendency : torch.Tensor
             The normalized tendency tensor output from model.
         post_processors_state : callable
@@ -702,7 +737,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
 
         state_outp[..., self.data_indices.model.output.prognostic] += post_processors_state(
-            state_inp[..., self.data_indices.model.input.prognostic],
+            state_inp,
             in_place=False,
             data_index=self.data_indices.data.input.prognostic,
         )
@@ -817,7 +852,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         torch.Tensor
             Truncated tensor with same shape as input
         """
-        x_skip = einops.rearrange(x, "bs ens latlon nvar -> bs 1 ens latlon nvar")
-        x_skip = self.residual(x_skip, grid_shard_shapes, model_comm_group)
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
         # x_skip.shape: (bs, ens, latlon, nvar)
-        return x_skip
+        return x_skip[..., self.data_indices.model.input.prognostic]

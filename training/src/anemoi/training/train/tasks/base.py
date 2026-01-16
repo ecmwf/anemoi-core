@@ -462,8 +462,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
-            Loss and metrics dictionary (if validation_mode)
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
+            Loss, metrics dictionary (if validation_mode), and full predictions
         """
         # Prepare tensors for loss/metrics computation
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -477,7 +477,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
+            metrics_next = self._compute_metrics(
+                y_pred_full,
+                y_full,
+                grid_shard_slice=grid_shard_slice,
+                **kwargs,
+            )
 
         return loss, metrics_next, y_pred_full
 

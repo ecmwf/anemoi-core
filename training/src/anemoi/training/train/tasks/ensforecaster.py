@@ -127,6 +127,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        step: int | None = None,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         y_pred_ens = gather_tensor(
@@ -136,17 +137,20 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             mgroup=self.ens_comm_subgroup,
         )
 
-        loss = self.loss(
+        loss = self._compute_loss(
             y_pred_ens,
             y,
-            squash=True,
             grid_shard_slice=self.grid_shard_slice,
-            model_comm_group=self.model_comm_group,
             grid_dim=self.grid_dim,
             grid_shard_shape=self.grid_shard_shapes,
         )
 
-        return loss, y_pred_ens if validation_mode else None
+        # Compute metrics if in validation mode
+        metrics_next = {}
+        if validation_mode:
+            metrics_next = self._compute_metrics(y_pred_ens, y, step=step, grid_shard_slice=self.grid_shard_slice)
+
+        return loss, metrics_next, y_pred_ens
 
     def _rollout_step(
         self,
@@ -209,23 +213,15 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 
-            loss, y_pred_ens_group = checkpoint(
+            loss, metrics_next, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
+                step=rollout_step,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
 
             x = self._advance_input(x, y_pred, batch, rollout_step)
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred_ens_group,
-                    y,
-                    self.grid_shard_slice,
-                    rollout_step,
-                )
-
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else []
+            yield loss, metrics_next, y_pred_ens_group
