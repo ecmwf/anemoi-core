@@ -100,15 +100,23 @@ class DCT2D(SpectralTransform):
             from torch_dct import dct_2d
         except ImportError:
             raise ImportError("torch_dct is required for DCT2D transform. ")
-        var = data.shape[-1]
-        try:
-            x = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
-        except Exception as e:
-            raise einops.EinopsError(
-                f"Possible dimension mismatch in einops.rearrange in DCT2D layer: "
-                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
-            ) from e
-        return dct_2d(x, dim=(-2, -3))
+        b, e, points, v = data.shape
+        assert points == self.x_dim * self.y_dim
+
+        x = einops.rearrange(
+            data,
+            "b e (y x) v -> (b e v) y x",
+            x=self.x_dim,
+            y=self.y_dim,
+        )
+        x = dct_2d(x)
+        return einops.rearrange(
+            x,
+            "(b e v) y x -> b e y x v",
+            b=b,
+            e=e,
+            v=v,
+        )
 
 
 class SHT(SpectralTransform):
