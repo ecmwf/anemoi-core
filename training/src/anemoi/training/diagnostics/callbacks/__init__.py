@@ -23,7 +23,6 @@ from pytorch_lightning.callbacks import TQDMProgressBar
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
-from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -49,13 +48,45 @@ def nestedget(config: DictConfig, key: str, default: Any) -> Any:
 # Callbacks to add according to flags in the config
 # Can be function to check status from config
 CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bool], type[Callback]]] = [
-    ("training.swa.enabled", StochasticWeightAveraging),
     (
         lambda config: nestedget(config, "diagnostics.log.wandb.enabled", False)
         or nestedget(config, "diagnostics.log.mlflow.enabled", False),
         LearningRateMonitor,
     ),
 ]
+
+
+def _get_weight_averaging_callback(config: DictConfig) -> list[Callback]:
+    """Get weight averaging callback.
+
+    Supported are ExponentialMovingAverage and StochasticWeightAveraging.
+
+    Example config:
+        weight_averaging:
+          _target_: anemoi.training.diagnostics.callbacks.optimiser.ExponentialMovingAverage
+          decay: 0.999
+
+    Parameters
+    ----------
+    config : DictConfig
+        Job configuration
+
+    Returns
+    -------
+    list[Callback]
+        List containing the weight averaging callback, or empty list if not configured.
+    """
+    weight_averaging_config = nestedget(config, "training.weight_averaging", None)
+
+    if weight_averaging_config is not None:
+        try:
+            weight_averaging = instantiate(weight_averaging_config)
+            LOGGER.info("Using weight averaging: %s", type(weight_averaging))
+        except InstantiationException:
+            LOGGER.warning("Failed to instantiate weight averaging callback from config: %s", weight_averaging_config)
+        else:
+            return [weight_averaging]
+    return []
 
 
 def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
@@ -225,6 +256,9 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     # Plotting callbacks
     trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+
+    # Weight averaging callback (SWA or EMA)
+    trainer_callbacks.extend(_get_weight_averaging_callback(config))
 
     # Extend with config enabled callbacks
     trainer_callbacks.extend(_get_config_enabled_callbacks(config))
