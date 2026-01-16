@@ -14,7 +14,7 @@ import einops
 import numpy as np
 import torch
 import torch.fft
-
+from anemoi.training.utils.enums import TensorDim
 from anemoi.models.layers.spectral_helpers import CartesianRealSHT
 from anemoi.models.layers.spectral_helpers import EcTransOctahedralSHTModule
 from anemoi.models.layers.spectral_helpers import OctahedralRealSHT
