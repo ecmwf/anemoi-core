@@ -373,8 +373,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Prepared y_pred, y, and grid_shard_slice
         """
         is_sharded = self.grid_shard_slice is not None
-        predicted_indices = self.loss.predicted_indices
-        target_indices = self.loss.target_indices
 
         sharding_supported = (self.loss_supports_sharding or validation_mode) and (
             self.metrics_support_sharding or not validation_mode
@@ -388,7 +386,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         else:
             y_pred_full, y_full = y_pred, y
 
-        return y_pred_full[..., predicted_indices], y_full[..., target_indices], grid_shard_slice
+        return y_pred_full, y_full, grid_shard_slice
 
     def _get_grid_shard_slice(self, validation_mode: bool) -> list[int] | None:
         is_sharded = self.grid_shard_slice is not None
@@ -420,11 +418,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        y_pred, y, grid_shard_slice = self._prepare_tensors_for_loss(
-            y_pred,
-            y,
-            validation_mode=False,
-        )
         return self.loss(y_pred, y, grid_shard_slice=grid_shard_slice, group=self.model_comm_group, kwargs=_kwargs)
 
     def _compute_metrics(
@@ -450,11 +443,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Computed metrics
         """
-        y_pred, y, grid_shard_slice = self._prepare_tensors_for_loss(
-            y_pred,
-            y,
-            validation_mode=True,
-        )
         return self.calculate_val_metrics(y_pred, y, grid_shard_slice=grid_shard_slice)
 
     def compute_loss_metrics(
@@ -484,20 +472,26 @@ class BaseGraphModule(pl.LightningModule, ABC):
         tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
-        grid_shard_slice = self._get_grid_shard_slice(validation_mode)
-        loss = self._compute_loss(y_pred, y, grid_shard_slice=grid_shard_slice, **kwargs)
+        # Prepare tensors for loss/metrics computation
+        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred,
+            y,
+            validation_mode,
+        )
+
+        loss = self._compute_loss(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
             metrics_next = self._compute_metrics(
-                y_pred,
-                y,
+                y_pred_full,
+                y_full,
                 grid_shard_slice=grid_shard_slice,
                 **kwargs,
             )
 
-        return loss, metrics_next, y_pred
+        return loss, metrics_next, y_pred_full
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.

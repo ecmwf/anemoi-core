@@ -286,5 +286,5 @@ class FunctionalLoss(BaseLoss):
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
-        return self.reduce(out, squash, group=group if is_sharded else None, **kwargs)
+        squash_mode = kwargs.get("squash_mode", "avg")
+        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -56,7 +57,7 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
             variable_scaling[sub_loss.__class__.__name__] = print_variable_scaling(sub_loss, data_indices)
         return variable_scaling
 
-    if isinstance(loss, FilteringLossWrapper):
+    if isinstance(loss, FilteringLossWrapper | MultiscaleLossWrapper):
         return print_variable_scaling(loss.loss, data_indices)
 
     variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).reshape(-1)
