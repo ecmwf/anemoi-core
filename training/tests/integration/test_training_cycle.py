@@ -143,6 +143,17 @@ def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_te
     AnemoiTrainer(cfg).train()
 
 
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_out_ens(
+    multi_out_ens_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = multi_out_ens_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
     BaseSchema(**cfg)

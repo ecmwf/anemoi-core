@@ -284,6 +284,37 @@ def ensemble_config(
 
 
 @pytest.fixture
+def multi_out_ens_config(
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, str]:
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
+        template = compose(config_name="ensemble_crps", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+
+    OmegaConf.set_struct(template.training, False)  # allow adding multistep_output
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+
+    cfg = handle_truncation_matrices(cfg, get_test_data)
+
+    cfg.data.timestep = "12h"
+    cfg.training.multistep_input = 3
+    cfg.training["multistep_output"] = 2
+
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0]
+
+
+@pytest.fixture
 def hierarchical_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
