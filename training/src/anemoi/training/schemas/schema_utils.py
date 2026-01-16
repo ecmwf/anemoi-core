@@ -11,5 +11,8 @@ from typing import Literal
 from typing import TypeAlias
 from typing import TypeVar
 
+# The DatasetDict type alias is intended to standardize the structure of dataset-related dictionaries
+# across the codebase, improving type safety and code readability.
+# The dataset-specific configurations are represented as a dictionary where keys are the dataset names
 T = TypeVar("T")
 DatasetDict: TypeAlias = dict[Literal["datasets"], dict[str, T]]
