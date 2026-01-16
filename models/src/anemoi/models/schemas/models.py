@@ -178,8 +178,8 @@ OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 class GraphProviderSchema(BaseModel):
     target_: Literal[
-        "anemoi.models.layers.graph_providers.StaticGraphProvider",
-        "anemoi.models.layers.graph_providers.NoOpGraphProvider",
+        "anemoi.models.layers.graph_provider.StaticGraphProvider",
+        "anemoi.models.layers.graph_provider.NoOpGraphProvider",
     ] = Field(..., alias="_target_")
     edges: Optional[list[str]] = None
     edge_attributes: Optional[list[str]] = None
@@ -187,7 +187,7 @@ class GraphProviderSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_graph_provider(self) -> "GraphProviderSchema":
-        if self.target_ == "anemoi.models.layers.graph_providers.StaticGraphProvider":
+        if self.target_ == "anemoi.models.layers.graph_provider.StaticGraphProvider":
             if not self.edges:
                 raise ValueError("StaticGraphProvider requires edges.")
             if len(self.edges) != 3:
