@@ -28,6 +28,24 @@ from anemoi.models.triton.utils import is_hip
 from anemoi.models.triton.utils import supports_host_descriptor
 from anemoi.models.triton.utils import torch_dtype_to_triton
 
+def set_allocator():
+    """Defines how memory is allocated by triton.
+    Certain GPUs (e.g. Nvidia Hoppers and Blackwells) support TMA (Tensor Memory Accelerator)
+    TMA is hardware support for async data movement between global and shared memory
+    Basically the relevant memory addresses are calculated by dedicated hardware instead of registers
+    This frees up threads and registers to do other computations
+    TMA requires global memory allocations, so we set the alloc_fn here
+    """
+    #TODO(cathal) Update to check if allocator has been set before attempting to set
+    # Currently there isn't a stable way to do this via Triton
+    
+    def alloc_fn(size: int, align: int, _):
+        return torch.empty(size, dtype=torch.int8, device="cuda")
+    
+    triton.set_allocator(alloc_fn)
+    
+set_allocator()
+
 
 @triton.jit
 def _attn_fwd_inner(
@@ -39,7 +57,7 @@ def _attn_fwd_inner(
     desc_v,  #
     iter_offset,
     dtype: tl.constexpr,
-    start_m,
+    start_fixed,
     qk_scale,  #
     BLOCK_FIXED: tl.constexpr,
     BLOCK_ITER: tl.constexpr,  #
@@ -69,7 +87,8 @@ def _attn_fwd_inner(
         # X X X X -
         # X X X X X
 
-        lo, hi = 0, (start_m + 1) * BLOCK_FIXED
+        lo, hi = 0, tl.minimum((start_fixed + 1) * BLOCK_FIXED, N_CTX)
+        hi = tl.multiple_of(hi, BLOCK_FIXED)
     elif WINDOW > 0:
         # Attends within the following range (Assuming W=1)
         # X X - - -
@@ -78,15 +97,15 @@ def _attn_fwd_inner(
         # - - X X X
         # - - - X X
 
-        lo = tl.maximum(0, (start_m * BLOCK_FIXED) - WINDOW)
-        hi = tl.minimum(N_CTX, (start_m + 1) * BLOCK_FIXED + WINDOW)
+        lo = tl.maximum(0, (start_fixed * BLOCK_FIXED) - WINDOW)
+        hi = tl.minimum(N_CTX, (start_fixed + 1) * BLOCK_FIXED + WINDOW)
 
         # round down to lowest multiple if not even
         if lo % BLOCK_ITER != 0:
             lo = (lo // BLOCK_ITER) * BLOCK_ITER
         # round up to highest multiple if not even
         if hi % BLOCK_ITER != 0:
-            hi = (hi // BLOCK_ITER) * BLOCK_ITER + BLOCK_ITER
+            hi = tl.minimum(N_CTX, (hi // BLOCK_ITER) * BLOCK_ITER + BLOCK_ITER)
 
         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
         lo = tl.multiple_of(lo, BLOCK_ITER)
@@ -100,12 +119,16 @@ def _attn_fwd_inner(
         # X X X X X
 
         lo, hi = 0, N_CTX
-
+    
+    #TODO(cathal) change based on dtype
+    MINUS_INF : tl.constexpr = -1.0e8
+    lse_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) + MINUS_INF
+    
     iter_offset = iter_offset + lo
     # loop over k, v and update accumulator
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
         curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
-
+        
         # -- compute qk ----
         k = desc_k.load([iter_offset, 0]).T
         qk = tl.dot(q, k) * qk_scale
@@ -116,21 +139,21 @@ def _attn_fwd_inner(
             iter_pos = curr_iter + offs_iter[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
             mask = (iter_pos <= fixed_pos + WINDOW) & (iter_pos >= fixed_pos - WINDOW)
-            qk = tl.where(mask, qk, -1.0e6)
+            qk = tl.where(mask, qk, MINUS_INF)
 
         elif CAUSAL:
             fixed_pos = offs_fixed[:, None]
             iter_pos = curr_iter + offs_iter[None, :]
             mask = fixed_pos >= iter_pos
-            qk = tl.where(mask, qk, -1.0e6)
+            qk = tl.where(mask, qk, MINUS_INF)
 
         # global attention
+        #m_ij = tl.maximum(tl.max(qk, 1), lse_i)
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        qk -= m_ij[:, None]
+        p = tl.math.exp2(qk - m_ij[:, None])
 
-        p = tl.math.exp2(qk)
         # -- compute correction factor
-        alpha = tl.math.exp2(m_i - m_ij)
+        alpha = tl.math.exp2(m_i - m_ij) 
         l_ij = tl.sum(p, 1)
         # -- update output accumulator --
         acc = acc * alpha[:, None]
@@ -141,6 +164,9 @@ def _attn_fwd_inner(
 
         # update m_i and l_i
         # place this at the end of the loop to reduce register pressure
+        #l_i = l_i * alpha + l_ij # not sure if this is right
+        #l_i_new = tl.exp2(lse_i - m_ij) + l_ij
+        #lse_i = m_ij + tl.log(l_i_new)
         l_i = l_i * alpha + l_ij
         m_i = m_ij
 
@@ -209,8 +235,8 @@ def _generate_configs(try_warp_spec=True):
             num_warps=w,
             pre_hook=_host_descriptor_pre_hook,
         )
-        for BM in [32, 64, 128]
-        for BN in [32, 64, 128]
+        for BM in [16, 32, 64, 128]
+        for BN in [16, 32, 64, 128]
         for s in NUM_STAGES_OPTIONS
         for w in [4, 8]
         for WS in ([True, False] if try_warp_spec else [False])
@@ -218,10 +244,10 @@ def _generate_configs(try_warp_spec=True):
 
     if "PYTEST_VERSION" in os.environ:
         # Use a single config in testing for reproducibility
-        configs = [
+        configs = [ 
             triton.Config(
-                dict(BLOCK_FIXED=128, BLOCK_ITER=32, WARP_SPECIALIZE=False),
-                num_stages=2,
+                dict(BLOCK_FIXED=32, BLOCK_ITER=16, WARP_SPECIALIZE=False),
+                num_stages=1,
                 num_warps=4,
                 pre_hook=_host_descriptor_pre_hook,
             )
@@ -231,15 +257,23 @@ def _generate_configs(try_warp_spec=True):
 
 def _prune_invalid_configs_fwd(configs, named_args, **kwargs):
     N_CTX = kwargs["N_CTX"]
+    HEAD_DIM = kwargs["HEAD_DIM"]
 
     # Filter out configs where BLOCK_FIXED > N_CTX
-    return [conf for conf in configs if conf.kwargs.get("BLOCK_FIXED", 0) <= N_CTX]
+    # And configs where BLOCK_* does not divide evenly into N_CTX
+    valid_configs=[conf for conf in configs if (conf.kwargs.get("BLOCK_FIXED", 0) <= N_CTX and N_CTX % conf.kwargs.get("BLOCK_FIXED", 0) == 0 and N_CTX % conf.kwargs.get("BLOCK_ITER", 0) == 0)]
+        
+    if len(valid_configs) == 0:
+        raise ValueError(f"Autotuning found no valid runtime configurations for your setup (mode=fwd, {N_CTX=}, {HEAD_DIM=}). Please use an alternate attention backend or open a ticket on the anemoi-core repository describing your use case.")
+
+    return valid_configs
 
 
 def _prune_invalid_configs_bwd(configs, named_args, **kwargs):
     N_CTX = kwargs["N_CTX"]
-
-    return [
+    HEAD_DIM = kwargs["HEAD_DIM"]
+    
+    valid_configs = [
         conf
         for conf in configs
         if (
@@ -248,8 +282,15 @@ def _prune_invalid_configs_bwd(configs, named_args, **kwargs):
             and conf.kwargs.get("BLOCK_ITER", 0) <= N_CTX
             # BLOCK_FIXED must divide evenly into BLOCK_ITER (static assert in _bwd_dvdk and _bwd_dq)
             and conf.kwargs.get("BLOCK_FIXED", 0) % conf.kwargs.get("BLOCK_ITER", 0) == 0
+            # and configs where the block size does not divide evenly into the context
+            and N_CTX % conf.kwargs.get("BLOCK_FIXED", 0) == 0 and N_CTX % conf.kwargs.get("BLOCK_ITER", 0) == 0
         )
     ]
+    
+    if len(valid_configs) == 0:
+        raise ValueError(f"Autotuning found no valid configurations for your setup (mode=bwd, {N_CTX=}, {HEAD_DIM=}). Please use an alternate attention backend or open a ticket on the anemoi-core repository describing your use case.")
+
+    return valid_configs
 
 
 @triton.jit
@@ -269,14 +310,15 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 @triton.jit
 def _attn_fwd(
     sm_scale,
-    M,  #
+    M,
+    L,
     Z,
     H,
     desc_q,
     desc_k,
     desc_v,
     desc_o,
-    N_CTX,  #
+    N_CTX: tl.constexpr,  #
     HEAD_DIM: tl.constexpr,  #
     WINDOW: tl.constexpr,  #
     BLOCK_FIXED: tl.constexpr,  #
@@ -286,6 +328,8 @@ def _attn_fwd(
     dtype: tl.constexpr,
 ):
     tl.static_assert(BLOCK_ITER <= HEAD_DIM)
+    tl.static_assert(N_CTX % BLOCK_FIXED == 0)
+                     
     start_fixed = tl.program_id(0)
     off_hz = tl.program_id(1)
     off_z = off_hz // H
@@ -320,7 +364,7 @@ def _attn_fwd(
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
-
+    
     # Offsets into the start of the tensor which this kernel will iterate over
     iter_offset = off_z * (N_CTX * H) + off_h * N_CTX
     # Offsets into the region of the tensor which this kernel will keep in memory
@@ -328,10 +372,10 @@ def _attn_fwd(
     # initialize offset pointers
     offs_fixed = start_fixed * BLOCK_FIXED + tl.arange(0, BLOCK_FIXED)  # (used for normal tensors)
     offs_iter = tl.arange(0, BLOCK_ITER)
-
+    
     # initialize pointer to m and l
-    m_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) - float("inf")
-    l_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) + 1.0
+    m_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) - float("inf") # list of maximum values, will be updated after each BLOCK_ITER. used to compute online softmax
+    l_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) #+ 1.0
     acc = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
     # load scales
     qk_scale = sm_scale
@@ -361,7 +405,9 @@ def _attn_fwd(
     )
     # epilogue
     m_i += tl.math.log2(l_i)
+    #o_scale = tl.exp(m_i - l_i)
     acc = acc / l_i[:, None]
+    #acc = acc * o_scale[:,None]
     m_ptrs = M + off_hz * N_CTX + offs_fixed
     tl.store(m_ptrs, m_i)
     desc_o.store([fixed_offset, 0], acc.to(dtype))
@@ -401,6 +447,7 @@ def _attn_bwd_dkdv(
     desc_dk,
     desc_dv,
     M,
+    L,
     D,
     sm_scale: tl.constexpr,
     # shared by Q/K/V/DO.
@@ -475,6 +522,7 @@ def _attn_bwd_dkdv(
 
     # offset pointers for batch/head
     M += off_chz
+    L += off_chz
     D += off_chz
 
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
@@ -492,6 +540,12 @@ def _attn_bwd_dkdv(
 
     tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
     curr_iter = start_iter
+    
+    #TODO(cathal) change based on dtype
+    #if dtype == tl.bfloat16:
+        #MINUS_INF : tl.constexpr = -1.0e8
+    #elif dtype == tl.float16:
+    MINUS_INF : tl.constexpr = -1.0e8
 
     # This is a single stage kernel, which loops over columns of Q
     # When masking (causal or sliding-window) is used, it must determine where the
@@ -523,7 +577,7 @@ def _attn_bwd_dkdv(
 
     # skip up to 'lo'
     iter_offset += lo
-
+    
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
 
         qT = desc_q.load([iter_offset, 0]).T
@@ -534,17 +588,17 @@ def _attn_bwd_dkdv(
         # Apply masking.
         if CAUSAL:
             mask = offs_iter[None, :] >= offs_fixed[:, None]
-            qkT = tl.where(mask, qkT, float("-inf"))
+            qkT = tl.where(mask, qkT, MINUS_INF)
 
         if WINDOW > 0:
             iter_pos = offs_iter[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
             mask = (kv_lower_bound <= iter_pos) & (kv_upper_bound >= iter_pos)
-            qkT = tl.where(mask, qkT, float("-inf"))
-
+            qkT = tl.where(mask, qkT, MINUS_INF)
+            
         # Apply exponent after masking, improves numerical stability and accuracy
         pT = tl.math.exp2(qkT - m[None, :])
-
+        
         do = desc_do.load([iter_offset, 0])
         # Compute dV.
         ppT = pT.to(dtype)
@@ -562,7 +616,7 @@ def _attn_bwd_dkdv(
 
     # Store computed dK and dV
     desc_dv.store([fixed_offset, 0], dv.to(dtype))
-    dk *= sm_scale
+    dk *= sm_scale 
     desc_dk.store([fixed_offset, 0], dk.to(dtype))
 
 
@@ -601,7 +655,8 @@ def _attn_bwd_dq(
     It then iterates over columns of K and V in blocks of BLOCK_ITER.
     """
 
-    LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
+    #LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
+    LN2: tl.constexpr = 0.6931471805599453  # = ln(2)
 
     # index into context
     pid = tl.program_id(0)
@@ -668,6 +723,9 @@ def _attn_bwd_dq(
     Di = tl.load(D + offs_fixed)
     tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
     curr_iter = start_iter
+    
+    #TODO(cathal) change based on dtype
+    MINUS_INF : tl.constexpr = -1.0e8
 
     # This is a single stage kernel, which loops over columns of K and V
     # When masking (causal or sliding-window) is used, it must determine where the
@@ -706,13 +764,13 @@ def _attn_bwd_dq(
             iter_pos = offs_iter[None, :]
             fixed_pos = offs_fixed[:, None]
             mask = fixed_pos >= iter_pos
-            qk = tl.where(mask, qk, float("-inf"))
+            qk = tl.where(mask, qk, MINUS_INF)
 
         if WINDOW > 0:
             offs_iter = curr_iter + tl.arange(0, BLOCK_ITER)
             iter_pos = offs_iter[None, :]
             mask = (iter_pos <= q_upper_bound) & (iter_pos >= q_lower_bound)
-            qk = tl.where(mask, qk, float("-inf"))
+            qk = tl.where(mask, qk, MINUS_INF)
 
         # Apply exponent after masking, improves numerical stability and accuracy
         p = tl.math.exp2(qk - m)
@@ -770,17 +828,6 @@ def _system_specific_settings(q, k, v, o, warp_specialize):
         desc_k = k
         desc_o = o
 
-    # Defines how memory is allocated by triton
-    # Certain GPUs (e.g. Nvidia Hoppers and Blackwells) support TMA (Tensor Memory Accelerator)
-    # TMA is hardware support for async data movement between global and shared memory
-    # Basically the relevant memory addresses are calculated by dedicated hardware instead of registers
-    # This frees up threads and registers to do other computations
-    # TMA requires global memory allocations, so we set the alloc_fn here
-    def alloc_fn(size: int, align: int, _):
-        return torch.empty(size, dtype=torch.int8, device="cuda")
-
-    triton.set_allocator(alloc_fn)
-
     return desc_q, desc_k, desc_v, desc_o, extra_kern_args
 
 
@@ -810,6 +857,7 @@ class TritonAttention(torch.autograd.Function):
         assert not (causal and window > 0), "causal and window not supported in combination"
 
         M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        L = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
 
@@ -824,7 +872,8 @@ class TritonAttention(torch.autograd.Function):
 
         _attn_fwd[grid](
             sm_scale,
-            M,  #
+            M, 
+            L,
             q.shape[0],
             q.shape[1],  #
             desc_q,
@@ -839,7 +888,7 @@ class TritonAttention(torch.autograd.Function):
             **extra_kern_args,
         )
 
-        ctx.save_for_backward(q, k, v, o, M)
+        ctx.save_for_backward(q, k, v, o, M, L)
         ctx.sm_scale = sm_scale
         ctx.causal = causal
         ctx.window = window
@@ -847,7 +896,7 @@ class TritonAttention(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do):
-        q, k, v, o, M = ctx.saved_tensors
+        q, k, v, o, M, L= ctx.saved_tensors
 
         if do.shape == o.shape and do.stride() != o.stride():
             do = do.reshape(o.shape)
@@ -860,8 +909,8 @@ class TritonAttention(torch.autograd.Function):
         BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
 
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
-        k = k * (ctx.sm_scale * RCP_LN2)
-        PRE_BLOCK = 128
+        k = k * (ctx.sm_scale * RCP_LN2) # TODO move to kernel
+        PRE_BLOCK = 16
         assert N_CTX % PRE_BLOCK == 0
         pre_grid = (N_CTX // PRE_BLOCK, BATCH * N_HEAD)
         delta = torch.empty_like(M)
@@ -891,6 +940,7 @@ class TritonAttention(torch.autograd.Function):
             desc_dk,
             desc_dv,
             M,
+            L,
             delta,  #
             ctx.sm_scale,
             Z=BATCH,
