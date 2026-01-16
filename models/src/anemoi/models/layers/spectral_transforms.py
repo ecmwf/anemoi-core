@@ -73,18 +73,18 @@ class FFT2D(SpectralTransform):
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = data[:, :, self.nodes_slice, :]
-        batch_size, ens, _, var = data.shape
-        assert data.shape[2] == self.x_dim * self.y_dim, (
-            f"Input data spatial dimension {data.shape[2]} does not match expected "
-            f"size {self.x_dim * self.y_dim} from x_dim and y_dim"
+        data = torch.index_select(
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
         )
-        # [batch, ens, y*x, variables] -> [batch*ens*variables, y, x]
-        # TODO (Ophelia): edit this when multi ouptuts get merged
-        data = einops.rearrange(data, "b e (y x) v -> (b e v) y x", x=self.x_dim, y=self.y_dim)
-        fft_data = torch.fft.fft2(data)
-        # [batch**ens*variables, y, x] -> [batch, ens y, x, variables]
-        return einops.rearrange(fft_data, "(b e v) y x -> b e y x v", b=batch_size, e=ens, v=var)
+        var = data.shape[-1]
+        try:
+            data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+        except Exception as e:
+            raise einops.EinopsError(
+                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
+                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
+            ) from e
+        return torch.fft.fft2(data, dim=(-2, -3))
 
 
 class DCT2D(SpectralTransform):
@@ -99,23 +99,15 @@ class DCT2D(SpectralTransform):
             from torch_dct import dct_2d
         except ImportError:
             raise ImportError("torch_dct is required for DCT2D transform. ")
-        b, e, points, v = data.shape
-        assert points == self.x_dim * self.y_dim
-
-        x = einops.rearrange(
-            data,
-            "b e (y x) v -> (b e v) y x",
-            x=self.x_dim,
-            y=self.y_dim,
-        )
-        x = dct_2d(x)
-        return einops.rearrange(
-            x,
-            "(b e v) y x -> b e y x v",
-            b=b,
-            e=e,
-            v=v,
-        )
+        var = data.shape[-1]
+        try:
+            x = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+        except Exception as e:
+            raise einops.EinopsError(
+                f"Possible dimension mismatch in einops.rearrange in DCT2D layer: "
+                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
+            ) from e
+        return dct_2d(x, dim=(-2, -3))
 
 
 class SHT(SpectralTransform):
@@ -164,8 +156,9 @@ class CartesianSHT(SHT):
         self.x_freq = self._sht.mmax
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        # TODO (Ophelia): change this when multi outputs get merged
-        data = data[:, :, self.nodes_slice, :]
+        data = torch.index_select(
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
+        )
 
         if self.nodes_slice != slice(0, None):
             raise NotImplementedError(
@@ -210,8 +203,9 @@ class OctahedralSHT(SHT):
         self.x_freq = self._sht.mmax
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        # TODO (Ophelia): change this when multi outputs get merged
-        data = data[:, :, self.nodes_slice, :]
+        data = torch.index_select(
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
+        )
 
         if self.nodes_slice != slice(0, None):
             raise NotImplementedError(
@@ -261,7 +255,9 @@ class EcTransOctahedralSHT(SHT):
         self._expected_points = int(self._sht.n_grid_points)
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        data = data[:, :, self.nodes_slice, :]
+        data = torch.index_select(
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
+        )
         _, _, points, _ = data.shape
         assert points == self._expected_points, (
             f"Input data spatial dimension {points} does not match expected "
