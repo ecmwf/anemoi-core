@@ -15,7 +15,6 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch.utils.checkpoint import checkpoint
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
@@ -28,6 +27,7 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
 
 
@@ -41,6 +41,7 @@ class BaseProcessor(nn.Module, ABC):
         num_channels: int,
         num_chunks: int,
         cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
         layer_kernels: DotDict,
         **kwargs,
     ) -> None:
@@ -56,6 +57,8 @@ class BaseProcessor(nn.Module, ABC):
             Number of chunks of the processor. The num_chunks and num_layers, defines how many layers are grouped together for checkpointing, i.e. chunk_size = num_layers/ num_chunks.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
+        gradient_checkpointing : bool
+            Whether to enable gradient checkpointing, by default True
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
@@ -68,6 +71,7 @@ class BaseProcessor(nn.Module, ABC):
         self.num_chunks = num_chunks
         self.chunk_size = num_layers // num_chunks
         self.num_channels = num_channels
+        self.gradient_checkpointing = gradient_checkpointing
 
         self.layer_factory = load_layer_kernels(layer_kernels)
 
@@ -100,9 +104,16 @@ class BaseProcessor(nn.Module, ABC):
         return data
 
     def run_layers(self, data: tuple, *args, **kwargs) -> tuple:
-        """Run Layers with checkpoints around chunks."""
+        """Run Layers with optional checkpoints around chunks."""
         for chunk_start in range(0, self.num_layers, self.chunk_size):
-            data = checkpoint(self.run_layer_chunk, chunk_start, data, *args, **kwargs, use_reentrant=False)
+            data = maybe_checkpoint(
+                self.run_layer_chunk,
+                self.gradient_checkpointing,
+                chunk_start,
+                data,
+                *args,
+                **kwargs,
+            )
 
         return data
 
