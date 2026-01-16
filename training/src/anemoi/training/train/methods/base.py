@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
 
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -568,7 +569,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return self.loss[dataset_name](
             y_pred,
             y,
-            grid_shard_slice=grid_shard_slice,
+            grid_shard_slice=(
+                grid_shard_slice
+                if isinstance(grid_shard_slice, slice)
+                else (grid_shard_slice[dataset_name] if grid_shard_slice is not None else None)
+            ),
             group=self.model_comm_group,
         )
 
@@ -625,8 +630,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
-            Loss and metrics dictionary (if validation_mode)
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
+            Loss, metrics dictionary (if validation_mode), and full predictions
         """
         # Prepare tensors for loss/metrics computation
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -695,7 +700,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
 
-            total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
+            if dataset_loss is not None:
+                dataset_loss_sum = dataset_loss.sum()  # collapse potential multi-scale loss
+                total_loss = dataset_loss_sum if total_loss is None else total_loss + dataset_loss_sum
+
+                if validation_mode:
+                    loss_obj = self.loss[dataset_name]
+                    loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
+                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = dataset_loss
 
             # Prefix dataset name to metric keys
             for metric_name, metric_value in dataset_metrics.items():
@@ -886,7 +898,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for metric_name, metric in metrics_dict.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(y_pred_postprocessed, y_postprocessed)
+                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(
+                    y_pred_postprocessed,
+                    y_postprocessed,
+                    grid_shard_slice=grid_shard_slice,
+                    model_comm_group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_shapes=self.grid_shard_shapes,
+                )
                 continue
 
             for mkey, indices in val_metric_ranges.items():
@@ -904,17 +924,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     scaler_indices=[..., indices],
                     grid_shard_slice=grid_shard_slice,
                     group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_shapes=self.grid_shard_shapes,
                 )
 
         return metrics
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         del batch_idx
-
-        train_loss, *_ = self._step(batch)
-
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
+
+        train_loss, *_ = self._step(batch)
+        train_loss = train_loss.sum()
 
         self.log(
             "train_" + self._get_loss_name() + "_loss",
@@ -943,11 +966,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         del batch_idx
 
-        with torch.no_grad():
-            val_loss, metrics, *args = self._step(batch, validation_mode=True)
-
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
+
+        with torch.no_grad():
+            val_loss_scales, metrics, *args = self._step(batch, validation_mode=True)
+        val_loss = val_loss_scales.sum()
 
         self.log(
             "val_" + self._get_loss_name() + "_loss",
@@ -960,17 +984,34 @@ class BaseGraphModule(pl.LightningModule, ABC):
             sync_dist=True,
         )
 
+        if val_loss_scales.numel() > 1:
+            for scale in range(val_loss_scales.numel()):
+                self.log(
+                    "val_" + self.loss.name + "_loss" + "_scale_" + str(scale),
+                    val_loss_scales[scale],
+                    on_epoch=True,
+                    on_step=True,
+                    prog_bar=False,
+                    logger=self.logger_enabled,
+                    batch_size=batch_size,
+                    sync_dist=True,
+                )
+
         for mname, mvalue in metrics.items():
-            self.log(
-                "val_" + mname,
-                mvalue,
-                on_epoch=True,
-                on_step=False,
-                prog_bar=False,
-                logger=self.logger_enabled,
-                batch_size=batch_size,
-                sync_dist=True,
-            )
+            for scale in range(mvalue.numel()):
+
+                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
+
+                self.log(
+                    "val_" + mname + "_scale_" + str(scale),
+                    log_val,
+                    on_epoch=True,
+                    on_step=False,
+                    prog_bar=False,
+                    logger=self.logger_enabled,
+                    batch_size=batch_size,
+                    sync_dist=True,
+                )
 
         return val_loss, *args
 

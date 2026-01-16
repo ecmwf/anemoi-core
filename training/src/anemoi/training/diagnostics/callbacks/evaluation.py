@@ -21,7 +21,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 class RolloutEval(Callback):
-    """Evaluates the model performance over a (longer) rollout window."""
+    """Evaluates the model performance over a (longer) rollout window.
+
+    Health warning: this callback runs only every ``every_n_batches`` validation batches,
+    so metrics are a sampled view of validation dates. Metrics are logged with
+    distributed synchronization.
+    """
 
     def __init__(self, config: OmegaConf, rollout: list[int] | ListConfig, every_n_batches: int) -> None:
         """Initialize RolloutEval callback.
@@ -83,7 +88,6 @@ class RolloutEval(Callback):
 
         loss_scales = loss
         loss = loss_scales.sum()
-
         pl_module.log(
             f"val_r{self.max_rollout}_{loss_name}",
             loss,
@@ -92,8 +96,7 @@ class RolloutEval(Callback):
             prog_bar=False,
             logger=pl_module.logger_enabled,
             batch_size=bs,
-            sync_dist=False,
-            rank_zero_only=True,
+            sync_dist=True,
         )
         if loss_scales.numel() > 1:
             for scale in range(loss_scales.numel()):
@@ -105,8 +108,7 @@ class RolloutEval(Callback):
                     prog_bar=False,
                     logger=pl_module.logger_enabled,
                     batch_size=bs,
-                    sync_dist=False,
-                    rank_zero_only=True,
+                    sync_dist=True,
                 )
 
         for mname, mvalue in metrics.items():
@@ -122,8 +124,7 @@ class RolloutEval(Callback):
                     prog_bar=False,
                     logger=pl_module.logger_enabled,
                     batch_size=bs,
-                    sync_dist=False,
-                    rank_zero_only=True,
+                    sync_dist=True,
                 )
 
     def on_validation_batch_end(
@@ -154,7 +155,12 @@ class RolloutEval(Callback):
 
 
 class RolloutEvalEns(RolloutEval):
-    """Evaluates the model performance over a (longer) rollout window."""
+    """Evaluates the model performance over a (longer) rollout window.
+
+    Health warning: this callback runs only every ``every_n_batches`` validation batches,
+    so metrics are a sampled view of validation dates. Metrics are logged with
+    distributed synchronization.
+    """
 
     def _eval(self, pl_module: pl.LightningModule, batch: dict[str, torch.Tensor]) -> None:
         """Rolls out the model and calculates the validation metrics.
