@@ -156,3 +156,16 @@ class TrajectoryDataset(BaseAnemoiReader):
         tree.add(f"Trajectory start: {self.trajectory_start}")
         tree.add(f"Trajectory length: {self.trajectory_length} steps")
         return tree
+
+
+def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
+    """Factory function to create dataset based on dataset configuration."""
+    trajectory_config = dataset_config.pop("trajectory", {})
+    if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
+        return TrajectoryDataset(
+            **dataset_config,
+            trajectory_start=trajectory_config["start"],
+            trajectory_length=trajectory_config["length"],
+        )
+
+    return NativeGridDataset(**dataset_config)

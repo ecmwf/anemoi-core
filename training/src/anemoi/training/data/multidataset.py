@@ -21,7 +21,7 @@ from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.usable_indices import get_usable_indices
-from anemoi.training.losses.loss import instantiate
+from anemoi.training.data.dataset import create_dataset
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
 
@@ -72,7 +72,7 @@ class MultiDataset(IterableDataset):
                 msg = f"No grid_indices configuration found for dataset '{name}'"
                 raise ValueError(msg)
 
-            self.datasets[name] = instantiate(data_reader)
+            self.datasets[name] = create_dataset(data_reader)
 
         # relative_date_indices are computed in terms of data frequency
         # data_relative_date_indices are in terms of the specific dataset

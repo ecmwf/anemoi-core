@@ -55,14 +55,12 @@ grid_indices:
 training:
   datasets:
     era5:
-      _target_: anemoi.training.data.dataset.NativeGridDataset
       dataset: ${system.input.dataset}
       start: 1985
       end: 2020
       frequency: ${data.frequency}
       drop: []
     cerra:
-      _target_: anemoi.training.data.dataset.NativeGridDataset
       dataset: ${system.input.dataset_b}  # Using same dataset as duplicate for testing
       start: 1985
       end: 2020
@@ -75,14 +73,12 @@ validation_rollout: 1 # number of rollouts to use for validation
 validation:
   datasets:
     era5:
-      _target_: anemoi.training.data.dataset.NativeGridDataset
       dataset: ${system.input.dataset}
       start: 2021
       end: 2021
       frequency: ${data.frequency}
       drop: []
     cerra:
-      _target_: anemoi.training.data.dataset.NativeGridDataset
       dataset: ${system.input.dataset_b}
       start: 2021
       end: 2021
@@ -93,14 +89,12 @@ validation:
 test:
   datasets:
     era5:
-      _target_: anemoi.training.data.dataset.NativeGridDataset
       dataset: ${system.input.dataset}
       start: 2022
       end: null
       frequency: ${data.frequency}
       drop: []
     cerra:
-      _target_: anemoi.training.data.dataset.NativeGridDataset
       dataset: ${system.input.dataset_b}
       start: 2022
       end: null
