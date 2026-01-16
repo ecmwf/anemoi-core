@@ -28,7 +28,6 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
-from anemoi.training.losses.spectral import SpectralLoss
 from anemoi.training.utils.enums import TensorDim
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
