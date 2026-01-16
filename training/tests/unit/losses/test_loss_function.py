@@ -364,6 +364,8 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
 
 
 def test_logfft2dist_loss() -> None:
+    import einops
+
     """Test that LogFFT2Distance can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
@@ -400,6 +402,8 @@ def test_logfft2dist_loss() -> None:
 
 
 def test_fcl_loss() -> None:
+    import einops
+
     # TODO (Ophelia): edit this when multi ouptuts get merged
     """Test that FourierCorrelationLoss can be instantiated and validates input shape."""
     loss = get_loss_function(
@@ -427,7 +431,7 @@ def test_fcl_loss() -> None:
     assert loss_total.numel() == 1, "Expected a single aggregated loss value"
 
     wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
-    with pytest.raises(AssertionError):
+    with pytest.raises(einops.EinopsError):
         _ = loss(*wrong, squash=True)
 
 
