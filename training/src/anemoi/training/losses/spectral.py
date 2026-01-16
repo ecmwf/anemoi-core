@@ -75,8 +75,6 @@ class SpectralLoss(BaseLoss):
             "dct2d",
         ] = "fft2d",
         *,
-        x_dim: int | None = None,
-        y_dim: int | None = None,
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -103,13 +101,6 @@ class SpectralLoss(BaseLoss):
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
         _ = scalers  # intentionally unused
         kwargs.pop("scalers", None)
-
-        # Let configs use x_dim/y_dim as top-level args for FFT2D while still allowing
-        # more explicit kwargs if desired.
-        if x_dim is not None:
-            kwargs.setdefault("x_dim", x_dim)
-        if y_dim is not None:
-            kwargs.setdefault("y_dim", y_dim)
 
         if transform == "fft2d":
             self.transform = FFT2D(**kwargs)
