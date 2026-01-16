@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+
 def _ensure_without_scalers_has_grid_dimension(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
     """Temporary fix for https://github.com/ecmwf/anemoi-core/issues/725.
 
