@@ -26,7 +26,7 @@ class SpectralTransform(abc.ABC):
     """Abstract base class for spectral transforms."""
 
     @abc.abstractmethod
-    def forward(
+    def __call__(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
