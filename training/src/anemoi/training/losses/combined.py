@@ -119,13 +119,15 @@ class CombinedLoss(BaseLoss):
         if loss_weights is None:
             loss_weights = (1.0,) * len(losses)
 
+        data_indices = kwargs.pop("data_indices", None)
+
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
         for i, loss in enumerate(losses):
             if isinstance(loss, DictConfig | dict):
                 self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
-                self.losses.append(get_loss_function(loss, scalers={}, **dict(kwargs)))
+                self.losses.append(get_loss_function(loss, scalers={}, data_indices=data_indices, **dict(kwargs)))
             elif isinstance(loss, type):
                 self._loss_scaler_specification[i] = ["*"]
                 self.losses.append(loss(**kwargs))

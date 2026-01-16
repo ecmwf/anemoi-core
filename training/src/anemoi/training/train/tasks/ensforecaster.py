@@ -209,7 +209,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
 
-            y = batch[:, self.multi_step + rollout_step, 0, :, self.data_indices.data.output.full]
+            y = batch[:, self.multi_step + rollout_step, 0, ...]
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 
