@@ -22,11 +22,11 @@ from anemoi.models.layers.spectral_helpers import OctahedralRealSHT
 LOGGER = logging.getLogger(__name__)
 
 
-class SpectralTransform(abc.ABC):
+class SpectralTransform(torch.nn.Module):
     """Abstract base class for spectral transforms."""
 
     @abc.abstractmethod
-    def __call__(
+    def forward(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:

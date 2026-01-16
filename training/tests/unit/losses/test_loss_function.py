@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import einops
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -27,6 +28,7 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.spectral import SpectralLoss
 from anemoi.training.utils.enums import TensorDim
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
@@ -395,7 +397,7 @@ def test_logfft2dist_loss() -> None:
 
     # wrong grid size should fail (FFT2D reshape/assert)
     wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
-    with pytest.raises(AssertionError):
+    with pytest.raises(einops.EinopsError):
         _ = loss(*wrong, squash=True)
 
 

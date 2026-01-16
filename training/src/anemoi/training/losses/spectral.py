@@ -15,8 +15,9 @@ This module consolidates spectral losses that were historically split across
 Notes
 -----
 * These losses operate on tensors whose *spatial* dimension is flattened
-  (i.e. `(..., grid, variables)`), and internally reshape for FFT2D or use
-  the appropriate SHT for spherical grids.
+  (i.e. `(..., grid, variables)`), and internally reshape to 2D grids for FFT2D.
+* For backwards compatibility, legacy class names (e.g. ``LogFFT2Distance``)
+  are kept.
 """
 
 from __future__ import annotations
@@ -43,11 +44,10 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-
-def _ensure_without_scalers_has_2(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
+def _ensure_without_scalers_has_grid_dimension(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
     """Temporary fix for https://github.com/ecmwf/anemoi-core/issues/725.
 
-    Some pipelines pass numeric scaler indices and rely on excluding scaler index 2
+    Some pipelines pass numeric scaler indices and rely on excluding scalers over grid dimension
     by default. Ensure this exclusion is present for numeric lists.
     """
     if without_scalers is None:
@@ -87,7 +87,8 @@ class SpectralLoss(BaseLoss):
         transform
             Spectral transform type.
         x_dim, y_dim
-            2D grid shape (required for FFT2D). Kept for backwards compatibility.
+            2D grid shape (required for FFT2D). Stored on the loss instance for
+            backwards compatibility and for test assertions.
         ignore_nans
             Whether to ignore NaNs in the loss computation.
         scalers
@@ -163,7 +164,7 @@ class SpectralL2Loss(SpectralLoss):
         result = self.scale(
             diff,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group)
@@ -198,7 +199,7 @@ class LogSpectralDistance(SpectralLoss):
         result = self.scale(
             log_diff**2,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
         return torch.sqrt(self.reduce(result, squash=squash, group=group) + eps)
@@ -230,7 +231,7 @@ class FourierCorrelationLoss(SpectralLoss):
         cross = self.scale(
             cross,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
         numerator = 0.5 * torch.sum(cross, dim=TensorDim.GRID.value, keepdim=True)
@@ -350,7 +351,7 @@ class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
         scaled = self.scale(
             crps,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(scaled, squash=squash, group=group)
