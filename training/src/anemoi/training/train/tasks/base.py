@@ -26,6 +26,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -35,8 +36,6 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -545,7 +544,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return self.loss[dataset_name](
             y_pred,
             y,
-            grid_shard_slice=grid_shard_slice[dataset_name] if grid_shard_slice is not None else None,
+            grid_shard_slice=(
+                grid_shard_slice
+                if type(grid_shard_slice) == slice
+                else (grid_shard_slice[dataset_name] if grid_shard_slice is not None else None)
+            ),
             group=self.model_comm_group,
         )
 
@@ -1026,7 +1029,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # The conditions should be separate, but are combined due to pre-commit hook
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
             # Log hyperparameters on rank 0
-            hyper_params = OmegaConf.to_container(convert_to_omegaconf(self.config), resolve=True)
+            hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)

@@ -17,10 +17,10 @@ from torch.utils.data import DataLoader
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.worker_init import worker_init_func
 
 LOGGER = logging.getLogger(__name__)
@@ -83,14 +83,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def data_indices(self) -> dict[str, IndexCollection]:
         """Return data indices for each dataset."""
-        from anemoi.training.utils.config_utils import get_dataset_data_config
-
         indices = {}
+        data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name in self.dataset_names:
             name_to_index = self.ds_train.name_to_index[dataset_name]
             # Get dataset-specific data config
-            data_config = get_dataset_data_config(self.config, dataset_name)
-            indices[dataset_name] = IndexCollection(data_config, name_to_index)
+            indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
 
     def relative_date_indices(self, val_rollout: int = 1) -> list:

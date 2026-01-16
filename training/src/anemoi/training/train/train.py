@@ -29,6 +29,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -39,7 +40,6 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -183,7 +183,7 @@ class AnemoiTrainer(ABC):
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
         graphs = {}
-        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
+        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
         for dataset_name, dataset_config in dataset_configs.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
             graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
@@ -361,7 +361,7 @@ class AnemoiTrainer(ABC):
             "dataset": None,  # will be populated in DataModule
             "data_indices": None,  # will be populated in DataModule
             "provenance_training": gather_provenance_info(),
-            "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
+            "timestamp": datetime.datetime.now(tz=datetime.UTC),
             "metadata_inference": metadata_inference,
             "uuid": None,  # will be populated in checkpoint callback
         }
@@ -401,18 +401,15 @@ class AnemoiTrainer(ABC):
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
-        # Log number of variables (features)
-        # Multi-dataset case: log per dataset
-        from anemoi.training.utils.config_utils import get_dataset_data_config
-
+        # Log number of variables (features) per dataset
         for dataset_name, data in self.datamodule.ds_train.data.items():
-            dataset_data_config = get_dataset_data_config(self.config, dataset_name)
-            num_fc_features = len(data.variables) - len(dataset_data_config.forcing)
+            num_forcing_features = len(self.data_indices[dataset_name].forcing)
+            num_fc_features = len(data.variables) - num_forcing_features
             LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
             LOGGER.info(
                 "Dataset '%s' - Total number of auxiliary variables: %d",
                 dataset_name,
-                len(dataset_data_config.forcing),
+                num_forcing_features,
             )
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node
