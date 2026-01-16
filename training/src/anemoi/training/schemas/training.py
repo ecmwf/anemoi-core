@@ -12,6 +12,7 @@ from functools import partial
 from typing import Annotated
 from typing import Any
 from typing import Literal
+from typing import Self
 
 from pydantic import AfterValidator
 from pydantic import BaseModel as PydanticBaseModel
@@ -22,7 +23,6 @@ from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 from pydantic import field_validator
 from pydantic import model_validator
-from typing_extensions import Self
 
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
