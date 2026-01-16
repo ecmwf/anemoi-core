@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-import einops
 import pytest
 import torch
 from omegaconf import DictConfig
