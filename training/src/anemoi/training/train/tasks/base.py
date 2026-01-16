@@ -668,7 +668,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
 
-            total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
+            if dataset_loss is not None:
+                dataset_loss_sum = dataset_loss.sum()  # collapse potential multi-scale loss
+                total_loss = dataset_loss_sum if total_loss is None else total_loss + dataset_loss_sum
+
+                if validation_mode:
+                    loss_obj = self.loss[dataset_name]
+                    loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
+                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = dataset_loss
 
             # Prefix dataset name to metric keys
             for metric_name, metric_value in dataset_metrics.items():
