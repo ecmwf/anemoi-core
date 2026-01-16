@@ -15,7 +15,6 @@ from abc import abstractmethod
 from typing import Optional
 
 import einops
-import numpy as np
 import torch
 from torch import Tensor
 from torch import nn
@@ -32,9 +31,8 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.khop_edges import bipartite_subgraph
 from anemoi.models.distributed.khop_edges import drop_unconnected_src_nodes
-from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
-from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvMapperBlock
