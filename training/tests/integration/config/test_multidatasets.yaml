@@ -1,19 +1,52 @@
 # Modifications for the basic template "config.yaml"
 system:
   input:
-    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
     dataset_b: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
 
 dataloader:
   training:
     datasets:
       era5:
-        end: 1979-01-08 12:00:00
+        end: 2017-01-08 12:00:00
       cerra:
-        end: 1979-01-08 12:00:00
+        end: 2017-01-08 12:00:00
   validation:
     datasets:
       era5:
-        start: 1979-01-08 18:00:00
+        start: 2017-01-08 18:00:00
       cerra:
-        start: 1979-01-08 18:00:00
+        start: 2017-01-08 18:00:00
+
+data:
+  datasets:
+    cerra:
+      forcing:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      diagnostic:
+      - "tp"
+
+      processors:
+        normalizer:
+          config:
+            default: "mean-std"
+            std:
+            - "tp"
+            min-max:
+            max:
+            none:
+            - "cos_latitude"
+            - "cos_longitude"
+            - "sin_latitude"
+            - "sin_longitude"
+            - "cos_julian_day"
+            - "cos_local_time"
+            - "sin_julian_day"
+            - "sin_local_time"
