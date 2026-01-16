@@ -141,7 +141,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         loss = self._compute_loss(
             y_pred_ens,
             y,
-            grid_shard_slice=self.grid_shard_slice,
+            grid_shard_slice=self.grid_shard_slice[dataset_name],
             grid_dim=self.grid_dim,
             grid_shard_shape=self.grid_shard_shapes,
             dataset_name=dataset_name,
