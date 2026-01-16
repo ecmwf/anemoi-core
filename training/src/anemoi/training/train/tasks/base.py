@@ -35,7 +35,6 @@ from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 
 LOGGER = logging.getLogger(__name__)
@@ -546,7 +546,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y,
             grid_shard_slice=(
                 grid_shard_slice
-                if type(grid_shard_slice) == slice
+                if isinstance(grid_shard_slice, slice)
                 else (grid_shard_slice[dataset_name] if grid_shard_slice is not None else None)
             ),
             group=self.model_comm_group,
@@ -673,7 +673,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
 
-            total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
+            if dataset_loss is not None:
+                dataset_loss_sum = dataset_loss.sum()  # collapse potential multi-scale loss
+                total_loss = dataset_loss_sum if total_loss is None else total_loss + dataset_loss_sum
+
+                if validation_mode:
+                    loss_obj = self.loss[dataset_name]
+                    loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
+                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = dataset_loss
 
             # Prefix dataset name to metric keys
             for metric_name, metric_value in dataset_metrics.items():
