@@ -153,7 +153,9 @@ class AnemoiTrainer(ABC):
                 from anemoi.graphs.utils import get_distributed_device
 
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+                print('JE SUIS LA DEVICE UTILISÉE DEBUG',get_distributed_device())
+                # return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+                return torch.load(graph_filename, map_location='cpu', weights_only=False)
 
         else:
             graph_filename = None
@@ -481,7 +483,7 @@ class AnemoiTrainer(ABC):
             deterministic=self.config.training.deterministic,
             detect_anomaly=self.config.diagnostics.debug.anomaly_detection,
             strategy=self.strategy,
-            devices=self.config.hardware.num_gpus_per_node * self.config.hardware.num_nodes,
+            devices=self.config.hardware.num_gpus_per_node,
             num_nodes=self.config.hardware.num_nodes,
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,
