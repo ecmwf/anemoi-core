@@ -844,7 +844,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
 
         scheduler = scheduler_cls(**noise_scheduler_config)
-
         sigmas = scheduler.get_schedule(x.device, torch.float64)
 
         # Initialize output with noise

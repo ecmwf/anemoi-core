@@ -83,7 +83,7 @@ hardware:
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
     graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
-  num_gpus_per_node: 4
+  num_gpus_per_node: 16
   num_gpus_per_model: 2
   num_nodes: 1
 training:
