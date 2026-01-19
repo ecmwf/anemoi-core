@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 from __future__ import annotations
-from lightning_utilities.core.rank_zero import rank_zero_info
 
 import logging
 from typing import TYPE_CHECKING
@@ -207,5 +206,4 @@ class GraphForecaster(BaseGraphModule):
             y_preds.append(y_preds_next)
 
         loss *= 1.0 / self.rollout
-        rank_zero_info('[DEBUG] dans _step de graphforecaster')
         return loss, metrics, y_preds

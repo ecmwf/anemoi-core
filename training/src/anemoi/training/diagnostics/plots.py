@@ -7,12 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from lightning_utilities.core.rank_zero import rank_zero_info
 
 import logging
 from dataclasses import dataclass
-from lightning_utilities.core.rank_zero import rank_zero_info
-import torch 
 import datashader as dsh
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -36,7 +33,6 @@ from torch import nn
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-import torch 
 LOGGER = logging.getLogger(__name__)
 
 continents = Coastlines()
@@ -432,8 +428,6 @@ def plot_predicted_multilevel_flat_sample_unconditional(
         The figure object handle.
 
     """
-    rank_zero_info("[DEBUG] : on passe dans plot_predicted_multilevel_flat_sample_unconditional")
-    rank_zero_info(f"[DEBUG] : len(paramaters={len(parameters)} and n_plots_per_sample={n_plots_per_sample})")
     n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
@@ -516,7 +510,6 @@ def plot_flat_sample_unconditional(
     -------
     None
     """
-    rank_zero_info("[DEBUG] : on passe dans plot_flat_sample_unconditional")
     precip_and_related_fields = precip_and_related_fields or []
     if vname in precip_and_related_fields:
         # converting to mm from m
@@ -612,7 +605,6 @@ def plot_predicted_multilevel_flat_sample(
         The figure object handle.
 
     """
-    rank_zero_info("[DEBUG] : on passe dans plot_predicted_multilevel_flat_sample")
     n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
@@ -704,7 +696,6 @@ def plot_flat_sample(
     -------
     None
     """
-    rank_zero_info("[DEBUG] : on passe dans plot_flat_sample")
     precip_and_related_fields = precip_and_related_fields or []
     if vname in precip_and_related_fields:
         # converting to mm from m

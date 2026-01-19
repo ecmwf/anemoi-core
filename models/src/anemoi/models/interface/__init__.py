@@ -17,7 +17,6 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.utils.config import DotDict
-from anemoi.utils.config import load_config
 
 class AnemoiModelInterface(torch.nn.Module):
     """An interface for Anemoi models.
@@ -85,11 +84,9 @@ class AnemoiModelInterface(torch.nn.Module):
             [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)]
             for name, processor in self.config.data.processors.items()
         ]
-        print("BUILKD MODEL :")
         # Assign the processor list pre- and post-processors
         self.pre_processors = Processors(processors)
         self.post_processors = Processors(processors, inverse=True)
-        print("pre processors : ", self.pre_processors)
         # If tendencies statistics are provided, instantiate the tendencies processors
         if self.statistics_tendencies is not None:
             processors = [
@@ -138,7 +135,7 @@ class AnemoiModelInterface(torch.nn.Module):
         torch.Tensor
             Predicted data.
         """
-        print("on passe dans anemoiModelInterface")
+
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
             "batch": batch,
@@ -148,26 +145,11 @@ class AnemoiModelInterface(torch.nn.Module):
             "model_comm_group": model_comm_group,
         }
 
-        inference_cfg = load_config(name = "/home/users/u102751/code/anemoi/anemoi-inference/src/anemoi/inference/config_test.yaml")
-        print("config chargée :", inference_cfg)
         # Add tendency processors if they exist
         if hasattr(self, "pre_processors_tendencies"):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
             predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
 
-        # noise_scheduler_params = inference_cfg.noise_scheduled_params
-        # print("type de noise scheduler ", type(noise_scheduler_params))
-        # print("noise scheduler params dans inference cfg :", noise_scheduler_params)
-        kwargs = {
-            "noise_scheduler_config" : {
-                 "schedule_type": "karras",
-                 "sigma_max": 100.0,
-                 "sigma_min": 0.02,
-                 "rho": 7.0,
-                 "num_steps": 50,
-                 "num_steps_sdedit": 25,
-                 "SDEdit": True,}
-        }
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)

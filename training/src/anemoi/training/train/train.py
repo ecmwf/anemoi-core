@@ -481,7 +481,7 @@ class AnemoiTrainer(ABC):
             deterministic=self.config.training.deterministic,
             detect_anomaly=self.config.diagnostics.debug.anomaly_detection,
             strategy=self.strategy,
-            devices=self.config.hardware.num_gpus_per_node * self.config.hardware.num_nodes,
+            devices=self.config.hardware.num_gpus_per_node,
             num_nodes=self.config.hardware.num_nodes,
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,

@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from lightning_utilities.core.rank_zero import rank_zero_info
 
 import asyncio
 import copy
@@ -944,9 +943,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         outputs: list,
         batch: torch.Tensor,
     ) -> tuple[np.ndarray, np.ndarray]:
-        rank_zero_info("[DEBUG] on passe dans le process de BASEPLOT ADD")
+        
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
+        
         input_tensor = (
             batch[
                 :,
@@ -1033,7 +1033,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         epoch: int,
     ) -> None:
         logger = trainer.logger
-        print('JE PASSE PAR PLOT SAMPLE UNCOccNDITIONNAL ')
 
         # Build dictionary of indices and parameters to be plotted
         diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic

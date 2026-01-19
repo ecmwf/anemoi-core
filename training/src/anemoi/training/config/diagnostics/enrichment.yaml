@@ -1,61 +1,16 @@
-eval:
-  enabled: False
-  # use this to evaluate the model over longer rollouts, every so many validation batches
-  rollout: 1 #set to 1 because enrichment
-  frequency: 20
-
+---
 defaults:
-  - plot: detailed
+  - plot: detailed_uncond
   - callbacks: placeholder
   - benchmark_profiler: detailed
 
-plot:
-  enabled: False  # plot should NOT be enabled when using diffusion (not handled yet)
-  asynchronous: False #if True, training does not close 
-  frequency: 500
-  sample_idx: 0
-  per_sample: 6
-  parameters:
-    - z_500
-    - t_850
-    - u_850
-    - v_850
-    - 2t
-    - 10u
-    - 10v
-    - sp
-    - tp
-  #Defining the accumulation levels for precipitation related fields and the colormap
-  accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
-  cmap_accumulation: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
-  precip_and_related_fields: [tp]
-  # Histogram and Spectrum plots
-  parameters_histogram:
-    - z_500
-    - tp
-    - 2t
-    - 10u
-    - 10v
-  parameters_spectrum:
-    - z_500
-    - tp
-    - 2t
-    - 10u
-    - 10v
-  # group parameters by categories when visualizing contributions to the loss
-  # one-parameter groups are possible to highlight individual parameters
-  parameter_groups:
-    moisture: [tp, tcwv]
-    sfc_wind: [10u, 10v]
-  learned_features: False
+# another alternative if you don't have any callbacks is to remove it from the
+# defaults list and just use
+# callbacks: []
 
 debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training
   anomaly_detection: False
-
-# activate the pytorch profiler (disable this in production)
-# remember to also activate the tensorboard logger (below)
-profiler: False
 
 enable_checkpointing: True
 checkpoint:
@@ -74,9 +29,9 @@ checkpoint:
 log:
   wandb:
     enabled: False
-    offline: True
+    offline: False
     log_model: False
-    project: 'DE371'
+    project: 'Anemoi'
     entity: ???
     # logger options (these probably come with some overhead)
     gradients: False
@@ -84,18 +39,22 @@ log:
   tensorboard:
     enabled: False
   mlflow:
-    enabled: True
-    offline: True
-    authentication: True
-    log_model: False
-    tracking_uri: https://mlflow.ecmwf.int
-    project_name: 'DE371'
-    experiment_name: 'DE371-eval'
-    run_name: to_delete # If set to null, the run name will be the a random UUID
-    system: True
+    enabled: False
+    offline: False
+    authentication: False
+    tracking_uri: ???
+    experiment_name: 'anemoi-debug'
+    project_name: 'Anemoi'
+    system: False
     terminal: True
+    run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True
-  interval: 100
+    expand_hyperparams: # Which keys in hyperparams to expand
+      - config
+    http_max_retries: 35
+    max_params_length: 2000
+  interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True
+check_val_every_n_epoch: 1
 print_memory_summary: False

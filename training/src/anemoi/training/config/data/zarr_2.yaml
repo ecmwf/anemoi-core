@@ -25,6 +25,7 @@ forcing:
 diagnostic:
 - "tp"
 - "cp"
+- "sp"
 normalizer:
   default: "mean-std"
 
@@ -40,8 +41,8 @@ normalizer:
   # zero value in the normalized space.
   std:
   - "tp"
-  # - "cp"
-
+  - "cp"
+  - "sp"
   
   min-max:
   max:

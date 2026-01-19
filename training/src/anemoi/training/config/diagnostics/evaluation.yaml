@@ -1,6 +1,6 @@
 ---
 defaults:
-  - plot: detailed_uncond
+  - plot: detailed
   - callbacks: placeholder
   - benchmark_profiler: detailed
 

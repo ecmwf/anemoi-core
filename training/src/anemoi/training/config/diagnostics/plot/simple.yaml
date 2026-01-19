@@ -15,6 +15,7 @@ parameters:
 - 10v
 - sp
 - tp
+- cp
 
 # Sample index
 sample_idx: 0

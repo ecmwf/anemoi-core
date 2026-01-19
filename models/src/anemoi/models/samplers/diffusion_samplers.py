@@ -12,7 +12,6 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Callable
 from typing import Optional
-from lightning_utilities.core.rank_zero import rank_zero_info
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -213,7 +212,6 @@ class EDMHeunSampler(DiffusionSampler):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
-
         # Override instance defaults with any kwargs
         S_churn = kwargs.get("S_churn", self.S_churn)
         S_min = kwargs.get("S_min", self.S_min)
@@ -225,7 +223,6 @@ class EDMHeunSampler(DiffusionSampler):
         batch_size, ensemble_size = x.shape[0], x.shape[2]
         num_steps = len(sigmas) - 1
         
-        print("inference number of steps: ", num_steps)
         # Heun sampling loop
         for i in range(num_steps):
             sigma_i = sigmas[i]
@@ -285,7 +282,6 @@ class DPMpp2MSampler(DiffusionSampler):
         **kwargs,
     ) -> torch.Tensor:
         # DPM++ sampler converts to x.dtype
-        rank_zero_info("[DEBUG] Le sample utilisé est le DMPp2Msapler")
         y = y.to(x.dtype)
         sigmas = sigmas.to(x.dtype)
 

@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-from lightning_utilities.core.rank_zero import rank_zero_info
 
 import logging
 from abc import ABC
@@ -707,7 +706,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         """
         del batch_idx
-        rank_zero_info("[DEBUG] dans validation step")
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(batch, validation_mode=True)
 

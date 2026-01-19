@@ -7,12 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
 import logging
 import warnings
 from typing import Callable
 from typing import Optional
 from typing import Union
-from lightning_utilities.core.rank_zero import rank_zero_info
 import einops
 import torch
 from hydra.utils import instantiate
@@ -28,7 +28,6 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
-import matplotlib.pyplot as plt 
 LOGGER = logging.getLogger(__name__)
 
 
@@ -114,19 +113,13 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         return mlp
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
-
-        # rank_zero_info("[DEBUG] : PASSAGE PAR ASSEMBLE INPUT")
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
-        # rank_zero_info(f"nodes attributes data shape {node_attributes_data.shape}")
         if grid_shard_shapes is not None:
 
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
-        # rank_zero_info(f"shape de x dans assemble input :, {x.shape}")
-        # rank_zero_info(f"shape de y_noised dans assemble_input :  {y_noised.shape}")
-        # rank_zero_info(f"time dans x : {x[0,:,0,0,0]}")
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
@@ -139,11 +132,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
-        # rank_zero_info(f"[DEBUG] x dans assemble input {x}")
         return x_data_latent, None, shard_shapes_data
 
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
-        # rank_zero_info("DEBUG: dans ASSEMBLE OUTPUT")
 
         x_out = einops.rearrange(
             x_out,
@@ -163,8 +154,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
         
-        # rank_zero_info("[DEBUG] : PASSAGE PAR generate noise conditioning")
-
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
 
@@ -206,7 +195,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         **kwargs,
     ) -> torch.Tensor:
       
-        rank_zero_info("[DEBUG]: on passe dans le forward")
         batch_size, ensemble_size = x.shape[0], x.shape[2]
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
@@ -275,7 +263,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         """Forward pass with pre-conditioning of EDM diffusion model."""
 
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
-        print("pendant l'inférence on passe dans le fwd de conditionnel, x", x)
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )  # calls forward ...
@@ -432,7 +419,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             assert (
                 len(batch.shape) == 4
             ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
-            print("shape de batch avant before sampling data dans predict step : ", batch.shape, batch)
             # Before sampling hook
             before_sampling_data, grid_shard_shapes = self._before_sampling(
                 batch,
@@ -445,7 +431,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             )
 
             x = before_sampling_data[0]
-            print("dans predict step après before sampling data x : ", x.shape)
             out = self.sample(
                 x,
                 model_comm_group,
@@ -508,21 +493,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         if noise_scheduler_params is not None:
             noise_scheduler_config.update(noise_scheduler_params)
 
-        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") #param de steps (dont sdedit) est dedans
-        print("noise_scheduler_config : ", noise_scheduler_config)
+        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") 
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
 
         if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
             raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
-        # print("actual_schedule type :", actual_schedule_type) : karras
-        print("noise scheduler config :", noise_scheduler_config) #: {'sigma_max': 100.0, 'sigma_min': 0.02, 'rho': 7.0, 'num_steps': 50}
         scheduler = scheduler_cls(**noise_scheduler_config)
-        # print("scheduler :", scheduler) : scheduler : <anemoi.models.samplers.diffusion_samplers.KarrasScheduler object at 0x14fd162cacd0>
         sigmas = scheduler.get_schedule(x.device, torch.float64)
-        # print("sigmas dans smaple enc proc dec", sigmas, sigmas.shape) : bruit décroissant (100 -> 0.02)
-        # print("si je prends un sigma un peu au hsard :", sigmas[-1]) : 0.02
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
         shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
@@ -530,54 +509,19 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
-        print('diffusion sampler config', diffusion_sampler_config)
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
         
-        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}") #param de sdedit est dedans.
+        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}") 
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
-        # rank_zero_info(f"[DEBUG] actual sampler utilisé : {actual_sampler} ")
         if actual_sampler not in diffusion_samplers.DIFFUSION_SAMPLERS:
             raise ValueError(f"Unknown sampler: {actual_sampler}")
-        
         
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
         
-        if diffusion_sampler_config['SDEdit']:
-            
-            forcings = self.data_indices["forcing"] #TODO faire une fonction qui permet de choisir les bons indices pour pas avoir à faire ça ici
-            # print(self.data_indices)
-            name_to_index = self.data_indices["name_to_index"]
-            idx_to_drop = torch.tensor([name_to_index[var] for var in forcings])
-            print("shape de idc to drop :", idx_to_drop.shape, idx_to_drop)
-            mask_idx = torch.ones(x.size(-1), dtype=torch.bool)
-            print("shape de mask idx ", mask_idx.shape)
-            # mask_idx[idx_to_drop] = False  
-            x_removed = x[:,0,:,:,mask_idx]
-            print("x drop : ", x.shape)
-            num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
-            num_steps = len(sigmas) #total number of denoising steps when not using sdedit
-            print(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
-            init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
-            # y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * init_sigma + x
-            sigmas = sigmas[num_steps - num_steps_sdedit :]
-            print('longueur de sigma : ', sigmas, len(sigmas))
-        # rank_zero_info(f"[DEBUG] dans sample d encprodec x no cond: {x_no_cond}")
-            C = x.shape[-1]
-            idx_remove = []
-            removed_names = []
-
-            for name in forcings:
-                if name in name_to_index:
-                    idx = name_to_index[name]
-                    if idx < C:   # évite l’index 78 si C=78
-                        idx_remove.append(idx)
-                        removed_names.append(name)
-
-            print("remove:", list(zip(removed_names, idx_remove)), len(idx_remove))
         return sampler_instance.sample(
             x,
             y_init,
@@ -622,16 +566,9 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
-        """
-        Forward pass inconditionnel :
-        - x : dummy input (souvent zéro)
-        - y_noised : target bruité
-        - sigma : niveau de bruit
-        """
         batch_size = x.shape[0]
         in_out_sharded = grid_shard_shapes is not None
 
-      
         self._assert_valid_sharding(batch_size, 1, in_out_sharded, model_comm_group)
 
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
@@ -694,108 +631,13 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
     ) -> torch.Tensor:
-        """
-        Forward pass avec préconditionnement EDM diffusion.
-        Identique au parent mais pour usage inconditionnel.
-        """
+       
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
         )
         D_x = c_skip * y_noised + c_out * pred
         return D_x
-
-    def predict_step(
-        self,
-        batch: torch.Tensor,
-        pre_processors: nn.Module,
-        post_processors: nn.Module,
-        multi_step: int,
-        model_comm_group: Optional[ProcessGroup] = None,
-        gather_out: bool = True,
-        noise_scheduler_params: Optional[dict] = None,
-        sampler_params: Optional[dict] = None,
-        pre_processors_tendencies: Optional[nn.Module] = None,
-        post_processors_tendencies: Optional[nn.Module] = None,
-        **kwargs,
-    ) -> torch.Tensor:
-        """Prediction step for flow/diffusion models - performs sampling.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Input batched data (before pre-processing)
-        pre_processors : nn.Module,
-            Pre-processing module
-        post_processors : nn.Module,
-            Post-processing module
-        multi_step : int,
-            Number of input timesteps
-        model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
-        gather_out : bool
-            Whether to gather output tensors across distributed processes
-        noise_scheduler_params : Optional[dict]
-            Dictionary of noise scheduler parameters (schedule_type, sigma_max, sigma_min, rho, num_steps, etc.)
-            These will override the default values from inference_defaults
-        sampler_params : Optional[dict]
-            Dictionary of sampler parameters (sampler, S_churn, S_min, S_max, S_noise, etc.)
-            These will override the default values from inference_defaults
-        pre_processors_tendencies : Optional[nn.Module]
-            Pre-processing module for tendencies (used by subclasses)
-        post_processors_tendencies : Optional[nn.Module]
-            Post-processing module for tendencies (used by subclasses)
-        **kwargs
-            Additional sampling parameters
-
-        Returns
-        -------
-        torch.Tensor
-            Sampled output (after post-processing)
-        """
-        print("noise_ scheduelr params = ", noise_scheduler_params)
-
-        with torch.no_grad():
-
-            assert (
-                len(batch.shape) == 4
-            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
-            # Before sampling hook
-            before_sampling_data, grid_shard_shapes = self._before_sampling(
-                batch,
-                pre_processors,
-                multi_step,
-                model_comm_group,
-                pre_processors_tendencies=pre_processors_tendencies,
-                post_processors_tendencies=post_processors_tendencies,
-                **kwargs,
-            )
-
-            x = before_sampling_data[0]
-            out = self.sample(
-                x,
-                model_comm_group,
-                grid_shard_shapes=grid_shard_shapes,
-                noise_scheduler_params=noise_scheduler_params,
-                sampler_params=sampler_params,
-                **kwargs,
-            ).to(x.dtype)
-
-            # After sampling hook
-            out = self._after_sampling(
-                out,
-                post_processors,
-                before_sampling_data,
-                model_comm_group,
-                grid_shard_shapes,
-                gather_out,
-                pre_processors_tendencies=pre_processors_tendencies,
-                post_processors_tendencies=post_processors_tendencies,
-                **kwargs,
-            )
-
-        return out
-
 
     def sample(
         self,
@@ -880,11 +722,10 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
                 warnings.warn(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
                 
                 init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
-                print("init sigma : ", init_sigma)
                 sigmas = sigmas[num_steps - num_steps_sdedit :]
                 y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
 
-        x = torch.zeros_like(x, device=x.device)
+        x = torch.zeros_like(x, device=x.device) #set condition to constant = 0 as in training
 
         return sampler_instance.sample(
             x,
@@ -969,7 +810,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         return input_dim
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
-
         x_trunc = x[:, -1, :, :, self._internal_input_idx]
         x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
         x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
