@@ -53,7 +53,7 @@ data:
 
 diagnostics:
   plot:
-    parameters: ["2t"]
+    parameters: ["tp"]
     datasets_to_plot: ["era5", "cerra"] # Default dataset names to use in the plot callbacks
     callbacks:
       - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
@@ -77,12 +77,10 @@ diagnostics:
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
-        parameters:
-        - 2t
+        parameters: ${diagnostics.plot.parameters}
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         precip_and_related_fields: []
-        parameters:
-        - 2t
+        parameters: ${diagnostics.plot.parameters}
