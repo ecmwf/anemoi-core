@@ -11,8 +11,8 @@
 import logging
 import os
 import warnings
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from functools import cached_property
 from pathlib import Path
 
@@ -55,7 +55,7 @@ class AnemoiProfiler(AnemoiTrainer):
     def print_metadata() -> None:
         console.print(f"[bold blue] SLURM NODE(s) {os.getenv('SLURM_JOB_NODELIST', '')} [/bold blue]!")
         console.print(f"[bold blue] SLURM JOB ID {os.getenv('SLURM_JOB_ID', '')} [/bold blue]!")
-        console.print(f"[bold blue] TIMESTAMP {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M:%S')} [/bold blue]!")
+        console.print(f"[bold blue] TIMESTAMP {datetime.now(UTC).strftime('%d/%m/%Y %H:%M:%S')} [/bold blue]!")
 
     @rank_zero_only
     def print_benchmark_profiler_report(
