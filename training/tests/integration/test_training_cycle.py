@@ -256,3 +256,14 @@ def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_
 def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
     cfg, _ = diffusion_config
     BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_out_diffusion(
+    multi_out_diffusion_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    cfg, url = multi_out_diffusion_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()

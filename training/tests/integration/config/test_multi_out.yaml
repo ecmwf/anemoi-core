@@ -3,9 +3,6 @@ system:
   input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
 
-data:
-  timestep: 12h
-
 dataloader:
   training:
     end: 1979-01-08 12:00:00
