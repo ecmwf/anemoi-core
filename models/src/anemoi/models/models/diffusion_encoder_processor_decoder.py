@@ -566,7 +566,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             statistics=statistics,
             graph_data=graph_data,
         )
-        assert self.multi_out == 1, "AnemoiDiffusionTendModelEncProcDec currently only supports single-output models!"
 
     def _calculate_input_dim(self):
         input_dim = super()._calculate_input_dim()
