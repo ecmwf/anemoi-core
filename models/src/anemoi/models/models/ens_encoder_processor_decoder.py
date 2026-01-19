@@ -108,7 +108,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         # just for the prognostic variables
         x_out[..., self._internal_output_idx] += einops.rearrange(
             x_skip,
-            "(batch ensemble) time grid var -> batch ensemble time grid var",
+            "(batch ensemble) time grid var -> batch time ensemble grid var",
             batch=batch_size,
         ).to(dtype=dtype)
 
