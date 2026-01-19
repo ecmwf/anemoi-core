@@ -599,11 +599,7 @@ class AnemoiTrainer:
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(
-    version_base=None,
-    config_path=os.path.join(os.environ.get("DEV"), "anemoi-config"),
-    config_name="debug",
-)
+@hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 
