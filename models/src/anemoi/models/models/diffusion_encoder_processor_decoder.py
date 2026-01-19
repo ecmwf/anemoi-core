@@ -28,7 +28,6 @@ from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
-from anemoi.training.utils.enums import TensorDim
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -98,7 +97,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             in_channels_src=self.num_channels,
             in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
-            out_channels_dst=self.num_output_channels,
+            out_channels_dst=self.output_dim,
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
@@ -106,7 +105,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def _calculate_input_dim(self):
         base_input_dim = super()._calculate_input_dim()
-        return base_input_dim + self.num_output_channels  # input + noised targets
+        output_dim = self._calculate_output_dim()
+        return base_input_dim + output_dim  # input + noised targets
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()
@@ -141,12 +141,13 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         x_out = einops.rearrange(
             x_out,
-            "(batch ensemble grid) vars -> batch ensemble grid vars",
+            "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
             batch=batch_size,
             ensemble=ensemble_size,
+            time=self.multi_out,
         ).to(dtype=dtype)
 
-        return x_out.unsqueeze(TensorDim.TIME)  # add time dim
+        return x_out
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
         out = einops.repeat(
@@ -513,8 +514,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         sigmas = scheduler.get_schedule(x.device, torch.float64)
 
         # Initialize output with noise
-        batch_size, time_size, ensemble_size, grid_size = x.shape[0], x.shape[1], x.shape[2], x.shape[-2]
-        shape = (batch_size, time_size, ensemble_size, grid_size, self.num_output_channels)
+        batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
+        shape = (batch_size, self.multi_out, ensemble_size, grid_size, self.num_output_channels)
         y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
@@ -565,10 +566,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             statistics=statistics,
             graph_data=graph_data,
         )
+        assert self.multi_out == 1, "AnemoiDiffusionTendModelEncProcDec currently only supports single-output models!"
 
     def _calculate_input_dim(self):
-        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        input_dim += self.num_output_channels  # noised targets
+        input_dim = super()._calculate_input_dim()
         if self.condition_on_residual:
             input_dim += len(self.data_indices.model.input.prognostic)  # truncated input state
         return input_dim

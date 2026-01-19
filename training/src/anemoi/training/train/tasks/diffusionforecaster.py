@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.utils.enums import TensorDim
-
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -54,8 +52,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
-        assert self.multi_out == 1, "BaseDiffusionForecaster currently only supports single-output models!"
-
         self.rho = config.model.model.diffusion.rho
 
     def get_input(self, batch: torch.Tensor) -> torch.Tensor:
@@ -67,15 +63,15 @@ class BaseDiffusionForecaster(BaseGraphModule):
             self.data_indices.data.input.full,
         ]  # (bs, multi_step, ens, latlon, nvar)
         msg = f"Batch length not sufficient for requested multi_step length!, {batch.shape[1]} !>= {self.multi_step}"
-        assert batch.shape[1] >= self.multi_step, msg
+        assert batch.shape[1] >= self.multi_step + self.multi_out, msg
         LOGGER.debug("SHAPE: x.shape = %s", list(x.shape))
         return x
 
     def get_target(self, batch: torch.Tensor) -> torch.Tensor:
         """Get target tensor shape for diffusion model."""
-        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full].unsqueeze(
-            TensorDim.TIME,
-        )  # (bs, 1, ens, latlon, nvar)
+        fc_times = [self.multi_step + i for i in range(self.multi_out)]
+        y = batch[:, fc_times, ...]
+        y = y[..., self.data_indices.data.output.full]  # (bs, multi_out, ens, latlon, nvar)
         LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
         return y
 
@@ -175,7 +171,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, 1, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
@@ -294,7 +290,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None:

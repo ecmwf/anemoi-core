@@ -226,8 +226,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             self.loss.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
+        # TODO(dieter): change to n_step_in and n_step_out
         self.multi_step = config.training.multistep_input
-        self.multi_out = config.training.multistep_output  # default to 1
+        self.multi_out = config.training.multistep_output  # defaults to 1 via pydantic
+        LOGGER.info("GraphModule with multistep_input=%s and multistep_output=%s", self.multi_step, self.multi_out)
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
