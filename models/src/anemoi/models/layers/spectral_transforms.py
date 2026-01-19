@@ -120,7 +120,7 @@ class DCT2D(SpectralTransform):
 
 
 class SHT(SpectralTransform):
-    """Placeholder for Spherical Harmonics Transform."""
+    """Bsaeclass for Spherical Harmonics Transform."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
