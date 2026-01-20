@@ -7,7 +7,7 @@ set -euo pipefail
 #fi
 
 ADD_YAML="./training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml"
-ZARR_PATH="test-20km-bcmask.zarr"
+ZARR_PATH="test-20km-bcmask-time.zarr"
 
 anemoi-datasets init-additions "$ADD_YAML"
 anemoi-datasets load-additions "$ADD_YAML"
