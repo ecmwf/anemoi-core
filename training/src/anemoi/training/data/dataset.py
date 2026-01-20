@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import logging
+from abc import abstractmethod
 
 import numpy as np
 import torch
@@ -17,6 +19,8 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.utils.dates import frequency_to_seconds
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseAnemoiReader:
@@ -86,9 +90,9 @@ class BaseAnemoiReader:
         return self.data.resolution
 
     @property
-    def trajectory_ids(self) -> list[str] | None:
-        """Return trajectory IDs if available."""
-        return None
+    @abstractmethod
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
 
     def get_sample(
         self,
@@ -128,6 +132,11 @@ class BaseAnemoiReader:
 class NativeGridDataset(BaseAnemoiReader):
     """Native grid dataset."""
 
+    @property
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
+        return False
+
 
 class TrajectoryDataset(BaseAnemoiReader):
     """Trajectory dataset."""
@@ -147,6 +156,11 @@ class TrajectoryDataset(BaseAnemoiReader):
         self.trajectory_length = trajectory_length
 
     @property
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
+        return True
+
+    @property
     def trajectory_ids(self) -> list[str]:
         trajectory_length_seconds = self.trajectory_length * frequency_to_seconds(self.frequency)
         return (self.dates - self.trajectory_start) // np.timedelta64(trajectory_length_seconds, "s")
@@ -162,10 +176,12 @@ def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
+        LOGGER.info("Creating TrajectoryDataset...")
         return TrajectoryDataset(
             **dataset_config,
             trajectory_start=trajectory_config["start"],
             trajectory_length=trajectory_config["length"],
         )
 
+    LOGGER.info("Creating NativeGridDataset...")
     return NativeGridDataset(**dataset_config)

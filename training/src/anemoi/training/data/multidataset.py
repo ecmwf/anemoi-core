@@ -211,7 +211,7 @@ class MultiDataset(IterableDataset):
                 ds.missing,
                 len(ds.dates),
                 self.data_relative_date_indices,
-                ds.trajectory_ids,
+                ds.trajectory_ids if ds.has_trajectories else None,
             )
             if valid_date_indices_ref is None:
                 valid_date_indices_ref = valid_date_indices
