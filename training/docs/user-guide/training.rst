@@ -408,19 +408,9 @@ anemoi-training uses area weighting, where each node is weighted
 according to the size of the geographical area it represents.
 
 It is also possible to rescale the weight of a subset of nodes after
-they are loaded from the graph. For instance, for a stretched grid setup
-we can rescale the weight of nodes in the limited area such that their
-sum equals 0.25 of the sum of all node weights with the following config
-setup
+they are loaded from the graph using the class
+`anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler`.
 
-.. code:: yaml
-   datasets:
-      your_dataset_name:
-         node_loss_weights:
-            _target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute
-            target_nodes: data
-            scaled_attribute: cutout
-            weight_frac_of_total: 0.25
 
 ***************
  Learning rate
