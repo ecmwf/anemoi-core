@@ -85,9 +85,6 @@ class SpectralLoss(BaseLoss):
         ----------
         transform
             Spectral transform type.
-        x_dim, y_dim
-            2D grid shape (required for FFT2D). Stored on the loss instance for
-            backwards compatibility and for test assertions.
         ignore_nans
             Whether to ignore NaNs in the loss computation.
         scalers
@@ -118,8 +115,6 @@ class SpectralLoss(BaseLoss):
         else:
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
-        self.x_dim = self.transform.x_dim
-        self.y_dim = self.transform.y_dim
 
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten spectral dimensions."""
