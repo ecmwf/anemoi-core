@@ -3,6 +3,10 @@
 #   anemoi-datasets init-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml
 #   anemoi-datasets load-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml
 #   anemoi-datasets finalise-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml
+#
+# Verify shortNames in a sample GRIB (HGT, LAND, DSWRF):
+#   wgrib2 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v2024050500.grib2 -s | \
+#     grep -i -E ":(HGT|LAND|DSWRF):surface:anl:" | head -n 20
 
 name: rrfs-conus-3km-additions
 
@@ -26,13 +30,13 @@ input:
         - pipe:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-                param: [lsm, dswrf, orog]
+                param: [dswrf, hgt, land]
                 typeOfLevel: surface
             - rename:
                 param:
-                  lsm: landmask
                   dswrf: swdown
-                  orog: orography
+                  hgt: orography
+                  land: landmask
     - regrid:
         matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
 
