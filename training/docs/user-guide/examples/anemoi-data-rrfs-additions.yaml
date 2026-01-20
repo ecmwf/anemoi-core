@@ -32,6 +32,8 @@ input:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
                 shortName: [sdswrf, lsm, orog]
                 typeOfLevel: surface
+                date: "{date:strftime(%Y%m%d)}"
+                time: "{date:strftime(%H)}"
             - rename:
                 param:
                   sdswrf: swdown
