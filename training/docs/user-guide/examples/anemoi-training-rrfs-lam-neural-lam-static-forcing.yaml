@@ -3,7 +3,7 @@ defaults:
   - dataloader: native_grid
   - diagnostics: evaluation
   - datamodule: single
-  - hardware: example
+  - system/hardware: example
   - graph: existing_graph
   - model: graphtransformer
   - training: lam
