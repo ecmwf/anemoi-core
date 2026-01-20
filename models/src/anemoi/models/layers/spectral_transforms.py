@@ -191,21 +191,19 @@ class OctahedralSHT(SHT):
 
     def __init__(
         self,
-        y_dim: int,
-        x_dim: int | None = None,  # ignored, kept for signature-uniformity
+        nlat: int,
         lmax: int | None = None,
         mmax: int | None = None,
         folding: bool = False,
         nodes_slice: tuple[int, int | None] | None = None,
     ) -> None:
-        self.y_dim = y_dim
-        self.x_dim = x_dim  # unused but present to match FFT2D/CartesianSHT signature
+        self.nlat = nlat
         self.lmax = lmax
         self.mmax = mmax
         self.folding = folding
         nodes_slice = nodes_slice or (0, None)
         self.nodes_slice = slice(*nodes_slice)
-        self._sht = OctahedralRealSHT(nlat=self.y_dim, lmax=lmax, mmax=mmax, folding=folding)
+        self._sht = OctahedralRealSHT(nlat=self.nlat, lmax=lmax, mmax=mmax, folding=folding)
         self._nlon = self._sht.nlon
         self._expected_points = int(np.sum(self._nlon))
         self.y_freq = self._sht.lmax
