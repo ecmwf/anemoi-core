@@ -19,33 +19,41 @@ class SkipConnectionSchema(BaseModel):
     )
 
 
+class TruncationGraphSchema(BaseModel):
+    """Schema for graph-based truncation."""
+
+    graph_config: dict[str, Any]
+    down_edges_name: list[str]
+    up_edges_name: list[str]
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+
+    @model_validator(mode="after")
+    def validate_edges(self) -> "TruncationGraphSchema":
+        if len(self.down_edges_name) != 3 or len(self.up_edges_name) != 3:
+            raise ValueError("down_edges_name and up_edges_name must be [src, relation, dst].")
+        return self
+
+
 class TruncatedConnectionSchema(BaseModel):
     """Schema for truncated connection residuals."""
 
     target_: Literal["anemoi.models.layers.residual.TruncatedConnection"] = Field(..., alias="_target_")
-    data_nodes: str | None = Field(
-        None,
-        description="Name of the node set in the graph representing the original (full) resolution data. Required if not using file paths.",
-    )
-    truncation_nodes: str | None = Field(
-        None,
-        description="Name of the node set in the graph representing the truncated (reduced) resolution data. Required if not using file paths.",
-    )
-    edge_weight_attribute: str | None = Field(
-        None,
-        description="Optional name of the edge attribute to use as weights when projecting between data and truncation nodes. Only used if not using file paths.",
-    )
-    src_node_weight_attribute: str | None = Field(
-        None,
-        description="Optional name of an attribute on source nodes to use as multiplicative weights during projection. Only used if not using file paths.",
-    )
     truncation_up_file_path: str | None = Field(
         None,
-        description="Optional file path (.npz) to load the up-projection matrix from. Required if not using graph-based projection.",
+        description="Optional file path (.npz) to load the up-projection matrix from. Required if not using truncation_graph.",
     )
     truncation_down_file_path: str | None = Field(
         None,
-        description="Optional file path (.npz) to load the down-projection matrix from. Required if not using graph-based projection.",
+        description="Optional file path (.npz) to load the down-projection matrix from. Required if not using truncation_graph.",
+    )
+    truncation_matrices_path: str | None = Field(
+        None,
+        description="Optional base path for resolving truncation matrix file paths.",
+    )
+    truncation_graph: TruncationGraphSchema | None = Field(
+        None,
+        description="Graph-based truncation specification (graph_config + edge definitions).",
     )
     autocast: bool = Field(
         False, description="Whether to enable mixed precision autocasting during projection operations."
@@ -56,39 +64,26 @@ class TruncatedConnectionSchema(BaseModel):
 
     @model_validator(mode="after")
     def check_instantiation_method(self) -> Any:
-        # Check that only one method is used: either file paths or graph-based
         file_based = self.truncation_up_file_path is not None and self.truncation_down_file_path is not None
-        graph_based = self.data_nodes is not None and self.truncation_nodes is not None
+        graph_config_based = self.truncation_graph is not None
 
-        if file_based and graph_based:
-            raise ValueError(
-                "Specify either file paths for truncation_up_file_path and truncation_down_file_path, or data_nodes and truncation_nodes for graph-based projection, but not both."
-            )
+        if sum([file_based, graph_config_based]) != 1:
+            raise ValueError("Specify exactly one truncation source: file paths or truncation_graph.")
 
-        if not file_based and not graph_based:
-            raise ValueError(
-                "You must specify either both file paths (truncation_up_file_path and truncation_down_file_path) or both data_nodes and truncation_nodes for graph-based projection."
-            )
+        if self.truncation_matrices_path is not None and not file_based:
+            raise ValueError("truncation_matrices_path requires truncation_up_file_path and truncation_down_file_path.")
 
         if file_based:
-            # If using file-based, the graph-based fields should not be set
-            if (
-                self.data_nodes is not None
-                or self.truncation_nodes is not None
-                or self.edge_weight_attribute is not None
-                or self.src_node_weight_attribute is not None
-            ):
-                raise ValueError(
-                    "When using file-based projection, do not specify data_nodes, truncation_nodes, edge_weight_attribute, or src_node_weight_attribute."
-                )
+            if self.truncation_graph is not None:
+                raise ValueError("When using file-based projection, do not specify truncation_graph.")
 
-        if graph_based:
-            # If using graph-based, the file-based fields should not be set
+        if graph_config_based:
             if self.truncation_up_file_path is not None or self.truncation_down_file_path is not None:
                 raise ValueError(
-                    "When using graph-based projection, do not specify truncation_up_file_path or truncation_down_file_path."
+                    "When using truncation_graph, do not specify truncation_up_file_path or truncation_down_file_path."
                 )
-
+            if self.truncation_matrices_path is not None:
+                raise ValueError("When using truncation_graph, do not specify truncation_matrices_path.")
         return self
 
 

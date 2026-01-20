@@ -6,6 +6,14 @@ keep_batch_sharded: True
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
+graph_providers:
+  encoder:
+    _target_: anemoi.models.layers.graph_provider.NoOpGraphProvider
+  processor:
+    _target_: anemoi.models.layers.graph_provider.NoOpGraphProvider
+  decoder:
+    _target_: anemoi.models.layers.graph_provider.NoOpGraphProvider
+
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
@@ -72,9 +80,7 @@ decoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
 
-residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
+residual: ${truncation.residual}
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

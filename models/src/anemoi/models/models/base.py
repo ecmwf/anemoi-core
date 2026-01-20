@@ -145,28 +145,35 @@ class BaseGraphModel(nn.Module):
             dataset_names = list(self._graph_data.keys())
             reference_dataset = dataset_names[0]
             reference_graph = self._graph_data[reference_dataset]
-            reference_hidden_graph = reference_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
+            hidden_names = (
+                list(self._graph_name_hidden)
+                if isinstance(self._graph_name_hidden, (list, tuple))
+                else [self._graph_name_hidden]
+            )
 
-            # Check hidden graph structure consistency across all datasets
-            for dataset_name in dataset_names[1:]:
-                dataset_graph = self._graph_data[dataset_name]
-                dataset_hidden_graph = dataset_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
+            for hidden_name in hidden_names:
+                reference_hidden_graph = reference_graph[(hidden_name, "to", hidden_name)]
 
-                # Compare edge indices
-                assert torch.equal(reference_hidden_graph.edge_index, dataset_hidden_graph.edge_index), (
-                    f"Hidden-to-hidden graph edge structure mismatch between reference dataset '{reference_dataset}' "
-                    f"and dataset '{dataset_name}'. All datasets must have identical hidden graph topology "
-                    f"for the shared processor to work correctly."
-                )
+                # Check hidden graph structure consistency across all datasets
+                for dataset_name in dataset_names[1:]:
+                    dataset_graph = self._graph_data[dataset_name]
+                    dataset_hidden_graph = dataset_graph[(hidden_name, "to", hidden_name)]
 
-                # Compare number of nodes (should be same for hidden graphs)
-                ref_num_hidden_nodes = self.node_attributes[reference_dataset].num_nodes[self._graph_name_hidden]
-                dataset_num_hidden_nodes = self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden]
-                assert ref_num_hidden_nodes == dataset_num_hidden_nodes, (
-                    f"Hidden node count mismatch between reference dataset '{reference_dataset}' ({ref_num_hidden_nodes} nodes) "
-                    f"and dataset '{dataset_name}' ({dataset_num_hidden_nodes} nodes). "
-                    f"All datasets must have the same number of hidden nodes for the shared processor."
-                )
+                    # Compare edge indices
+                    assert torch.equal(reference_hidden_graph.edge_index, dataset_hidden_graph.edge_index), (
+                        f"Hidden-to-hidden graph edge structure mismatch between reference dataset '{reference_dataset}' "
+                        f"and dataset '{dataset_name}' for '{hidden_name}'. All datasets must have identical hidden graph "
+                        f"topology for the shared processor to work correctly."
+                    )
+
+                    # Compare number of nodes (should be same for hidden graphs)
+                    ref_num_hidden_nodes = self.node_attributes[reference_dataset].num_nodes[hidden_name]
+                    dataset_num_hidden_nodes = self.node_attributes[dataset_name].num_nodes[hidden_name]
+                    assert ref_num_hidden_nodes == dataset_num_hidden_nodes, (
+                        f"Hidden node count mismatch between reference dataset '{reference_dataset}' "
+                        f"({ref_num_hidden_nodes} nodes) and dataset '{dataset_name}' ({dataset_num_hidden_nodes} nodes) "
+                        f"for '{hidden_name}'. All datasets must have the same number of hidden nodes for the shared processor."
+                    )
 
             LOGGER.info(
                 "All datasets have consistent hidden-to-hidden graph structures (required for shared processor)"
@@ -208,7 +215,7 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data[dataset_name])
+            self.residual[dataset_name] = instantiate(residual_config)
 
     @abstractmethod
     def forward(

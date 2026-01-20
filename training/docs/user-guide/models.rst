@@ -174,12 +174,18 @@ main purposes:
 
 The truncation system supports several types of transformation matrices:
 
-**Truncation Matrix (``truncation``)**
+**Truncation Down Matrix (``truncation.matrices.down``)**
    The forward transformation matrix that applies the truncation filter
    to the skipped connection.
 
-**Inverse Truncation Matrix (``truncation_inv``)**
+**Truncation Up Matrix (``truncation.matrices.up``)**
    The inverse transformation matrix.
+
+**Truncation Matrices Path (``truncation.matrices.path``)**
+   Optional base path for resolving truncation matrix filenames.
+
+**Truncation Graph (``truncation.graph``)**
+   Optional graph-based definition for building truncation projections.
 
 **Loss Matrices Path (``loss_matrices_path``)**
    Path to the directory containing smoothing matrices for multi-scale
@@ -198,6 +204,11 @@ The truncation system supports several types of transformation matrices:
    For detailed instructions on how to create these matrices, see the
    documentation at :ref:`Create sparse matrices with anemoi-graphs
    <anemoi-graphs:usage-create_sparse_matrices>` tutorial.
+
+.. note::
+
+   Multi-dataset training assumes identical grids/resolutions for field truncation.
+   If datasets differ, set ``truncation: none``.
 
 ***************
  Ensemble Size

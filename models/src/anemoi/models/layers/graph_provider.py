@@ -12,11 +12,14 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from pathlib import Path
+from typing import Any
 from typing import Optional
 from typing import Union
 
 import numpy as np
 import torch
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -30,46 +33,34 @@ from anemoi.models.layers.graph import TrainableTensor
 LOGGER = logging.getLogger(__name__)
 
 
-def create_graph_provider(
-    graph: Optional[HeteroData] = None,
-    edge_attributes: Optional[list[str]] = None,
-    src_size: Optional[int] = None,
-    dst_size: Optional[int] = None,
-    trainable_size: int = 0,
+def instantiate_graph_provider(
+    *,
+    provider_config: dict,
+    graph_data: HeteroData,
+    node_attributes: Any,
 ) -> "BaseGraphProvider":
-    """Factory function to create appropriate graph provider.
+    assert provider_config is not None, "graph provider config must be set"
 
-    Returns StaticGraphProvider if graph has edges,
-    otherwise returns NoOpGraphProvider for edge-less architectures.
-
-    Parameters
-    ----------
-    graph : HeteroData, optional
-        Graph containing edges (for static mode)
-    edge_attributes : list[str], optional
-        Edge attributes to use (for static mode)
-    src_size : int, optional
-        Source grid size (for static mode)
-    dst_size : int, optional
-        Destination grid size (for static mode)
-    trainable_size : int, optional
-        Trainable tensor size, by default 0
-
-    Returns
-    -------
-    BaseGraphProvider
-        Appropriate graph provider instance
-    """
-    if graph:
-        return StaticGraphProvider(
-            graph=graph,
-            edge_attributes=edge_attributes,
-            src_size=src_size,
-            dst_size=dst_size,
-            trainable_size=trainable_size,
-        )
+    if OmegaConf.is_config(provider_config):
+        provider_kwargs = OmegaConf.to_container(provider_config, resolve=True)
     else:
-        return NoOpGraphProvider()
+        provider_kwargs = dict(provider_config)
+
+    edges = provider_kwargs.pop("edges", None)
+    if edges is not None:
+        assert graph_data is not None, "graph_data must be provided if edges are present in config"
+        assert node_attributes is not None, "node_attributes must be provided if edges are present in config"
+        assert len(edges) == 3, "edges must be [src, relation, dst]"
+        edge_key = tuple(edges)
+        assert edge_key in graph_data.edge_types, f"unknown edge type: {edge_key}"
+        assert edge_key[0] in node_attributes.num_nodes, f"unknown source node type: {edge_key[0]}"
+        assert edge_key[2] in node_attributes.num_nodes, f"unknown destination node type: {edge_key[2]}"
+        graph = graph_data[edge_key]
+        src_size = node_attributes.num_nodes[edge_key[0]]
+        dst_size = node_attributes.num_nodes[edge_key[2]]
+        return instantiate(provider_kwargs, graph=graph, src_size=src_size, dst_size=dst_size)
+
+    return instantiate(provider_kwargs)
 
 
 class BaseGraphProvider(nn.Module, ABC):
@@ -522,6 +513,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
         row_normalize: bool,
     ) -> None:
         """Create sparse projection matrix."""
+
+        edge_index = edge_index.long()
 
         if row_normalize:
             weights = self._row_normalize_weights(edge_index, weights, src_size)

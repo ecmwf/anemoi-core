@@ -6,8 +6,6 @@ system:
   input:
     dataset:  /home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
     graph: ./ens-bm-graph.pt
-    truncation: null
-    truncation_inv: null
     loss_matrices_path: "anemoi-integration-tests/training/assets/"
 
 training:

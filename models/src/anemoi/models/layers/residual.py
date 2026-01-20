@@ -10,13 +10,17 @@
 
 from abc import ABC
 from abc import abstractmethod
+from pathlib import Path
+from typing import Any
 from typing import Optional
 
 import einops
 import torch
+from omegaconf import DictConfig
 from torch import nn
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.create import GraphCreator
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -27,7 +31,7 @@ from anemoi.models.layers.sparse_projector import SparseProjector
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
-    def __init__(self, graph: HeteroData | None = None) -> None:
+    def __init__(self) -> None:
         super().__init__()
 
     @abstractmethod
@@ -47,7 +51,7 @@ class SkipConnection(BaseResidualConnection):
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def __init__(self, step: int = -1, **_) -> None:
+    def __init__(self, step: int = -1) -> None:
         super().__init__()
         self.step = step
 
@@ -67,39 +71,34 @@ class TruncatedConnection(BaseResidualConnection):
 
     Parameters
     ----------
-    graph : HeteroData, optional
-        The graph containing the subgraphs for down and up projections.
-    data_nodes : str, optional
-        Name of the nodes representing the data nodes.
-    truncation_nodes : str, optional
-        Name of the nodes representing the truncated (coarse) nodes.
-    edge_weight_attribute : str, optional
-        Name of the edge attribute to use as weights for the projections.
-    src_node_weight_attribute : str, optional
-        Name of the source node attribute to use as weights for the projections.
+    truncation_up_file_path : str | Path, optional
+        File path (.npz) to load the up-projection matrix from.
+    truncation_down_file_path : str | Path, optional
+        File path (.npz) to load the down-projection matrix from.
+    truncation_matrices_path : str | Path, optional
+        Optional base path for resolving truncation matrix file paths.
+    truncation_graph : dict, optional
+        Graph-based truncation specification (graph_config + edge definitions).
     autocast : bool, default False
         Whether to use automatic mixed precision for the projections.
-    truncation_up_file_path : str, optional
-        File path (.npz) to load the up-projection matrix from.
-    truncation_down_file_path : str, optional
-        File path (.npz) to load the down-projection matrix from.
     row_normalize : bool, optional
         Whether to normalize weights per row (target node) so each row sums to 1
 
     Example
     -------
-    >>> from torch_geometric.data import HeteroData
     >>> import torch
-    >>> # Assume graph is a HeteroData object with the required edges and node types
-    >>> graph = HeteroData()
-    >>> # ...populate graph with nodes and edges for 'data' and 'int'...
-    >>> # Example creating the projection matrices from the graph
-    >>> conn = TruncatedConnection(
-    ...     graph=graph,
-    ...     data_nodes="data",
-    ...     truncation_nodes="int",
-    ...     edge_weight_attribute="gauss_weight",
-    ... )
+    >>> # Example using a truncation graph definition
+    >>> truncation_graph = {
+    ...     "graph_config": {
+    ...         "nodes": {"data": {...}, "trunc": {...}},
+    ...         "edges": [...],
+    ...         "post_processors": [],
+    ...     },
+    ...     "down_edges_name": ["data", "to", "trunc"],
+    ...     "up_edges_name": ["trunc", "to", "data"],
+    ...     "edge_weight_attribute": "gauss_weight",
+    ... }
+    >>> conn = TruncatedConnection(truncation_graph=truncation_graph)
     >>> x = torch.randn(2, 4, 1, 40192, 44)  # (batch, time, ens, nodes, features)
     >>> out = conn(x)
     >>> print(out.shape)
@@ -118,25 +117,38 @@ class TruncatedConnection(BaseResidualConnection):
 
     def __init__(
         self,
-        graph: Optional[HeteroData] = None,
-        data_nodes: Optional[str] = None,
-        truncation_nodes: Optional[str] = None,
-        edge_weight_attribute: Optional[str] = None,
-        src_node_weight_attribute: Optional[str] = None,
-        truncation_up_file_path: Optional[str] = None,
-        truncation_down_file_path: Optional[str] = None,
+        truncation_up_file_path: Optional[str | Path] = None,
+        truncation_down_file_path: Optional[str | Path] = None,
         autocast: bool = False,
+        truncation_matrices_path: str | Path | None = None,
+        truncation_graph: dict[str, Any] | DictConfig | None = None,
         row_normalize: bool = False,
     ) -> None:
         super().__init__()
-        up_edges, down_edges = self._get_edges_name(
-            graph,
-            data_nodes,
-            truncation_nodes,
-            truncation_up_file_path,
-            truncation_down_file_path,
-            edge_weight_attribute,
-        )
+
+        graph = None
+        if truncation_graph is not None:
+            assert (
+                truncation_up_file_path is None and truncation_down_file_path is None
+            ), "truncation_up_file_path and truncation_down_file_path must be omitted when truncation_graph is set."
+            (
+                graph,
+                up_edges,
+                down_edges,
+                edge_weight_attribute,
+                src_node_weight_attribute,
+            ) = self._load_truncation_graph(truncation_graph)
+            truncation_up_file_path = None
+            truncation_down_file_path = None
+        else:
+            assert (
+                truncation_up_file_path is not None and truncation_down_file_path is not None
+            ), "truncation_up_file_path and truncation_down_file_path must be provided when truncation_graph is not set."
+            truncation_up_file_path = self._resolve_matrix_path(truncation_up_file_path, truncation_matrices_path)
+            truncation_down_file_path = self._resolve_matrix_path(truncation_down_file_path, truncation_matrices_path)
+            up_edges = down_edges = None
+            edge_weight_attribute = None
+            src_node_weight_attribute = None
 
         self.provider_down = ProjectionGraphProvider(
             graph=graph,
@@ -158,32 +170,45 @@ class TruncatedConnection(BaseResidualConnection):
 
         self.projector = SparseProjector(autocast=autocast)
 
-    def _get_edges_name(
+    @staticmethod
+    def _resolve_matrix_path(file_path: Optional[str | Path], base_path: str | Path | None) -> Optional[Path]:
+        if file_path is None:
+            return None
+        resolved = Path(file_path)
+        if base_path and not resolved.is_absolute():
+            resolved = Path(base_path) / resolved
+        return resolved
+
+    def _build_truncation_graph(self, graph_config: dict[str, Any] | DictConfig) -> HeteroData:
+        graph_creator = GraphCreator(config=graph_config)
+        graph = HeteroData()
+        graph = graph_creator.update_graph(graph)
+        graph = graph_creator.clean(graph)
+        return graph_creator.post_process(graph)
+
+    def _load_truncation_graph(
         self,
-        graph,
-        data_nodes,
-        truncation_nodes,
-        truncation_up_file_path,
-        truncation_down_file_path,
-        edge_weight_attribute,
-    ):
-        are_files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
-        if not are_files_specified:
-            assert graph is not None, "graph must be provided if file paths are not specified."
-            assert data_nodes is not None, "data nodes name must be provided if file paths are not specified."
-            assert (
-                truncation_nodes is not None
-            ), "truncation nodes name must be provided if file paths are not specified."
-            up_edges = (truncation_nodes, "to", data_nodes)
-            down_edges = (data_nodes, "to", truncation_nodes)
-            assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."
-            assert down_edges in graph.edge_types, f"Graph must contain edges {down_edges} for down-projection."
-        else:
-            assert (
-                data_nodes is None or truncation_nodes is None or edge_weight_attribute is None
-            ), "If file paths are specified, node and attribute names should not be provided."
-            up_edges = down_edges = None  # Not used when loading from files
-        return up_edges, down_edges
+        truncation_graph: dict[str, Any] | DictConfig,
+    ) -> tuple[HeteroData, tuple[str, str, str], tuple[str, str, str], Optional[str], Optional[str]]:
+        assert isinstance(truncation_graph, (dict, DictConfig)), "truncation_graph must be a mapping"
+        graph_config = truncation_graph.get("graph_config")
+        assert isinstance(graph_config, (dict, DictConfig)), "truncation_graph.graph_config must be a mapping"
+        down_edges_name = truncation_graph.get("down_edges_name")
+        up_edges_name = truncation_graph.get("up_edges_name")
+        assert (
+            down_edges_name is not None and up_edges_name is not None
+        ), "truncation_graph must define down_edges_name and up_edges_name"
+        assert len(down_edges_name) == 3, "down_edges_name must be [src, relation, dst]"
+        assert len(up_edges_name) == 3, "up_edges_name must be [src, relation, dst]"
+
+        graph = self._build_truncation_graph(graph_config)
+        down_edges = tuple(down_edges_name)
+        up_edges = tuple(up_edges_name)
+        assert down_edges in graph.edge_types, f"Graph must contain edges {down_edges} for down-projection."
+        assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."
+        edge_weight_attribute = truncation_graph.get("edge_weight_attribute")
+        src_node_weight_attribute = truncation_graph.get("src_node_weight_attribute")
+        return graph, up_edges, down_edges, edge_weight_attribute, src_node_weight_attribute
 
     def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Apply truncated skip connection."""
