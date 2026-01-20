@@ -33,8 +33,9 @@ For example, a configuration that previously looked like this:
 
 .. code:: yaml
 
-    normaliser:
-        default: mean-std
+    processors:
+        normaliser:
+            default: mean-std
 
 
 now becomes:
@@ -43,15 +44,16 @@ now becomes:
 
     datasets:
         your_dataset_name:
-            normaliser:
-                default: mean-std
+            processors:
+                normaliser:
+                    default: mean-std
 
 
 Each dataset is identified by a unique name, and all configuration that applies specifically to that dataset is defined within its block.
 
-
+***************************************
  Dataset Name Conventions in Templates
-=======================================
+***************************************
 
 In the configuration templates provided with the framework, we use "data" as a generic placeholder for the dataset name. For example:
 
@@ -67,6 +69,87 @@ The key under datasets can be any user-defined name and serves only as an identi
 
 All dataset-specific configuration must be nested under the corresponding dataset name.
 
+*************************************
+ Example Multi-Dataset Configuration
+*************************************
+
+Here is an example configuration snippet for two datasets, `era5` and `cerra`:
+
+.. code:: yaml
+
+    data:
+        datasets:
+            era5:
+                forcing:
+                - "cos_latitude"
+                - "cos_longitude"
+                - "sin_latitude"
+                - "sin_longitude"
+                - "cos_julian_day"
+                - "cos_local_time"
+                - "sin_julian_day"
+                - "sin_local_time"
+                - "insolation"
+                - "lsm"
+                - "sdor"
+                - "slor"
+                - "z"
+                diagnostic: [tp, cp]
+                processors:
+                    normalizer:
+                        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+                        config:
+                            default: "mean-std"
+                            std:
+                            - "tp"
+                            min-max:
+                            max:
+                            - "sdor"
+                            - "slor"
+                            - "z"
+                            none:
+                            - "cos_latitude"
+                            - "cos_longitude"
+                            - "sin_latitude"
+                            - "sin_longitude"
+                            - "cos_julian_day"
+                            - "cos_local_time"
+                            - "sin_julian_day"
+                            - "sin_local_time"
+                            - "insolation"
+                            - "lsm"
+
+            cerra:
+                forcing:
+                - "cos_latitude"
+                - "cos_longitude"
+                - "sin_latitude"
+                - "sin_longitude"
+                - "cos_julian_day"
+                - "cos_local_time"
+                - "sin_julian_day"
+                - "sin_local_time"
+                diagnostic: [tp]
+                processors:
+                    normalizer:
+                        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+                        config:
+                            default: "mean-std"
+                            std:
+                            - "tp"
+                            min-max:
+                            max:
+                            none:
+                            - "cos_latitude"
+                            - "cos_longitude"
+                            - "sin_latitude"
+                            - "sin_longitude"
+                            - "cos_julian_day"
+                            - "cos_local_time"
+                            - "sin_julian_day"
+                            - "sin_local_time"
+
+Since they have different variables, each dataset has its own lists of forcing and diagnostic variables, as well as its own normaliser configuration.
 
 *****************
  Migration Notes
