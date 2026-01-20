@@ -30,14 +30,13 @@ input:
         - pipe:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-                param: [DSWRF, LAND, HGT]
+                shortName: [sdswrf, lsm, orog]
                 typeOfLevel: surface
-                step: 0
             - rename:
                 param:
-                  DSWRF: swdown
-                  LAND: landcover
-                  HGT: orography
+                  sdswrf: swdown
+                  lsm: landcover
+                  orog: orography
     - regrid:
         matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
 
