@@ -50,15 +50,6 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-TASK_TYPE_MAP = {
-    "GraphForecaster": "forecaster",
-    "GraphEnsForecaster": "forecaster",
-    "GraphDiffusionForecaster": "forecaster",
-    "GraphDiffusionTendForecaster": "forecaster",
-    "GraphInterpolator": "time-interpolator",
-}
-
-
 class BaseGraphModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 
@@ -183,7 +174,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for mask in self.output_mask.values():
             combined_supporting_arrays.update(mask.supporting_arrays)
 
-        metadata["metadata_inference"]["task"] = self._get_task_type_from_config(config)
+        if not hasattr(self.__class__, "task_type"):
+            msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
+                indicating the type of task (e.g., 'forecaster', 'time-interpolator')."""
+            raise AttributeError(msg)
+
+        metadata["metadata_inference"]["task"] = self.task_type
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
@@ -328,15 +324,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """Get the loss name for multi-dataset cases."""
         # For multi-dataset, use a generic name or combine dataset names
         return "multi_dataset"
-
-    def _get_task_type_from_config(self, config: dict) -> str:
-        task_class_name = str(config.training.model_task).split(".")[-1]
-
-        try:
-            return TASK_TYPE_MAP[task_class_name]
-        except KeyError as exc:
-            err_msg = f"Unknown task type: {task_class_name}"
-            raise ValueError(err_msg) from exc
 
     def _check_sharding_support(self) -> None:
         self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())
