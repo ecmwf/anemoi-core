@@ -1,124 +1,115 @@
----
-defaults:
-  - scalers: multi
-  - optimization: default
-
-# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
-transfer_learning: False # activate to perform transfer learning
-load_weights_only: False # only load model weights, do not restore optimiser states etc.
+transfer_learning: False
+load_weights_only: False
 
-# run in deterministic mode ; slows down
 deterministic: False
-
-# miscellaneous
 precision: 16-mixed
 
-# multistep input
-# 1 = single step scheme, X(t-1) used to predict X(t)
-# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-# Deepmind use k = 2 in their model
-multistep_input: 2
+multistep_input: 12
 
-# gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
-# the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
+num_sanity_val_steps: 1
 
-num_sanity_val_steps: 6
-
-# clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
 gradient_clip:
   val: 32.
   algorithm: value
 
-# stochastic weight averaging
-# https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
 swa:
   enabled: False
-  lr: 1.e-4
+  lr: 1.e-10
 
 # =====================================================================
-# Optimizer configuration
+# Optimizer
 # =====================================================================
+optimizer:
+  _target_: torch.optim.AdamW
+  betas: [0.9, 0.95]
 
-# select model
-training_method: anemoi.training.train.methods.SingleTraining
+model_task: anemoi.training.train.tasks.multiforecaster.GraphMultiDatasetForecaster
 
-# select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
   num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
-# loss functions
-
-# dynamic rescaling of the loss gradient
-# see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
-# don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
 
-# Set max_epochs or max_steps. Training stops at the first limit reached.
+rollout:
+  start: 1
+  epoch_increment: 0
+  max: 1
+
 max_epochs: null
 max_steps: 150000
 
+lr:
+  warmup: 1000
+  rate: 0.625e-4
+  iterations: ${training.max_steps}
+  min: 1e-12
 
 submodules_to_freeze: []
 
-# Dataset-specific loss and metrics configuration
+# =====================================================================
+# Loss / metrics per dataset
+# =====================================================================
 training_loss:
   datasets:
-    era5:
-      # ERA5 uses additional scalers
-      _target_: anemoi.training.losses.MSELoss
-      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: false
-    cerra:
-      # CERRA uses additional scalers
-      _target_: anemoi.training.losses.MSELoss
-      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: false
+    opera:
+      _target_: anemoi.training.losses.KernelCRPS
+      scalers: ['node_weights','nan_mask_weights']   # add 'nan_mask_weights' if you have it
+      ignore_nans: true
+
+    nordic:
+      _target_: anemoi.training.losses.KernelCRPS
+      scalers: ['node_weights','nan_mask_weights']
+      ignore_nans: true
+
+    netatmo:
+      _target_: anemoi.training.losses.KernelCRPS
+      scalers: ['node_weights','nan_mask_weights']
+      ignore_nans: true
 
 validation_metrics:
   datasets:
-    era5:
-      mse:
-        _target_: anemoi.training.losses.MSELoss
-        scalers: ['node_weights']
+    opera:
+      kcrps:
+        _target_: anemoi.training.losses.KernelCRPS
+        scalers: ['node_weights','nan_mask_weights']
         ignore_nans: true
-    cerra:
-      mse:
-        _target_: anemoi.training.losses.MSELoss
-        scalers: ['node_weights']
+    nordic:
+      kcrps:
+        _target_: anemoi.training.losses.KernelCRPS
+        scalers: ['node_weights','nan_mask_weights']
+        ignore_nans: true
+    netatmo:
+      kcrps:
+        _target_: anemoi.training.losses.KernelCRPS
+        scalers: ['node_weights','nan_mask_weights']
         ignore_nans: true
 
-# ERA5-specific variable groups (extends default with more variables)
+# =====================================================================
+# Variable groups (targets)
+# =====================================================================
 variable_groups:
   datasets:
-    era5:
-      default: sfc
-      pl:
-        param: [q, t, u, v, w] #, z] TODO: # ERA5 has vorticity and divergence
-      sfc:
-        param: [tp, cp, 10u, 10v, 2d, sp]  # ERA5 surface variables
-    cerra:
-      default: sfc
-      pl:
-        param: [q, t, u, v, w] #, z] TODO: # CERRA has vorticity and divergence
-      sfc:
-        param: [tp, cp, 10u, 10v, 2d]  # CERRA surface variables
+    opera:
+      default: precip
+      precip:
+        param: [RAINFALL_RATE]
+    nordic:
+      default: precip
+      precip:
+        param: [lwe_precipitation_rate]
+    netatmo:
+      default: precip
+      precip:
+        param: [rr]
 
-# Same metrics as ERA5
+# (Optional) list “headline metrics” here if your reporting expects it
 metrics:
   datasets:
-    era5:
-    - z_500
-    - z_1000
-    - t_500
-    - u_850
-    - v_850
-    cerra:
-    - z_500
-    - z_1000
-    - t_500
-    - u_850
+    opera: []
+    nordic: []
+    netatmo: []

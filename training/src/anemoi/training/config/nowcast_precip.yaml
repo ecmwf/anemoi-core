@@ -1,0 +1,20 @@
+defaults:
+  - data: nowcast_precip
+  - dataloader: nowcast_precip
+  - diagnostics: evaluation_multi
+  - system: ppi
+  - graph: nowcast_precip
+  - model: nowcast_precip
+  - training: multi
+  - _self_
+
+config_validation: False
+# Dataset-specific bits for QC. Add `qc_flags` to your input variables and
+# attach the preprocessor in your experiment overrides if desired.
+
+model:
+  # these values are read by NowcastPrecipUnionMeshModel
+  mesh_slices:
+    opera: [0, 0]       # will be auto-filled if left as [0,0]
+    nordic_radar: [0, 0]
+    netatmo: [0, 0]

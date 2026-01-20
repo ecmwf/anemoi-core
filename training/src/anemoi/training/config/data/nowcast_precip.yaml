@@ -1,0 +1,79 @@
+format: zarr
+frequency: 5m
+timestep: 5m
+imputer:
+  default: 0
+
+# Dataset-specific configurations
+datasets:
+  opera:
+    forcing:
+      - qc_flags
+    diagnostic: []
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          - "RAINFALL_RATE"
+          none:
+          - "qc_flags"
+      imputer:
+        _target_: anemoi.models.preprocessing.imputer.DynamicInputImputer
+        _convert_: all
+        config: ${data.imputer}
+
+  nordic_radar:
+    forcing:
+    - qc_flags
+    diagnostic: []
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          - "lwe_precipitation_rate"
+          min-max:
+          max:
+          none:
+          - "qc_flags"
+      imputer:
+        _target_: anemoi.models.preprocessing.imputer.DynamicInputImputer
+        _convert_: all
+        config: ${data.imputer}
+
+  netatmo:
+    forcing:
+    - has_nan
+    - altitude
+    - number_neighbours
+    - ta
+    - ff
+    - dd
+    - fg
+    - pr
+    diagnostic: []
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          - rr
+          - rr_hourly
+          min-max:
+          max:
+          - altitude
+          log1p:
+          - number_neighbours
+          none:
+          - has_nan
+      imputer:
+        _target_: anemoi.models.preprocessing.imputer.DynamicInputImputer
+        _convert_: all
+        config:
+          default: mean
+
+num_features: null
