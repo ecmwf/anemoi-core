@@ -139,13 +139,13 @@ def test_ensemble_plot_mixin_process():
     batch = torch.randn(2, 6, 100, 5)
     # input_tensor: bs, rollout + 1, latlon, nvar
     data_tensor = torch.randn(2, 4, 100, 5)
-    # loss: 1, y_preds: bs, latlon, nvar
-    outputs = [torch.tensor(0.5), [torch.randn(2, 100, 5), torch.randn(2, 100, 5), torch.randn(2, 100, 5)]]
+    # loss: 1, y_preds: bs, multi-out, latlon, nvar
+    outputs = [torch.tensor(0.5), [torch.randn(2, 1, 100, 5), torch.randn(2, 1, 100, 5), torch.randn(2, 1, 100, 5)]]
 
     # Mock post_processors
     mock_post_processors = MagicMock()
     mock_post_processors.return_value = data_tensor
-    # tensor after post_processors: bs, ensemble, latlon, nvar
+    # tensor after post_processors: bs, multi-out, ensemble, latlon, nvar
     mock_post_processors.side_effect = [
         data_tensor,
         torch.randn(2, 1, 1, 100, 5),
@@ -176,9 +176,10 @@ def test_ensemble_plot_mixin_process():
     assert data.shape == (4, 100, 5), f"Expected data shape (4, 100, 5), got {data.shape}"
     assert result_output_tensor.shape == (
         3,
+        1,
         100,
         5,
-    ), f"Expected output_tensor shape (3, 100, 5), got {result_output_tensor.shape}"
+    ), f"Expected output_tensor shape (3, 1, 100, 5), got {result_output_tensor.shape}"
 
 
 def test_rollout_eval_ens_eval():
