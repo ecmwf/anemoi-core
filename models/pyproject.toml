@@ -50,7 +50,7 @@ dependencies = [
 optional-dependencies.all = [ "anemoi-models[migrations]" ]
 
 optional-dependencies.dev = [
-  "anemoi-models[all,docs,tests]",
+  "anemoi-models[all,docs,spectral,tests]",
   "pre-commit>=3.3.3",
 ]
 optional-dependencies.docs = [
@@ -69,6 +69,7 @@ optional-dependencies.migrations = [
   "rich",
 ]
 
+optional-dependencies.spectral = [ "torch-dct>=0.1.6" ]
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8" ]
 
 urls.Documentation = "https://anemoi-models.readthedocs.io/"
