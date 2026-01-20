@@ -1,8 +1,8 @@
 # Add static/forcing fields to an existing RRFS Zarr dataset.
 # Use with:
-#   anemoi-datasets init-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml <existing.zarr>
-#   anemoi-datasets load-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml <existing.zarr>
-#   anemoi-datasets finalise-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml <existing.zarr>
+#   anemoi-datasets init-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml
+#   anemoi-datasets load-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml
+#   anemoi-datasets finalise-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml
 
 name: rrfs-conus-3km-additions
 
@@ -17,6 +17,8 @@ dates:
 
 build:
   variable_naming: "{param}"
+
+output: test-data.zarr
 
 input:
   pipe:
@@ -34,4 +36,4 @@ input:
     - regrid:
         matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
 
-# output is the existing Zarr path passed on the command line.
+# output is the existing Zarr path to update.
