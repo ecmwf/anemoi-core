@@ -135,8 +135,9 @@ inputs.
 ``Prognostic`` variables are the variables like temperature or humidity
 that we want to predict and appear as both inputs and outputs.
 
-The user can specify the routing of the data by setting the
-``config.data.forcings`` and ``config.data.diagnostics``. These are
+The user can specify the routing of the data for each dataset separately
+by setting the ``config.data.datasets.your_dataset_name.forcings`` and
+``config.data.datasets.your_dataset_name.diagnostics``. These are
 named strings, as Anemoi datasets enables us to address variables by
 name. Any variable in the dataset which is not listed as either forcing
 or diagnostic (or dropped, see :ref:`Dataloader <Dataloader>` below),
@@ -145,11 +146,13 @@ will be classed as a prognostic variable.
 .. code:: yaml
 
    data:
-      forcings:
-         - solar_insolation
-         - land_sea_mask
-      diagnostics:
-         - total_precipitation
+      datasets:
+         your_dataset_name:
+            forcings:
+               - solar_insolation
+               - land_sea_mask
+            diagnostics:
+               - total_precipitation
 
 **************
  Data Modules
@@ -201,8 +204,10 @@ the area being modelled.
    # set a custom mask for grid points.
    # Useful for LAM (dropping unconnected nodes from forcing dataset)
    grid_indices:
-      _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: ${graph.data}
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.data.grid_indices.FullGrid
+            nodes_name: ${graph.data}
 
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we
@@ -213,12 +218,14 @@ version of the model. Best practice is to separate the data in time,
 ensuring the validation and test data are suitably independent from the
 training data.
 
-We define the start and end time of each section of the data. This can
-be given as a full date, or just the year, or year and month, in these
-cases the first of the month/first of the year is used.
+For each dataset `your_dataset_name`, we define the start and end
+time of each section of the data.
+This can be given as a full date, or just the year, or year and month,
+in these cases the first of the month/first of the year is used.
 
-The dataset used, and the frequency can be set spearately for the
-different parts of the dataset, for example, if test data is stored in a
+We also define the dataset used and the frequency. These can be set
+separately for the different training/validation/test parts of the
+dataset `your_dataset_name`, for example, if test data is stored in a
 different file.
 
 By default, every variable within the dataset is used. If this is not
@@ -262,7 +269,7 @@ and the proportional distance from this point is retained,
 
 The user can specify the normalisation strategy by choosing a default
 method, and additionally specifying specific cases for certain variables
-within ``config.data.normaliser``:
+within ``config.data.datasets.your_dataset_name.normaliser``:
 
 .. code:: yaml
 
@@ -296,26 +303,28 @@ cause the model to predict only NaNs. For fields which contain missing
 values, we provide options to replace these values via an "imputer".
 During training NaN values are replaced with the specified value for the
 field. The default imputer is "none", which means no imputation is
-performed. The user can specify the imputer by setting
-``processors.imputer`` under the ``data/zarr.yaml`` file. It is comon to
-impute with the mean value, ensuring that the variable value over NaNs
-becomes zero after mean-std normalisation. Another option is to impute
-with a given constant.
+performed. The user can specify the imputer for each dataset by setting
+``datasets.your_dataset_name.processors.imputer`` under the
+``data/zarr.yaml`` file. It is common to impute with the mean value,
+ensuring that the variable value over NaNs becomes zero after mean-std
+normalisation. Another option is to impute with a given constant.
 
 The ``DynamicInputImputer`` can be used for fields where the NaN
 locations change in time.
 
 .. code:: yaml
 
-   imputer:
-      default: "none"
-      mean:
-         - 2t
+   datasets:
+      your_dataset_name:
+         imputer:
+            default: "none"
+            mean:
+               - 2t
 
-   processors:
-   imputer:
-      _target_: anemoi.models.preprocessing.imputer.InputImputer
-      config: ${data.imputer}
+         processors:
+            imputer:
+               _target_: anemoi.models.preprocessing.imputer.InputImputer
+               config: ${data.datasets.your_dataset_name.imputer}
 
 ****************
  Loss Functions
@@ -327,11 +336,13 @@ tasks and easily allows for custom loss functions to be added.
 .. code:: yaml
 
    training_loss:
-      _target_: anemoi.training.losses.mse.WeightedMSELoss
-      # class kwargs
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.mse.WeightedMSELoss
+            # class kwargs
 
 The choice of loss function depends on the model task and the desired
-properties of the forecast.
+properties of the forecast and is configured for each dataset separately.
 
 For ensemble training, the following loss functions are available:
 
@@ -364,32 +375,35 @@ level has a weighting less than 0.2), defined in class
 
 .. code:: yaml
 
-   general_variable:
-      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-      weights:
-         default: 1
-         t: 6
-         z: 12
-         10u: 0.1
-         10v: 0.1
-         2d: 0.5
-         tp: 0.025
-         cp: 0.0025
+   datasets:
+      your_dataset_name:
+         general_variable:
+            _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+            weights:
+               default: 1
+               t: 6
+               z: 12
+               10u: 0.1
+               10v: 0.1
+               2d: 0.5
+               tp: 0.025
+               cp: 0.0025
 
 .. code:: yaml
-
-   pressure_level:
-      # Variable level scaler to be used
-      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-      group: pl
-      y_intercept: 0.2
-      slope: 0.001
+   datasets:
+      your_dataset_name:
+         pressure_level:
+            # Variable level scaler to be used
+            _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+            group: pl
+            y_intercept: 0.2
+            slope: 0.001
 
 The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
 an attribute in the graph object. The configuration option
-``config.training.node_loss_weights`` is used to specify the node
-attribute used as weights in the loss function. By default
+``config.training.datasets.your_dataset_name.node_weights`` is used to
+specify the node attribute used as weights in the loss function. By default
 anemoi-training uses area weighting, where each node is weighted
 according to the size of the geographical area it represents.
 
@@ -400,12 +414,13 @@ sum equals 0.25 of the sum of all node weights with the following config
 setup
 
 .. code:: yaml
-
-   node_loss_weights:
-      _target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute
-      target_nodes: data
-      scaled_attribute: cutout
-      weight_frac_of_total: 0.25
+   datasets:
+      your_dataset_name:
+         node_loss_weights:
+            _target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute
+            target_nodes: data
+            scaled_attribute: cutout
+            weight_frac_of_total: 0.25
 
 ***************
  Learning rate

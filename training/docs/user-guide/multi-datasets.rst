@@ -2,9 +2,9 @@
  Multiple Dataset Support
 ##########################
 
-The framework now supports training with multiple datasets simultaneously.
-This enables use cases such as downscaling, or leveraging diverse data sources
-to improve model generalisation.
+Since `anemoi-training=0.4`, The framework supports training with multiple datasets
+simultaneously. This enables use cases such as downscaling, or leveraging diverse
+data sources to improve model generalisation.
 
 **********
  Overview
