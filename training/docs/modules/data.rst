@@ -21,7 +21,7 @@ the model (``__iter__``).
 The ``multidataset.py`` file contains the ``MultiDataset`` class
 which is used for deterministic and probabilistic model training.
 
-.. automodule:: anemoi.training.data.dataset.multidataset
+.. automodule:: anemoi.training.data.multidataset
    :members:
    :no-undoc-members:
    :show-inheritance:
