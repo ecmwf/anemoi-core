@@ -77,8 +77,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def supporting_arrays(self) -> dict:
         """Return supporting arrays from all training datasets."""
-        # Each dataset has its own supporting arrays, no assumptions about sharing
-        return self.ds_train.supporting_arrays
+        supporting_arrays = self.ds_train.supporting_arrays
+        for dataset_name, grid_indices in self.grid_indices.items():
+            if dataset_name in supporting_arrays:
+                supporting_arrays[dataset_name] = supporting_arrays[dataset_name] | grid_indices.supporting_arrays
+            else:
+                supporting_arrays[dataset_name] = grid_indices.supporting_arrays
+        return supporting_arrays
 
     @cached_property
     def data_indices(self) -> dict[str, IndexCollection]:

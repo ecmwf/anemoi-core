@@ -27,6 +27,8 @@ LOGGER = logging.getLogger(__name__)
 class GraphInterpolator(BaseGraphModule):
     """Graph neural network interpolator for PyTorch Lightning."""
 
+    task_type = "time-interpolator"
+
     def __init__(
         self,
         *,

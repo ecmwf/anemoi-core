@@ -27,6 +27,8 @@ LOGGER = logging.getLogger(__name__)
 class GraphForecaster(BaseRolloutGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
 
+    task_type = "forecaster"
+
     def _rollout_step(
         self,
         batch: dict,
