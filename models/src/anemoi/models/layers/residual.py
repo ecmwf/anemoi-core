@@ -20,7 +20,8 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.layers.sparse_projector import build_sparse_projector
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.sparse_projector import SparseProjector
 
 
 class BaseResidualConnection(nn.Module, ABC):
@@ -82,6 +83,8 @@ class TruncatedConnection(BaseResidualConnection):
         File path (.npz) to load the up-projection matrix from.
     truncation_down_file_path : str, optional
         File path (.npz) to load the down-projection matrix from.
+    row_normalize : bool, optional
+        Whether to normalize weights per row (target node) so each row sums to 1
 
     Example
     -------
@@ -123,6 +126,7 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_up_file_path: Optional[str] = None,
         truncation_down_file_path: Optional[str] = None,
         autocast: bool = False,
+        row_normalize: bool = False,
     ) -> None:
         super().__init__()
         up_edges, down_edges = self._get_edges_name(
@@ -134,23 +138,25 @@ class TruncatedConnection(BaseResidualConnection):
             edge_weight_attribute,
         )
 
-        self.project_down = build_sparse_projector(
+        self.provider_down = ProjectionGraphProvider(
             graph=graph,
             edges_name=down_edges,
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_down_file_path,
-            autocast=autocast,
+            row_normalize=row_normalize,
         )
 
-        self.project_up = build_sparse_projector(
+        self.provider_up = ProjectionGraphProvider(
             graph=graph,
             edges_name=up_edges,
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_up_file_path,
-            autocast=autocast,
+            row_normalize=row_normalize,
         )
+
+        self.projector = SparseProjector(autocast=autocast)
 
     def _get_edges_name(
         self,
@@ -187,8 +193,8 @@ class TruncatedConnection(BaseResidualConnection):
 
         x = einops.rearrange(x, "batch ensemble grid features -> (batch ensemble) grid features")
         x = self._to_channel_shards(x, shard_shapes, model_comm_group)
-        x = self.project_down(x)
-        x = self.project_up(x)
+        x = self.projector(x, self.provider_down.get_edges(device=x.device))
+        x = self.projector(x, self.provider_up.get_edges(device=x.device))
         x = self._to_grid_shards(x, shard_shapes, model_comm_group)
         x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
 
