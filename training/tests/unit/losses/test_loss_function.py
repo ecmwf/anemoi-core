@@ -355,6 +355,7 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
             "scalers": ["*", "!test"],
         }
     )
+    # TODO(@all): not all spectral loss functions need x_dim/y_dim as args
     loss = get_loss_function(
         DictConfig(loss_dic),
         scalers={"test": (-1, torch.ones(2))},
@@ -378,8 +379,8 @@ def test_logfft2dist_loss() -> None:
         ),
     )
     assert isinstance(loss, BaseLoss)
-    assert hasattr(loss, "x_dim")
-    assert hasattr(loss, "y_dim")
+    assert hasattr(loss.transform, "x_dim")
+    assert hasattr(loss.transform, "y_dim")
 
     # pred/target are (batch, steps, grid, vars)
     # TODO (Ophelia): edit this when multi ouptuts get merged
@@ -417,8 +418,8 @@ def test_fcl_loss() -> None:
         ),
     )
     assert isinstance(loss, BaseLoss)
-    assert hasattr(loss, "x_dim")
-    assert hasattr(loss, "y_dim")
+    assert hasattr(loss.transform, "x_dim")
+    assert hasattr(loss.transform, "y_dim")
 
     right = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
 
@@ -450,7 +451,7 @@ def test_octahedral_sht_loss() -> None:
             {
                 "_target_": "anemoi.training.losses.spectral.SpectralL2Loss",
                 "transform": "octahedral_sht",
-                "y_dim": nlat,
+                "nlat": nlat,
                 "scalers": [],
             },
         ),
@@ -533,15 +534,9 @@ def test_spectral_l2_loss_ectrans_octahedral_sht_no_assets(monkeypatch: pytest.M
     nvars = 3
     points = _expected_octahedral_points(trunc)
 
-    # Provide x_dim/y_dim “compat args” (validated by the transform)
-    x_dim = 20 + 4 * trunc  # max nlon (equator)
-    y_dim = 2 * (trunc + 1)  # number of latitude rings (full globe)
-
     loss = SpectralL2Loss(
         transform="ectrans_octahedral_sht",
         truncation=trunc,
-        x_dim=x_dim,
-        y_dim=y_dim,
         # filepath=None is fine because we stub the module
     )
 
@@ -557,23 +552,6 @@ def test_spectral_l2_loss_ectrans_octahedral_sht_no_assets(monkeypatch: pytest.M
     target_wrong = torch.zeros_like(pred_wrong)
     with pytest.raises(AssertionError):
         _ = loss(pred_wrong, target_wrong, squash=True)
-
-
-def test_ectrans_octahedral_sht_dim_validation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Validate the x_dim/y_dim alias checks (even though the grid isn't rectangular)."""
-    import anemoi.models.layers.spectral_transforms as st
-    from anemoi.training.losses.spectral import SpectralL2Loss
-
-    monkeypatch.setattr(st, "EcTransOctahedralSHTModule", _DummyEcTransOctahedralSHTModule)
-
-    trunc = 8
-    x_dim_ok = 20 + 4 * trunc
-    y_dim_ok = 2 * (trunc + 1)
-    _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok, y_dim=y_dim_ok)
-    with pytest.raises(ValueError, match=r"y_dim.* incompatible with truncation"):
-        _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok, y_dim=y_dim_ok + 1)
-    with pytest.raises(ValueError, match=r"x_dim.* incompatible with truncation"):
-        _ = SpectralL2Loss(transform="ectrans_octahedral_sht", truncation=trunc, x_dim=x_dim_ok + 1, y_dim=y_dim_ok)
 
 
 def test_spectral_crps_fft_and_dct() -> None:
