@@ -18,9 +18,31 @@ When multiple datasets are configured:
 
 #. A single shared processor operates on the combined latent representation.
 
-#. Any training component that must be configured per dataset (e.g. normalisation, dataset-specific options) is now defined under a dataset-specific configuration block. This makes it possible to mix datasets with different preprocessing requirements while still benefiting from shared representation learning.
+.. warning::
+    All datasets must share the same time resolution and forecast horizon or interpolation target times.
 
-#. All datasets must share the same time resolution and forecast horizon or interpolation target times.
+
+Dataset-Specific Configuration
+==============================
+
+Any training component that must be configured per dataset (e.g. normalisation, dataset-specific options) is now defined under a dataset-specific configuration block. This makes it possible to mix datasets with different preprocessing requirements while still benefiting from shared representation learning.
+Similarly, dataset-specific encoders and decoders can handle differing input/output variable sets.
+
+.. image:: ../images/multi-dataset/prog-forc-diag.png
+
+
+Example Use Cases
+=================
+
+The multi-dataset setup can be used for various use cases, by combining different combinations of forcing and diagnostic variables across datasets.
+
+For example, downscaling can be achieved by using a high-resolution dataset where all variables are set to be diagnostics and a lower-resolution dataset where all variables are set to be forcings.
+
+.. image:: ../images/multi-dataset/downscaling-multi.png
+
+Similarly, a multi-dataset variant of a limited area model can be created as follows:
+
+.. image:: ../images/multi-dataset/lam-multi.png
 
 
 *********************************
