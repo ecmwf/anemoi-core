@@ -23,22 +23,24 @@ When multiple datasets are configured:
 
 
 Dataset-Specific Configuration
-==============================
+------------------------------
 
 Any training component that must be configured per dataset (e.g. normalisation, dataset-specific options) is now defined under a dataset-specific configuration block. This makes it possible to mix datasets with different preprocessing requirements while still benefiting from shared representation learning.
 Similarly, dataset-specific encoders and decoders can handle differing input/output variable sets.
 
 .. image:: ../images/multi-dataset/prog-forc-diag.png
+    :scale: 50%
 
 
 Example Use Cases
-=================
+-----------------
 
 The multi-dataset setup can be used for various use cases, by combining different combinations of forcing and diagnostic variables across datasets.
 
-For example, downscaling can be achieved by using a high-resolution dataset where all variables are set to be diagnostics and a lower-resolution dataset where all variables are set to be forcings.
+For example, downscaling can be achieved by using a high-resolution dataset where all variables to be downscaled are set to be diagnostics, and a lower-resolution dataset where all variables are set to be forcings.
 
 .. image:: ../images/multi-dataset/downscaling-multi.png
+
 
 Similarly, a multi-dataset variant of a limited area model can be created as follows:
 
