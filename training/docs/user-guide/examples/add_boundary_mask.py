@@ -147,6 +147,11 @@ def main():
         if isinstance(vars_attr, (list, tuple)):
             obj.attrs["variables"] = list(vars_attr) + [args.var_name]
 
+    vars_meta = ds_out.attrs.get("variables_metadata")
+    if isinstance(vars_meta, dict) and args.var_name not in vars_meta:
+        vars_meta[args.var_name] = {"constant_in_time": True, "mars": {}}
+        ds_out.attrs["variables_metadata"] = vars_meta
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     ds_out.to_zarr(args.output, mode="w")
 
