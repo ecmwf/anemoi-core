@@ -81,6 +81,8 @@ class TruncatedConnection(BaseResidualConnection):
         Graph-based truncation specification (graph_config + edge definitions).
     autocast : bool, default False
         Whether to use automatic mixed precision for the projections.
+    row_normalize : bool, optional
+        Whether to normalize weights per row (target node) so each row sums to 1
 
     Example
     -------
@@ -120,6 +122,7 @@ class TruncatedConnection(BaseResidualConnection):
         autocast: bool = False,
         truncation_matrices_path: str | Path | None = None,
         truncation_graph: dict[str, Any] | DictConfig | None = None,
+        row_normalize: bool = False,
     ) -> None:
         super().__init__()
 
@@ -153,6 +156,7 @@ class TruncatedConnection(BaseResidualConnection):
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_down_file_path,
+            row_normalize=row_normalize,
         )
 
         self.provider_up = ProjectionGraphProvider(
@@ -161,6 +165,7 @@ class TruncatedConnection(BaseResidualConnection):
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_up_file_path,
+            row_normalize=row_normalize,
         )
 
         self.projector = SparseProjector(autocast=autocast)
