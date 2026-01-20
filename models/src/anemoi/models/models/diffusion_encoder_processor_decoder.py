@@ -120,9 +120,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
             out_channels_dst=self.output_dim,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            edge_dim=self.decoder_graph_provider.edge_dim,
         )
 
     def _calculate_input_dim(self):
@@ -787,7 +785,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
         # Dimensions are batch, timesteps, grid, variables
         x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
-        x_t0 = batch[:, -1:, None, ...]  # add dummy ensemble dimension
+        x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension
 
         grid_shard_shapes = None
         if model_comm_group is not None:
