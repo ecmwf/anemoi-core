@@ -1,0 +1,83 @@
+##########################
+ Multiple Dataset Support
+##########################
+
+The framework now supports training with multiple datasets simultaneously.
+This enables use cases such as downscaling, or leveraging diverse data sources
+to improve model generalisation.
+
+**********
+ Overview
+**********
+
+When multiple datasets are configured:
+
+#. Each dataset has its own encoder and decoder, allowing dataset-specific input and output representations.
+
+#. Encoded representations from all datasets are combined in a shared latent space.
+
+#. A single shared processor operates on the combined latent representation.
+
+#. Any training component that must be configured per dataset (e.g. normalisation, dataset-specific options) is now defined under a dataset-specific configuration block. This makes it possible to mix datasets with different preprocessing requirements while still benefiting from shared representation learning.
+
+#. All datasets must share the same time resolution and forecast horizon or interpolation target times.
+
+
+*********************************
+ Configuration Structure Changes
+*********************************
+
+To support per-dataset configuration, the YAML structure has changed for several config entries. The configuration now supports a dictionary-based approach ("dict-ification") for datasets and related components. The entry point is a `datasets:` field, which is a dictionary where each key is a dataset name and the value is its configuration.
+
+For example, a configuration that previously looked like this:
+
+.. code:: yaml
+
+    normaliser:
+        default: mean-std
+
+
+now becomes:
+
+.. code:: yaml
+
+    datasets:
+        your_dataset_name:
+            normaliser:
+                default: mean-std
+
+
+Each dataset is identified by a unique name, and all configuration that applies specifically to that dataset is defined within its block.
+
+
+ Dataset Name Conventions in Templates
+=======================================
+
+In the configuration templates provided with the framework, we use "data" as a generic placeholder for the dataset name. For example:
+
+.. code:: yaml
+
+    datasets:
+        data:
+            normaliser:
+                default: mean-std
+
+
+The key under datasets can be any user-defined name and serves only as an identifier for that dataset within the configuration. When adapting a template, you may rename "data" to something more descriptive (e.g. `era5`, or `cerra`), or define multiple dataset entries as needed.
+
+All dataset-specific configuration must be nested under the corresponding dataset name.
+
+
+*****************
+ Migration Notes
+*****************
+
+#. If you are using a single dataset, you still need to define it under the datasets key when using the new layout.
+
+#. Existing configuration values generally remain the same, but their location in the YAML file has changed.
+
+#. All configuration snippets throughout the documentation have been updated to reflect the new structure.
+
+#. To ease the transition, the previous configuration layout is still supported for a limited period, but only when configuration validation is disabled.
+
+#. We strongly recommend updating configurations to the new datasets-based layout, as this is the forward-compatible and fully supported format.
