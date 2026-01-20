@@ -174,10 +174,17 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def ds_train(self) -> NativeGridDataset:
-        return self._get_dataset(
-            open_dataset(self.config.dataloader.training),
-            label="train",
-        )
+        try:
+            return self._get_dataset(
+                open_dataset(self.config.dataloader.training),
+                label="train",
+            )
+        except Exception:
+            LOGGER.error(
+                "Failed to open training dataset. dataloader.training=%s",
+                self.config.dataloader.training,
+            )
+            raise
 
     @cached_property
     def ds_valid(self) -> NativeGridDataset:
@@ -187,12 +194,19 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 self.config.dataloader.training.end,
                 self.config.dataloader.validation.start,
             )
-        return self._get_dataset(
-            open_dataset(self.config.dataloader.validation),
-            shuffle=False,
-            val_rollout=self.config.dataloader.validation_rollout,
-            label="validation",
-        )
+        try:
+            return self._get_dataset(
+                open_dataset(self.config.dataloader.validation),
+                shuffle=False,
+                val_rollout=self.config.dataloader.validation_rollout,
+                label="validation",
+            )
+        except Exception:
+            LOGGER.error(
+                "Failed to open validation dataset. dataloader.validation=%s",
+                self.config.dataloader.validation,
+            )
+            raise
 
     @cached_property
     def ds_test(self) -> NativeGridDataset:
@@ -204,11 +218,18 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             f"Validation end date {self.config.dataloader.validation.end} is not before"
             f"test start date {self.config.dataloader.test.start}"
         )
-        return self._get_dataset(
-            open_dataset(self.config.dataloader.test),
-            shuffle=False,
-            label="test",
-        )
+        try:
+            return self._get_dataset(
+                open_dataset(self.config.dataloader.test),
+                shuffle=False,
+                label="test",
+            )
+        except Exception:
+            LOGGER.error(
+                "Failed to open test dataset. dataloader.test=%s",
+                self.config.dataloader.test,
+            )
+            raise
 
     def _get_dataset(
         self,
