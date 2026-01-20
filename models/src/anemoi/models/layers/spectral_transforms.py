@@ -119,33 +119,7 @@ class DCT2D(SpectralTransform):
         )
 
 
-class SHT(SpectralTransform):
-    """Bsaeclass for Spherical Harmonics Transform."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__()
-
-    def __call__(
-        self,
-        data: torch.Tensor,
-    ) -> torch.Tensor:
-        """Transform data to spectral domain using spherical harmonics.
-
-        Parameters
-        ----------
-        data : torch.Tensor
-            Input data in the spatial domain.
-
-        Returns
-        -------
-        torch.Tensor
-            Data transformed to the spectral domain.
-        """
-        msg = "Each spherical harmonics transform subclass " "should implement the __call__ method."
-        raise NotImplementedError(msg)
-
-
-class CartesianSHT(SHT):
+class CartesianSHT(SpectralTransform):
     """SHT on a regular (y_dim=nlat, x_dim=nlon) grid."""
 
     def __init__(
@@ -186,7 +160,7 @@ class CartesianSHT(SHT):
         return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
 
 
-class OctahedralSHT(SHT):
+class OctahedralSHT(SpectralTransform):
     """SHT on an octahedral reduced grid."""
 
     def __init__(
@@ -231,7 +205,7 @@ class OctahedralSHT(SHT):
         return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
 
 
-class EcTransOctahedralSHT(SHT):
+class EcTransOctahedralSHT(SpectralTransform):
     def __init__(
         self,
         truncation: int,
