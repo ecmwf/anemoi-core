@@ -1,0 +1,37 @@
+# Add static/forcing fields to an existing RRFS Zarr dataset.
+# Use with:
+#   anemoi-datasets init-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml <existing.zarr>
+#   anemoi-datasets load-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml <existing.zarr>
+#   anemoi-datasets finalise-additions training/docs/user-guide/examples/anemoi-data-rrfs-additions.yaml <existing.zarr>
+
+name: rrfs-conus-3km-additions
+
+description: >
+  Add landmask (static) and downward shortwave radiation (forcing) from
+  RRFS GRIB2 to an existing Zarr dataset.
+
+dates:
+  start: "2024-05-05T00:00:00"
+  end: "2024-05-05T23:00:00"
+  frequency: 1h
+
+build:
+  variable_naming: "{param}"
+
+input:
+  pipe:
+    - join:
+        - pipe:
+            - grib:
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                param: [lsm, dswrf, orog]
+                typeOfLevel: surface
+            - rename:
+                param:
+                  lsm: landmask
+                  dswrf: swdown
+                  orog: orography
+    - regrid:
+        matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
+
+# output is the existing Zarr path passed on the command line.
