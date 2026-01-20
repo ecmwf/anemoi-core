@@ -240,20 +240,9 @@ class EcTransOctahedralSHT(SHT):
         dtype: torch.dtype = torch.float32,
         filepath: str | None = None,
         nodes_slice: tuple[int, int | None] | None = None,
-        *,
-        # optional “compat” args:
-        x_dim: int | None = None,  # interpreted as max_nlon
-        y_dim: int | None = None,  # interpreted as nlat (full globe)
     ) -> None:
         self.truncation = int(truncation)
         self.dtype = dtype
-        self.y_dim = 2 * (self.truncation + 1)  # nlat full globe
-        self.x_dim = 20 + 4 * self.truncation  # max nlon on any latitude ring
-
-        if y_dim is not None and int(y_dim) != self.y_dim:
-            raise ValueError(f"y_dim={y_dim} incompatible with truncation={self.truncation} (expected {self.y_dim}).")
-        if x_dim is not None and int(x_dim) != self.x_dim:
-            raise ValueError(f"x_dim={x_dim} incompatible with truncation={self.truncation} (expected {self.x_dim}).")
 
         nodes_slice = nodes_slice or (0, None)
         self.nodes_slice = slice(*nodes_slice)
