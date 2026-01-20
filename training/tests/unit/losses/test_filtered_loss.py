@@ -44,8 +44,8 @@ def test_instantiation_with_filtering() -> None:
     )
     assert isinstance(loss, FilteringLossWrapper)
     assert isinstance(loss.loss, BaseLoss)
-    assert hasattr(loss.loss, "y_dim")
-    assert hasattr(loss.loss, "x_dim")
+    assert hasattr(loss.loss.transform, "y_dim")
+    assert hasattr(loss.loss.transform, "x_dim")
 
     loss.set_data_indices(data_indices)
     assert hasattr(loss, "predicted_indices")
