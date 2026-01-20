@@ -1,6 +1,6 @@
 defaults:
 - data: zarr
-- dataloader: non_analysis
+- dataloader: native_grid
 - diagnostics: evaluation
 - system: example
 - graph: multi_scale
