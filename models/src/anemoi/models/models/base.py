@@ -192,6 +192,16 @@ class BaseGraphModel(nn.Module):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
+    def _get_consistent_dim(self, x: dict[str, Tensor], dim: int) -> int:
+        dim_sizes = [_x.shape[dim] for _x in x.values()]
+
+        # Assert all datasets have the same sizes
+        assert all(
+            bs == dim_sizes[0] for bs in dim_sizes
+        ), f"Dimensions must be the same across datasets: {dim_sizes}"
+
+        return dim_sizes[0]
+
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
