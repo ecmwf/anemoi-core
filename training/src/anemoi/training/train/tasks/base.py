@@ -21,7 +21,6 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
-from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
