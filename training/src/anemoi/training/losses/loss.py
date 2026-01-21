@@ -81,11 +81,17 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    if "CombinedLoss" in loss_config.get("_target_", "") and data_indices is not None:
+    if "CombinedLoss" in loss_config.get("_target_", ""):
+        if data_indices is not None:
+            loss_config.update(
+                {"data_indices": data_indices},
+            )
+            data_indices = None  # for combined loss we want the individual losses to handle data indices
         loss_config.update(
-            {"data_indices": data_indices},
+            {"scalers": scalers},
         )
-        data_indices = None  # for combined loss we want the individual losses to handle data indices
+        scalers_to_include = []
+        scalers = {}  # for combined loss we want the individual losses to handle scalers
     loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
 
     if not isinstance(loss_function, BaseLoss):

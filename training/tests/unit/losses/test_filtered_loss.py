@@ -14,6 +14,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 
 def test_instantiation_with_filtering() -> None:
@@ -119,27 +120,55 @@ def test_instantiation_without_filtering_variables() -> None:
 
 def test_print_variable_scaling() -> None:
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.scalers.scalers import create_scalers
     from anemoi.training.losses.utils import print_variable_scaling
+    from anemoi.utils.config import DotDict
 
-    data_config = {"data": {"forcing": ["imerg"], "target": ["imerg"], "prognostic": ["tp"], "diagnostic": []}}
-    name_to_index = {"tp": 0, "imerg": 1}
+    data_config = {"data": {"forcing": ["f1"], "target": [], "prognostic": ["f2"], "diagnostic": ["tp", "imerg"]}}
+    name_to_index = {"tp": 0, "imerg": 1, "f1": 2, "f2": 3}
     data_indices = IndexCollection(DictConfig(data_config), name_to_index)
+    metadata_extractor = ExtractVariableGroupAndLevel(
+        DotDict(
+            {
+                "default": "sfc",
+            },
+        ),
+    )
+    scalers, _ = create_scalers(
+        DotDict(
+            {
+                "general_variable": {
+                    "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",
+                    "weights": {
+                        "default": 1,
+                        "tp": 0.1,
+                        "imerg": 100,
+                        "f2": 0.5,
+                    },
+                },
+            },
+        ),
+        data_indices=data_indices,
+        metadata_extractor=metadata_extractor,
+    )
     loss = get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "scalers": ["general_variable"],
                 "losses": [
                     {
                         "_target_": "anemoi.training.losses.MSELoss",
+                        "scalers": ["general_variable"],
                         "predicted_variables": ["tp"],
                         "target_variables": ["imerg"],
-                        "scalers": ["pressure_level", "general_variable", "nan_mask_weights", "node_weights"],
                     },
                 ],
             },
         ),
         data_indices=data_indices,
+        scalers=scalers,
     )
     scaling_dict = print_variable_scaling(loss, data_indices)
     assert "FilteringLossWrapper" in scaling_dict  # loss is filtered
-    assert "tp" in scaling_dict["FilteringLossWrapper"]  # tp is the predicted var
+    assert [v in scaling_dict["FilteringLossWrapper"] for v in ["tp", "imerg", "f2"]]  # diag and prog variables
