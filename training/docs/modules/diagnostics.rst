@@ -42,8 +42,10 @@ callback, any other kwarg is passed to the callback's constructor.
 
 Plotting callbacks are configured in a similar way, but they are
 specified underneath the ``config.diagnostics.plot.callbacks`` key.
+
 This is done to ensure seperation and ease of configuration between
 experiments.
+
 ``config.diagnostics.plot`` is a broader config file specifying the
 parameters to plot, as well as the plotting frequency, and
 asynchronosity.
@@ -58,36 +60,14 @@ background thread, allowing plotting tasks to be offloaded to worker
 threads. This setup keeps the main thread responsive, handling
 plot-related tasks asynchronously and efficiently in the background.
 
-**Focus Area**
-
-Plotting callbacks (such as ``PlotSample``, ``PlotLoss``, and ``LongRolloutPlots``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
-
-* **Spatial Mask**: A ``spatial_mask`` string referencing a boolean mask defined within the graph data.
-* **Lat/Lon Bounds**: A ``latlon_bounds`` list specifying a bounding box: ``[[lat_min, lon_min], [lat_max, lon_max]]``.
-
-When a focus area is applied, the plot filenames and experiment log tags will automatically include a suffix (e.g., ``_spatial_mask`` or ``_latlon_bounds``) to distinguish them from global plots.
-
-.. code:: yaml
-
-   # Example: Focusing on a specific geographic region
-   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
-     sample_idx: ${diagnostics.plot.sample_idx}
-     parameters: ${diagnostics.plot.parameters}
-     focus_area:
-       latlon_bounds: [[30.0, -20.0], [60.0, 40.0]]
-
-**Rendering Methods**
-
 There is an additional flag in the plotting callbacks to control the
 rendering method for geospatial plots, offering a trade-off between
-performance and detail.
-
-* When `datashader` is set to True, Datashader is
-   used for rendering, which accelerates plotting through efficient
-   hexbining, particularly useful for large datasets. This approach can
-   produce smoother-looking plots due to the aggregation of data points.
-* If `datashader` is set to False, matplotlib.scatter is used, which provides
-   sharper and more detailed visuals but may be slower for large datasets.
+performance and detail. When `datashader` is set to True, Datashader is
+used for rendering, which accelerates plotting through efficient
+hexbining, particularly useful for large datasets. This approach can
+produce smoother-looking plots due to the aggregation of data points. If
+`datashader` is set to False, matplotlib.scatter is used, which provides
+sharper and more detailed visuals but may be slower for large datasets.
 
 **Note** - this asynchronous behaviour is only available for the
 plotting callbacks.
@@ -97,7 +77,9 @@ plotting callbacks.
 The progress bar callback can be configured to control how training
 progress is displayed. This is particularly useful on HPC systems with
 SLURM where output is written to files, as the default RichProgressBar
-in PyTorch Lightning 2.6+ may not work correctly. The progress bar is controlled by two configuration options:
+in PyTorch Lightning 2.6+ may not work correctly.
+
+The progress bar is controlled by two configuration options:
 
 -  ``enable_progress_bar``: A boolean flag to enable or disable the
    progress bar entirely
@@ -127,18 +109,18 @@ which is recommended for interactive terminals and
       epoch: 5
 
       # Parameters to plot
-      parameters:
+         parameters:
          - z_500
          - t_850
          - u_850
 
-      # Sample index
-      sample_idx: 0
+         # Sample index
+         sample_idx: 0
 
-      # Precipitation and related fields
-      precip_and_related_fields: [tp, cp]
+         # Precipitation and related fields
+         precip_and_related_fields: [tp, cp]
 
-      callbacks:
+         callbacks:
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
             dataset_names: ["your_dataset_name"]
             # group parameters by categories when visualizing contributions to the loss
