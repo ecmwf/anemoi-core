@@ -669,65 +669,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return total_loss, metrics_next, y_preds
 
-    def get_inputs(self, batch: dict, sample_length: int) -> dict:
-        # start rollout of preprocessed batch
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.multi_step,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
-            msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {sample_length}"
-            )
-            assert dataset_batch.shape[1] >= sample_length, msg
-        return x
-
-    def get_targets(self, batch: dict, lead_step: int) -> dict:
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[
-                :,
-                lead_step,
-                ...,
-                self.data_indices[dataset_name].data.output.full,
-            ]
-        return y
-
-    def compute_loss_metrics(
-        self,
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
-        rollout_step: int,
-        validation_mode: bool = False,
-        **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
-        total_loss = None
-        metrics_next = {}
-
-        for dataset_name in y:
-            dataset_loss, dataset_metrics = checkpoint(
-                self._compute_loss_metrics,
-                y_pred[dataset_name],
-                y[dataset_name],
-                rollout_step,
-                validation_mode,
-                dataset_name,
-                use_reentrant=False,
-            )
-
-            # Add to total loss
-            total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
-
-            # Store metrics with dataset prefix
-            for metric_name, metric_value in dataset_metrics.items():
-                metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
-
-        return total_loss, metrics_next
-
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
