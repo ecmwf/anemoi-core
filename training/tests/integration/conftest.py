@@ -338,7 +338,7 @@ def hierarchical_config(
 
 @pytest.fixture
 def autoencoder_config(
-    testing_modifications_with_temp_dir: OmegaConf,
+    testing_modifications_callbacks_on_with_temp_dir: OmegaConf,
     get_tmp_paths: callable,
 ) -> tuple[OmegaConf, list[str]]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_autoencoder"):
@@ -346,10 +346,9 @@ def autoencoder_config(
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, dataset_urls
 
