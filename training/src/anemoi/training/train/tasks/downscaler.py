@@ -63,8 +63,6 @@ class GraphDownscaler(BaseGraphModule):
 
         y_pred = self(x)
 
-        # y includes the auxiliary variables, so we must leave those out when computing the loss
-        # Compute loss for each dataset and sum them up
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
