@@ -11,7 +11,6 @@ import datetime
 import logging
 from abc import abstractmethod
 
-import numpy as np
 import torch
 from einops import rearrange
 from rich.console import Console
