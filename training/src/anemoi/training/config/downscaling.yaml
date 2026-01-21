@@ -38,7 +38,7 @@ dataloader:
   training:
     datasets:
       era5: # low-res dataset: all variables should be forcing variables
-        dataset: 
+        dataset:
           dataset: ${system.input.dataset}
           select: ${data.datasets.era5.forcing}
       cerra: # high-res dataset: all variables should be diagnostic or forcing variables
