@@ -131,7 +131,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def forward(
         self,
-        x: torch.Tensor,
+        x: dict[str, torch.Tensor],
         *,
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -142,7 +142,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : dict[str, torch.Tensor]
             Input tensor, shape (bs, m, e, n, f)
         fcstep : int
             Forecast step
@@ -160,20 +160,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         """
         dataset_names = list(x.keys())
 
-        # Extract and validate batch sizes across datasets
-        batch_sizes = [x[dataset_name].shape[0] for dataset_name in dataset_names]
-        ensemble_sizes = [x[dataset_name].shape[2] for dataset_name in dataset_names]
+        # Extract and validate batch & ensemble sizes across datasets
+        batch_size = self._get_consistent_dim(x, 0)
+        ensemble_size = self._get_consistent_dim(x, 2)
 
-        # Assert all datasets have the same batch and ensemble sizes
-        assert all(
-            bs == batch_sizes[0] for bs in batch_sizes
-        ), f"Batch sizes must be the same across datasets: {batch_sizes}"
-        assert all(
-            es == ensemble_sizes[0] for es in ensemble_sizes
-        ), f"Ensemble sizes must be the same across datasets: {ensemble_sizes}"
-
-        batch_size = batch_sizes[0]
-        ensemble_size = ensemble_sizes[0]
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
