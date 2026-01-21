@@ -274,6 +274,8 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         *,
         x_dim: int | None = None,
         y_dim: int | None = None,
+        alpha: float = 1.0,
+        no_autocast: bool = True,
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -287,7 +289,8 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             scalers=scalers,
             **kwargs,
         )
-        AlmostFairKernelCRPS.__init__(self, ignore_nans=ignore_nans, **kwargs)
+        AlmostFairKernelCRPS.__init__(self, alpha=alpha, ignore_nans=ignore_nans, **kwargs)
+        self.no_autocast = no_autocast
 
     def forward(
         self,
@@ -308,7 +311,11 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         tgt_spec = self._to_spectral_flat(target)
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
         pred_spec = einops.rearrange(pred_spec, "b e m v -> b v m e")  # ensemble dim last for preds
-        crps = self._kernel_crps(pred_spec, tgt_spec)
+        if self.no_autocast:
+            with torch.amp.autocast(device_type="cuda", enabled=False):
+                crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+        else:
+            crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
         crps = einops.rearrange(crps, "b v m -> b 1 m v")  # consistent with tensordim
 
         scaled = self.scale(
