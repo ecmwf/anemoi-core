@@ -16,7 +16,6 @@ import torch
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from collections.abc import Mapping
 
     from torch_geometric.data import HeteroData
@@ -92,7 +91,7 @@ class GraphDownscaler(BaseGraphModule):
 
         y_pred = self(x)
 
-        y = self.get_targets(batch, lead_step=self.multi_step-1)
+        y = self.get_targets(batch, lead_step=self.multi_step - 1)
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         # Compute loss for each dataset and sum them up

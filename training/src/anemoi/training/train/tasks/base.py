@@ -21,6 +21,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
+from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
@@ -37,7 +38,6 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from torch.utils.checkpoint import checkpoint
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -725,7 +725,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             # Store metrics with dataset prefix
             for metric_name, metric_value in dataset_metrics.items():
                 metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
-        
+
         return total_loss, metrics_next
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:

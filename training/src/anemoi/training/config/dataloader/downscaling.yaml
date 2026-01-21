@@ -80,11 +80,11 @@ training:
       drop: []
     cerra:
       dataset: ${hardware.paths.data}/${hardware.files.dataset_b}  # Using same dataset as duplicate for testing
-      thinning: 5 
+      thinning: 5
       start: 2000
       end: 2020
       frequency: ${data.frequency}
-      select: 
+      select:
         - "cos_latitude"
         - "cos_longitude"
         - "sin_latitude"
@@ -154,11 +154,11 @@ validation:
       drop: []
     cerra:
       dataset: ${hardware.paths.data}/${hardware.files.dataset_b}
-      thinning: 5 
+      thinning: 5
       start: 2021
       end: 2021
       frequency: ${data.frequency}
-      select: 
+      select:
         - "cos_latitude"
         - "cos_longitude"
         - "sin_latitude"
@@ -226,11 +226,11 @@ test:
       drop: []
     cerra:
       dataset: ${hardware.paths.data}/${hardware.files.dataset_b}
-      thinning: 5 
+      thinning: 5
       start: 2022
       end: null
       frequency: ${data.frequency}
-      select: 
+      select:
         - "cos_latitude"
         - "cos_longitude"
         - "sin_latitude"

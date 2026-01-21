@@ -9,16 +9,16 @@
 
 from .diffusionforecaster import GraphDiffusionForecaster
 from .diffusionforecaster import GraphDiffusionTendForecaster
+from .downscaling import GraphDownscaler
 from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
-from .downscaling import GraphDownscaler
 
 __all__ = [
     "GraphDiffusionForecaster",
     "GraphDiffusionTendForecaster",
+    "GraphDownscaler",
     "GraphEnsForecaster",
     "GraphForecaster",
     "GraphInterpolator",
-    "GraphDownscaler",
 ]
