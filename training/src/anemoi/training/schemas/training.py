@@ -437,11 +437,19 @@ class InterpolationSchema(BaseTrainingSchema):
     "Forcing parameters for target output times."
 
 
+class DownscalingSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDownscaler"] = Field(..., alias="model_task")
+    "Training objective."
+    multistep_input: PositiveInt = Field(example=1)
+    "Number of input steps for the model. E.g. 1 = single step scheme, X(t) used to predict Y(t)."
+
+
 TrainingSchema = Annotated[
     ForecasterSchema
     | ForecasterEnsSchema
     | InterpolationSchema
     | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema,
+    | DiffusionTendForecasterSchema
+    | DownscalingSchema,
     Discriminator("model_task"),
 ]

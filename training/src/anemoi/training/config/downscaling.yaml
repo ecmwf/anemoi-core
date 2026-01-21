@@ -8,28 +8,26 @@ defaults:
 - training: downscaling
 - _self_
 
-config_validation: False
+config_validation: True
 
 training:
   model_task: anemoi.training.train.tasks.GraphDownscaler
   max_epochs: 1
   multistep_input: 1
 
-hardware:
-  paths:
-    truncation: null
-    data: /home/mlx/ai-ml/datasets/
-    output: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
-  files:
-    truncation: null
-    truncation_inv: null
+system:
+  input:
     graph: graph_anemoi_new_${data.resolution}.pt
+    truncation: null
 
     # Primary dataset for ERA5
-    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-${data.frequency}-v8.zarr
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-${data.frequency}-v8
 
     # Secondary dataset for CERRA
-    dataset_b: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-${data.frequency}-v3-hmsi.zarr
+    dataset_b: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-${data.frequency}-v3-hmsi
+
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
 
 data:
   resolution: o96  # Global resolution setting used in hardware file paths
