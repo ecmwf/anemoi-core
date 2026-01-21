@@ -570,7 +570,6 @@ def test_spectral_crps_fft_and_dct() -> None:
                     "transform": transform,
                     "x_dim": x_dim,
                     "y_dim": y_dim,
-                    "cutoff_ratio": 0.5,
                     "scalers": [],
                 },
             ),

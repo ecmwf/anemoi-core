@@ -88,13 +88,13 @@ optional-dependencies.profile = [
 ]
 optional-dependencies.tests = [
   "anemoi-graphs[tri]",      # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]", # required to test the DCT2D spectral loss
   "anemoi-training[azure]",  # required to test the AzureMlflowLogger
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",
-  "torch-dct>=0.1.6",        # required for spectral loss tests
 ]
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"

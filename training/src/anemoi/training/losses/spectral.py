@@ -36,7 +36,7 @@ from anemoi.models.layers.spectral_transforms import EcTransOctahedralSHT
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.kcrps import KernelCRPS
+from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -254,7 +254,7 @@ class LogFFT2Distance(LogSpectralDistance):
         )
 
 
-class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
+class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
     """CRPS computed in spectral space using arbitrary spectral transforms.
 
     Works with:
@@ -275,7 +275,8 @@ class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
         *,
         x_dim: int | None = None,
         y_dim: int | None = None,
-        cutoff_ratio: float | None = None,
+        alpha: float = 1.0,
+        no_autocast: bool = True,
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -289,24 +290,14 @@ class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
             scalers=scalers,
             **kwargs,
         )
-        KernelCRPS.__init__(self, ignore_nans=ignore_nans)
-
-        self.cutoff_ratio = cutoff_ratio
-
-    @staticmethod
-    def _apply_cutoff(
-        pred: torch.Tensor,
-        tgt: torch.Tensor,
-        cutoff_ratio: float,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Keep only the lowest spectral modes."""
-        if not (0.0 < cutoff_ratio <= 1.0):
-            msg = "cutoff_ratio must be in (0, 1]."
-            raise ValueError(msg)
-
-        n_modes = pred.shape[-2]
-        keep = max(1, int(cutoff_ratio * n_modes))
-        return pred[:, :, :keep, :], tgt[:, :, :keep, :]
+        AlmostFairKernelCRPS.__init__(
+            self,
+            alpha=alpha,
+            no_autocast=no_autocast,
+            ignore_nans=ignore_nans,
+            **kwargs,
+        )
+        self.no_autocast = no_autocast
 
     def forward(
         self,
@@ -325,15 +316,13 @@ class SpectralCRPSLoss(SpectralLoss, KernelCRPS):
         # → [..., modes, vars]
         pred_spec = self._to_spectral_flat(pred)
         tgt_spec = self._to_spectral_flat(target)
-        if self.cutoff_ratio is not None:
-            pred_spec, tgt_spec = self._apply_cutoff(
-                pred_spec,
-                tgt_spec,
-                self.cutoff_ratio,
-            )
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
         pred_spec = einops.rearrange(pred_spec, "b e m v -> b v m e")  # ensemble dim last for preds
-        crps = self._kernel_crps(pred_spec, tgt_spec)
+        if self.no_autocast:
+            with torch.amp.autocast(device_type="cuda", enabled=False):
+                crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+        else:
+            crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
         crps = einops.rearrange(crps, "b v m -> b 1 m v")  # consistent with tensordim
 
         scaled = self.scale(
