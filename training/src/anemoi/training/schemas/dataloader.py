@@ -71,7 +71,7 @@ class DatasetSchema(PydanticBaseModel):
     "List of variables to drop from dataset"
 
 
-class DataLoaderSchema(PydanticBaseModel):
+class DLSchema(PydanticBaseModel):
     """DataLoader configuration schema."""
 
     datasets: DatasetDict[DatasetSchema]
@@ -125,11 +125,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DataLoaderSchema
+    training: DLSchema
     "Training DatasetSchema."
-    validation: DataLoaderSchema
+    validation: DLSchema
     "Validation DatasetSchema."
-    test: DataLoaderSchema
+    test: DLSchema
     "Test DatasetSchema."
     validation_rollout: NonNegativeInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
