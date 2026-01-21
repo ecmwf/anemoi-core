@@ -81,10 +81,10 @@ class FFT2D(SpectralTransform):
         fx = torch.fft.fftfreq(x_dim)
         fy = torch.fft.fftfreq(y_dim)
 
-        KX, KY = torch.meshgrid(fx, fy, indexing='ij')
-        k = torch.sqrt(KX*KX + KY*KY)
+        KX, KY = torch.meshgrid(fx, fy, indexing="ij")
+        k = torch.sqrt(KX * KX + KY * KY)
 
-        mask = (k < 0.5) #torch.where(k < 0.5, 1.0 - 2.0 * k, 0.0)
+        mask = k < 0.5  # torch.where(k < 0.5, 1.0 - 2.0 * k, 0.0)
         return einops.rearrange(mask, "x y -> y x 1")
 
     def __call__(
@@ -102,7 +102,7 @@ class FFT2D(SpectralTransform):
                 f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
                 f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
             ) from e
-        
+
         fft = torch.fft.fft2(data, dim=(-2, -3))
         if self.apply_filter:
             fft *= self.filter.to(device=data.device, dtype=data.dtype)
