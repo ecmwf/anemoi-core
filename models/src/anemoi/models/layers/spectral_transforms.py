@@ -54,6 +54,7 @@ class FFT2D(SpectralTransform):
         self,
         x_dim: int,
         y_dim: int,
+        apply_filter: bool = True,
         nodes_slice: tuple[int, int | None] | None = None,
     ) -> None:
         """2D FFT Transform.
@@ -64,11 +65,27 @@ class FFT2D(SpectralTransform):
             size of the spatial dimension x of the original data in 2D
         y_dim : int
             size of the spatial dimension y of the original data in 2D
+        apply_filter: bool
+            Apply low-pass filter to ignore frequencies beyond the Nyquist limit
         """
         self.x_dim = x_dim
         self.y_dim = y_dim
         nodes_slice = nodes_slice or (0, None)
         self.nodes_slice = slice(*nodes_slice)
+        self.apply_filter = apply_filter
+        if apply_filter:
+            self.filter = self.lowpass_filter(x_dim, y_dim)
+
+    @staticmethod
+    def lowpass_filter(x_dim, y_dim):
+        fx = torch.fft.fftfreq(x_dim)
+        fy = torch.fft.fftfreq(y_dim)
+
+        KX, KY = torch.meshgrid(fx, fy, indexing='ij')
+        k = torch.sqrt(KX*KX + KY*KY)
+
+        mask = (k < 0.5) #torch.where(k < 0.5, 1.0 - 2.0 * k, 0.0)
+        return einops.rearrange(mask, "x y -> y x 1")
 
     def __call__(
         self,
@@ -85,7 +102,11 @@ class FFT2D(SpectralTransform):
                 f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
                 f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
             ) from e
-        return torch.fft.fft2(data, dim=(-2, -3))
+        
+        fft = torch.fft.fft2(data, dim=(-2, -3))
+        if self.apply_filter:
+            fft *= self.filter.to(device=data.device, dtype=data.dtype)
+        return fft
 
 
 class DCT2D(SpectralTransform):
