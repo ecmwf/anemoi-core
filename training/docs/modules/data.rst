@@ -33,12 +33,3 @@ which is used for ensemble model training.
    :members:
    :no-undoc-members:
    :show-inheritance:
-
-The ``autoencoderdataset.py`` file contains the
-``AutoencoderNativeGridDataset`` class which is used for autoencoder
-model training.
-
-.. automodule:: anemoi.training.data.dataset.autoencoderdataset
-   :members:
-   :no-undoc-members:
-   :show-inheritance:

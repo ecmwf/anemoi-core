@@ -69,6 +69,8 @@ class DatasetSchema(PydanticBaseModel):
     "Temporal resolution, frequency must be >= to dataset frequency."
     drop: list | None = Field(default=None)
     "List of variables to drop from dataset"
+    shuffle: bool = Field(default=False)
+    "Whether to shuffle the dataset samples."
 
 
 class LoaderSet(BaseModel):

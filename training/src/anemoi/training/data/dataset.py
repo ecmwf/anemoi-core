@@ -19,6 +19,7 @@ import torch
 from einops import rearrange
 from torch.utils.data import IterableDataset
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
@@ -232,16 +233,16 @@ class NativeGridDataset(IterableDataset):
         """
         self.worker_id = worker_id
 
-        # Divide this equally across shards (one shard per group!)
+        # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
+        # note that we need even splits here across DDP ranks, so we might throw away some samples
         shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
         shard_start = self.sample_comm_group_id * shard_size
-        shard_end = (self.sample_comm_group_id + 1) * shard_size
 
-        shard_len = shard_end - shard_start
-        self.n_samples_per_worker = shard_len // n_workers
+        self.n_samples_per_worker = shard_size // n_workers
 
-        low = shard_start + worker_id * self.n_samples_per_worker
-        high = min(shard_start + (worker_id + 1) * self.n_samples_per_worker, shard_end)
+        # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
+        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
+
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
         LOGGER.info(
@@ -311,23 +312,21 @@ class NativeGridDataset(IterableDataset):
         )
 
         for i in shuffled_chunk_indices:
-            start = i + self.relative_date_indices[0]
-            end = i + self.relative_date_indices[-1] + 1
-            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
-            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
-            # data[start...] will be replaced with data[self.relative_date_indices + i]
+            rel = self.relative_date_indices
+            grid_shard = self.grid_indices.get_shard_indices(self.reader_group_rank)
 
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
+            start_idx = i + rel[0]
+            end_idx = (i + rel[-1] + 1) if len(rel) > 1 else (start_idx + 1)
+            timeincrement = (rel[1] - rel[0]) if len(rel) > 1 else 1
 
+            time_slice = slice(start_idx, end_idx, timeincrement)
+
+            if isinstance(grid_shard, slice):
+                x = self.data[time_slice, :, :, grid_shard]
             else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[start:end:timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]  # select the grid shard
+                x = self.data[time_slice, :, :, :]
+                x = x[..., grid_shard]
+
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
 
@@ -339,52 +338,3 @@ class NativeGridDataset(IterableDataset):
             Dataset: {self.data}
             Relative dates: {self.relative_date_indices}
         """
-
-class SingleTimestepNativeGridDataset(NativeGridDataset):
-    """Iterable autoencoder dataset for AnemoI data on the arbitrary grids."""
-
-    def __iter__(self) -> torch.Tensor:
-        """Return an iterator over the dataset.
-
-        The datasets are retrieved by anemoi.datasets from anemoi datasets. This iterator yields
-        chunked batches for DDP and sharded training.
-
-        Currently it receives data with an ensemble dimension, which is discarded for
-        now. (Until the code is "ensemble native".)
-        """
-        if self.shuffle:
-            shuffled_chunk_indices = self.rng.choice(
-                self.valid_date_indices,
-                size=len(self.valid_date_indices),
-                replace=False,
-            )[self.chunk_index_range]
-        else:
-            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
-
-        LOGGER.debug(
-            (
-                "Worker pid %d, label %s, worker id %d, global_rank %d, "
-                "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
-            ),
-            os.getpid(),
-            self.label,
-            self.worker_id,
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            self.sample_comm_group_id,
-            shuffled_chunk_indices[:10],
-        )
-
-        for i in shuffled_chunk_indices:
-
-            i = int(i)
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-
-            x = self.data[i : i + 1]  # trick to keep the date dimention
-            x = x[..., grid_shard_indices]  # select the grid shard
-
-            x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-            self.ensemble_dim = 1
-
-            yield torch.from_numpy(x)
