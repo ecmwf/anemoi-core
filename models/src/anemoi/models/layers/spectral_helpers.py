@@ -579,8 +579,14 @@ class EcTransOctahedralSHTModule(Module):
         # Fetch relevant arrays from ecTrans
         # Note that all of these arrays (including the input points-per-latitude array) are
         # specified across the full globe, pole to pole
-
-        import ectrans4py
+        try:
+            import ectrans4py  # type: ignore
+        except Exception as exc:  # pragma: no cover
+            msg = (
+                "ectrans4py is required to generate octahedral SHT assets. "
+                "Either install ectrans4py or provide a precomputed npz via `filepath=`."
+            )
+            raise ModuleNotFoundError(msg) from exc
 
         poly_size = sum(self.truncation + 2 - im for im in range(self.truncation + 1))
 
