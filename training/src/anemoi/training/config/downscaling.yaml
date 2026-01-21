@@ -2,7 +2,7 @@ defaults:
 - data: multi
 - dataloader: multi
 - diagnostics: evaluation
-- hardware: example
+- system: example
 - graph: multi_scale
 - model: graphtransformer
 - training: downscaling
@@ -10,10 +10,14 @@ defaults:
 
 config_validation: True
 
-training:
-  model_task: anemoi.training.train.tasks.GraphDownscaler
-  max_epochs: 1
-  multistep_input: 1
+data:
+  resolution: o96
+  datasets:
+    era5:  # low-res dataset: all variables should be forcing variables
+      diagnostics: []
+    cerra:  # high-res dataset: all variables should be diagnostic or forcing variables
+      forcing: []
+      diagnostics: [tp, 2t, 10si, 10wdir, z_100, z_500, z_850, z_1000, t_500, u_100, v_100, u_500, v_500, u_850, v_850]
 
 system:
   input:
@@ -29,12 +33,18 @@ system:
   output:
     root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
 
-data:
-  resolution: o96  # Global resolution setting used in hardware file paths
-  # Time frequency requested from dataset
-  frequency: 6h
-  # Time step of model (must be multiple of frequency)
-  timestep: 6h
+
+dataloader:
+  training:
+    datasets:
+      era5: # low-res dataset: all variables should be forcing variables
+        dataset: 
+          dataset: ${system.input.dataset}
+          select: ${data.datasets.era5.forcing}
+      cerra: # high-res dataset: all variables should be diagnostic or forcing variables
+        dataset:
+          dataset: ${system.input.dataset_b}
+          select: ${data.datasets.cerra.diagnostics}
 
 diagnostics:
   plot:

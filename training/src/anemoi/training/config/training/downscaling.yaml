@@ -1,3 +1,7 @@
+---
+defaults:
+  - scalers: multi
+
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
@@ -11,10 +15,9 @@ deterministic: False
 precision: 16-mixed
 
 # multistep input
-# 1 = single step scheme, X(t-1) used to predict X(t)
-# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-# Deepmind use k = 2 in their model
-multistep_input: 2
+# 1 = single step scheme, X(t) used to predict Y(t), (if GraphDownscaler)
+# k > 1: multistep scheme, uses [X(t-k+1), ... X(t-1), X(t)] to predict Y(t)
+multistep_input: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
@@ -33,19 +36,48 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# Optimizer settings
+# =====================================================================
+# Optimizer configuration
+# =====================================================================
 optimizer:
-  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
-  kwargs:
-    betas: [0.9, 0.95]
+  # ---------------------------------------------------------------
+  # Choose optimizer type (_target_ approach)
+  # ---------------------------------------------------------------
+  # Default optimizer: AdamW
+  _target_: torch.optim.AdamW
+
+  # ---------------------------------------------------------------
+  # Common optimizer parameters
+  # ---------------------------------------------------------------
+  # Learning rate is defined elsewhere
+  #kwargs:
+  betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
+
+  # ---------------------------------------------------------------
+  # Optional: configuration for AdEMAMix (custom optimizer)
+  # Uncomment the lines below to enable it
+  # ---------------------------------------------------------------
+  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
+  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
+  # alpha: 8.0                   # Mixing factor controlling EMA fusion
+  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
+  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
+  # weight_decay: 0.01
+
+  # Optional: configuration for ZeroRedundancyOptimizer
+  # _target_: torch.distributed.optim.ZeroRedundancyOptimizer
+  # optimizer_class:
+  #   _target_: torch.optim.AdamW
+  #   _partial_: true
+  # betas: [0.9, 0.95]
 
 # select model
-model_task: anemoi.training.train.tasks.GraphForecaster
+model_task: anemoi.training.train.tasks.GraphDownscaler
 
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
 # loss functions
@@ -78,180 +110,44 @@ lr:
 
 submodules_to_freeze: []
 
-# Dataset-specific scalers configuration
-scalers:
-  # Default scalers inherited by all datasets
-  default:
-    general_variable:
-      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-      weights:
-        default: 1
-        q: 0.6
-        t: 6
-        u: 0.8
-        v: 0.5
-        w: 0.001
-        z: 12
-        sp: 10
-
-    nan_mask_weights:
-      _target_: anemoi.training.losses.scalers.NaNMaskScaler
-
-    pressure_level:
-      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-      group: pl
-      y_intercept: 0.2
-      slope: 0.001
-
-
-    # tendency scalers
-    # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
-    # useful if including slow vs fast evolving variables in the training (e.g. Land/Ocean vs Atmosphere)
-    # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
-    stdev_tendency:
-      _target_: anemoi.training.losses.scalers.StdevTendencyScaler
-
-    var_tendency:
-      _target_: anemoi.training.losses.scalers.VarTendencyScaler
-
-    # Scalers from node attributes
-    node_weights:
-      _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: ${graph.data}
-      nodes_attribute_name: area_weight
-      norm: unit-sum
-
-  # Dataset-specific scalers
-  datasets:
-    era5:
-      # ERA5 inherits from default and adds specific scalers
-      general_variable:
-        _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-        weights:
-          default: 1
-          q: 0.8      # ERA5-specific weight
-          t: 6        # ERA5-specific weight
-          u: 0.8
-          v: 0.5
-          w: 0.001
-          z: 12       # Higher weight for geopotential in ERA5
-          sp: 10
-          10u: 0.1    # ERA5 has 10m winds
-          10v: 0.1
-          2d: 0.5
-          tp: 0.025   # ERA5 has precipitation
-          cp: 0.0025  # ERA5 has convective precipitation
-
-    cerra:
-      # ERA5_copy uses same configuration as ERA5 for debugging
-      general_variable:
-        _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-        weights:
-          default: 1
-          q: 1.0      # Same as ERA5
-          t: 8        # Same as ERA5
-          u: 0.8
-          v: 0.5
-          w: 0.001
-          sp: 10
-
-      pressure_level:
-        _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-        group: pl
-        y_intercept: 0.1
-        slope: 0.001
-
 # Dataset-specific loss and metrics configuration
-loss_and_metrics:
-  # Default configuration inherited by all datasets
-  default:
-    training_loss:
+training_loss:
+  datasets:
+    cerra:
+      # CERRA uses additional scalers
       _target_: anemoi.training.losses.MSELoss
-      scalers: ['general_variable', 'nan_mask_weights']
+      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
       ignore_nans: false
 
-    validation_metrics:
+validation_metrics:
+  datasets:
+    cerra:
       mse:
         _target_: anemoi.training.losses.MSELoss
         scalers: ['node_weights']
         ignore_nans: true
 
-    # Variable groupings for organizing different variable types
-    variable_groups:
+# ERA5-specific variable groups (extends default with more variables)
+variable_groups:
+  datasets:
+    cerra:
       default: sfc
       pl:
-        param: [q, t, u, v, w, z]
+        param: [q, t, u, v, w] #, z] TODO: # CERRA has vorticity and divergence
+      sfc:
+        param: [tp, cp, 10u, 10v, 2d]  # CERRA surface variables
 
-    # Specific metrics to track (variable_level format)
-    metrics:
-      - z_500
-      - t_850
-      - u_850
-      - v_850
-
-  # Dataset-specific loss and metrics configurations
+# Same metrics as ERA5
+metrics:
   datasets:
     era5:
-      # ERA5 uses additional scalers
-      training_loss:
-        _target_: anemoi.training.losses.MSELoss
-        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        ignore_nans: false
-
-      validation_metrics:
-        mse:
-          _target_: anemoi.training.losses.MSELoss
-          scalers: ['node_weights']
-          ignore_nans: true
-
-      # ERA5-specific variable groups (extends default with more variables)
-      variable_groups:
-        default: sfc
-        pl:
-          param: [q, t, u, v, w, z]  # ERA5 has vorticity and divergence
-        sfc:
-          param: [tp, cp, 10u, 10v, 2d, sp]  # ERA5 surface variables
-
-      # ERA5-specific metrics (more comprehensive set)
-      metrics:
-        - z_500
-        - z_1000
-        - t_850
-        - t_500
-        - u_850
-        - v_850
-        - q_700
-        - tp_sfc  # precipitation at surface
-        - sp_sfc  # surface pressure
-
+    - z_500
+    - z_1000
+    - t_500
+    - u_850
+    - v_850
     cerra:
-      # cerra uses same configuration as ERA5 for debugging
-      training_loss:
-        _target_: anemoi.training.losses.MSELoss
-        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        ignore_nans: false
-
-      validation_metrics:
-        mse:
-          _target_: anemoi.training.losses.MSELoss
-          scalers: ['node_weights']
-          ignore_nans: true
-
-      # Same variable groups as ERA5
-      variable_groups:
-        default: sfc
-        pl:
-          param: [q, t, u, v, w, z, vo, d]
-        sfc:
-          param: [tp, cp, 10u, 10v, 2d, sp]
-
-      # Same metrics as ERA5
-      metrics:
-        - z_500
-        - z_1000
-        - t_500
-        - u_850
-        - v_850
-        - q_700
-        - sp_sfc
-        - cp_sfc
+    - z_500
+    - z_1000
+    - t_500
+    - u_850

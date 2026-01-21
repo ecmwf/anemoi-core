@@ -9,7 +9,7 @@
 
 from .diffusionforecaster import GraphDiffusionForecaster
 from .diffusionforecaster import GraphDiffusionTendForecaster
-from .downscaling import GraphDownscaler
+from .downscaler import GraphDownscaler
 from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
