@@ -71,15 +71,6 @@ class DatasetSchema(PydanticBaseModel):
     "List of variables to drop from dataset"
 
 
-class DLSchema(PydanticBaseModel):
-    """DataLoader configuration schema."""
-
-    datasets: DatasetDict[DatasetSchema]
-    "Datasets for the dataloader."
-    shuffle: bool = Field(example=True, default=False)
-    "Whether to shuffle the data at every epoch."
-
-
 class LoaderSet(BaseModel):
     training: NonNegativeInt | None = Field(example=None)
     "Value for training dataset"
@@ -125,11 +116,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DLSchema
+    training: DatasetDict[DatasetSchema]
     "Training DatasetSchema."
-    validation: DLSchema
+    validation: DatasetDict[DatasetSchema]
     "Validation DatasetSchema."
-    test: DLSchema
+    test: DatasetDict[DatasetSchema]
     "Test DatasetSchema."
     validation_rollout: NonNegativeInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."

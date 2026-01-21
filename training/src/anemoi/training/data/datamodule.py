@@ -162,7 +162,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Create multi-dataset for training."""
         return self._get_dataset(
             self.train_dataloader_config,
-            shuffle=self.config.dataloader.training.shuffle,
+            shuffle=True,
             label="training",
         )
 
@@ -171,7 +171,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Create multi-dataset for validation."""
         return self._get_dataset(
             self.valid_dataloader_config,
-            shuffle=self.config.dataloader.validation.shuffle,
+            shuffle=False,
             val_rollout=self.config.dataloader.validation_rollout,
             label="validation",
         )
@@ -179,7 +179,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_test(self) -> MultiDataset:
         """Create multi-dataset for testing."""
-        return self._get_dataset(self.test_dataloader_config, shuffle=self.config.dataloader.test.shuffle, label="test")
+        return self._get_dataset(self.test_dataloader_config, shuffle=False, label="test")
 
     def _get_dataset(
         self,

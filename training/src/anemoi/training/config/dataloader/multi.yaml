@@ -67,8 +67,6 @@ training:
       frequency: ${data.frequency}
       drop: []
 
-  shuffle: true
-
 validation_rollout: 1 # number of rollouts to use for validation
 
 # Multi-dataset validation with same datasets, different time period
@@ -86,7 +84,6 @@ validation:
       end: 2021
       frequency: ${data.frequency}
       drop: []
-  shuffle: false
 
 # Multi-dataset test with same datasets, different time period
 test:
@@ -103,4 +100,3 @@ test:
       end: null
       frequency: ${data.frequency}
       drop: []
-  shuffle: false
