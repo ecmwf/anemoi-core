@@ -289,7 +289,13 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             scalers=scalers,
             **kwargs,
         )
-        AlmostFairKernelCRPS.__init__(self, alpha=alpha, ignore_nans=ignore_nans, **kwargs)
+        AlmostFairKernelCRPS.__init__(
+            self,
+            alpha=alpha,
+            no_autocast=no_autocast,
+            ignore_nans=ignore_nans,
+            **kwargs,
+        )
         self.no_autocast = no_autocast
 
     def forward(
@@ -304,7 +310,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
-        group = group if is_sharded else None
+    group = group if is_sharded else None
 
         # → [..., modes, vars]
         pred_spec = self._to_spectral_flat(pred)
