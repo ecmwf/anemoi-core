@@ -310,7 +310,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
-    group = group if is_sharded else None
+        group = group if is_sharded else None
 
         # → [..., modes, vars]
         pred_spec = self._to_spectral_flat(pred)
