@@ -13,7 +13,7 @@ def main():
     log_path = sys.argv[1]
     output_png = sys.argv[2] if len(sys.argv) == 3 else "loss.png"
 
-    pattern = re.compile(r"Epoch\\s+(?P<epoch>\\d+):.*?train_mse_loss_epoch=(?P<loss>[0-9.]+)")
+    pattern = re.compile(r"Epoch\s+(?P<epoch>\d+):.*?train_mse_loss_epoch=(?P<loss>[0-9.]+)")
 
     # Keep the last loss per epoch (dedupe repeated ranks)
     epoch_to_loss = OrderedDict()
