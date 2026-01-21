@@ -1,7 +1,6 @@
 defaults:
-- data: downscaling
-- dataloader: downscaling
-- datamodule: single
+- data: multi
+- dataloader: multi
 - diagnostics: evaluation
 - hardware: example
 - graph: multi_scale
@@ -16,15 +15,6 @@ training:
   max_epochs: 1
   multistep_input: 1
 
-model:
-  num_channels: 128
-
-dataloader:
-  limit_batches:
-    training: 20
-    validation: 20
-    test: 20
-
 hardware:
   paths:
     truncation: null
@@ -36,15 +26,10 @@ hardware:
     graph: graph_anemoi_new_${data.resolution}.pt
 
     # Primary dataset for ERA5
-    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8.zarr
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-${data.frequency}-v8.zarr
 
-    # Secondary dataset for ERA5_copy (using same file for debugging)
-    dataset_b: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-6h-v3-hmsi.zarr
-
-  accelerator: auto
-  num_gpus_per_node: 1
-  num_nodes: 1
-  num_gpus_per_model: 1
+    # Secondary dataset for CERRA
+    dataset_b: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-${data.frequency}-v3-hmsi.zarr
 
 data:
   resolution: o96  # Global resolution setting used in hardware file paths
