@@ -87,8 +87,8 @@ to process the input data.
 The layers are designed as extensible classes to allow for easy
 experimentation and switching out of components.
 
-Mappers
-=======
+Graph Mappers
+=============
 
 The layers implement `Mappers`, which maps data between the input grid
 and the internal hidden grid. The `Mappers` are used as encoder and
@@ -99,9 +99,24 @@ Processors
 ==========
 
 Additionally, the layers implement `Processors` which are used to
-process the data on the hidden grid. The `Processors` use a chunking
-strategy with `Chunks` that pass a subset of layers to `Blocks` to allow
-for more efficient processing of the data.
+process the data on the hidden grid. The `Processors` use a series of
+`Blocks` to process the data. These `Blocks` can be partitioned into
+checkpointed chunks via `num_chunks` to reduce memory usage during
+training.
+
+Graph Providers
+===============
+
+Graph providers encapsulate the logic for supplying edge indices and
+attributes to mapper and processor layers. This separation allows for
+different graph types:
+
+-  **StaticGraphProvider**: For fixed graph structures with optional
+   trainable edge parameters
+-  **NoOpGraphProvider**: For edge-less architectures (e.g., pure
+   Transformers)
+-  **DynamicGraphProvider**: For on-the-fly graph construction (future)
+-  **ProjectionGraphProvider**: For sparse projection matrices
 
 **************
  Data Indices

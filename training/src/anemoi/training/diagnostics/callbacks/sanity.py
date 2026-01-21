@@ -17,9 +17,6 @@ LOGGER = logging.getLogger(__name__)
 class CheckVariableOrder(pl.callbacks.Callback):
     """Check the order of the variables in a pre-trained / fine-tuning model."""
 
-    def __init__(self) -> None:
-        super().__init__()
-
     def _get_model_name_to_index(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Get the model name to index mapping, handling both checkpoint and data indices."""
         if hasattr(pl_module, "_ckpt_model_name_to_index"):
@@ -31,7 +28,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
             return model_name_to_index
         return trainer.datamodule.data_indices.name_to_index
 
-    def _compare_variables(self, trainer: pl.Trainer, model_name_to_index, data_name_to_index) -> None:  # type: ignore[misc]
+    def _compare_variables(self, trainer: pl.Trainer, model_name_to_index: dict, data_name_to_index: dict) -> None:  # type: ignore[misc]
         """Compare variables between model and data indices."""
         for dataset_name, data_indices in trainer.datamodule.data_indices.items():
             data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
@@ -43,7 +40,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
+        _ : pl.LightningModule
             Not used
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
@@ -57,7 +54,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
+        _ : pl.LightningModule
             Not used
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
@@ -71,7 +68,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
+        _ : pl.LightningModule
             Not used
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index

@@ -74,3 +74,40 @@ def latlon_rad_to_cartesian(locations: torch.Tensor, radius: float = 1) -> torch
     y = radius * torch.cos(latr) * torch.sin(lonr)
     z = radius * torch.sin(latr)
     return torch.stack((x, y, z), dim=-1)
+
+
+def latlon_rad_to_sincos(locations: torch.Tensor) -> torch.Tensor:
+    """Convert planar coordinates to sin-cos representation.
+
+    Parameters
+    ----------
+    locations : torch.Tensor of shape (N, 2)
+        The 2D coordinates of the points, in radians.
+
+    Returns
+    -------
+    torch.Tensor of shape (N, 4)
+        2D coordinates of the points in sin-cos representation.
+    """
+    return torch.cat([torch.sin(locations), torch.cos(locations)], dim=-1)
+
+
+def sincos_to_latlon_rad(sincos_coords: torch.Tensor) -> torch.Tensor:
+    """Convert sin-cos representation to planar coordinates.
+
+    Parameters
+    ----------
+    sincos_coords : torch.Tensor of shape (N, 4)
+        The 2D coordinates of the points in sin-cos representation.
+
+    Returns
+    -------
+    torch.Tensor of shape (N, 2)
+        The 2D coordinates of the points, in radians. Latitudes in [-pi/2, pi/2] and longitudes in [0, 2*pi].
+    """
+    ndim = sincos_coords.shape[1] // 2
+    sin_values = sincos_coords[:, :ndim]
+    cos_values = sincos_coords[:, ndim:]
+    coords = torch.atan2(sin_values, cos_values)
+    coords[:, 1] = torch.remainder(coords[:, 1], 2 * torch.pi)
+    return coords

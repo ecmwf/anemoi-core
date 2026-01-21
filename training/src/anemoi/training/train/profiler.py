@@ -11,8 +11,8 @@
 import logging
 import os
 import warnings
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from functools import cached_property
 from pathlib import Path
 
@@ -55,7 +55,7 @@ class AnemoiProfiler(AnemoiTrainer):
     def print_metadata() -> None:
         console.print(f"[bold blue] SLURM NODE(s) {os.getenv('SLURM_JOB_NODELIST', '')} [/bold blue]!")
         console.print(f"[bold blue] SLURM JOB ID {os.getenv('SLURM_JOB_ID', '')} [/bold blue]!")
-        console.print(f"[bold blue] TIMESTAMP {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M:%S')} [/bold blue]!")
+        console.print(f"[bold blue] TIMESTAMP {datetime.now(UTC).strftime('%d/%m/%Y %H:%M:%S')} [/bold blue]!")
 
     @rank_zero_only
     def print_benchmark_profiler_report(
@@ -91,7 +91,7 @@ class AnemoiProfiler(AnemoiTrainer):
 
         if model_summary is not None:
             self.print_report("Model Summary", model_summary, color="Orange", emoji="robot")
-            num_gpus = self.config.hardware.num_gpus_per_node * self.config.hardware.num_nodes
+            num_gpus = self.config.system.hardware.num_gpus_per_node * self.config.system.hardware.num_nodes
             if num_gpus > 1:
                 LOGGER.info("Model Summary displays the stats for a single GPU.")
 
@@ -285,8 +285,10 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
+        self.config.diagnostics.progress_bar.target_ = (
+            ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
+        )
         callbacks = super().callbacks
-        callbacks.append(ProfilerProgressBar())
         if self.config.diagnostics.benchmark_profiler.snapshot.enabled:
             from anemoi.training.diagnostics.callbacks.profiler import MemorySnapshotRecorder
             from anemoi.training.diagnostics.profilers import check_torch_version
@@ -304,21 +306,24 @@ class AnemoiProfiler(AnemoiTrainer):
         batch = next(iter(datamodule.train_dataloader()))
         if type(batch) in [list, tuple]:
             batch = batch[0]
-        self.example_input_array = batch[
-            :,
-            0 : self.config.training.multistep_input,
-            ...,
-            self.data_indices.data.input.full,
-        ]
-        # If the input batch is sharded, replicate it to its full size
-        if self.config.dataloader.read_group_size > 1:
-            self.example_input_array = self.example_input_array.repeat(
-                1,
-                1,
-                1,
-                self.config.dataloader.read_group_size,
-                1,
-            )
+
+        self.example_input_array = {}
+        for dataset_name in batch:
+            self.example_input_array[dataset_name] = batch[dataset_name][
+                :,
+                0 : self.config.training.multistep_input,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]
+            # If the input batch is sharded, replicate it to its full size
+            if self.config.dataloader.read_group_size > 1:
+                self.example_input_array[dataset_name] = self.example_input_array[dataset_name].repeat(
+                    1,
+                    1,
+                    1,
+                    self.config.dataloader.read_group_size,
+                    1,
+                )
         return datamodule
 
     @cached_property
@@ -332,11 +337,11 @@ class AnemoiProfiler(AnemoiTrainer):
         if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
-            self.config.hardware.paths.profiler = Path(self.config.hardware.paths.profiler, self.run_id)
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, self.run_id)
         elif self.config.training.fork_run_id:
             parent_run = self.config.training.fork_run_id
-            self.config.hardware.paths.profiler = Path(self.config.hardware.paths.profiler, parent_run)
-        LOGGER.info("Profiler path: %s", self.config.hardware.paths.profiler)
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, parent_run)
+        LOGGER.info("Profiler path: %s", self.config.system.output.profiler)
 
     def _close_logger(self) -> None:
         if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):

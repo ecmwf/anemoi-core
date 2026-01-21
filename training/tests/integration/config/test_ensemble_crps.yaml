@@ -1,16 +1,75 @@
 # Modifications for the basic template "config.yaml"
-hardware:
-  paths:
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
-    truncation: null
-  files:
+system:
+  input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
-    truncation: null
-    truncation_inv: null
-    graph: null
+    loss_matrices_path: "anemoi-integration-tests/training/assets/"
+
+training:
+  training_loss:
+    datasets:
+      data:
+        loss_matrices: [ "o96_smoothing_o96.npz", null]
+        weights: [1.0, 1.0]
+  validation_metrics:
+    datasets:
+      data:
+        multiscale:
+          loss_matrices: ["o96_smoothing_o96.npz", null]
+          weights: [1.0, 1.0]
 
 dataloader:
   training:
-    end: 2017-01-08 12:00:00
+    datasets:
+      data:
+        end: 2017-01-08 12:00:00
   validation:
-    start: 2017-01-08 18:00:00
+    datasets:
+      data:
+        start: 2017-01-08 18:00:00
+
+diagnostics:
+  plot:
+    callbacks:
+      # Add plot callbacks here.
+      - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample
+        dataset_names: ["data"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        per_sample : 2
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        #Defining the accumulation levels for precipitation related fields and the colormap
+        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+        members: null  # None for all members, list for specific members
+
+      # Deterministic callbacks are also overloaded.
+      - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss
+        dataset_names: ["data"]
+        # group parameters by categories when visualizing contributions to the loss
+        # one-parameter groups are possible to highlight individual parameters
+        parameter_groups:
+          moisture: [tp, cp, tcw]
+          sfc_wind: [10u, 10v]
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum
+        dataset_names: ["data"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram
+        dataset_names: ["data"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        precip_and_related_fields: ["tp", "cp"] # Optional: specify precip fields for special histogram treatment
+      - _target_: anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot
+        dataset_names: ["data"]
+        every_n_epochs: ${diagnostics.plot.frequency.epoch}
+
+      # Overloaded PlotSample will return the plots for the first ensemble member
+      # - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotSample
+      #   sample_idx: ${diagnostics.plot.sample_idx}
+      #   per_sample: 6
+      #   parameters: ${diagnostics.plot.parameters}
+      #   every_n_batches: ${diagnostics.plot.frequency.batch}
+      #   accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+      #   precip_and_related_fields: ["tp", "cp"] # Optional: specify precip fields

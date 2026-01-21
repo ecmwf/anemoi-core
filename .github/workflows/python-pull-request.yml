@@ -9,6 +9,7 @@ on:
   schedule:
     - cron: "9 2 * * 0" # at 9:02 on sunday
   workflow_dispatch:
+  merge_group:
 
 env:
   UV_SYSTEM_PYTHON: 1
@@ -23,8 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: ["ubuntu-latest", "macos-latest"]
-        python-version: ["3.10", "3.11", "3.12"]
+        platform: ["ubuntu-latest"]
+        python-version: ["3.11", "3.12"]
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
 

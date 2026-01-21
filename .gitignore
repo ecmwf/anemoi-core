@@ -2,7 +2,6 @@
 __pycache__/
 *.py[cod]
 *$py.class
-outputs
 *.so
 .Python
 __pypackages__/
@@ -142,3 +141,8 @@ _version.py
 *.to_upload
 tempCodeRunnerFile.python
 Untitled-*.py
+trace.txt
+?/
+*.prof
+prof/
+*.gz

@@ -3,9 +3,9 @@ name: nightly-integration-tests-hpc-gpu
  # Controls when the workflow will run
 on:
   schedule:
-    - cron: "0 22 * * *"  # every day at 22pm on default(main) branch
+    - cron: "0 23 * * *"  # every day at 23pm on default(main) branch
   workflow_dispatch:
-
+  merge_group:
 
 jobs:
   check_date:
@@ -42,7 +42,8 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --slow
+            python3 -m pytest -v training/tests/integration --slow --mlflow --mlflow-server=${{ secrets.MLFLOW_TEST_URL }}
+            python3 -m pytest -v models/tests/integration --slow
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
@@ -51,7 +52,7 @@ jobs:
             #SBATCH --qos=ng
             #SBATCH --gpus=1
             #SBATCH --gres=gpu:1
-            #SBATCH --mem=16G
+            #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
   benchmark-tests:
     runs-on: hpc

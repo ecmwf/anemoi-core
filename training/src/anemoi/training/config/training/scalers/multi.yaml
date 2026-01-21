@@ -1,0 +1,84 @@
+# Dataset-specific scalers configuration
+datasets:
+  era5:
+    general_variable:
+      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+      weights:
+        default: 1
+        q: 0.8      # ERA5-specific weight
+        t: 6        # ERA5-specific weight
+        u: 0.8
+        v: 0.5
+        w: 0.001
+        z: 12       # Higher weight for geopotential in ERA5
+        sp: 10
+        10u: 0.1    # ERA5 has 10m winds
+        10v: 0.1
+        2d: 0.5
+        tp: 0.025   # ERA5 has precipitation
+        cp: 0.0025  # ERA5 has convective precipitation
+
+    nan_mask_weights:
+      _target_: anemoi.training.losses.scalers.NaNMaskScaler
+
+    pressure_level:
+      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      group: pl
+      y_intercept: 0.2
+      slope: 0.001
+
+    # tendency scalers
+    # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
+    # useful if including slow vs fast evolving variables in the training (e.g. Land/Ocean vs Atmosphere)
+    # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
+    stdev_tendency:
+      _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+
+    var_tendency:
+      _target_: anemoi.training.losses.scalers.VarTendencyScaler
+
+    # Scalers from node attributes
+    node_weights:
+      _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+      nodes_name: ${graph.data}
+      nodes_attribute_name: area_weight
+      norm: unit-sum
+
+  cerra:
+    # ERA5_copy uses same configuration as CERRA for debugging
+    general_variable:
+      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+      weights:
+        default: 1
+        q: 1.0      # Same as ERA5
+        t: 8        # Same as ERA5
+        u: 0.8
+        v: 0.5
+        w: 0.001
+        z: 3       # Same as ERA5
+
+    nan_mask_weights:
+      _target_: anemoi.training.losses.scalers.NaNMaskScaler
+
+    pressure_level:
+      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      group: pl
+      y_intercept: 0.1
+      slope: 0.001
+
+    # tendency scalers
+    # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
+    # useful if including slow vs fast evolving variables in the training (e.g. Land/Ocean vs Atmosphere)
+    # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
+    stdev_tendency:
+      _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+
+    var_tendency:
+      _target_: anemoi.training.losses.scalers.VarTendencyScaler
+
+    # Scalers from node attributes
+    node_weights:
+      _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+      nodes_name: ${graph.data}
+      nodes_attribute_name: area_weight
+      norm: unit-sum
