@@ -196,9 +196,7 @@ class BaseGraphModel(nn.Module):
         dim_sizes = [_x.shape[dim] for _x in x.values()]
 
         # Assert all datasets have the same sizes
-        assert all(
-            bs == dim_sizes[0] for bs in dim_sizes
-        ), f"Dimensions must be the same across datasets: {dim_sizes}"
+        assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
 
         return dim_sizes[0]
 
