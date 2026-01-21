@@ -58,11 +58,10 @@ class GraphDownscaler(BaseGraphModule):
         batch: dict,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
         x = self.get_inputs(batch, sample_length=self.multi_step)
-        y_pred = self(x)
-
         y = self.get_targets(batch, lead_step=self.multi_step - 1)
+
+        y_pred = self(x)
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         # Compute loss for each dataset and sum them up
