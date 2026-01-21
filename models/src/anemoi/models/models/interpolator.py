@@ -44,8 +44,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             Graph definition
         """
         model_config = DotDict(model_config)
-        self.input_times = len(model_config.training.explicit_times.input)
-        self.output_times = len(model_config.training.explicit_times.target)
+        model_config.training.multistep_input = len(model_config.training.explicit_times.input)
+        model_config.training.multistep_output = len(model_config.training.explicit_times.target)
 
         super().__init__(
             model_config=model_config,

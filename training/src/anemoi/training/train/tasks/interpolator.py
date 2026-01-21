@@ -61,6 +61,17 @@ class GraphInterpolator(BaseGraphModule):
             Supporting NumPy arrays to store in the checkpoint
 
         """
+        self.boundary_times = config.training.explicit_times.input
+        self.interp_times = config.training.explicit_times.target
+        config.training.multistep_input = len(self.boundary_times)
+        config.training.multistep_output = len(self.interp_times)
+        LOGGER.info(
+            "Interpolator: overwriting config entries 'multistep_input' to number of input times (%s)"
+            " and 'multistep_output' to number of target times (%s).",
+            len(self.boundary_times),
+            len(self.interp_times),
+        )
+
         super().__init__(
             config=config,
             graph_data=graph_data,
@@ -70,9 +81,7 @@ class GraphInterpolator(BaseGraphModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
-        self.boundary_times = config.training.explicit_times.input
-        self.interp_times = config.training.explicit_times.target
-        self.multi_out = len(self.interp_times)
+
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
 
