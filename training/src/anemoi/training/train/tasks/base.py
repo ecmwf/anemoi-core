@@ -595,10 +595,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_name=dataset_name,
         )
 
-        loss = self.loss[dataset_name](
-            pred=y_pred_full,
-            target=y_full,
+        loss = self._compute_loss(
+            y_pred=y_pred_full,
+            y=y_full,
             grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
             **kwargs,
         )
 
