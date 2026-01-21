@@ -118,7 +118,7 @@ class SpectralLoss(BaseLoss):
 
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten spectral dimensions."""
-        x_spec = self.transform(x)
+        x_spec = self.transform.forward(x)
         return einops.rearrange(x_spec, "... y x v -> ... (y x) v")
 
 
@@ -281,20 +281,14 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         scalers: list | None = None,
         **kwargs,
     ) -> None:
-        SpectralLoss.__init__(
-            self,
+        super().__init__(
             transform=transform,
             x_dim=x_dim,
             y_dim=y_dim,
-            ignore_nans=ignore_nans,
-            scalers=scalers,
-            **kwargs,
-        )
-        AlmostFairKernelCRPS.__init__(
-            self,
             alpha=alpha,
             no_autocast=no_autocast,
             ignore_nans=ignore_nans,
+            scalers=scalers,
             **kwargs,
         )
         self.no_autocast = no_autocast
