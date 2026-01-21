@@ -8,12 +8,10 @@ dataloader:
     datasets:
       data:
         end: 1979-01-08 12:00:00
-        shuffle: True
   validation:
     datasets:
       data:
         start: 1979-01-08 18:00:00
-        shuffle: False
 
 diagnostics:
   log:
