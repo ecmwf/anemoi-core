@@ -614,7 +614,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
 
-        return loss, metrics_next, y_pred_full
+        return loss, metrics_next, y_pred
 
     def compute_loss_metrics(
         self,
