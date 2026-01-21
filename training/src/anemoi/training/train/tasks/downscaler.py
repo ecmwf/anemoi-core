@@ -58,7 +58,6 @@ class GraphDownscaler(BaseGraphModule):
         batch: dict,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
         x = self.get_inputs(batch, sample_length=self.multi_step)
         y_pred = self(x)
