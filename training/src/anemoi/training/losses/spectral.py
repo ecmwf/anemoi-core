@@ -139,7 +139,6 @@ class SpectralL2Loss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
