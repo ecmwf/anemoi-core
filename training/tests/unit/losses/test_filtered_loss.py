@@ -115,3 +115,31 @@ def test_instantiation_without_filtering_variables() -> None:
         torch.as_tensor([710 * 640] * len(name_to_index), dtype=loss_value.dtype),
     ), " MSE "
     "loss value should be averaged over batch and ensemble dims and summed over grids without scaler"
+
+
+def test_print_variable_scaling() -> None:
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.utils import print_variable_scaling
+
+    data_config = {"data": {"forcing": ["imerg"], "target": ["imerg"], "prognostic": ["tp"], "diagnostic": []}}
+    name_to_index = {"tp": 0, "imerg": 1}
+    data_indices = IndexCollection(DictConfig(data_config), name_to_index)
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "losses": [
+                    {
+                        "_target_": "anemoi.training.losses.MSELoss",
+                        "predicted_variables": ["tp"],
+                        "target_variables": ["imerg"],
+                        "scalers": ["pressure_level", "general_variable", "nan_mask_weights", "node_weights"],
+                    },
+                ],
+            },
+        ),
+        data_indices=data_indices,
+    )
+    scaling_dict = print_variable_scaling(loss, data_indices)
+    assert "FilteringLossWrapper" in scaling_dict  # loss is filtered
+    assert "tp" in scaling_dict["FilteringLossWrapper"]  # tp is the predicted var
