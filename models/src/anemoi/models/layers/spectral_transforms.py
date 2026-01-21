@@ -25,10 +25,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 class SpectralTransform(torch.nn.Module):
-    """Abstract base class for spectral transforms."""
+    """Base class for spectral transforms."""
 
     @abc.abstractmethod
-    def __call__(
+    def forward(
         self,
         data: torch.Tensor,
         **kwargs,
@@ -92,7 +92,7 @@ class FFT2D(SpectralTransform):
         mask = k < 0.5  # torch.where(k < 0.5, 1.0 - 2.0 * k, 0.0)
         return einops.rearrange(mask, "x y -> y x 1")
 
-    def __call__(
+    def forward(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
@@ -118,12 +118,12 @@ class FFT2D(SpectralTransform):
 class DCT2D(SpectralTransform):
     """2D Discrete Cosine Transform."""
 
-    def __init__(self, x_dim: int, y_dim: int) -> None:
+    def __init__(self, x_dim: int, y_dim: int, **kwargs) -> None:
         super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
 
-    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         try:
             from torch_dct import dct_2d
         except ImportError:
@@ -155,6 +155,7 @@ class CartesianSHT(SpectralTransform):
         x_dim: int,  # nlon
         y_dim: int,  # nlat
         grid: str = "legendre-gauss",
+        **kwargs,
     ) -> None:
         super().__init__()
         self.x_dim = x_dim
@@ -164,8 +165,7 @@ class CartesianSHT(SpectralTransform):
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
-    def __call__(self, data: torch.Tensor) -> torch.Tensor:
-
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
         assert (
             p == self.x_dim * self.y_dim
@@ -186,6 +186,7 @@ class OctahedralSHT(SpectralTransform):
         lmax: int | None = None,
         mmax: int | None = None,
         folding: bool = False,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.nlat = nlat
@@ -198,8 +199,7 @@ class OctahedralSHT(SpectralTransform):
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
-    def __call__(self, data: torch.Tensor) -> torch.Tensor:
-
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
         assert (
             p == self._expected_points
@@ -218,6 +218,7 @@ class EcTransOctahedralSHT(SpectralTransform):
         truncation: int,
         dtype: torch.dtype = torch.float32,
         filepath: str | None = None,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.truncation = int(truncation)
@@ -226,8 +227,7 @@ class EcTransOctahedralSHT(SpectralTransform):
         self._sht = EcTransOctahedralSHTModule(truncation=self.truncation, dtype=self.dtype, filepath=filepath)
         self._expected_points = int(self._sht.n_grid_points)
 
-    def __call__(self, data: torch.Tensor) -> torch.Tensor:
-
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         _, _, points, _ = data.shape
         assert points == self._expected_points, (
             f"Input data spatial dimension {points} does not match expected "
