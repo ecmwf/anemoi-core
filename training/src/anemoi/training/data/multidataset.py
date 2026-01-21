@@ -356,7 +356,7 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         start = index + self.data_relative_date_indices[0]
         end = index + self.data_relative_date_indices[-1] + 1
-        if len(self.data_relative_date_indices) == 1: # autoencoder & downscaling
+        if len(self.data_relative_date_indices) == 1:  # autoencoder & downscaling
             timeincrement = 1
         else:
             timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
