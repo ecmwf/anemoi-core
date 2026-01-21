@@ -166,6 +166,7 @@ def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, l
     cfg, _ = hierarchical_config
     BaseSchema(**cfg)
 
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_autoencoder(
