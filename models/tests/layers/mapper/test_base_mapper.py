@@ -16,9 +16,34 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.mapper import BaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
+
+
+class ConcreteBaseMapper(BaseMapper):
+    """Concrete implementation of BaseMapper for testing."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Simple dummy processor
+        self.proc = torch.nn.Identity()
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        shapes_src, shapes_dst = shard_shapes
+        x_src, x_dst = x
+        return x_src, x_dst, shapes_src, shapes_dst
+
+    def post_process(self, x_dst, **kwargs):
+        return x_dst
+
+    def forward(self, x, batch_size, shard_shapes, graph_provider, model_comm_group=None, **kwargs):
+        """Simple forward implementation for testing."""
+        x_src, x_dst, shapes_src, shapes_dst = self.pre_process(x, shard_shapes, model_comm_group)
+        # Simple identity operation
+        result = self.post_process(x_dst, shapes_dst=shapes_dst)
+        return result
 
 
 @dataclass
@@ -28,8 +53,8 @@ class BaseMapperConfig:
     hidden_dim: int = 128
     out_channels_dst: int = 5
     cpu_offload: bool = False
-    trainable_size: int = 6
     layer_kernels: field(default_factory=DotDict) = None
+    edge_dim: int = None  # Will be set from graph_provider
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
@@ -47,13 +72,20 @@ class TestBaseMapper:
         return BaseMapperConfig()
 
     @pytest.fixture
-    def mapper(self, mapper_init, fake_graph):
-
-        return BaseMapper(
-            **asdict(mapper_init),
-            sub_graph=fake_graph[("nodes", "to", "nodes")],
-            sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
+    def graph_provider(self, fake_graph):
+        return create_graph_provider(
+            graph=fake_graph[("nodes", "to", "nodes")],
+            edge_attributes=["edge_attr1", "edge_attr2"],
+            src_size=self.NUM_SRC_NODES,
+            dst_size=self.NUM_DST_NODES,
+            trainable_size=6,
         )
+
+    @pytest.fixture
+    def mapper(self, mapper_init, graph_provider):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        return ConcreteBaseMapper(**config)
 
     @pytest.fixture
     def pair_tensor(self, mapper_init):
@@ -101,6 +133,6 @@ class TestBaseMapper:
 
         result = mapper.post_process(
             x_dst,
-            shapes_dst,
+            shapes_dst=shapes_dst,
         )
         assert torch.equal(result, x_dst)

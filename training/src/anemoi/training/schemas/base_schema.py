@@ -12,6 +12,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import Any
+from typing import Self
 from typing import Union
 
 from omegaconf import DictConfig
@@ -21,7 +22,6 @@ from pydantic import model_validator
 from pydantic._internal import _model_construction
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
-from typing_extensions import Self
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
