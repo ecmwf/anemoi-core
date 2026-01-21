@@ -23,7 +23,7 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
-class SpectralTransform(abc.ABC):
+class SpectralTransform(torch.nn.Module):
     """Abstract base class for spectral transforms."""
 
     @abc.abstractmethod
@@ -153,27 +153,16 @@ class CartesianSHT(SHT):
         x_dim: int,  # nlon
         y_dim: int,  # nlat
         grid: str = "legendre-gauss",
-        nodes_slice: tuple[int, int | None] | None = None,
     ) -> None:
+        super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
         self.grid = grid
-        nodes_slice = nodes_slice or (0, None)
-        self.nodes_slice = slice(*nodes_slice)
         self._sht = CartesianRealSHT(nlat=self.y_dim, nlon=self.x_dim, grid=self.grid)
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
-        )
-
-        if self.nodes_slice != slice(0, None):
-            raise NotImplementedError(
-                "nodes_slice is not supported for CartesianSHT unless it is the full grid. "
-                "SHT requires a complete (nlat*nlon) grid ordering."
-            )
 
         b, e, p, v = data.shape
         assert (
@@ -195,30 +184,19 @@ class OctahedralSHT(SHT):
         lmax: int | None = None,
         mmax: int | None = None,
         folding: bool = False,
-        nodes_slice: tuple[int, int | None] | None = None,
     ) -> None:
+        super().__init__()
         self.nlat = nlat
         self.lmax = lmax
         self.mmax = mmax
         self.folding = folding
-        nodes_slice = nodes_slice or (0, None)
-        self.nodes_slice = slice(*nodes_slice)
-        self._sht = OctahedralRealSHT(nlat=self.nlat, lmax=lmax, mmax=mmax, folding=folding)
+        self._sht = OctahedralRealSHT(nlat=self.nlat, lmax=self.lmax, mmax=self.mmax, folding=folding)
         self._nlon = self._sht.nlon
         self._expected_points = int(np.sum(self._nlon))
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
-        )
-
-        if self.nodes_slice != slice(0, None):
-            raise NotImplementedError(
-                "nodes_slice is not supported for OctahedralSHT unless it is the full grid. "
-                "Octahedral SHT expects full ring structure."
-            )
 
         b, e, p, v = data.shape
         assert (
@@ -228,7 +206,8 @@ class OctahedralSHT(SHT):
         # expects [..., points] where points is flattened spatial dim
         x = einops.rearrange(data, "b e p v -> (b e v) p")
         coeffs = self._sht(x)  # complex: (b*e*v, L, M)
-        return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+        tmp = einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+        return tmp
 
 
 class EcTransOctahedralSHT(SHT):
@@ -237,23 +216,16 @@ class EcTransOctahedralSHT(SHT):
         truncation: int,
         dtype: torch.dtype = torch.float32,
         filepath: str | None = None,
-        nodes_slice: tuple[int, int | None] | None = None,
     ) -> None:
+        super().__init__()
         self.truncation = int(truncation)
         self.dtype = dtype
-
-        nodes_slice = nodes_slice or (0, None)
-        self.nodes_slice = slice(*nodes_slice)
-        if not (self.nodes_slice.start == 0 and self.nodes_slice.stop is None):
-            raise ValueError("EcTransOctahedralSHT does not support `nodes_slice` (requires full grid).")
 
         self._sht = EcTransOctahedralSHTModule(truncation=self.truncation, dtype=self.dtype, filepath=filepath)
         self._expected_points = int(self._sht.n_grid_points)
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
-        )
+
         _, _, points, _ = data.shape
         assert points == self._expected_points, (
             f"Input data spatial dimension {points} does not match expected "
