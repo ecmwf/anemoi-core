@@ -119,14 +119,13 @@ class EnsemblePlotMixin:
             tuple(
                 self.post_processors(x.detach().cpu(), in_place=False)[
                     self.sample_idx : self.sample_idx + 1,
-                    :,
+                    -1:,  # TODO (dieter): -1: -> :, and set up plotting of all output steps
                     members,
                     ...,
                 ]
                 for x in outputs[1]
             ),
         )
-
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=-2, fill_value=np.nan)
         data = data.numpy()

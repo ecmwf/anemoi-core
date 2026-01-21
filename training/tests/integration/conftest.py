@@ -306,7 +306,6 @@ def multi_out_ens_config(
 
     cfg = handle_truncation_matrices(cfg, get_test_data)
 
-    cfg.data.timestep = "12h"
     cfg.training.multistep_input = 3
     cfg.training["multistep_output"] = 2
 
