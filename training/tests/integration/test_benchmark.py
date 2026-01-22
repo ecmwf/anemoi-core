@@ -46,7 +46,7 @@ def test_benchmark_dataloader(
     graph = GraphCreator(config=cfg.graph).create(overwrite=True)
 
     # Initialize datamodule with graph data
-    datamodule = AnemoiDatasetsDataModule(config=cfg, graph_data=dict(data=graph))
+    datamodule = AnemoiDatasetsDataModule(config=cfg, graph_data={"data": graph})
 
     # Get training dataloader
     train_dataloader = datamodule.train_dataloader()
