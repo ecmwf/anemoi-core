@@ -36,9 +36,11 @@ nan_mask_weights:
 # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
 stdev_tendency:
   _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+  timestep: ${data.timestep}
 
 var_tendency:
   _target_: anemoi.training.losses.scalers.VarTendencyScaler
+  timestep: ${data.timestep}
 
 # Scalers from node attributes
 node_weights:

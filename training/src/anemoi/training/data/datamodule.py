@@ -25,6 +25,8 @@ from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_seconds
+from anemoi.utils.dates import frequency_to_string
+from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,8 +64,18 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
-        return self.ds_train.statistics_tendencies
+    def statistics_tendencies(self) -> dict | None:
+        stats = self.ds_train.statistics_tendencies
+        if stats is None:
+            return None
+
+        multi_out = self.config.training.multistep_output
+        lead_times = [self._lead_time_for_step(step) for step in range(1, multi_out + 1)]
+        stats_by_lead = {
+            lead_time: self.ds_train.statistics_tendencies_for_timestep(lead_time) for lead_time in lead_times
+        }
+        stats_by_lead["lead_times"] = lead_times
+        return stats_by_lead
 
     @cached_property
     def metadata(self) -> dict:
@@ -76,6 +88,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def data_indices(self) -> IndexCollection:
         return IndexCollection(self.config, self.ds_train.name_to_index)
+
+    def _lead_time_for_step(self, step: int) -> str:
+        timestep = frequency_to_timedelta(self.config.data.timestep)
+        return frequency_to_string(timestep * step)
 
     def relative_date_indices(self, val_rollout: int = 1) -> list:
         """Determine a list of relative time indices to load for each batch."""

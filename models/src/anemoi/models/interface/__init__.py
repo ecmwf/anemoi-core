@@ -16,6 +16,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.utils.config import DotDict
 
 
@@ -78,25 +79,35 @@ class AnemoiModelInterface(torch.nn.Module):
 
     def _build_model(self) -> None:
         """Builds the model and pre- and post-processors."""
-        # Instantiate processors
-        processors = [
-            [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)]
-            for name, processor in self.config.data.processors.items()
-        ]
 
-        # Assign the processor list pre- and post-processors
+        def build_processors(statistics: dict) -> list:
+            return [
+                [name, instantiate(processor, data_indices=self.data_indices, statistics=statistics)]
+                for name, processor in self.config.data.processors.items()
+            ]
+
+        processors = build_processors(self.statistics)
         self.pre_processors = Processors(processors)
         self.post_processors = Processors(processors, inverse=True)
 
-        # If tendencies statistics are provided, instantiate the tendencies processors
         if self.statistics_tendencies is not None:
-            processors = [
-                [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics_tendencies)]
-                for name, processor in self.config.data.processors.items()
-            ]
-            # Assign the processor list pre- and post-processors
-            self.pre_processors_tendencies = Processors(processors)
-            self.post_processors_tendencies = Processors(processors, inverse=True)
+            assert isinstance(
+                self.statistics_tendencies, dict
+            ), "Tendency statistics must be a dict with per-step entries."
+            lead_times = self.statistics_tendencies.get("lead_times")
+            assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
+            assert all(
+                lead_time in self.statistics_tendencies for lead_time in lead_times
+            ), "Missing tendency statistics for one or more output steps."
+
+            self.pre_processors_tendencies = StepwiseProcessors(lead_times)
+            self.post_processors_tendencies = StepwiseProcessors(lead_times)
+            for lead_time in lead_times:
+                step_stats = self.statistics_tendencies[lead_time]
+                if step_stats is not None:
+                    step_processors = build_processors(step_stats)
+                    self.pre_processors_tendencies.set(lead_time, Processors(step_processors))
+                    self.post_processors_tendencies.set(lead_time, Processors(step_processors, inverse=True))
 
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
