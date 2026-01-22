@@ -68,7 +68,7 @@ class BasePlotCallback(Callback, ABC):
         ----------
         config : OmegaConf
             Config object
-        focus_areas : dict | None, optional
+        focus_areas : list[dict] | None, optional
             Area or point indices to focus the plot on.
             Can be:
             - {"mask_attr_name": str}
@@ -81,6 +81,9 @@ class BasePlotCallback(Callback, ABC):
 
         self.post_processors = None
         self.latlons = None
+
+        if focus_areas is None:
+            focus_areas = [None] * len(self.dataset_names)
 
         # Focus area for plotting
         self.focus_masks = [
@@ -633,19 +636,10 @@ class LongRolloutPlots(BasePlotCallback):
         # predicted output tensor
         output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
 
-        # Apply spatial mask
-        latlons, data_0, data_rollout_step, output_tensor = self.focus_mask.apply(
-            pl_module.model.model._graph_data,
-            self.latlons,
-            data_0,
-            data_rollout_step,
-            output_tensor,
-        )
-
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
             self.per_sample,
-            latlons,
+            self.latlons,
             self.accumulation_levels_plot,
             data_0.squeeze(),
             data_rollout_step.squeeze(),
@@ -656,8 +650,7 @@ class LongRolloutPlots(BasePlotCallback):
             logger,
             fig,
             epoch=epoch,
-            tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_"
-            f"rank{pl_module.local_rank:01d}{self.focus_mask.tag}",
+            tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_rank{pl_module.local_rank:01d}",
             exp_log_tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
         )
 
@@ -1086,12 +1079,17 @@ class PlotLoss(BasePerBatchPlotCallback):
                     ...,
                     data_indices.data.output.full,
                 ]
-                _, y_hat, y_true = focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    y_hat,
-                    y_true,
-                )
+
+                if focus_mask is not None:
+                    _, y_hat, y_true = focus_mask.apply(
+                        pl_module.model.model._graph_data,
+                        self.latlons[dataset_name],
+                        y_hat,
+                        y_true,
+                    )
+                    tag = focus_mask.tag
+                else:
+                    tag = ""
 
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
@@ -1105,8 +1103,8 @@ class PlotLoss(BasePerBatchPlotCallback):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"loss_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}{focus_mask.tag}",
-                    exp_log_tag=f"loss_sample_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}{focus_mask.tag}",
+                    tag=f"loss_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}{tag}",
+                    exp_log_tag=f"loss_sample_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}{tag}",
                 )
 
     def on_validation_batch_end(
@@ -1285,12 +1283,18 @@ class PlotSample(BasePlotAdditionalMetrics):
                 init_step = self._get_init_step(rollout_step, output_times[1])
 
                 # Apply spatial mask
-                latlons, data, output_tensor = focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
+                if focus_mask is not None:
+                    latlons, data, output_tensor = focus_mask.apply(
+                        pl_module.model.model._graph_data,
+                        self.latlons[dataset_name],
+                        data,
+                        output_tensor,
+                    )
+                    tag = focus_mask.tag
+
+                else:
+                    latlons = self.latlons[dataset_name]
+                    tag = ""
 
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
@@ -1309,8 +1313,8 @@ class PlotSample(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{focus_mask.tag}",
-                    exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{focus_mask.tag}",
+                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
+                    exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{tag}",
                 )
 
 
@@ -1373,12 +1377,18 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
             # Apply spatial mask
-            latlons, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
-                data,
-                output_tensor,
-            )
+            if focus_mask is not None:
+                latlons, data, output_tensor = self.focus_mask.apply(
+                    pl_module.model.model._graph_data,
+                    self.latlons[dataset_name],
+                    data,
+                    output_tensor,
+                )
+                tag = focus_mask.tag
+
+            else:
+                latlons = self.latlons[dataset_name]
+                tag = ""
 
             for rollout_step in range(output_times[0]):
                 # Build dictionary of inidicies and parameters to be plotted
@@ -1410,8 +1420,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{focus_mask.tag}",
-                    exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{focus_mask.tag}",
+                    tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
+                    exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{tag}",
                 )
 
 
@@ -1482,12 +1492,17 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
             # Apply spatial mask
-            _, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
-                data,
-                output_tensor,
-            )
+            if focus_mask is not None:
+                _, data, output_tensor = self.focus_mask.apply(
+                    pl_module.model.model._graph_data,
+                    self.latlons[dataset_name],
+                    data,
+                    output_tensor,
+                )
+                tag = focus_mask.tag
+
+            else:
+                tag = ""
 
             for rollout_step in range(output_times[0]):
 
@@ -1521,6 +1536,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{focus_mask.tag}",
-                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{focus_mask.tag}",
+                    tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
+                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{tag}",
                 )
