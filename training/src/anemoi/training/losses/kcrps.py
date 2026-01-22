@@ -122,7 +122,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
         """
-        super().__init__(ignore_nans=ignore_nans, **kwargs)
+        super().__init__(ignore_nans=ignore_nans)
 
         self.alpha = alpha
         self.no_autocast = no_autocast
