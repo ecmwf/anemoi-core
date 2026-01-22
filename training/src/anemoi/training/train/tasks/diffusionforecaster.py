@@ -56,12 +56,12 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         self.rho = config.model.model.diffusion.rho
 
-    def get_input(self, batch: torch.Tensor) -> torch.Tensor:
+    def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
-        msg = f"Batch length not sufficient for requested multi_step length!, {batch.shape[1]} !>= {self.multi_step}"
-        assert batch.shape[1] >= self.multi_step + self.multi_out, msg
         x = {}
         for dataset_name, dataset_batch in batch.items():
+            msg = f"Batch length not sufficient for multi_step len!, {dataset_batch.shape[1]} !>= {self.multi_step}"
+            assert dataset_batch.shape[1] >= self.multi_step + self.multi_out, msg
             x[dataset_name] = dataset_batch[
                 :,
                 0 : self.multi_step,
@@ -71,15 +71,13 @@ class BaseDiffusionForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
-    def get_target(self, batch: torch.Tensor) -> torch.Tensor:
+    def get_target(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get target tensor shape for diffusion model."""
         y = {}
         fc_times = [self.multi_step + i for i in range(self.multi_out)]
 
         for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[
-                :,
-                fc_times,
+            y[dataset_name] = dataset_batch[:, fc_times][
                 ...,
                 self.data_indices[dataset_name].data.output.full,
             ]
@@ -163,9 +161,9 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """Step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
@@ -211,7 +209,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
             use_reentrant=False,
         )
 
-        return loss, metrics, [y_pred]
+        return loss, metrics, y_pred
 
 
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):

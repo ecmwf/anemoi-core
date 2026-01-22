@@ -14,8 +14,11 @@ from operator import itemgetter
 from typing import TYPE_CHECKING
 
 import torch
+from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -63,6 +66,34 @@ class GraphInterpolator(BaseGraphModule):
             Supporting NumPy arrays to store in the checkpoint
 
         """
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
+        self.target_forcing_indices, self.use_time_fraction = {}, {}
+        target_forcing_config = DotDict(
+            {dataset_name: {"data": [], "time_fraction": False} for dataset_name in self.dataset_names},
+        )
+        if config.training.get("target_forcing", None) is not None:
+            target_forcing_config = get_multiple_datasets_config(config.training.target_forcing)
+        for dataset_name in self.dataset_names:
+            if len(target_forcing_config[dataset_name].data) >= 1:
+                self.target_forcing_indices[dataset_name] = itemgetter(*target_forcing_config[dataset_name].data)(
+                    data_indices[dataset_name].data.input.name_to_index,
+                )
+                if isinstance(self.target_forcing_indices[dataset_name], int):
+                    self.target_forcing_indices[dataset_name] = [self.target_forcing_indices[dataset_name]]
+            else:
+                self.target_forcing_indices[dataset_name] = []
+
+            self.use_time_fraction[dataset_name] = target_forcing_config[dataset_name].time_fraction
+
+        self.num_tfi = {name: len(idxs) for name, idxs in self.target_forcing_indices.items()}
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
         config.training.multistep_input = len(self.boundary_times)
@@ -72,16 +103,6 @@ class GraphInterpolator(BaseGraphModule):
             " and 'multistep_output' to number of target times (%s).",
             len(self.boundary_times),
             len(self.interp_times),
-        )
-
-        super().__init__(
-            config=config,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
         )
 
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
@@ -108,8 +129,9 @@ class GraphInterpolator(BaseGraphModule):
                 target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][
                     :,
                     itemgetter(*self.interp_times)(self.imap),
-                    :,
-                    :,
+                    ...,
+                ][
+                    ...,
                     self.target_forcing_indices[dataset_name],
                 ]
 
@@ -136,27 +158,18 @@ class GraphInterpolator(BaseGraphModule):
         y_pred = self(x_bound, target_forcing)
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[
-                :,
-                itemgetter(*self.interp_times)(self.imap),
-                :,
-                :,
+            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap), ...][
+                ...,
                 self.data_indices[dataset_name].data.output.full,
             ]
 
-        loss = self._compute_loss(
+        loss, metrics, y_pred = checkpoint(
+            self.compute_loss_metrics,
             y_pred,
             y,
-            model_comm_group=self.model_comm_group,
-            grid_shard_slice=self.grid_shard_slice,
+            validation_mode=validation_mode,
+            use_reentrant=False,
         )
-        metrics = {}
-        if validation_mode:
-            metrics = self._compute_metrics(
-                y_pred=y_pred,
-                y=y,
-                grid_shard_slice=self.grid_shard_slice,
-            )
         return loss, metrics, y_pred
 
     def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:

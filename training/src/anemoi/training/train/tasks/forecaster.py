@@ -71,7 +71,6 @@ class GraphForecaster(BaseRolloutGraphModule):
             assert dataset_batch.shape[1] >= required_time_steps, msg
         for rollout_step in range(rollout or self.rollout):
             y_pred = self(x)
-
             y = {}
             fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
             for dataset_name, dataset_batch in batch.items():

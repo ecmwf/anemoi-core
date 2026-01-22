@@ -16,6 +16,7 @@ import torch
 from einops import rearrange
 from omegaconf import DictConfig
 from torch import Tensor
+from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -70,23 +71,20 @@ class ObsGraphInterpolator(BaseGraphModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
-        self.known_future_variables = (
-            list(
-                itemgetter(*config.training.known_future_variables)(
-                    data_indices.data.input.name_to_index,
-                ),
-            )
-            if len(config.training.known_future_variables)
-            else []
-        )
-        if isinstance(self.known_future_variables, int):
-            self.known_future_variables = [self.known_future_variables]
-        self.multi_step = self.config.training.multistep_input
+        self.multi_step = config.training.get("multistep_input", 1)
+        self.known_future_variables = {dataset_name: [] for dataset_name in self.dataset_names}
+        if config.training.get("known_future_variables", None) is not None:
+            for dataset_name in self.dataset_names:
+                self.known_future_variables[dataset_name] = list(
+                    itemgetter(*config.training.known_future_variables)(
+                        data_indices[dataset_name].data.input.name_to_index,
+                    ),
+                )
         boundary_times = config.training.explicit_times.input
         self.boundary_times = [t + self.multi_step - 1 for t in boundary_times]
         interp_times = config.training.explicit_times.target
-        self.multi_out = len(interp_times)
         self.interp_times = [t + self.multi_step - 1 for t in interp_times]
+        config.training.multistep_output = len(self.interp_times)
         sorted_indices = sorted(
             set(range(self.multi_step)).union(
                 self.boundary_times,
@@ -97,54 +95,52 @@ class ObsGraphInterpolator(BaseGraphModule):
 
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[Tensor, Mapping[str, Tensor], Tensor]:
-        batch = self.model.pre_processors(batch)
-        b, _, e, g, _ = batch.shape
         present, future = itemgetter(*self.boundary_times)(self.imap)
+        x, y = {}, {}
+        for dataset_name, data_batch in batch.items():
+            data_batch = self.model.pre_processors(data_batch)
+            b, _, e, g, _ = data_batch.shape
+            obs = {var.item() for var in self.data_indices[dataset_name].data.input.full}.difference(
+                set(self.known_future_variables[dataset_name]),
+            )
+            x_init = data_batch[:, : self.multi_step, ..., list(obs)]  # here only past steps are used for observed vars
+            x_init_nwp = data_batch[:, itemgetter(*self.boundary_times)(self.imap)][
+                ...,
+                self.known_future_variables[dataset_name],
+            ]  # bounds are derived from variables we know in the future
+            x_init = rearrange(x_init, "b t e g v -> b e g (v t)")
+            x_init_nwp = rearrange(x_init_nwp, "b t e g v -> b e g (v t)")
+            x_bound = torch.cat([x_init, x_init_nwp], dim=-1)
+            # time-ratio forcing for each interp time
+            num_interp = len(self.interp_times)
+            ratios = torch.tensor(
+                [(t - present) / (future - present) for t in self.interp_times],
+                device=data_batch.device,
+                dtype=data_batch.dtype,
+            )
+            ratios = ratios.reshape(1, 1, 1, num_interp).expand(b, e, g, num_interp)  # broadcast to (b,e,g,num_interp)
+            x_full = torch.cat(
+                [
+                    x_bound,  # static wrt interp
+                    ratios,  # normalized delta-time forcing
+                ],
+                dim=-1,
+            ).unsqueeze(
+                1,
+            )  # fake time dimension
+            y[dataset_name] = data_batch[:, itemgetter(*self.interp_times)(self.imap)]
+            x[dataset_name] = x_full
 
-        obs = {var.item() for var in self.data_indices.data.input.full}.difference(
-            set(self.known_future_variables),
-        )
-        x_init = batch[:, : self.multi_step, ..., list(obs)]  # here only past steps are used for observed vars
-        x_init_nwp = batch[:, itemgetter(*self.boundary_times)(self.imap)][
-            ...,
-            self.known_future_variables,
-        ]  # bounds are derived from variables we know in the future
-        x_init = rearrange(x_init, "b t e g v -> b e g (v t)")
-        x_init_nwp = rearrange(x_init_nwp, "b t e g v -> b e g (v t)")
-        x_bound = torch.cat([x_init, x_init_nwp], dim=-1)
-        # time-ratio forcing for each interp time
-        num_interp = len(self.interp_times)
-        ratios = torch.tensor(
-            [(t - present) / (future - present) for t in self.interp_times],
-            device=batch.device,
-            dtype=batch.dtype,
-        )
-        ratios = ratios.reshape(1, 1, 1, num_interp).expand(b, e, g, num_interp)  # broadcast to (b,e,g,num_interp)
-
-        x_full = torch.cat(
-            [
-                x_bound,  # static wrt interp
-                ratios,  # normalized delta-time forcing
-            ],
-            dim=-1,
-        ).unsqueeze(
-            1,
-        )  # fake time dimension
-
-        y_pred = self(x_full)
-        y = batch[:, itemgetter(*self.interp_times)(self.imap)]
-        loss = self._compute_loss(
+        y_pred = self(x)
+        loss, metrics, y_pred = checkpoint(
+            self.compute_loss_metrics,
             y_pred,
             y,
-            model_comm_group=self.model_comm_group,
-            grid_shard_slice=self.grid_shard_slice,
+            validation_mode=validation_mode,
+            use_reentrant=False,
         )
-
-        metrics = {}
-        if validation_mode:
-            metrics = self._compute_metrics(y_pred, y)
 
         return loss, metrics, y_pred
