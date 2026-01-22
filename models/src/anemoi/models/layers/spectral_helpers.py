@@ -637,7 +637,7 @@ class EcTransOctahedralSHTModule(Module):
             Returns symmetric and antisymmetric polynomials and normalisation
         """
 
-        if filepath and filepath.exists():
+        if filepath and Path(filepath).exists():
             self.highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials = self.load_from_disk(
                 filepath
             )
