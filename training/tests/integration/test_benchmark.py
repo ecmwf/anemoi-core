@@ -42,6 +42,13 @@ def test_benchmark_dataloader(
     cfg.graph.nodes.data.node_builder.dataset = cfg.system.input.dataset
     LOGGER.info("Benchmarking dataloader for configuration: %s", test_case)
 
+    # Reset memory logging and free all possible memory between runs
+    # this ensures we report the peak memory used during each run,
+    # and not the peak memory used by the run with the highest memory usage
+    reset_peak_memory_stats()
+    empty_cache()
+    gc.collect()
+
     # Initialize the forecaster to get graph data
     graph = GraphCreator(config=cfg.graph).create(overwrite=True)
 
@@ -79,7 +86,7 @@ def test_benchmark_dataloader(
     LOGGER.info("Dataloader Performance Results:")
     LOGGER.info("  Total batches: %d", batch_count)
     LOGGER.info("  Total time: %.2f seconds", elapsed_time)
-    LOGGER.info("  Batches per second: %.2f", batches_per_second)
+    LOGGER.info("  Throughput: %.2f it/s", batches_per_second)
     LOGGER.info("  Time per batch: %.2f ms", time_per_batch_ms)
 
 
