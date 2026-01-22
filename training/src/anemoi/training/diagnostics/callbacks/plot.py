@@ -1279,22 +1279,22 @@ class PlotSample(BasePlotAdditionalMetrics):
 
             local_rank = pl_module.local_rank
 
+            # Apply spatial mask
+            if focus_mask is not None:
+                latlons, data, output_tensor = focus_mask.apply(
+                    pl_module.model.model._graph_data,
+                    self.latlons[dataset_name],
+                    data,
+                    output_tensor,
+                )
+                tag = focus_mask.tag
+
+            else:
+                latlons = self.latlons[dataset_name]
+                tag = ""
+
             for rollout_step in range(output_times[0]):
                 init_step = self._get_init_step(rollout_step, output_times[1])
-
-                # Apply spatial mask
-                if focus_mask is not None:
-                    latlons, data, output_tensor = focus_mask.apply(
-                        pl_module.model.model._graph_data,
-                        self.latlons[dataset_name],
-                        data,
-                        output_tensor,
-                    )
-                    tag = focus_mask.tag
-
-                else:
-                    latlons = self.latlons[dataset_name]
-                    tag = ""
 
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
