@@ -26,6 +26,8 @@ LOGGER = logging.getLogger(__name__)
 class GraphDownscaler(BaseGraphModule):
     """Graph neural network downscaler for PyTorch Lightning."""
 
+    task_type = "downscaler"
+
     def get_inputs(self, batch: dict, sample_length: int) -> dict:
         # start rollout of preprocessed batch
         x = {}
