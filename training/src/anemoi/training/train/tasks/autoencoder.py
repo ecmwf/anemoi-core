@@ -27,6 +27,8 @@ LOGGER = logging.getLogger(__name__)
 class GraphAutoEncoder(BaseGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
 
+    task_type = "autoencoder"
+
     def _step(
         self,
         batch: torch.Tensor,
