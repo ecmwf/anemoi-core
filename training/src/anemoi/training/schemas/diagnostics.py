@@ -29,6 +29,8 @@ LOGGER = logging.getLogger(__name__)
 class GraphTrainableFeaturesPlotSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
     "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     every_n_epochs: int | None
     "Epoch frequency to plot at."
 
@@ -51,6 +53,8 @@ class FocusAreaSchema(BaseModel):
 class PlotLossSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
     "PlotLoss object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     parameter_groups: dict[str, list[str]]
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
@@ -97,6 +101,8 @@ ColormapSchema = Annotated[
 class LongRolloutPlotsSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots"] = Field(alias="_target_")
     "LongRolloutPlots object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     rollout: list[int]
     "Rollout steps to plot at."
     sample_idx: int
@@ -124,6 +130,8 @@ class LongRolloutPlotsSchema(BaseModel):
 class PlotSampleSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
     "PlotSample object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
@@ -147,6 +155,8 @@ class PlotSampleSchema(BaseModel):
 class PlotSpectrumSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSpectrum"] = Field(alias="_target_")
     "PlotSpectrum object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
@@ -160,6 +170,8 @@ class PlotSpectrumSchema(BaseModel):
 class PlotHistogramSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotHistogram"] = Field(alias="_target_")
     "PlotHistogram object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
@@ -173,6 +185,8 @@ class PlotHistogramSchema(BaseModel):
 class PlotEnsSampleSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample"] = Field(alias="_target_")
     "PlotEnsSample object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
@@ -196,6 +210,8 @@ class PlotEnsSampleSchema(BaseModel):
 class PlotEnsLossSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss"] = Field(alias="_target_")
     "PlotLoss object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     parameter_groups: dict[str, list[str]]
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
@@ -205,6 +221,8 @@ class PlotEnsLossSchema(BaseModel):
 class PlotEnsSpectrumSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum"] = Field(alias="_target_")
     "PlotSpectrum object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
@@ -216,6 +234,8 @@ class PlotEnsSpectrumSchema(BaseModel):
 class PlotEnsHistogramSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram"] = Field(alias="_target_")
     "PlotHistogram object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
@@ -230,6 +250,8 @@ class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot"] = Field(
         alias="_target_",
     )
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
     "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
     every_n_epochs: int | None
     "Epoch frequency to plot at."
@@ -263,6 +285,8 @@ class PlotSchema(BaseModel):
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
+    datasets_to_plot: list[str] = Field(default_factory=list, example=["data"])
+    "Default dataset names to use in the plot callbacks"
     frequency: PlottingFrequency
     "Frequency of the plotting."
     sample_idx: int

@@ -12,7 +12,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.dataset}
+      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"  # Always overridden from dataloader config
     attributes: ${graph.attributes.nodes}
   hidden_1:
     node_builder:

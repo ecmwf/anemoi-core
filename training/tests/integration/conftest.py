@@ -22,6 +22,7 @@ from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
@@ -208,6 +209,28 @@ def stretched_config(
 
 
 @pytest.fixture
+def multidatasets_config(
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, list[str]]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidatasets"):
+        template = compose(config_name="multi")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "dataset_b"])
+    dataset, dataset_b = rel_paths
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
+    use_case_modifications.system.input.dataset_b = str(Path(tmp_dir, dataset_b))
+
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls
+
+
+@pytest.fixture
 def lam_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
@@ -238,22 +261,32 @@ def lam_config_with_graph(
     cfg, urls = lam_config
     cfg.graph = existing_graph_config
 
-    url_graph = cfg.system.input.graph
-    tmp_path_graph = get_test_data(url_graph)
-    cfg.system.input.graph = Path(tmp_path_graph)
+    dataset_name = "data"  # default dataset name
+    url_graph = "anemoi-integration-tests/training/graphs/lam-graph.pt"
+    tmp_path_graph = Path(get_test_data(url_graph))
+    dataset_graph_filename = tmp_path_graph.name.replace(".pt", f"_{dataset_name}.pt")
+    tmp_path_graph.rename(tmp_path_graph.parent / dataset_graph_filename)
+    cfg.system.input.graph = tmp_path_graph
     return cfg, urls
 
 
 def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> DictConfig:
     url_loss_matrices = cfg.system.input.loss_matrices_path
     tmp_path_loss_matrices = None
-    for file in cfg.training.training_loss.loss_matrices:
-        if file is not None:
-            tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
-    if tmp_path_loss_matrices is not None:
-        cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
-        cfg.training.training_loss.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
-        cfg.training.validation_metrics.multiscale.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+
+    training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
+    for dataset_name, training_loss_cfg in training_losses_cfg.items():
+        for file in training_loss_cfg.loss_matrices:
+            if file is not None:
+                tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+        if tmp_path_loss_matrices is not None:
+            cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
+            training_loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+
+            cfg.training.validation_metrics.datasets[dataset_name].multiscale.loss_matrices_path = str(
+                Path(tmp_path_loss_matrices).parent,
+            )
+        cfg.training.training_loss.datasets[dataset_name] = training_loss_cfg
     return cfg
 
 

@@ -176,7 +176,9 @@ properly:
 .. code:: yaml
 
    training_loss:
-     _target_: anemoi.training.losses.WeightedMSELoss
+      datasets:
+          your_dataset_name:
+              _target_: anemoi.training.losses.WeightedMSELoss
 
 During training, the :class:`GraphDiffusionForecaster` automatically
 passes the required `weights` based on the noise level to the loss
