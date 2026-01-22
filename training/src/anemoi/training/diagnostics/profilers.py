@@ -373,7 +373,7 @@ class BenchmarkProfiler(Profiler):
                     dirpath=self.dirpath,
                     on_trace_ready=trace_handler(self.dirpath),
                     schedule=torch.profiler.schedule(
-                        wait=0,
+                        wait=100,
                         warmup=self.warmup,
                         active=self.num_steps,
                         repeat=1,
