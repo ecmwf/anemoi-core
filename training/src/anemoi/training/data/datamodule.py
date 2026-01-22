@@ -74,11 +74,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.statistics_tendencies
 
     @cached_property
-    def timeincrement(self) -> int:
-        """Return time increment in seconds."""
-        return self.ds_train.timeincrement
-
-    @cached_property
     def metadata(self) -> dict:
         """Return metadata from all training datasets."""
         return self.ds_train.metadata
@@ -127,7 +122,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         multi_step = self.config.training.multistep_input
         multi_out = self.config.training.multistep_output  # defaults to 1
         time_range = multi_step + rollout * multi_out
-        return [self.timeincrement * mstep for mstep in range(time_range)]
+        return list(range(time_range))
 
     def add_trajectory_ids(self, data_reader: Callable) -> Callable:
         """Add trajectory IDs to data reader for forecast trajectory tracking."""
