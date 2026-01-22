@@ -78,9 +78,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         multi_out = self.config.training.multistep_output
         lead_times = [self._lead_time_for_step(step) for step in range(1, multi_out + 1)]
-        stats_by_lead = {
-            lead_time: self.ds_train.statistics_tendencies_for_timestep(lead_time) for lead_time in lead_times
-        }
+        stats_by_lead = {}
+        for lead_time in lead_times:
+            all_stats_tend = self.ds_train.statistics_tendencies_for_timestep(lead_time)
+            for dataset_name in self.dataset_names:
+                stats_by_lead[dataset_name] = {lead_time: all_stats_tend.get(dataset_name, None)}
         stats_by_lead["lead_times"] = lead_times
         return stats_by_lead
 

@@ -123,6 +123,10 @@ class MultiDataset(IterableDataset):
         for dataset in self.datasets.values():
             getattr(dataset, method_name)(*args, **kwargs)
 
+    def _apply_all_datasets_return(self, method_name: str, *args, **kwargs) -> dict:
+        """Call a method by name with given arguments on all datasets and return results."""
+        return {name: getattr(dataset, method_name)(*args, **kwargs) for name, dataset in self.datasets.items()}
+
     @cached_property
     def statistics(self) -> dict[str, dict]:
         """Return combined statistics from all datasets."""
@@ -132,6 +136,10 @@ class MultiDataset(IterableDataset):
     def statistics_tendencies(self) -> dict[str, dict | None]:
         """Return combined tendency statistics from all datasets."""
         return self._collect("statistics_tendencies")
+
+    def statistics_tendencies_for_timestep(self, timestep: str) -> dict[str, dict | None]:
+        """Return combined tendency statistics for a specific timestep from all datasets."""
+        return self._apply_all_datasets_return("statistics_tendencies_for_timestep", timestep)
 
     @cached_property
     def metadata(self) -> dict[str, dict]:

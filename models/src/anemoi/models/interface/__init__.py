@@ -116,9 +116,15 @@ class AnemoiModelInterface(torch.nn.Module):
         # Build tendencies processors if provided
         pre_processors_tendencies = None
         post_processors_tendencies = None
-        if statistics_tendencies is not None:
+        if any(s is not None for s in statistics_tendencies.values()):
+            next_available_lead_time = next(k for k, v in statistics_tendencies.items() if v is not None)
             processors_tendencies = [
-                [name, instantiate(processor, data_indices=data_indices, statistics=statistics_tendencies)]
+                [
+                    name,
+                    instantiate(
+                        processor, data_indices=data_indices, statistics=statistics_tendencies[next_available_lead_time]
+                    ),
+                ]
                 for name, processor in processors_configs.items()
             ]
             pre_processors_tendencies = Processors(processors_tendencies)
@@ -138,7 +144,8 @@ class AnemoiModelInterface(torch.nn.Module):
             lead_times = self.statistics_tendencies.get("lead_times")
             assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
             assert all(
-                lead_time in self.statistics_tendencies for lead_time in lead_times
+                [lead_time in self.statistics_tendencies[dataset_name] for lead_time in lead_times]
+                for dataset_name in self.statistics.keys()
             ), "Missing tendency statistics for one or more output steps."
 
         self.pre_processors_tendencies = {k: StepwiseProcessors(lead_times) for k in self.statistics_tendencies.keys()}

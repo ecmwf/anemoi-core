@@ -263,11 +263,15 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         self._tendency_pre_processors = pre_processors_tendencies
         self._tendency_post_processors = post_processors_tendencies
 
-    def _compute_tendency_target(self, y: torch.Tensor, x_ref: torch.Tensor) -> torch.Tensor:
-        tendencies = []
+    def _compute_tendency_target(
+        self,
+        y: dict[str, torch.Tensor],
+        x_ref: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        tendencies = {}
         for step, pre_proc in enumerate(self._tendency_pre_processors):
-            y_step = y[:, step : step + 1]
-            x_ref_step = x_ref[:, step : step + 1]
+            y_step = {k: y[k][:, step : step + 1] for k in y}
+            x_ref_step = {k: x_ref[k][:, step : step + 1] for k in x_ref}
             tendency_step = self.model.model.compute_tendency(
                 y_step,
                 x_ref_step,
@@ -275,14 +279,21 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 pre_proc,
                 input_post_processor=self.model.post_processors,
             )
-            tendencies.append(tendency_step)
-        return torch.cat(tendencies, dim=1)
+            for dataset_name in tendency_step:
+                if dataset_name not in tendencies:
+                    tendencies[dataset_name] = []
+                tendencies[dataset_name].append(tendency_step[dataset_name])
+        return {k: torch.cat(v, dim=1) for k, v in tendencies.items()}
 
-    def _reconstruct_state(self, x_ref: torch.Tensor, tendency: torch.Tensor) -> torch.Tensor:
-        states = []
+    def _reconstruct_state(
+        self,
+        x_ref: dict[str, torch.Tensor],
+        tendency: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        states = {}
         for step, post_proc in enumerate(self._tendency_post_processors):
-            x_ref_step = x_ref[:, step : step + 1]
-            tendency_step = tendency[:, step : step + 1]
+            tendency_step = {k: tendency[k][:, step : step + 1] for k in tendency}
+            x_ref_step = {k: x_ref[k][:, step : step + 1] for k in x_ref}
             state_step = self.model.model.add_tendency_to_state(
                 x_ref_step,
                 tendency_step,
@@ -290,19 +301,21 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 post_proc,
                 output_pre_processor=self.model.pre_processors,
             )
-            states.append(state_step)
-        return torch.cat(states, dim=1)
+            for dataset_name in state_step:
+                if dataset_name not in states:
+                    states[dataset_name] = []
+                states[dataset_name].append(state_step[dataset_name])
+        return {k: torch.cat(v, dim=1) for k, v in states.items()}
 
-    def compute_dataset_loss_metrics(
+    def compute_loss_metrics(
         self,
         y_pred: dict[str, torch.Tensor],
         y: dict[str, torch.Tensor],
         validation_mode: bool = False,
-        dataset_name: str | None = None,
         y_pred_state: dict[str, torch.Tensor] | None = None,
         y_state: dict[str, torch.Tensor] | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor] | None]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
@@ -315,11 +328,9 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             Current step
         validation_mode : bool, optional
             Whether to compute validation metrics
-        dataset_name : str | None
-            Dataset name for multi-dataset setups
-        y_pred_state : torch.Tensor, optional
+        y_pred_state : dict[str, torch.Tensor], optional
             Predicted states (for validation metrics) if they differ from y_pred (e.g., tendency-based models)
-        y_state : torch.Tensor, optional
+        y_state : dict[str, torch.Tensor], optional
             Target states (for validation metrics) if they differ from y (e.g., tendency-based models)
         **kwargs
             Additional arguments to pass to loss computation
@@ -329,53 +340,50 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
-        # Prepare tensors for loss/metrics computation
-        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
-            y_pred,
-            y,
-            validation_mode=validation_mode,
-            dataset_name=dataset_name,
-        )
-
-        loss = self._compute_loss(
-            y_pred_full,
-            y_full,
-            grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name,
-            **kwargs,
-        )
-
-        # Compute metrics if in validation mode
-        metrics_next = {}
-        if validation_mode:
-            assert (
-                dataset_name in y_pred_state
-            ), f"{dataset_name} must be a key in y_pred_state for tendency-based diffusion models."
-            assert (
-                dataset_name in y_state
-            ), f"{dataset_name} must be a key in y_state for tendency-based diffusion models."
-            assert (
-                y_pred_state[dataset_name] is not None
-            ), "y_pred_state must be provided for tendency-based diffusion models."
-            assert y_state[dataset_name] is not None, "y_state must be provided for tendency-based diffusion models."
-
-            # Prepare states for metrics computation
-            y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
-                y_pred_state[dataset_name],
-                y_state[dataset_name],
+        total_loss, metrics_next, y_preds = None, {}, {}
+        for dataset_name in self.dataset_names:
+            y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
+                y_pred[dataset_name],
+                y[dataset_name],
                 validation_mode=validation_mode,
                 dataset_name=dataset_name,
             )
-
-            metrics_next = self._compute_metrics(
-                y_pred_state_full,
-                y_state_full,
+            loss = self._compute_loss(
+                y_pred=y_pred_full,
+                y=y_full,
                 grid_shard_slice=grid_shard_slice,
                 dataset_name=dataset_name,
                 **kwargs,
             )
+            if loss is not None:
+                dataset_loss_sum = loss.sum()  # collapse potential multi-scale loss
+                total_loss = dataset_loss_sum if total_loss is None else total_loss + dataset_loss_sum
 
-        return loss, metrics_next, y_pred_state_full if validation_mode else None
+                if validation_mode:
+                    loss_obj = self.loss[dataset_name]
+                    loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
+                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = loss
+
+            # Compute metrics if in validation mode
+            if validation_mode:
+                assert y_pred_state is not None, "y_pred_state must be provided for tendency-based diffusion models."
+                assert y_state is not None, "y_state must be provided for tendency-based diffusion models."
+                # Prepare states for metrics computation
+                y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
+                    y_pred_state[dataset_name],
+                    y_state[dataset_name],
+                    validation_mode,
+                )
+                dataset_metrics = self._compute_metrics(
+                    y_pred_state_full,
+                    y_state_full,
+                    grid_shard_slice=grid_shard_slice,
+                    **kwargs,
+                )
+                y_preds[dataset_name] = y_pred_state_full
+                for metric_name, metric_value in dataset_metrics.items():
+                    metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
+        return total_loss, metrics_next, y_preds if validation_mode else None
 
     def _step(
         self,
@@ -419,7 +427,6 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         )
 
         tendency_target = self._compute_tendency_target(y, x_ref)
-
         # get noise level and associated loss weights
         shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 1) for k, x_ in x.items()}
         sigma, noise_weights = self._get_noise_level(
@@ -451,4 +458,4 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             use_reentrant=False,
         )
 
-        return loss, metrics, [y_pred]
+        return loss, metrics, y_pred
