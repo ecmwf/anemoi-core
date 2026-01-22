@@ -4,7 +4,8 @@ defaults:
 - diagnostics: evaluation
 - datamodule: single
 - hardware: example
-- graph: existing_graph
+- graph: graph_AROME.yaml
+# - graph: existing_graph
 - model: graphtransformer_diffusionuncond
 - training: diffusion
 - _self_
@@ -78,15 +79,20 @@ model:
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
-    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/multi_nodes_probabilistic_low_noise_x_0/
+    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/tests_bs_gpus_nodes/gpu_per_model_1/
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
-    graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
+    # graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
+    graph: /project/home/p200177/DE_371/angeliquebonamy/anemoi/graph/graph_AROME_full.pt
+
+  # num_nodes: 2
+  # accelerator: gpu
+  # devices: 1 
   num_gpus_per_node: 4
   num_gpus_per_model: 2
-  num_nodes: 2
+  num_nodes: 2 
 training:
   max_epochs: 500
   model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
   training_approach: probabilistic_low_noise
-  # run_id: 5e62bb9c61a84f74985391a6bd6c4628
+  # run_id: 73f7278e180543469b320e3311bfff27
