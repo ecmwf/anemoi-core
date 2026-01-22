@@ -85,7 +85,7 @@ class LeadTimeDecayScaler(TimeStepScaler):
         self.decay_factor = torch.tensor(decay_factor)
         self.inverse = inverse
         self.output_lead_times = torch.tensor(output_lead_times) / max_lead_time
-        self.weights = self.get_weights()
+        self.weights = self.get_weights().to(torch.float32)
         super().__init__(weights=self.weights, norm=norm)
 
     def scale_forward(self) -> torch.Tensor:
@@ -114,3 +114,6 @@ class LeadTimeDecayScaler(TimeStepScaler):
         if self.inverse:
             return self.scale_backward()
         return self.scale_forward()
+
+    def get_scaling_values(self) -> torch.Tensor:
+        return self.weights.clone().detach()
