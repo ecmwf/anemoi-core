@@ -249,21 +249,36 @@ class GraphEnsInterpMulti(BaseGraphModule):
             y_preds.append(y_pred_ens_group)
 
         for agg_op in self.aggregate_outputs:
-            agg_type = getattr(torch, agg_op)
-            y_pred_agg = agg_type(y_pred, dim=1)  # (bs, ens, latlon, nvar)
-            y_agg = agg_type(y, dim=1)  # (bs, latlon, nvar)
-            if agg_op in ["max", "min"]:
-                y_pred_agg = y_pred_agg[0]  # discard indices
-                y_agg = y_agg[0]
-            loss_next, metrics_next, y_pred_ens_group = self.loss_step(
-                y_pred_agg,
-                y_agg,
-                validation_mode=validation_mode,
-                val_index=len(self.interp_times) + self.aggregate_outputs.index(agg_op),
-            )
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_pred_ens_group)
+            if agg_op == "diff":
+                y_pred_diff = y_pred[:, 1:, ...] - y_pred[:, :-1, ...]  # (bs, time, ens, latlon, nvar)
+                y_diff = y[:, 1:, ...] - y[:, :-1, ...]  # (bs, time, latlon, nvar)
+                for step in range(y_pred_diff.shape[1]):
+                    loss_next, metrics_next, y_pred_ens_group = self.loss_step(
+                        y_pred_diff[:, step, ...],
+                        y_diff[:, step, ...],
+                        validation_mode=validation_mode,
+                        val_index=len(self.interp_times) + step + self.aggregate_outputs.index(agg_op),
+                    )
+                    loss += loss_next
+                    metrics.update(metrics_next)
+                    y_preds.append(y_pred_ens_group)
+
+            else:
+                agg_type = getattr(torch, agg_op)
+                y_pred_agg = agg_type(y_pred, dim=1)  # (bs, ens, latlon, nvar)
+                y_agg = agg_type(y, dim=1)  # (bs, latlon, nvar)
+                if agg_op in ["max", "min"]:
+                    y_pred_agg = y_pred_agg[0]  # discard indices
+                    y_agg = y_agg[0]
+                loss_next, metrics_next, y_pred_ens_group = self.loss_step(
+                    y_pred_agg,
+                    y_agg,
+                    validation_mode=validation_mode,
+                    val_index=len(self.interp_times) + self.aggregate_outputs.index(agg_op),
+                )
+                loss += loss_next
+                metrics.update(metrics_next)
+                y_preds.append(y_pred_ens_group)
 
         _ens_ic = x_bound if validation_mode else None
 

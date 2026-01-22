@@ -28,22 +28,21 @@ hardware:
 
 model:
   model:
-    _target_: anemoi.models.models.interpolator.AnemoiModelEncProcDecEnsInterp
+    _target_: anemoi.models.models.interpolator.AnemoiModelEncProcDecEnsInterpMulti
   latent_skip: True # True/False for skip connection on latent mesh
   grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
 
 training:
-  model_task: anemoi.training.train.tasks.GraphEnsInterp
+  model_task: anemoi.training.train.tasks.GraphEnsInterpMulti
   # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
     input: [0,6]
-    target: [1,2,3,4,5]
+    target: [1,2,3,4,5,6]
 
-  target_forcing: #forcing parameters for the target time to include as input
-    data: #of which come from the dataset
-      - "insolation"
-    time_fraction: True
-
-  use_all_targets: True #whether to use all interp targets or cycle through them, one each iteration.
+  aggregate_outputs: #calculate loss on time-aggregated outputs
+    - mean
+    - max
+    - min
+    - diff
 
   ensemble_size_per_device: 1
