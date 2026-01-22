@@ -14,6 +14,7 @@ import einops
 import numpy as np
 import torch
 import torch.fft
+import torch.nn as nn
 
 from anemoi.models.layers.spectral_helpers import CartesianRealSHT
 from anemoi.models.layers.spectral_helpers import EcTransOctahedralSHTModule
@@ -23,13 +24,14 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
-class SpectralTransform(abc.ABC):
+class SpectralTransform(nn.Module, abc.ABC):
     """Abstract base class for spectral transforms."""
 
     @abc.abstractmethod
     def __call__(
         self,
         data: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """Transform data to spectral domain.
 
@@ -56,6 +58,7 @@ class FFT2D(SpectralTransform):
         y_dim: int,
         apply_filter: bool = True,
         nodes_slice: tuple[int, int | None] | None = None,
+        **kwargs,
     ) -> None:
         """2D FFT Transform.
 
@@ -68,9 +71,11 @@ class FFT2D(SpectralTransform):
         apply_filter: bool
             Apply low-pass filter to ignore frequencies beyond the Nyquist limit
         """
+        super().__init__()
+
         self.x_dim = x_dim
         self.y_dim = y_dim
-        nodes_slice = nodes_slice or (0, None)
+        nodes_slice = nodes_slice or (0, x_dim * y_dim)
         self.nodes_slice = slice(*nodes_slice)
         self.apply_filter = apply_filter
         if apply_filter:
@@ -92,8 +97,9 @@ class FFT2D(SpectralTransform):
         data: torch.Tensor,
     ) -> torch.Tensor:
         data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
         )
+
         var = data.shape[-1]
         try:
             data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
@@ -113,6 +119,7 @@ class DCT2D(SpectralTransform):
     """2D Discrete Cosine Transform."""
 
     def __init__(self, x_dim: int, y_dim: int) -> None:
+        super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
 
@@ -150,6 +157,7 @@ class CartesianSHT(SpectralTransform):
         grid: str = "legendre-gauss",
         nodes_slice: tuple[int, int | None] | None = None,
     ) -> None:
+        super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
         self.grid = grid
@@ -161,7 +169,7 @@ class CartesianSHT(SpectralTransform):
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
         data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
         )
 
         if self.nodes_slice != slice(0, None):
@@ -192,6 +200,7 @@ class OctahedralSHT(SpectralTransform):
         folding: bool = False,
         nodes_slice: tuple[int, int | None] | None = None,
     ) -> None:
+        super().__init__()
         self.nlat = nlat
         self.lmax = lmax
         self.mmax = mmax
@@ -206,7 +215,7 @@ class OctahedralSHT(SpectralTransform):
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
         data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
         )
 
         if self.nodes_slice != slice(0, None):
@@ -234,6 +243,7 @@ class EcTransOctahedralSHT(SpectralTransform):
         filepath: str | None = None,
         nodes_slice: tuple[int, int | None] | None = None,
     ) -> None:
+        super().__init__()
         self.truncation = int(truncation)
         self.dtype = dtype
 
@@ -247,7 +257,7 @@ class EcTransOctahedralSHT(SpectralTransform):
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
         data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)))
+            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
         )
         _, _, points, _ = data.shape
         assert points == self._expected_points, (

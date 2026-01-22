@@ -289,13 +289,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             scalers=scalers,
             **kwargs,
         )
-        AlmostFairKernelCRPS.__init__(
-            self,
-            alpha=alpha,
-            no_autocast=no_autocast,
-            ignore_nans=ignore_nans,
-            **kwargs,
-        )
+        self.alpha = alpha
         self.no_autocast = no_autocast
 
     def forward(
@@ -308,15 +302,17 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
-    group = group if is_sharded else None
+        group = group if is_sharded else None
 
         # → [..., modes, vars]
         pred_spec = self._to_spectral_flat(pred)
         tgt_spec = self._to_spectral_flat(target)
-        tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
+
         pred_spec = einops.rearrange(pred_spec, "b e m v -> b v m e")  # ensemble dim last for preds
+        tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
                 crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
