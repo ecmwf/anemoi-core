@@ -31,13 +31,11 @@ from scipy.interpolate import griddata
 from torch import Tensor
 from torch import nn
 
-from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
+from anemoi.training.diagnostics.maps import map_features
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
-
-continents = Coastlines()
 LAYOUT = "tight"
 
 
@@ -691,19 +689,7 @@ def single_plot(
         ax.set_ylim((ymin - 0.1, ymax + 0.1))
 
     # Add map features
-    try:
-        import cartopy.feature as cfeature
-
-        if hasattr(ax, "add_feature"):
-            ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
-        else:
-            # If it's a regular Axes, add_feature doesn't exist
-            LOGGER.warning("Axis is not a GeoAxes; skipping cartopy features.")
-
-    except ModuleNotFoundError:
-        LOGGER.warning("Module cartopy not found. Coastlines and borders will not be plotted.")
-
-    continents.plot_continents(ax)
+    map_features.plot(ax)
 
     if title is not None:
         ax.set_title(title)
@@ -737,7 +723,9 @@ def get_scatter_frame(
     )
     ax.set_xlim((-np.pi, np.pi))
     ax.set_ylim((-np.pi / 2, np.pi / 2))
-    continents.plot_continents(ax)
+
+    map_features.plot(ax)
+
     ax.set_aspect("auto", adjustable=None)
     _hide_axes_ticks(ax)
     return ax, scatter_frame
@@ -782,7 +770,7 @@ def edge_plot(
     ax.set_xlim((xmin - 0.1, xmax + 0.1))
     ax.set_ylim((ymin - 0.1, ymax + 0.1))
 
-    continents.plot_continents(ax)
+    map_features.plot(ax)
 
     if title is not None:
         ax.set_title(title)
