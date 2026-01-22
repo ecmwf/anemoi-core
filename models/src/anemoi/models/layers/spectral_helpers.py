@@ -725,12 +725,7 @@ class EcTransOctahedralSHTModule(Module):
 
         return symmetric, antisymmetric, gaussian_weights
 
-    def longitudinal_rfft(
-        self,
-        x: torch.Tensor,
-        highest_zonal_wavenumber_per_lat=None,
-        padding=None
-    ) -> torch.Tensor:
+    def longitudinal_rfft(self, x: torch.Tensor, highest_zonal_wavenumber_per_lat=None, padding=None) -> torch.Tensor:
         """Performs rfft along the longitude.
 
         Cuts off the result at the highest zonal wavenumber to avoid aliasing effects. Padd up
@@ -769,9 +764,7 @@ class EcTransOctahedralSHTModule(Module):
                 :, :, : highest_zonal_wavenumber_per_lat[i] + 1, :
             ]
             four_out.append(
-                torch.cat(
-                    [out, torch.zeros((*out.shape[:2], padding[i], out.shape[-1]), device=out.device)], dim=2
-                )
+                torch.cat([out, torch.zeros((*out.shape[:2], padding[i], out.shape[-1]), device=out.device)], dim=2)
             )
 
         return torch.stack(four_out, dim=2)
@@ -832,13 +825,8 @@ class InverseEcTransOctahedralSHTModule(EcTransOctahedralSHTModule):
         self.register_buffer("symmetric", symmetric, persistent=False)
         self.register_buffer("antisymmetric", antisymmetric, persistent=False)
 
-    def inverse_longitudinal_rfft(
-        self,
-        x: torch.Tensor,
-        highest_zonal_wavenumber_per_lat=None
-    ) -> torch.Tensor:
+    def inverse_longitudinal_rfft(self, x: torch.Tensor, highest_zonal_wavenumber_per_lat=None) -> torch.Tensor:
         """Performs irfft along the longitude.
-
 
         Parameters
         ----------
