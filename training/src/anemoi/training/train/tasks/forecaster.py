@@ -81,7 +81,6 @@ class GraphForecaster(BaseRolloutGraphModule):
                     ...,
                     self.data_indices[dataset_name].data.output.full,
                 ]
-
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
             loss, metrics_next, y_pred = checkpoint(
