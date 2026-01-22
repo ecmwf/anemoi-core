@@ -215,10 +215,88 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
 
+    def __init__(
+        self,
+        *,
+        config: BaseSchema,
+        graph_data: HeteroData,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: IndexCollection,
+        metadata: dict,
+        supporting_arrays: dict,
+    ) -> None:
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
+        self._tendency_pre_processors = None
+        self._tendency_post_processors = None
+        self._validate_tendency_processors()
+
+    def _validate_tendency_processors(self) -> None:
+        stats = self.statistics_tendencies
+        assert stats is not None, "Tendency statistics are required for diffusion tendency models."
+        lead_times = stats.get("lead_times") if isinstance(stats, dict) else None
+        assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
+        assert (
+            len(lead_times) == self.multi_out
+        ), f"Expected {self.multi_out} tendency statistics entries, got {len(lead_times)}."
+        assert all(
+            lead_time in stats for lead_time in lead_times
+        ), "Missing tendency statistics for one or more output steps."
+
+        pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
+        post_processors_tendencies = getattr(self.model, "post_processors_tendencies", None)
+        assert (
+            pre_processors_tendencies is not None and post_processors_tendencies is not None
+        ), "Per-step tendency processors are required for multi-output diffusion tendency models."
+        assert (
+            len(pre_processors_tendencies) == self.multi_out and len(post_processors_tendencies) == self.multi_out
+        ), "Per-step tendency processors must match multistep_output."
+
+        self._tendency_pre_processors = pre_processors_tendencies
+        self._tendency_post_processors = post_processors_tendencies
+
+    def _compute_tendency_target(self, y: torch.Tensor, x_ref: torch.Tensor) -> torch.Tensor:
+        tendencies = []
+        for step, pre_proc in enumerate(self._tendency_pre_processors):
+            y_step = y[:, step : step + 1]
+            x_ref_step = x_ref[:, step : step + 1]
+            tendency_step = self.model.model.compute_tendency(
+                y_step,
+                x_ref_step,
+                self.model.pre_processors,
+                pre_proc,
+                input_post_processor=self.model.post_processors,
+            )
+            tendencies.append(tendency_step)
+        return torch.cat(tendencies, dim=1)
+
+    def _reconstruct_state(self, x_ref: torch.Tensor, tendency: torch.Tensor) -> torch.Tensor:
+        states = []
+        for step, post_proc in enumerate(self._tendency_post_processors):
+            x_ref_step = x_ref[:, step : step + 1]
+            tendency_step = tendency[:, step : step + 1]
+            state_step = self.model.model.add_tendency_to_state(
+                x_ref_step,
+                tendency_step,
+                self.model.post_processors,
+                post_proc,
+                output_pre_processor=self.model.pre_processors,
+            )
+            states.append(state_step)
+        return torch.cat(states, dim=1)
+
     def compute_dataset_loss_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
         validation_mode: bool = False,
         dataset_name: str | None = None,
         y_pred_state: dict[str, torch.Tensor] | None = None,
@@ -229,9 +307,9 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         Parameters
         ----------
-        y_pred : torch.Tensor
+        y_pred : dict[str, torch.Tensor]
             Predicted values
-        y : torch.Tensor
+        y : dict[str, torch.Tensor]
             Target values
         step : int, optional
             Current step
@@ -301,7 +379,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
         """Step for the tendency-based diffusion forecaster.
@@ -340,13 +418,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             self.model_comm_group,
         )
 
-        tendency_target = self.model.model.compute_tendency(
-            y,
-            x_ref,
-            self.model.pre_processors,
-            self.model.pre_processors_tendencies,
-            input_post_processor=self.model.post_processors,
-        )
+        tendency_target = self._compute_tendency_target(y, x_ref)
 
         # get noise level and associated loss weights
         shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 1) for k, x_ in x.items()}
@@ -366,14 +438,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         y_pred = None
         if validation_mode:
-            # re-construct predicted state, de-normalised
-            y_pred = self.model.model.add_tendency_to_state(
-                x_ref,
-                tendency_pred,
-                self.model.post_processors,
-                self.model.post_processors_tendencies,
-                output_pre_processor=self.model.pre_processors,
-            )
+            y_pred = self._reconstruct_state(x_ref, tendency_pred)
 
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,

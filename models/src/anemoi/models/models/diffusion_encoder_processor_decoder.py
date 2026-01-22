@@ -12,6 +12,7 @@ import logging
 import warnings
 from typing import Callable
 from typing import Optional
+from typing import Sequence
 from typing import Union
 
 import einops
@@ -967,7 +968,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
         gather_out: bool = True,
-        post_processors_tendencies: Optional[nn.Module] = None,
+        post_processors_tendencies: Optional[Sequence[Optional[nn.Module]]] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Process sampled tendency to get state prediction.
@@ -983,12 +984,22 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         # truncate x_t0 if needed
         x_t0 = self.apply_reference_state_truncation(x_t0, grid_shard_shapes, model_comm_group)
         # Convert tendency to state
-        out = self.add_tendency_to_state(
-            x_t0,
-            out,
-            post_processors,
-            post_processors_tendencies,
-        )
+        assert post_processors_tendencies is not None, "Per-step tendency processors must be provided."
+        assert (
+            len(post_processors_tendencies) == out.shape[1]
+        ), "Per-step tendency processors must match the number of output steps."
+        states = []
+        for step, post_proc in enumerate(post_processors_tendencies):
+            out_step = out[:, step : step + 1]
+            x_t0_step = x_t0[:, step : step + 1]
+            state_step = self.add_tendency_to_state(
+                x_t0_step,
+                out_step,
+                post_processors,
+                post_proc,
+            )
+            states.append(state_step)
+        out = torch.cat(states, dim=1)
 
         # Gather if needed
         if gather_out and model_comm_group is not None:

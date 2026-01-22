@@ -16,6 +16,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
@@ -130,9 +131,18 @@ class AnemoiModelInterface(torch.nn.Module):
         # Multi-dataset mode: create processors for each dataset
         self.pre_processors = torch.nn.ModuleDict()
         self.post_processors = torch.nn.ModuleDict()
-        self.pre_processors_tendencies = torch.nn.ModuleDict()
-        self.post_processors_tendencies = torch.nn.ModuleDict()
+        if self.statistics_tendencies is not None:
+            assert isinstance(
+                self.statistics_tendencies, dict
+            ), "Tendency statistics must be a dict with per-step entries."
+            lead_times = self.statistics_tendencies.get("lead_times")
+            assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
+            assert all(
+                lead_time in self.statistics_tendencies for lead_time in lead_times
+            ), "Missing tendency statistics for one or more output steps."
 
+        self.pre_processors_tendencies = {k: StepwiseProcessors(lead_times) for k in self.statistics_tendencies.keys()}
+        self.post_processors_tendencies = {k: StepwiseProcessors(lead_times) for k in self.statistics_tendencies.keys()}
         data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name in self.statistics.keys():
             # Build processors for each dataset
@@ -145,8 +155,16 @@ class AnemoiModelInterface(torch.nn.Module):
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post
             if pre_tend is not None:
-                self.pre_processors_tendencies[dataset_name] = pre_tend
-                self.post_processors_tendencies[dataset_name] = post_tend
+                for lead_time in lead_times:
+                    step_stats = self.statistics_tendencies[dataset_name][lead_time]
+                    if step_stats is not None:
+                        step_processors = self._build_processors_for_dataset(
+                            data_config[dataset_name].processors, step_stats, self.data_indices[dataset_name]
+                        )
+                        self.pre_processors_tendencies[dataset_name].set(lead_time, Processors(step_processors))
+                        self.post_processors_tendencies[dataset_name].set(
+                            lead_time, Processors(step_processors, inverse=True)
+                        )
 
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg

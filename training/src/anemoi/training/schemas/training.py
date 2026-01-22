@@ -150,6 +150,8 @@ class TendencyScalerSchema(BaseModel):
         example="anemoi.training.losses.scalers.StdevTendencyScaler",
         alias="_target_",
     )
+    timestep: str | None = Field(default=None, example="6h")
+    "Timestep key used to select tendency statistics for scalers."
 
 
 class VariableLevelScalerTargets(str, Enum):
