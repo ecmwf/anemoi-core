@@ -2,10 +2,11 @@
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-#
+
 
 import logging
 from typing import Optional
@@ -46,6 +47,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden[0]],
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
             )
+
             self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -65,7 +67,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.down_level_processor_graph_providers = nn.ModuleDict()
             self.up_level_processor = nn.ModuleDict()
             self.up_level_processor_graph_providers = nn.ModuleDict()
-
             for i in range(0, self.num_hidden - 1):
                 nodes_names = self._graph_name_hidden[i]
 
@@ -124,7 +125,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Downscale
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
-
         for i in range(0, self.num_hidden - 1):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
@@ -149,7 +149,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Upscale
         self.upscale = nn.ModuleDict()
         self.upscale_graph_providers = nn.ModuleDict()
-
         for i in range(1, self.num_hidden):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i - 1]
@@ -284,8 +283,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             ## Downscale
             for i in range(0, self.num_hidden - 1):
-                src_hidden_name = self._graph_hidden_names[i]
-                dst_hidden_name = self._graph_hidden_names[i + 1]
+                src_hidden_name = self._graph_name_hidden[i]
+                dst_hidden_name = self._graph_name_hidden[i + 1]
 
                 ## Processing at same level
                 if self.level_process:
