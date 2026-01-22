@@ -27,9 +27,11 @@ LOGGER = logging.getLogger(__name__)
 class GraphForecaster(BaseRolloutGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
 
+    task_type = "forecaster"
+
     def _rollout_step(
         self,
-        batch: torch.Tensor,
+        batch: dict,
         rollout: int | None = None,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
@@ -37,8 +39,8 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         Parameters
         ----------
-        batch : torch.Tensor
-            Normalized batch to use for rollout (assumed to be already preprocessed)
+        batch : dict
+            Dictionary batch to use for rollout (assumed to be already preprocessed)
         rollout : Optional[int], optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
@@ -53,27 +55,34 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         """
         # start rollout of preprocessed batch
-        x = batch[
-            :,
-            0 : self.multi_step,
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, multi_step, latlon, nvar)
-
         required_time_steps = rollout * self.multi_out + self.multi_step
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {required_time_steps}"
-        )
-        assert batch.shape[1] >= required_time_steps, msg
-
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.multi_step,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, multi_step, latlon, nvar)
+            msg = (
+                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {required_time_steps}"
+            )
+            assert dataset_batch.shape[1] >= required_time_steps, msg
         for rollout_step in range(rollout or self.rollout):
             y_pred = self(x)
-            fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
-            y = batch[:, fc_times, ...]
-            y = y[..., self.data_indices.data.output.full]
-            # y includes the auxiliary variables, so we must leave those out when computing the loss
 
+            y = {}
+            fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
+            for dataset_name, dataset_batch in batch.items():
+                y[dataset_name] = dataset_batch[
+                    :,
+                    fc_times,
+                    ...,
+                    self.data_indices[dataset_name].data.output.full,
+                ]
+            # y includes the auxiliary variables, so we must leave those out when computing the loss
+            # Compute loss for each dataset and sum them up
             loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
@@ -83,6 +92,7 @@ class GraphForecaster(BaseRolloutGraphModule):
                 use_reentrant=False,
             )
 
-            x = self._advance_input(x, y_pred, batch, rollout_step)
+            # Advance input state for each dataset
+            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
 
             yield loss, metrics_next, y_pred

@@ -13,14 +13,14 @@ import logging
 from operator import itemgetter
 from typing import TYPE_CHECKING
 
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
+import torch
+
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from omegaconf import DictConfig
-    from torch import Tensor
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
@@ -31,6 +31,8 @@ LOGGER = logging.getLogger(__name__)
 
 class GraphInterpolator(BaseGraphModule):
     """Graph neural network interpolator for PyTorch Lightning."""
+
+    task_type = "time-interpolator"
 
     def __init__(
         self,
@@ -85,28 +87,63 @@ class GraphInterpolator(BaseGraphModule):
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
 
+    def get_target_forcing(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        batch_size = next(iter(batch.values())).shape[0]
+        ens_size = next(iter(batch.values())).shape[2]
+        grid_size = next(iter(batch.values())).shape[3]
+        batch_type = next(iter(batch.values())).dtype
+
+        target_forcing = {}
+        for dataset_name, num_tfi in self.num_tfi.items():
+            target_forcing[dataset_name] = torch.empty(
+                batch_size,
+                ens_size,
+                grid_size,
+                num_tfi + self.use_time_fraction[dataset_name],
+                device=self.device,
+                dtype=batch_type,
+            )
+
+            if num_tfi >= 1:
+                target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][
+                    :,
+                    itemgetter(*self.interp_times)(self.imap),
+                    :,
+                    :,
+                    self.target_forcing_indices[dataset_name],
+                ]
+
+            if self.use_time_fraction[dataset_name]:
+                target_forcing[dataset_name][..., -1] = (self.interp_times - self.boundary_times[-2]) / (
+                    self.boundary_times[-1] - self.boundary_times[-2]
+                )
+
+        return target_forcing
+
     def _step(
         self,
-        batch: Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[Tensor, Mapping[str, Tensor], Tensor]:
-        """Training / validation step."""
-        metrics = {}
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        x_bound = {}
+        for dataset_name in self.dataset_names:
+            x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, time, ens, latlon, nvar)
 
-        # Scalers which are delayed need to be initialized after the pre-processors
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
+        target_forcing = self.get_target_forcing(batch)
+        y_pred = self(x_bound, target_forcing)
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            y[dataset_name] = dataset_batch[
+                :,
+                itemgetter(*self.interp_times)(self.imap),
+                :,
+                :,
+                self.data_indices[dataset_name].data.output.full,
+            ]
 
-        x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, time, ens, latlon, nvar)
-
-        y_pred = self(x_bound)  # has shape (bs, time, ens, latlon, nvar)
-        y = batch[:, itemgetter(*self.interp_times)(self.imap)][..., self.data_indices.data.output.full]
         loss = self._compute_loss(
             y_pred,
             y,
@@ -121,3 +158,6 @@ class GraphInterpolator(BaseGraphModule):
                 grid_shard_slice=self.grid_shard_slice,
             )
         return loss, metrics, y_pred
+
+    def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
+        return super().forward(x, target_forcing=target_forcing)
