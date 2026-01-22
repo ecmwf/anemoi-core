@@ -5,19 +5,27 @@ system:
 
 dataloader:
   training:
-    end: 1979-01-08 12:00:00
+    datasets:
+      data:
+        end: 1979-01-08 12:00:00
   validation:
-    start: 1979-01-08 18:00:00
+    datasets:
+      data:
+        start: 1979-01-08 18:00:00
 
 training:
   multistep_input: 3
   multistep_output: 2
   scalers:
-    output_steps:
-      _target_: anemoi.training.losses.scalers.TimeStepScaler
-      norm: "unit-sum"
-      weights:
-        - 1.0
-        - 2.0
+    datasets:
+      data:
+        output_steps:
+          _target_: anemoi.training.losses.scalers.TimeStepScaler
+          norm: "unit-sum"
+          weights:
+            - 1.0
+            - 2.0
   training_loss:
-    scalers: ['pressure_level', 'general_variable', 'node_weights', 'output_steps']
+    datasets:
+      data:
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'output_steps']

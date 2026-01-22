@@ -36,10 +36,10 @@ class ObsGraphInterpolator(BaseGraphModule):
         self,
         *,
         config: DictConfig,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -49,12 +49,12 @@ class ObsGraphInterpolator(BaseGraphModule):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
+        graph_data : dict[str, HeteroData]
+            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
-        data_indices : IndexCollection
-            Indices of the training data,
+        data_indices : dict[str, IndexCollection]
+            Indices of the training data
         metadata : dict
             Provenance information
         supporting_arrays : dict
@@ -70,10 +70,13 @@ class ObsGraphInterpolator(BaseGraphModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
+        assert len(self.dataset_names) == 1, "ObsGraphInterpolator currently supports a single dataset."
+        self.dataset_name = self.dataset_names[0]
+        dataset_indices = self.data_indices[self.dataset_name]
         self.known_future_variables = (
             list(
                 itemgetter(*config.training.known_future_variables)(
-                    data_indices.data.input.name_to_index,
+                    dataset_indices.data.input.name_to_index,
                 ),
             )
             if len(config.training.known_future_variables)
@@ -97,14 +100,17 @@ class ObsGraphInterpolator(BaseGraphModule):
 
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[Tensor, Mapping[str, Tensor], Tensor]:
-        batch = self.model.pre_processors(batch)
+        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
+        batch = batch[self.dataset_name]
+        batch = self.model.pre_processors[self.dataset_name](batch)
         b, _, e, g, _ = batch.shape
         present, future = itemgetter(*self.boundary_times)(self.imap)
 
-        obs = {var.item() for var in self.data_indices.data.input.full}.difference(
+        dataset_indices = self.data_indices[self.dataset_name]
+        obs = {var.item() for var in dataset_indices.data.input.full}.difference(
             set(self.known_future_variables),
         )
         x_init = batch[:, : self.multi_step, ..., list(obs)]  # here only past steps are used for observed vars
@@ -134,17 +140,19 @@ class ObsGraphInterpolator(BaseGraphModule):
             1,
         )  # fake time dimension
 
-        y_pred = self(x_full)
+        y_pred = self({self.dataset_name: x_full})[self.dataset_name]
         y = batch[:, itemgetter(*self.interp_times)(self.imap)]
+
         loss = self._compute_loss(
             y_pred,
             y,
             model_comm_group=self.model_comm_group,
-            grid_shard_slice=self.grid_shard_slice,
+            grid_shard_slice=self.grid_shard_slice[self.dataset_name],
+            dataset_name=self.dataset_name,
         )
 
         metrics = {}
         if validation_mode:
-            metrics = self._compute_metrics(y_pred, y)
+            metrics = self._compute_metrics(y_pred, y, dataset_name=self.dataset_name)
 
         return loss, metrics, y_pred
