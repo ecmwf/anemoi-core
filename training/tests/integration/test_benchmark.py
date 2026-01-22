@@ -27,7 +27,6 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce mem
 LOGGER = logging.getLogger(__name__)
 
 
-
 @pytest.mark.multigpu
 @pytest.mark.slow
 def test_benchmark_dataloader(
@@ -36,8 +35,8 @@ def test_benchmark_dataloader(
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
     import time
 
-    from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
     from anemoi.graphs.create import GraphCreator
+    from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
     cfg, test_case = benchmark_config
     cfg.graph.nodes.data.node_builder.dataset = cfg.system.input.dataset
