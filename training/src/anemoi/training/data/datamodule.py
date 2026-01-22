@@ -74,6 +74,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.statistics_tendencies
 
     @cached_property
+    def timeincrement(self) -> int:
+        """Return time increment in seconds."""
+        return self.ds_train.timeincrement
+
+    @cached_property
     def metadata(self) -> dict:
         """Return metadata from all training datasets."""
         return self.ds_train.metadata
