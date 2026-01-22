@@ -56,7 +56,12 @@ LOGGER = logging.getLogger(__name__)
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
-    def __init__(self, config: BaseSchema, dataset_names: list[str] | None = None, focus_areas: list[dict] | None = None) -> None:
+    def __init__(
+        self,
+        config: BaseSchema,
+        dataset_names: list[str] | None = None,
+        focus_areas: list[dict] | None = None,
+    ) -> None:
         """Initialise the BasePlotCallback abstract base class.
 
         Parameters
@@ -266,7 +271,13 @@ class BasePlotCallback(Callback, ABC):
 class BasePerBatchPlotCallback(BasePlotCallback):
     """Base Callback for plotting at the end of each batch."""
 
-    def __init__(self, config: OmegaConf, every_n_batches: int | None = None, dataset_names: list[str] | None = None, focus_areas: list[dict] | None = None):
+    def __init__(
+        self,
+        config: OmegaConf,
+        every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
+        focus_areas: list[dict] | None = None,
+    ):
         """Initialise the BasePerBatchPlotCallback.
 
         Parameters
@@ -351,7 +362,13 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 class BasePerEpochPlotCallback(BasePlotCallback):
     """Base Callback for plotting at the end of each epoch."""
 
-    def __init__(self, config: OmegaConf, every_n_epochs: int | None = None, dataset_names: list[str] | None = None, focus_areas: list[dict] | None = None):
+    def __init__(
+        self,
+        config: OmegaConf,
+        every_n_epochs: int | None = None,
+        dataset_names: list[str] | None = None,
+        focus_areas: list[dict] | None = None,
+    ):
         """Initialise the BasePerEpochPlotCallback.
 
         Parameters
@@ -424,7 +441,6 @@ class LongRolloutPlots(BasePlotCallback):
         per_sample: int = 6,
         every_n_epochs: int = 1,
         animation_interval: int = 400,
-        focus_areas: dict | None = None,
     ) -> None:
         """Initialise LongRolloutPlots callback.
 
@@ -1042,7 +1058,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         logger = trainer.logger
         _ = batch_idx
 
-        for (dataset_name, focus_mask) in zip(dataset_names, self.focus_masks):
+        for dataset_name, focus_mask in zip(dataset_names, self.focus_masks, strict=True):
             data_indices = pl_module.data_indices[dataset_name]
             parameter_names = list(data_indices.model.output.name_to_index.keys())
             parameter_positions = list(data_indices.model.output.name_to_index.values())
@@ -1070,7 +1086,12 @@ class PlotLoss(BasePerBatchPlotCallback):
                     ...,
                     data_indices.data.output.full,
                 ]
-                _, y_hat, y_true = focus_mask.apply(pl_module.model.model._graph_data, self.latlons[dataset_name], y_hat, y_true)
+                _, y_hat, y_true = focus_mask.apply(
+                    pl_module.model.model._graph_data,
+                    self.latlons[dataset_name],
+                    y_hat,
+                    y_true,
+                )
 
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
@@ -1241,7 +1262,7 @@ class PlotSample(BasePlotAdditionalMetrics):
     ) -> None:
         logger = trainer.logger
 
-        for (dataset_name, focus_mask) in zip(dataset_names, self.focus_masks):
+        for dataset_name, focus_mask in zip(dataset_names, self.focus_masks, strict=True):
             # Build dictionary of indices and parameters to be plotted
             diagnostics = (
                 []
@@ -1284,13 +1305,13 @@ class PlotSample(BasePlotAdditionalMetrics):
                     colormaps=self.colormaps,
                 )
 
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{focus_mask.tag}",
-                        exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{focus_mask.tag}",
-                    )
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{focus_mask.tag}",
+                    exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{focus_mask.tag}",
+                )
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
@@ -1332,7 +1353,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.min_delta = min_delta
-        self.focus_area = focus_area
 
     @rank_zero_only
     def _plot(
@@ -1349,7 +1369,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        for (dataset_name, focus_mask) in zip(dataset_names, self.focus_masks):
+        for dataset_name, focus_mask in zip(dataset_names, self.focus_masks, strict=True):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
             # Apply spatial mask
@@ -1458,7 +1478,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
         local_rank = pl_module.local_rank
 
-        for (dataset_name, focus_mask) in zip(dataset_names, self.focus_areas):
+        for dataset_name, focus_mask in zip(dataset_names, self.focus_masks, strict=True):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
             # Apply spatial mask
