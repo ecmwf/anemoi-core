@@ -13,6 +13,7 @@ import logging
 import torch
 
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 
@@ -35,23 +36,41 @@ class NaNMaskScaler(BaseUpdatingScaler):
         self.use_processors_tendencies = use_processors_tendencies
         del kwargs
 
-    def on_batch_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:
+    def on_batch_start(self, model: AnemoiModelInterface, dataset_name: str | None = None) -> torch.Tensor | None:
         """Update loss scaling.
 
         Get mask multiplying NaN locations with zero.
         At this stage, returns a loss slicing mask with all values set to 1.
         Always when calling the imputer, the NaN positions are updated.
         Before every application of training loss function, the mask is replaced.
+
+        Parameters
+        ----------
+        model : AnemoiModelInterface
+            The model.
+        dataset_name : str, optional
+            The dataset name for multi-dataset scenarios.
         """
         loss_weights_mask = None
+        processors = []
 
-        processors = [model.pre_processors]
+        # Handle pre_processors
+        if hasattr(model, "pre_processors"):
+            assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+            # Multi-dataset case: get pre_processors for specific dataset
+            if dataset_name in model.pre_processors:
+                processors.append(model.pre_processors[dataset_name])
+
+        # Handle pre_processors_tendencies
         if self.use_processors_tendencies and hasattr(model, "pre_processors_tendencies"):
-            processors.extend(
-                tendency_processors
-                for tendency_processors in model.pre_processors_tendencies
-                if tendency_processors is not None
-            )
+            # Multi-dataset case: get pre_processors_tendencies for specific dataset
+            assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+            if dataset_name in model.pre_processors_tendencies:
+                tendency_processors = model.pre_processors_tendencies[dataset_name]
+                if isinstance(tendency_processors, StepwiseProcessors):
+                    processors.extend(proc for proc in tendency_processors if proc is not None)
+                else:
+                    processors.append(tendency_processors)
 
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
         for pre_processors in processors:
