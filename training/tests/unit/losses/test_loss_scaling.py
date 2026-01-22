@@ -65,7 +65,7 @@ def fake_data(
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
@@ -101,7 +101,7 @@ def fake_data_no_param() -> tuple[DictConfig, IndexCollection, dict[str, list[fl
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
@@ -162,7 +162,7 @@ def fake_data_variable_groups() -> tuple[
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(config.data, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     metadata_variables = {
@@ -364,7 +364,8 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices, _, _ = fake_data
 
     metadata_extractor = ExtractVariableGroupAndLevel(config.training.variable_groups)
-    metric_range = get_metric_ranges(config, data_indices, metadata_extractor=metadata_extractor)
+    metrics_to_log = config.training.get("metrics", [])
+    metric_range = get_metric_ranges(metadata_extractor, data_indices.model.output, metrics_to_log=metrics_to_log)
 
     del metric_range["all"]
 

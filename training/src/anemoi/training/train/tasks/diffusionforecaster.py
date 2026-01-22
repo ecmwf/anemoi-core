@@ -30,6 +30,8 @@ LOGGER = logging.getLogger(__name__)
 class BaseDiffusionForecaster(BaseGraphModule):
     """Base class for diffusion forecasters."""
 
+    task_type = "forecaster"
+
     def __init__(
         self,
         *,
@@ -56,21 +58,28 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
     def get_input(self, batch: torch.Tensor) -> torch.Tensor:
         """Get input tensor shape for diffusion model."""
-        x = batch[
-            :,
-            0 : self.multi_step,
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, multi_step, ens, latlon, nvar)
-        msg = f"Batch length not sufficient for requested multi_step length!, {batch.shape[1]} !>= {self.multi_step}"
-        assert batch.shape[1] >= self.multi_step, msg
-        LOGGER.debug("SHAPE: x.shape = %s", list(x.shape))
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.multi_step,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, multi_step, latlon, nvar)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
     def get_target(self, batch: torch.Tensor) -> torch.Tensor:
         """Get target tensor shape for diffusion model."""
-        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
-        LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            y[dataset_name] = dataset_batch[
+                :,
+                self.multi_step,
+                ...,
+                self.data_indices[dataset_name].data.output.full,
+            ]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
@@ -88,6 +97,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         y: torch.Tensor,
         weights: torch.Tensor | None = None,
         grid_shard_slice: slice | None = None,
+        dataset_name: str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the diffusion loss with noise weighting.
@@ -110,31 +120,37 @@ class BaseDiffusionForecaster(BaseGraphModule):
         torch.Tensor
             Computed loss with noise weighting applied
         """
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
         assert weights is not None, f"{self.__class__.__name__} must be provided for diffusion loss computation."
-        return self.loss(
+
+        return self.loss[dataset_name](
             y_pred,
             y,
-            weights=weights,
+            weights=weights[dataset_name],
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )
 
-    def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+    def _noise_target(self, x: dict[str, torch.Tensor], sigma: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Add noise to the state."""
-        return x + torch.randn_like(x) * sigma
+        return {name: x[name] + torch.randn_like(x[name]) * sigma[name] for name in x}
 
     def _get_noise_level(
         self,
-        shape: tuple[int],
+        shape: dict[str, tuple[int]],
         sigma_max: float,
         sigma_min: float,
         sigma_data: float,
         rho: float,
         device: torch.device,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        rnd_uniform = torch.rand(shape, device=device)
-        sigma = (sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))) ** rho
-        weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        sigma, weight = {}, {}
+        for dataset_name, shape_x in shape.items():
+            rnd_uniform = torch.rand(shape_x, device=device)
+            sigma[dataset_name] = (
+                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+            ) ** rho
+            weight[dataset_name] = (sigma[dataset_name] ** 2 + sigma_data**2) / (sigma[dataset_name] * sigma_data) ** 2
         return sigma, weight
 
 
@@ -154,9 +170,6 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         ----------
         batch : torch.Tensor
             Normalized batch to use for rollout (assumed to be already preprocessed).
-        rollout : Optional[int], optional
-            Number of times to rollout for, by default None
-            If None, will use self.rollout
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
@@ -166,19 +179,20 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict, torch.Tensor]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
         # get noise level and associated loss weights
+        shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 2) for k, x_ in x.items()}
         sigma, noise_weights = self._get_noise_level(
-            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
+            shape=shapes,
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
             rho=self.rho,
-            device=x.device,
+            device=next(iter(batch.values())).device,
         )
 
         # get noised targets
@@ -197,19 +211,20 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]
 
 
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
 
-    def compute_loss_metrics(
+    def compute_dataset_loss_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         validation_mode: bool = False,
-        y_pred_state: torch.Tensor | None = None,
-        y_state: torch.Tensor | None = None,
+        dataset_name: str | None = None,
+        y_pred_state: dict[str, torch.Tensor] | None = None,
+        y_state: dict[str, torch.Tensor] | None = None,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss and metrics for the given predictions and targets.
@@ -224,6 +239,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             Current step
         validation_mode : bool, optional
             Whether to compute validation metrics
+        dataset_name : str | None
+            Dataset name for multi-dataset setups
         y_pred_state : torch.Tensor, optional
             Predicted states (for validation metrics) if they differ from y_pred (e.g., tendency-based models)
         y_state : torch.Tensor, optional
@@ -240,28 +257,45 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred,
             y,
-            validation_mode,
+            validation_mode=validation_mode,
+            dataset_name=dataset_name,
         )
 
-        loss = self._compute_loss(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
+        loss = self._compute_loss(
+            y_pred_full,
+            y_full,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
+            **kwargs,
+        )
 
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            assert y_pred_state is not None, "y_pred_state must be provided for tendency-based diffusion models."
-            assert y_state is not None, "y_state must be provided for tendency-based diffusion models."
+            assert (
+                dataset_name in y_pred_state
+            ), f"{dataset_name} must be a key in y_pred_state for tendency-based diffusion models."
+            assert (
+                dataset_name in y_state
+            ), f"{dataset_name} must be a key in y_state for tendency-based diffusion models."
+            assert (
+                y_pred_state[dataset_name] is not None
+            ), "y_pred_state must be provided for tendency-based diffusion models."
+            assert y_state[dataset_name] is not None, "y_state must be provided for tendency-based diffusion models."
 
             # Prepare states for metrics computation
             y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
-                y_pred_state,
-                y_state,
-                validation_mode,
+                y_pred_state[dataset_name],
+                y_state[dataset_name],
+                validation_mode=validation_mode,
+                dataset_name=dataset_name,
             )
 
             metrics_next = self._compute_metrics(
                 y_pred_state_full,
                 y_state_full,
                 grid_shard_slice=grid_shard_slice,
+                dataset_name=dataset_name,
                 **kwargs,
             )
 
@@ -289,7 +323,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict, torch.Tensor]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, ens, latlon, nvar)
@@ -317,13 +351,14 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         )
 
         # get noise level and associated loss weights
+        shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 2) for k, x_ in x.items()}
         sigma, noise_weights = self._get_noise_level(
-            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
+            shape=shapes,
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
             rho=self.rho,
-            device=x.device,
+            device=next(iter(batch.values())).device,
         )
 
         tendency_target_noised = self._noise_target(tendency_target, sigma)
@@ -354,4 +389,4 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]

@@ -104,10 +104,10 @@ class SpectralLoss(BaseLoss):
         elif transform == "dct2d":
             self.transform = DCT2D(**kwargs)
         elif transform == "cartesian_sht":
-            # expected additional args: grid (and optional nodes_slice)
+            # expected additional args: grid
             self.transform = CartesianSHT(**kwargs)
         elif transform == "octahedral_sht":
-            # expected additional args: lmax/mmax/folding/nodes_slice
+            # expected additional args: lmax/mmax/folding
             self.transform = OctahedralSHT(**kwargs)
         elif transform == "ectrans_octahedral_sht":
             # expected args: truncation (+ optional dtype, filepath)
@@ -118,7 +118,7 @@ class SpectralLoss(BaseLoss):
 
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten spectral dimensions."""
-        x_spec = self.transform(x)
+        x_spec = self.transform.forward(x)
         return einops.rearrange(x_spec, "... y x v -> ... (y x) v")
 
 
@@ -139,7 +139,9 @@ class SpectralL2Loss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,
     ) -> torch.Tensor:
+        del kwargs  # unused
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
@@ -280,8 +282,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         scalers: list | None = None,
         **kwargs,
     ) -> None:
-        SpectralLoss.__init__(
-            self,
+        super().__init__(
             transform=transform,
             x_dim=x_dim,
             y_dim=y_dim,

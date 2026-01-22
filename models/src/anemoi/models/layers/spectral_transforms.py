@@ -14,7 +14,6 @@ import einops
 import numpy as np
 import torch
 import torch.fft
-import torch.nn as nn
 
 from anemoi.models.layers.spectral_helpers import CartesianRealSHT
 from anemoi.models.layers.spectral_helpers import EcTransOctahedralSHTModule
@@ -24,11 +23,11 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
-class SpectralTransform(nn.Module, abc.ABC):
+class SpectralTransform(torch.nn.Module):
     """Abstract base class for spectral transforms."""
 
     @abc.abstractmethod
-    def __call__(
+    def forward(
         self,
         data: torch.Tensor,
         **kwargs,
@@ -86,13 +85,13 @@ class FFT2D(SpectralTransform):
         fx = torch.fft.fftfreq(x_dim)
         fy = torch.fft.fftfreq(y_dim)
 
-        KX, KY = torch.meshgrid(fx, fy, indexing='ij')
-        k = torch.sqrt(KX*KX + KY*KY)
+        KX, KY = torch.meshgrid(fx, fy, indexing="ij")
+        k = torch.sqrt(KX * KX + KY * KY)
 
-        mask = (k < 0.5) #torch.where(k < 0.5, 1.0 - 2.0 * k, 0.0)
+        mask = k < 0.5  # torch.where(k < 0.5, 1.0 - 2.0 * k, 0.0)
         return einops.rearrange(mask, "x y -> y x 1")
 
-    def __call__(
+    def forward(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
@@ -108,7 +107,7 @@ class FFT2D(SpectralTransform):
                 f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
                 f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
             ) from e
-        
+
         fft = torch.fft.fft2(data, dim=(-2, -3))
         if self.apply_filter:
             fft *= self.filter.to(device=data.device, dtype=data.dtype)
@@ -118,12 +117,12 @@ class FFT2D(SpectralTransform):
 class DCT2D(SpectralTransform):
     """2D Discrete Cosine Transform."""
 
-    def __init__(self, x_dim: int, y_dim: int) -> None:
+    def __init__(self, x_dim: int, y_dim: int, **kwargs) -> None:
         super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
 
-    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         try:
             from torch_dct import dct_2d
         except ImportError:
@@ -155,29 +154,17 @@ class CartesianSHT(SpectralTransform):
         x_dim: int,  # nlon
         y_dim: int,  # nlat
         grid: str = "legendre-gauss",
-        nodes_slice: tuple[int, int | None] | None = None,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
         self.grid = grid
-        nodes_slice = nodes_slice or (0, None)
-        self.nodes_slice = slice(*nodes_slice)
         self._sht = CartesianRealSHT(nlat=self.y_dim, nlon=self.x_dim, grid=self.grid)
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
-    def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
-        )
-
-        if self.nodes_slice != slice(0, None):
-            raise NotImplementedError(
-                "nodes_slice is not supported for CartesianSHT unless it is the full grid. "
-                "SHT requires a complete (nlat*nlon) grid ordering."
-            )
-
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
         assert (
             p == self.x_dim * self.y_dim
@@ -198,32 +185,20 @@ class OctahedralSHT(SpectralTransform):
         lmax: int | None = None,
         mmax: int | None = None,
         folding: bool = False,
-        nodes_slice: tuple[int, int | None] | None = None,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.nlat = nlat
         self.lmax = lmax
         self.mmax = mmax
         self.folding = folding
-        nodes_slice = nodes_slice or (0, None)
-        self.nodes_slice = slice(*nodes_slice)
-        self._sht = OctahedralRealSHT(nlat=self.nlat, lmax=lmax, mmax=mmax, folding=folding)
+        self._sht = OctahedralRealSHT(nlat=self.nlat, lmax=self.lmax, mmax=self.mmax, folding=folding)
         self._nlon = self._sht.nlon
         self._expected_points = int(np.sum(self._nlon))
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
-    def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
-        )
-
-        if self.nodes_slice != slice(0, None):
-            raise NotImplementedError(
-                "nodes_slice is not supported for OctahedralSHT unless it is the full grid. "
-                "Octahedral SHT expects full ring structure."
-            )
-
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
         assert (
             p == self._expected_points
@@ -232,7 +207,8 @@ class OctahedralSHT(SpectralTransform):
         # expects [..., points] where points is flattened spatial dim
         x = einops.rearrange(data, "b e p v -> (b e v) p")
         coeffs = self._sht(x)  # complex: (b*e*v, L, M)
-        return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+        tmp = einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+        return tmp
 
 
 class EcTransOctahedralSHT(SpectralTransform):
@@ -241,24 +217,16 @@ class EcTransOctahedralSHT(SpectralTransform):
         truncation: int,
         dtype: torch.dtype = torch.float32,
         filepath: str | None = None,
-        nodes_slice: tuple[int, int | None] | None = None,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.truncation = int(truncation)
         self.dtype = dtype
 
-        nodes_slice = nodes_slice or (0, None)
-        self.nodes_slice = slice(*nodes_slice)
-        if not (self.nodes_slice.start == 0 and self.nodes_slice.stop is None):
-            raise ValueError("EcTransOctahedralSHT does not support `nodes_slice` (requires full grid).")
-
         self._sht = EcTransOctahedralSHTModule(truncation=self.truncation, dtype=self.dtype, filepath=filepath)
         self._expected_points = int(self._sht.n_grid_points)
 
-    def __call__(self, data: torch.Tensor) -> torch.Tensor:
-        data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
-        )
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         _, _, points, _ = data.shape
         assert points == self._expected_points, (
             f"Input data spatial dimension {points} does not match expected "
