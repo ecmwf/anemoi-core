@@ -25,7 +25,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GraphAutoEncoder(BaseGraphModule):
-    """Graph neural network forecaster for PyTorch Lightning."""
+    """Graph neural network autoencoder for PyTorch Lightning."""
+
+    task_type = "autoencoder"
 
     def _step(
         self,
@@ -33,13 +35,20 @@ class GraphAutoEncoder(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
 
-        x = batch[
-            ...,
-            self.data_indices.data.input.full,
-        ]
+        x = {}
+
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]
 
         y_pred = self(x)
-        y = batch[:, 0, ..., self.data_indices.data.output.full]
+
+        y = {}
+
+        for dataset_name, dataset_batch in batch.items():
+            y[dataset_name] = dataset_batch[:, 0, ..., self.data_indices[dataset_name].data.output.full]
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         loss, metrics, y_pred = checkpoint(
@@ -52,7 +61,7 @@ class GraphAutoEncoder(BaseGraphModule):
             use_reentrant=False,
         )
 
-        return loss, metrics, [y_pred]
+        return loss, metrics, y_pred
 
     def on_train_epoch_end(self) -> None:
         pass
