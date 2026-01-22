@@ -29,6 +29,8 @@ class GraphAutoEncoder(BaseGraphModule):
 
     task_type = "autoencoder"
 
+    task_type = "autoencoder"
+
     def _step(
         self,
         batch: torch.Tensor,
