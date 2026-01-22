@@ -14,7 +14,8 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch import Tensor
-from torch.fft import rfft, irfft
+from torch.fft import irfft
+from torch.fft import rfft
 from torch.nn import Module
 
 
