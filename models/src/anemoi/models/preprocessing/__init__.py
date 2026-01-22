@@ -216,14 +216,16 @@ class StepwiseProcessors(nn.Module):
 
     def __iter__(self):
         for lead_time in self._lead_times:
-            yield self._processors.get(str(lead_time))
+            key = str(lead_time)
+            yield self._processors[key] if key in self._processors else None
 
     def __getitem__(self, index: int | str) -> Optional["Processors"]:
         if isinstance(index, int):
             lead_time = self._lead_times[index]
         else:
             lead_time = str(index)
-        return self._processors.get(str(lead_time))
+        key = str(lead_time)
+        return self._processors[key] if key in self._processors else None
 
     @property
     def lead_times(self) -> list[str]:

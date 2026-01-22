@@ -62,7 +62,9 @@ class BaseTendencyScaler(BaseScaler):
 
             if timestep is None:
                 lead_times = statistics_tendencies.get("lead_times")
-                assert isinstance(lead_times, list) and lead_times, "lead_times must be a non-empty list"
+                assert lead_times is not None, "lead_times must be a non-empty list"
+                lead_times = list(lead_times)
+                assert lead_times, "lead_times must be a non-empty list"
                 timestep = lead_times[0]
                 LOGGER.warning(
                     "No timestep provided for tendency scaler, defaulting to first lead time: '%s'.",
