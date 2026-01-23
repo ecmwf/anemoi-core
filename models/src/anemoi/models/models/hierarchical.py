@@ -309,7 +309,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     )
 
                 # store latents for skip connections
-                x_skip_dict[dataset_name][src_hidden_name].append(x_latent)
+                x_skip_dict[dataset_name][src_hidden_name] = x_latent
 
                 # Compute edges for downscale mapper
                 downscale_edge_attr, downscale_edge_index, ds_edge_shard_shapes = self.downscale_graph_providers[
