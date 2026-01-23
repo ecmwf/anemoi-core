@@ -99,7 +99,7 @@ def get_loss_function(
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
-    if data_indices is not None and (predicted_variables is not None or target_variables is not None):
+    if data_indices is not None:
         loss_function = _wrap_loss_with_filtering(
             loss_function,
             predicted_variables,
@@ -154,7 +154,7 @@ def _apply_scalers(
         loss_function.add_scaler(*scalers[key], name=key)
 
 
-def _get_metric_ranges(
+def get_metric_ranges(
     extract_variable_group_and_level: ExtractVariableGroupAndLevel,
     output_data_indices: OutputTensorIndex,
     metrics_to_log: list,
@@ -174,18 +174,3 @@ def _get_metric_ranges(
     # Add the full list of output indices
     metric_ranges["all"] = output_data_indices.full.tolist()
     return metric_ranges
-
-
-def get_metric_ranges(
-    config: DictConfig,
-    data_indices: IndexCollection,
-    metadata_extractor: ExtractVariableGroupAndLevel,
-) -> tuple[METRIC_RANGE_DTYPE, METRIC_RANGE_DTYPE]:
-
-    metrics_to_log = config.training.metrics or []
-
-    return _get_metric_ranges(
-        metadata_extractor,
-        data_indices.model.output,
-        metrics_to_log,
-    )
