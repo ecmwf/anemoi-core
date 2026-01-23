@@ -441,11 +441,11 @@ def architecture_config_with_checkpoint(
     # rest of your logic...
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-12.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-23.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-01-23.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"
