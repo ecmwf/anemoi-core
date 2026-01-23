@@ -140,7 +140,6 @@ def _wrap_loss_with_filtering(
     return loss_function
 
 
-
 def _apply_scalers(
     loss_function: BaseLoss,
     scalers_to_include: list,
