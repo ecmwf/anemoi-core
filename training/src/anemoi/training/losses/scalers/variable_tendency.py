@@ -55,8 +55,9 @@ class BaseTendencyScaler(BaseScaler):
         self.statistics = statistics
         self.statistics_tendencies = None
         self.timestep = None
+        lead_times = statistics_tendencies.get("lead_times", []) if statistics_tendencies else []
 
-        if statistics_tendencies is not None:
+        if statistics_tendencies is not None and any(statistics_tendencies.get(lt) for lt in lead_times):
             assert isinstance(statistics_tendencies, Mapping), "statistics_tendencies must be a mapping."
             assert "lead_times" in statistics_tendencies, "statistics_tendencies must contain 'lead_times' key."
 

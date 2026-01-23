@@ -104,31 +104,36 @@ class AnemoiModelInterface(torch.nn.Module):
         tuple
             (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies)
         """
-        # Build processors for the dataset
-        processors = [
-            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
-            for name, processor in processors_configs.items()
-        ]
 
+        # Build processors for the dataset
+        def build_processors(statistics: dict) -> list:
+            return [
+                [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
+                for name, processor in processors_configs.items()
+            ]
+
+        processors = build_processors(statistics)
         pre_processors = Processors(processors)
         post_processors = Processors(processors, inverse=True)
 
         # Build tendencies processors if provided
         pre_processors_tendencies = None
         post_processors_tendencies = None
-        if any(s is not None for s in statistics_tendencies.values()):
-            next_available_lead_time = next(k for k, v in statistics_tendencies.items() if v is not None)
-            processors_tendencies = [
-                [
-                    name,
-                    instantiate(
-                        processor, data_indices=data_indices, statistics=statistics_tendencies[next_available_lead_time]
-                    ),
-                ]
-                for name, processor in processors_configs.items()
-            ]
-            pre_processors_tendencies = Processors(processors_tendencies)
-            post_processors_tendencies = Processors(processors_tendencies, inverse=True)
+        if statistics_tendencies is not None:
+            assert isinstance(statistics_tendencies, dict), "Tendency statistics must be a dict with per-step entries."
+            lead_times = statistics_tendencies.get("lead_times")
+            assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
+            assert all(
+                lead_time in statistics_tendencies for lead_time in lead_times
+            ), "Missing tendency statistics for one or more output steps."
+            pre_processors_tendencies = StepwiseProcessors(lead_times)
+            post_processors_tendencies = StepwiseProcessors(lead_times)
+            for lead_time in lead_times:
+                step_stats = statistics_tendencies[lead_time]
+                if step_stats is not None:
+                    step_processors = build_processors(step_stats)
+                    pre_processors_tendencies.set(lead_time, Processors(step_processors))
+                    post_processors_tendencies.set(lead_time, Processors(step_processors, inverse=True))
 
         return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
 
@@ -137,19 +142,9 @@ class AnemoiModelInterface(torch.nn.Module):
         # Multi-dataset mode: create processors for each dataset
         self.pre_processors = torch.nn.ModuleDict()
         self.post_processors = torch.nn.ModuleDict()
-        if self.statistics_tendencies is not None:
-            assert isinstance(
-                self.statistics_tendencies, dict
-            ), "Tendency statistics must be a dict with per-step entries."
-            lead_times = self.statistics_tendencies.get("lead_times")
-            assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
-            assert all(
-                [lead_time in self.statistics_tendencies[dataset_name] for lead_time in lead_times]
-                for dataset_name in self.statistics.keys()
-            ), "Missing tendency statistics for one or more output steps."
+        self.pre_processors_tendencies = torch.nn.ModuleDict()
+        self.post_processors_tendencies = torch.nn.ModuleDict()
 
-        self.pre_processors_tendencies = {k: StepwiseProcessors(lead_times) for k in self.statistics_tendencies.keys()}
-        self.post_processors_tendencies = {k: StepwiseProcessors(lead_times) for k in self.statistics_tendencies.keys()}
         data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name in self.statistics.keys():
             # Build processors for each dataset
@@ -162,16 +157,8 @@ class AnemoiModelInterface(torch.nn.Module):
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post
             if pre_tend is not None:
-                for lead_time in lead_times:
-                    step_stats = self.statistics_tendencies[dataset_name][lead_time]
-                    if step_stats is not None:
-                        step_processors = self._build_processors_for_dataset(
-                            data_config[dataset_name].processors, step_stats, self.data_indices[dataset_name]
-                        )
-                        self.pre_processors_tendencies[dataset_name].set(lead_time, Processors(step_processors))
-                        self.post_processors_tendencies[dataset_name].set(
-                            lead_time, Processors(step_processors, inverse=True)
-                        )
+                self.pre_processors_tendencies[dataset_name] = pre_tend
+                self.post_processors_tendencies[dataset_name] = post_tend
 
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
