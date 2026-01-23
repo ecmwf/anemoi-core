@@ -90,29 +90,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout_start = getattr(rollout_cfg, "start", 1)
         rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
 
-        # Random rollout configuration
-        random_rollout_probability = getattr(rollout_cfg, "random_probability", 0.0)
-        random_rollout_max = getattr(rollout_cfg, "random_max", 1)
-
         # Determine the maximum rollout that could be requested
         rollout_value = rollout_start
 
         # If epoch increment is enabled, we'll eventually reach rollout_max
         if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
             rollout_value = rollout_max
-
-        # If random rollout is enabled, we need to accommodate random_max
-        if random_rollout_probability > 0:
-            rollout_value = max(rollout_value, random_rollout_max)
-            LOGGER.info(
-                "Random rollout enabled (probability=%.1f%%), using rollout=%d for batch size calculation.",
-                random_rollout_probability * 100,
-                rollout_value,
-            )
         elif rollout_value == rollout_start and rollout_max is not None and rollout_max > rollout_start:
             # Warn only if we're not using max but max is configured higher
             LOGGER.warning(
-                "Falling back rollout to: %s (epoch_increment=0 and no random rollout)",
+                "Falling back rollout to: %s (epoch_increment=0)",
                 rollout_value,
             )
 

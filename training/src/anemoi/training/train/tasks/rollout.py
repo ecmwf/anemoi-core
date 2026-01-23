@@ -78,33 +78,9 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self.rollout_epoch_increment = config.training.rollout.epoch_increment
         self.rollout_max = config.training.rollout.max
 
-        # Random rollout configuration
-        self.random_rollout_probability = config.training.rollout.random_probability
-        self.random_rollout_min = config.training.rollout.random_min
-        self.random_rollout_max = config.training.rollout.random_max
-
-        # Track effective rollout for logging (set during _step)
-        self._last_effective_rollout = self.rollout
-
         LOGGER.debug("Rollout window length: %d", self.rollout)
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
-        if self.random_rollout_probability > 0:
-            LOGGER.debug(
-                "Random rollout enabled: %.1f%% probability, range [%d, %d]",
-                self.random_rollout_probability * 100,
-                self.random_rollout_min,
-                self.random_rollout_max,
-            )
-            # Warn if random_max exceeds rollout_max (dataloader batch size limit)
-            if self.random_rollout_max > self.rollout_max:
-                LOGGER.warning(
-                    "random_max (%d) > rollout.max (%d). Random rollout will be capped at %d. "
-                    "Set rollout.max >= random_max to use the full random rollout range.",
-                    self.random_rollout_max,
-                    self.rollout_max,
-                    self.rollout_max,
-                )
 
     def _advance_input(
         self,
@@ -172,45 +148,13 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         train_loss = super().training_step(batch, batch_idx)
         self.log(
             "rollout",
-            float(self._last_effective_rollout),
+            float(self.rollout),
             on_step=True,
             logger=self.logger_enabled,
             rank_zero_only=True,
             sync_dist=False,
         )
         return train_loss
-
-    def _get_effective_rollout(self, validation_mode: bool = False) -> int:
-        """Determine rollout length for current step.
-
-        During training, if random_rollout_probability > 0, will randomly choose
-        between single-step (rollout=1) and extended rollout (random_min to random_max).
-
-        Parameters
-        ----------
-        validation_mode : bool
-            Whether in validation mode. Random rollout is only applied during training.
-
-        Returns
-        -------
-        int
-            The effective rollout length to use for this step.
-
-        Note
-        ----
-        The effective rollout is capped by rollout_max since the dataloader uses
-        rollout_max to determine batch size (number of timesteps loaded).
-        """
-        if validation_mode or self.random_rollout_probability <= 0:
-            return self.rollout
-
-        # Random rollout: with probability p, use extended rollout; otherwise single step
-        if torch.rand(1).item() < self.random_rollout_probability:
-            # Cap by rollout_max since that's what the dataloader uses for batch size
-            effective_max = min(self.random_rollout_max, self.rollout_max)
-            effective_min = min(self.random_rollout_min, effective_max)
-            return torch.randint(effective_min, effective_max + 1, (1,)).item()
-        return 1
 
     def _step(
         self,
@@ -220,24 +164,20 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         """Training / validation step."""
         LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
 
-        # Determine effective rollout for this step
-        effective_rollout = self._get_effective_rollout(validation_mode)
-        self._last_effective_rollout = effective_rollout
-
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
         for loss_next, metrics_next, y_preds_next in self._rollout_step(
             batch,
-            rollout=effective_rollout,
+            rollout=self.rollout,
             validation_mode=validation_mode,
         ):
             loss += loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / effective_rollout
+        loss *= 1.0 / self.rollout
         return loss, metrics, y_preds
 
     @abstractmethod
