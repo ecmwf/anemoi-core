@@ -128,7 +128,7 @@ class MultiDataset(IterableDataset):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None]:
         """Return combined tendency statistics from all datasets."""
-        return self._collect("statistics_tendencies")
+        return {name: dataset.statistics_tendencies(self.timestep) for name, dataset in self.datasets.items()}
 
     @cached_property
     def metadata(self) -> dict[str, dict]:

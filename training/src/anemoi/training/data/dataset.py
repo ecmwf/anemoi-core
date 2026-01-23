@@ -10,8 +10,9 @@
 import datetime
 import logging
 from abc import abstractmethod
-
+from typing import Optional
 import numpy as np
+from omegaconf import DictConfig
 import torch
 from einops import rearrange
 from rich.console import Console
@@ -46,11 +47,10 @@ class BaseAnemoiReader:
         """Return dataset statistics."""
         return self.data.statistics
 
-    @property
-    def statistics_tendencies(self) -> dict | None:
+    def statistics_tendencies(self, timestep: Optional[datetime.timedelta] = None) -> dict | None:
         """Return dataset tendency statistics."""
         try:
-            return self.data.statistics_tendencies(self.timestep)
+            return self.data.statistics_tendencies(timestep)
         except (KeyError, AttributeError):
             return None
 
@@ -174,6 +174,8 @@ class TrajectoryDataset(BaseAnemoiReader):
 
 def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
+    if isinstance(dataset_config, DictConfig):
+        dataset_config = dict(dataset_config)
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
         LOGGER.info("Creating TrajectoryDataset...")
