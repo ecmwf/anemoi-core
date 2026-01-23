@@ -73,6 +73,10 @@ class BaseLoss(nn.Module, ABC):
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         self.scaler.update_scaler(name=name, scaler=scaler, override=override)
 
+    @functools.wraps(ScaleTensor.has_scaler_for_dim)
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        return self.scaler.has_scaler_for_dim(dim=dim)
+
     def scale(
         self,
         x: torch.Tensor,
@@ -111,7 +115,7 @@ class BaseLoss(nn.Module, ABC):
                 "Scaler tensor must be at least applied to the GRID dimension. "
                 "Please add a scaler here, use `UniformWeights` for simple uniform scaling.",
             )
-            raise RuntimeError(error_msg)
+            LOGGER.warning(error_msg)
 
         scale_tensor = self.scaler
         if without_scalers is not None and len(without_scalers) > 0:

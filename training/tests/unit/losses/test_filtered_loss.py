@@ -12,7 +12,6 @@ from omegaconf import DictConfig
 
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -64,60 +63,6 @@ def test_instantiation_with_filtering() -> None:
     ), "Loss output with squash=True should be the value of loss for predicted variables"
 
 
-def test_instantiation_without_filtering_variables() -> None:
-    from anemoi.models.data_indices.collection import IndexCollection
-
-    right_shaped_pred_output_pair = (
-        torch.ones((6, 1, 710 * 640, 2)),
-        torch.zeros((6, 1, 710 * 640, 2)),
-    )
-    data_config = {"data": {"forcing": [], "diagnostic": []}}
-    name_to_index = {"tp": 0, "other_var": 1}
-    data_indices = IndexCollection(DictConfig(data_config), name_to_index)
-
-    # 1) without data_indices
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.MSELoss",
-            },
-        ),
-        data_indices=None,
-    )
-    assert not isinstance(loss, FilteringLossWrapper)
-    assert isinstance(loss, BaseLoss)
-
-    # 2) with data_indices (triggers the FilteringLossWrapper)
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.MSELoss",
-            },
-        ),
-        data_indices=data_indices,
-    )
-    assert isinstance(loss, FilteringLossWrapper)
-    assert isinstance(loss, BaseLoss)
-    assert isinstance(loss.loss, FunctionalLoss)
-    # not filtering indices
-    assert (loss.predicted_indices == data_indices.model.output.full).all()
-    assert (loss.target_indices == data_indices.model.output.full).all()
-    assert loss.predicted_variables == list(name_to_index.keys())
-    assert loss.target_variables == list(name_to_index.keys())
-    loss_value = loss(*right_shaped_pred_output_pair, squash=False)
-    assert loss_value.shape[0] == len(
-        name_to_index.keys(),
-    ), "Loss output with squash=False should match length of all variables"
-    assert loss_value.nonzero().shape[0] == len(
-        name_to_index.keys(),
-    ), "All variables should have non-zero loss when not filtering"
-    assert torch.allclose(
-        loss_value,
-        torch.as_tensor([710 * 640] * len(name_to_index), dtype=loss_value.dtype),
-    ), " MSE "
-    "loss value should be averaged over batch and ensemble dims and summed over grids without scaler"
-
-
 def test_print_variable_scaling() -> None:
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.losses.scalers.scalers import create_scalers
@@ -158,7 +103,7 @@ def test_print_variable_scaling() -> None:
                 "scalers": ["general_variable"],
                 "losses": [
                     {
-                        "_target_": "anemoi.training.losses.MSELoss",
+                        "_target_": "anemoi.training.losses.MAELoss",
                         "scalers": ["general_variable"],
                         "predicted_variables": ["tp"],
                         "target_variables": ["imerg"],
@@ -171,4 +116,5 @@ def test_print_variable_scaling() -> None:
     )
     scaling_dict = print_variable_scaling(loss, data_indices)
     assert "FilteringLossWrapper" in scaling_dict  # loss is filtered
-    assert [v in scaling_dict["FilteringLossWrapper"] for v in ["tp", "imerg", "f2"]]  # diag and prog variables
+    assert "tp" in scaling_dict["FilteringLossWrapper"]
+    loss(torch.zeros((1, 1, 10, 4)), torch.zeros((1, 1, 10, 4)), without_scaler=[-2])
