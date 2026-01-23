@@ -93,7 +93,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,
-                out_channels_dst=self.num_output_channels[dataset_name],
+                out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
@@ -143,9 +143,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_out = (
             einops.rearrange(
                 x_out,
-                "(batch ensemble grid) vars -> batch ensemble grid vars",
+                "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
+                time=self.multi_out,
             )
             .to(dtype=dtype)
             .clone()
@@ -153,11 +154,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        x_out[..., self._internal_output_idx[dataset_name]] += (
+            x_skip[..., self._internal_input_idx[dataset_name]].unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        )
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
+        # TODO(dieter): verify if this is needed or can be solved alternatively
+        x_out = x_out.contiguous()  # necessary after expand()
         return x_out
 
     def _assert_valid_sharding(

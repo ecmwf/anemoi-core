@@ -136,15 +136,15 @@ class EnsemblePlotMixin:
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
-                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
+                self.post_processors[dataset_name](x[dataset_name].detach().cpu(), in_place=False)[
                     self.sample_idx : self.sample_idx + 1,
+                    -1:,  # TODO (dieter): -1: -> :, and set up plotting of all output steps
                     members,
                     ...,
                 ]
                 for x in outputs[1]
             ),
         )
-
         output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
         data = data.numpy()
@@ -173,7 +173,6 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
 
         if batch_idx % self.every_n_batches == 0:
             processed_batch, processed_output = self._handle_ensemble_batch_and_output(pl_module, output, batch)
-
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem

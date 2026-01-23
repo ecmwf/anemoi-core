@@ -77,6 +77,21 @@ def test_training_cycle_without_config_validation(
     AnemoiTrainer(cfg).train()
 
 
+@pytest.mark.slow
+def test_training_cycle_multi_out(
+    multi_out_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = multi_out_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_multi_out(multi_out_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = multi_out_config
+    BaseSchema(**cfg)
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_stretched(
@@ -141,6 +156,17 @@ def test_config_validation_lam(lam_config: DictConfig) -> None:
 @pytest.mark.slow
 def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = ensemble_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_out_ens(
+    multi_out_ens_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = multi_out_ens_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
@@ -270,4 +296,15 @@ def test_training_cycle_mlflow_dry_run(
     get_test_archive(url)
 
     # Run training
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_out_diffusion(
+    multi_out_diffusion_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    cfg, url = multi_out_diffusion_config
+    get_test_archive(url)
     AnemoiTrainer(cfg).train()

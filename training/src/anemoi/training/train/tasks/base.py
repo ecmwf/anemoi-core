@@ -264,7 +264,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
+        # TODO(dieter): change to n_step_in and n_step_out
         self.multi_step = config.training.multistep_input
+        self.multi_out = config.training.multistep_output  # defaults to 1 via pydantic
+        LOGGER.info("GraphModule with multistep_input=%s and multistep_output=%s", self.multi_step, self.multi_out)
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -777,7 +780,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         batch: torch.Tensor,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], torch.Tensor]:
         pass
 
     def allgather_batch(self, batch: torch.Tensor, grid_indices: dict, grid_dim: int) -> torch.Tensor:

@@ -57,9 +57,13 @@ class NativeGridDataset:
     @cached_property
     def statistics_tendencies(self) -> dict | None:
         """Return dataset tendency statistics."""
+        return self.statistics_tendencies_for_timestep(self.timestep)
+
+    def statistics_tendencies_for_timestep(self, timestep: str) -> dict | None:
+        """Return dataset tendency statistics for a specific timestep."""
         try:
-            return self.data.statistics_tendencies(self.timestep)
-        except (KeyError, AttributeError):
+            return self.data.statistics_tendencies(timestep)
+        except (KeyError, AttributeError, ValueError):
             return None
 
     @cached_property

@@ -317,6 +317,36 @@ def ensemble_config(
 
 
 @pytest.fixture
+def multi_out_ens_config(
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, str]:
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
+        template = compose(config_name="ensemble_crps", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+
+    OmegaConf.set_struct(template.training, False)  # allow adding multistep_output
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+
+    cfg = handle_truncation_matrices(cfg, get_test_data)
+
+    cfg.training.multistep_input = 3
+    cfg.training["multistep_output"] = 2
+
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0]
+
+
+@pytest.fixture
 def hierarchical_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
@@ -347,6 +377,27 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
     use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0]
+
+
+@pytest.fixture
+def multi_out_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, str]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multi_out"):
+        template = compose(config_name="config")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multi_out.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+
+    OmegaConf.set_struct(template.training.scalers, False)  # allow adding timestep scaler
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
@@ -525,3 +576,37 @@ def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str
     cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
     cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
     return cfg, url
+
+
+@pytest.fixture(
+    params=[
+        [],
+        [
+            "model=graphtransformer_diffusiontend",
+            "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+        ],
+    ],
+    ids=["diffusion", "diffusiontend"],
+)
+def multi_out_diffusion_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_callbacks_on_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, str]:
+    overrides = request.param
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion"):
+        template = compose(config_name="diffusion", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+
+    OmegaConf.set_struct(template.training, False)  # allow adding multistep_output
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+
+    cfg.training.multistep_input = 3
+    cfg.training["multistep_output"] = 2
+
+    return cfg, dataset_urls[0]

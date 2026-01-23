@@ -55,6 +55,7 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         """
         # start rollout of preprocessed batch
+        required_time_steps = rollout * self.multi_out + self.multi_step
         x = {}
         for dataset_name, dataset_batch in batch.items():
             x[dataset_name] = dataset_batch[
@@ -65,19 +66,17 @@ class GraphForecaster(BaseRolloutGraphModule):
             ]  # (bs, multi_step, latlon, nvar)
             msg = (
                 f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {rollout + self.multi_step}"
+                f", {dataset_batch.shape[1]} !>= {required_time_steps}"
             )
-            assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
-
+            assert dataset_batch.shape[1] >= required_time_steps, msg
         for rollout_step in range(rollout or self.rollout):
-            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
-
             y = {}
+            fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
             for dataset_name, dataset_batch in batch.items():
                 y[dataset_name] = dataset_batch[
                     :,
-                    self.multi_step + rollout_step,
+                    fc_times,
                     ...,
                     self.data_indices[dataset_name].data.output.full,
                 ]

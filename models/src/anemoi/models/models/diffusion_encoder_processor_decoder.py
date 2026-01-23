@@ -12,6 +12,7 @@ import logging
 import warnings
 from typing import Callable
 from typing import Optional
+from typing import Sequence
 from typing import Union
 
 import einops
@@ -128,13 +129,14 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,
-                out_channels_dst=self.num_output_channels[dataset_name],
+                out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
-        input_dim += self.num_output_channels[dataset_name]  # input + noised targets
+        output_dim = self._calculate_output_dim()
+        input_dim += output_dim[dataset_name]  # input + noised targets
         return input_dim
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
@@ -159,7 +161,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -173,18 +175,21 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         x_out = einops.rearrange(
             x_out,
-            "(batch ensemble grid) vars -> batch ensemble grid vars",
+            "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
             batch=batch_size,
             ensemble=ensemble_size,
+            time=self.multi_out,
         ).to(dtype=dtype)
 
         return x_out
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
         out = einops.repeat(
-            noise_emb, "batch ensemble noise_level vars -> batch ensemble (repeat noise_level) vars", repeat=repeat
+            noise_emb,
+            "batch time ensemble noise_level vars -> batch time ensemble (repeat noise_level) vars",
+            repeat=repeat,
         )
-        out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
+        out = einops.rearrange(out, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
         return out
 
     def _generate_noise_conditioning(
@@ -648,7 +653,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
             # Initialize output with noise
             batch_size, ensemble_size, grid_size = x_data.shape[0], x_data.shape[2], x_data.shape[-2]
-            shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
+            shape = (batch_size, self.multi_out, ensemble_size, grid_size, self.num_output_channels)
             y_init[dataset_name] = torch.randn(shape, device=x_data.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
@@ -725,6 +730,12 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             statistics=statistics,
             graph_data=graph_data,
         )
+        if self.multi_out > 1:
+            warnings.warn(
+                "The currently implemented normalization of the tendencies when the model has more than one output step is unconventional. Using"
+                "more than one output step with tendency diffusion models is currently highly experimental and results should be "
+                "cautiously interpreted."
+            )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
@@ -746,6 +757,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group)
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
+        # Get node attributes
+        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
 
         # Shard node attributes if grid sharding is enabled
         if grid_shard_shapes is not None:
@@ -758,7 +773,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -953,7 +968,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
         gather_out: bool = True,
-        post_processors_tendencies: Optional[nn.Module] = None,
+        post_processors_tendencies: Optional[Sequence[Optional[nn.Module]]] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Process sampled tendency to get state prediction.
@@ -968,14 +983,23 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         # truncate x_t0 if needed
         x_t0 = self.apply_reference_state_truncation(x_t0, grid_shard_shapes, model_comm_group)
-
         # Convert tendency to state
-        out = self.add_tendency_to_state(
-            x_t0,
-            out,
-            post_processors,
-            post_processors_tendencies,
-        )
+        assert post_processors_tendencies is not None, "Per-step tendency processors must be provided."
+        assert (
+            len(post_processors_tendencies) == out.shape[1]
+        ), "Per-step tendency processors must match the number of output steps."
+        states = []
+        for step, post_proc in enumerate(post_processors_tendencies):
+            out_step = out[:, step : step + 1]
+            x_t0_step = x_t0[:, step : step + 1]
+            state_step = self.add_tendency_to_state(
+                x_t0_step,
+                out_step,
+                post_processors,
+                post_proc,
+            )
+            states.append(state_step)
+        out = torch.cat(states, dim=1)
 
         # Gather if needed
         if gather_out and model_comm_group is not None:
@@ -1004,7 +1028,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name, in_x in x.items():
             x_skip = self.residual[dataset_name](in_x, grid_shard_shapes[dataset_name], model_comm_group)
-            # x_skip.shape: (bs, ens, latlon, nvar)
+            x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+            # x_skip.shape: (bs, time ens, latlon, nvar)
             x_skips[dataset_name] = x_skip[..., self.data_indices[dataset_name].model.input.prognostic]
 
         return x_skips

@@ -190,7 +190,7 @@ class BasePlotCallback(Callback, ABC):
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
         if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
             # Fill with NaNs values where the mask is False
-            data[:, :, ~pl_module.output_mask, :] = np.nan
+            data[:, :, :, ~pl_module.output_mask, :] = np.nan
         return data
 
     @abstractmethod
@@ -1015,9 +1015,12 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             for rollout_step in range(output_times[0]):
                 y_hat = outputs[1][rollout_step][dataset_name]
+                fc_times = [
+                    pl_module.multi_step + rollout_step * pl_module.multi_out + i for i in range(pl_module.multi_out)
+                ]
                 y_true = batch[dataset_name][
                     :,
-                    pl_module.multi_step + rollout_step,
+                    fc_times,
                     ...,
                     data_indices.data.output.full,
                 ]
@@ -1112,8 +1115,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=2, fill_value=np.nan)
+        output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
+        data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
         data = data.numpy()
 
         return data, output_tensor
@@ -1304,7 +1307,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     self.latlons[dataset_name],
                     data[init_step, ...].squeeze(),
                     data[rollout_step + 1, ...].squeeze(),
-                    output_tensor[rollout_step, ...],
+                    output_tensor[rollout_step, ...].squeeze(),
                     min_delta=self.min_delta,
                 )
 

@@ -117,16 +117,24 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     ):
         ensemble_size = batch_ens_size // batch_size
         x_out = (
-            einops.rearrange(x_out, "(bs e n) f -> bs e n f", bs=batch_size, e=ensemble_size).to(dtype=dtype).clone()
+            einops.rearrange(x_out, "(bs e) t n f -> bs t e n f", bs=batch_size, e=ensemble_size, t=self.multi_out)
+            .to(dtype=dtype)
+            .clone()
         )
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        x_out[..., self._internal_output_idx[dataset_name]] += einops.rearrange(
+            x_skip[..., self._internal_input_idx[dataset_name]].unsqueeze(1).expand(-1, self.multi_out, -1, -1),
+            "(batch ensemble) time grid var -> batch time ensemble grid var",
+            batch=batch_size,
+        ).to(dtype=dtype)
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
+        # TODO(dieter): verify if this is needed or can be solved alternatively
+        x_out = x_out.contiguous()  # necessary after expand()
         return x_out
 
     def forward(

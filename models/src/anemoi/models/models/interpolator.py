@@ -99,7 +99,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(target_forcing, "batch ensemble grid vars -> (batch ensemble grid) (vars)"),
+                einops.rearrange(target_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -116,7 +116,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         x_out = (
             einops.rearrange(
                 x_out,
-                "(batch ensemble grid) vars -> batch ensemble grid vars",
+                "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
             )
@@ -127,7 +127,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         # residual connection (just for the prognostic variables)
         if x_skip is not None:
             # residual connection (just for the prognostic variables)
-            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+            x_out[..., self._internal_output_idx[dataset_name]] += (
+                x_skip[..., self._internal_input_idx[dataset_name]].unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+            )
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file

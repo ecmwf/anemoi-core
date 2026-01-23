@@ -150,6 +150,8 @@ class TendencyScalerSchema(BaseModel):
         example="anemoi.training.losses.scalers.StdevTendencyScaler",
         alias="_target_",
     )
+    timestep: str | None = Field(default=None, example="6h")
+    "Timestep key used to select tendency statistics for scalers."
 
 
 class VariableLevelScalerTargets(str, Enum):
@@ -182,6 +184,30 @@ class GraphNodeAttributeScalerSchema(BaseModel):
     "Normalisation method applied to the node attribute."
 
 
+class TimeStepScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.TimeStepScaler"] = Field(..., alias="_target_")
+    norm: Literal["unit-max", "unit-sum"] | None = Field(default="unit-sum", example="unit-sum")
+    "Normalisation method applied to the weights."
+    weights: list[float] = Field(example=[1.0, 1.0])
+    "Weights for each time step"
+
+
+class LeadTimeDecayScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.LeadTimeDecayScaler"] = Field(..., alias="_target_")
+    output_lead_times: list[int] = Field(example=[0, 6, 12, 18, 24])
+    "Lead times corresponding to each output step."
+    decay_factor: float = Field(example=0.1)
+    "Decay factor for the lead time weights."
+    max_lead_time: int = Field(example=24)
+    "Maximum lead time for decay calculation."
+    decay_type: Literal["linear", "exponential"] | None = Field(default="linear", example="linear")
+    "Type of decay to apply."
+    inverse: bool | None = Field(default=False, example=False)
+    "If true, weights increase with lead time."
+    norm: Literal["unit-max", "unit-sum"] | None = Field(default="unit-sum", example="unit-sum")
+    "Normalisation method applied to the weights."
+
+
 class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler"] = Field(
         ...,
@@ -207,6 +233,8 @@ ScalerSchema = (
     | TendencyScalerSchema
     | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
+    | TimeStepScalerSchema
+    | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
 )
 
@@ -364,8 +392,12 @@ class BaseTrainingSchema(BaseModel):
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
-    """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
-    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""
+    """Number of input steps for the model.
+    E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
+    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
+    multistep_output: PositiveInt = Field(example=1, default=1)
+    """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
+    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)]."""
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""

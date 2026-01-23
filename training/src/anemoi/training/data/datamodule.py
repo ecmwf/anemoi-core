@@ -26,6 +26,8 @@ from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_seconds
+from anemoi.utils.dates import frequency_to_string
+from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,9 +71,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
-        """Return tendency statistics from all training datasets."""
-        return self.ds_train.statistics_tendencies
+    def statistics_tendencies(self) -> dict | None:
+        stats = self.ds_train.statistics_tendencies
+        if stats is None:
+            return None
+
+        multi_out = self.config.training.multistep_output
+        lead_times = [self._lead_time_for_step(step) for step in range(1, multi_out + 1)]
+        stats_by_lead = {}
+        for lead_time in lead_times:
+            all_stats_tend = self.ds_train.statistics_tendencies_for_timestep(lead_time)
+            for dataset_name in self.dataset_names:
+                stats_by_lead[dataset_name] = {lead_time: all_stats_tend.get(dataset_name, None)}
+                stats_by_lead[dataset_name]["lead_times"] = lead_times
+        return stats_by_lead
 
     @cached_property
     def metadata(self) -> dict:
@@ -100,6 +113,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
 
+    def _lead_time_for_step(self, step: int) -> str:
+        timestep = frequency_to_timedelta(self.config.data.timestep)
+        return frequency_to_string(timestep * step)
+
     def relative_date_indices(self, val_rollout: int = 1) -> list:
         """Determine a list of relative time indices to load for each batch."""
         if hasattr(self.config.training, "explicit_times"):
@@ -120,7 +137,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         rollout = max(rollout_value, val_rollout)
         multi_step = self.config.training.multistep_input
-        return list(range(multi_step + rollout))
+        multi_out = self.config.training.multistep_output  # defaults to 1
+        time_range = multi_step + rollout * multi_out
+        return list(range(time_range))
 
     def add_trajectory_ids(self, data_reader: Callable) -> Callable:
         """Add trajectory IDs to data reader for forecast trajectory tracking."""
