@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class NativeGridDataset:
-    """Iterable dataset for AnemoI data on the arbitrary grids."""
+    """Dataset for AnemoI data on the arbitrary grids."""
 
     def __init__(
         self,

@@ -171,11 +171,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for name in self.dataset_names:
             self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data[name])
 
-        # Handle supporting_arrays merge for multi-dataset
-        # Multi-dataset: merge supporting arrays from all output masks
+        # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
-        for mask in self.output_mask.values():
-            combined_supporting_arrays.update(mask.supporting_arrays)
+        for dataset_name, mask in self.output_mask.items():
+            combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
         if not hasattr(self.__class__, "task_type"):
             msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
@@ -673,7 +672,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
 
-        return loss, metrics_next, y_pred_full
+        return loss, metrics_next, y_pred
 
     def compute_loss_metrics(
         self,

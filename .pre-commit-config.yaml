@@ -27,7 +27,7 @@ repos:
   - id: python-check-blanket-noqa # Check for # noqa: all
   - id: python-no-log-warn # Check for log.warn
 - repo: https://github.com/psf/black-pre-commit-mirror
-  rev: 25.11.0
+  rev: 25.12.0
   hooks:
   - id: black
     args: [--line-length=120]
@@ -41,7 +41,7 @@ repos:
     - --profile black
     - --project anemoi
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.14.7
+  rev: v0.14.10
   hooks:
   - id: ruff
     args:
@@ -64,7 +64,7 @@ repos:
   - id: pyproject-fmt
     args: ["--max-supported-python", "3.12"]
 - repo: https://github.com/jshwi/docsig # Check docstrings against function sig
-  rev: v0.71.0
+  rev: v0.74.0
   hooks:
   - id: docsig
     args:
