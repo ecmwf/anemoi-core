@@ -133,9 +133,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        input_dim = super()._calculate_input_dim(dataset_name)
-        input_dim += self.output_dim[dataset_name]  # input + noised targets
-        return input_dim
+        base_input_dim = super()._calculate_input_dim(dataset_name)
+        output_dim = self.num_output_channels[dataset_name] * self.multi_out
+        return base_input_dim + output_dim  # input + noised targets
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()
@@ -554,7 +554,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         with torch.no_grad():
 
             assert isinstance(batch, dict), "Input batch must be a dictionary!"
-            for dataset_name, dataset_tensor in batch.values():
+            for dataset_name, dataset_tensor in batch.items():
                 assert (
                     len(dataset_tensor.shape) == 4
                 ), f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'

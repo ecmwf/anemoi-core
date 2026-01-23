@@ -137,15 +137,11 @@ class GraphInterpolator(BaseGraphModule):
             )
 
             if num_tfi >= 1:
-                target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][
-                    :,
-                    itemgetter(*self.interp_times)(self.imap),
-                    ...,
-                ][
+                time_idx = [self.imap[t] for t in self.interp_times]
+                target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][:, time_idx][
                     ...,
                     self.target_forcing_indices[dataset_name],
                 ]
-
             if self.use_time_fraction[dataset_name]:
                 time_fractions = torch.tensor(
                     [
@@ -166,8 +162,10 @@ class GraphInterpolator(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         x_bound = {}
+        time_idx = [self.imap[t] for t in self.interp_times]
+
         for dataset_name in self.dataset_names:
-            x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][
+            x_bound[dataset_name] = batch[dataset_name][:, time_idx][
                 ...,
                 self.data_indices[dataset_name].data.input.full,
             ]  # (bs, time, ens, latlon, nvar)
@@ -176,7 +174,7 @@ class GraphInterpolator(BaseGraphModule):
         y_pred = self(x_bound, target_forcing)
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap), ...][
+            y[dataset_name] = dataset_batch[:, time_idx][
                 ...,
                 self.data_indices[dataset_name].data.output.full,
             ]
