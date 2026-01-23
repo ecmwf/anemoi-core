@@ -99,7 +99,7 @@ def get_loss_function(
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
-    if data_indices is not None:
+    if data_indices is not None and (predicted_variables is not None or target_variables is not None):
         loss_function = _wrap_loss_with_filtering(
             loss_function,
             predicted_variables,
