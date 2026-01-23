@@ -128,6 +128,7 @@ class GraphInterpolator(BaseGraphModule):
         for dataset_name, num_tfi in self.num_tfi.items():
             target_forcing[dataset_name] = torch.empty(
                 batch_size,
+                len(self.interp_times),
                 ens_size,
                 grid_size,
                 num_tfi + self.use_time_fraction[dataset_name],
@@ -188,3 +189,14 @@ class GraphInterpolator(BaseGraphModule):
             use_reentrant=False,
         )
         return loss, metrics, y_pred
+
+    def forward(
+        self,
+        x_bound: dict[str, torch.Tensor],
+        target_forcing: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Forward pass of the interpolator."""
+        return self.model(
+            x_bound,
+            target_forcing,
+        )

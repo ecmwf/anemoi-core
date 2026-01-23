@@ -18,7 +18,7 @@ from anemoi.training.utils.masks import NoOutputMask
 
 class DummyLoss(torch.nn.Module):
 
-    def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, y_pred: dict[str, torch.Tensor], y: dict[str, torch.Tensor], **kwargs) -> torch.Tensor:
         del kwargs
         if isinstance(y, dict):
             y = y["dataset"]
@@ -36,13 +36,13 @@ class DummyModel:
         self.add_skip = add_skip
         self.metrics = {}
 
-    def _forward_tensor(
+    def _forward(
         self,
         x: dict[str, torch.Tensor],
         model_comm_group: Any | None = None,
         grid_shard_slice: Any | None = None,
         grid_shard_shapes: Any | None = None,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         y = {}
         for dataset, x_ in x.items():
             x_input = einops.rearrange(x_, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
@@ -65,20 +65,9 @@ class DummyModel:
         grid_shard_slice: Any | None = None,
         grid_shard_shapes: Any | None = None,
         **kwargs: Any,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         del kwargs
-        if isinstance(x, dict):
-            return {
-                dataset_name: self._forward_tensor(
-                    x_tensor,
-                    model_comm_group=model_comm_group,
-                    grid_shard_slice=grid_shard_slice,
-                    grid_shard_shapes=grid_shard_shapes,
-                )
-                for dataset_name, x_tensor in x.items()
-            }
-
-        return self._forward_tensor(
+        return self._forward(
             x,
             model_comm_group=model_comm_group,
             grid_shard_slice=grid_shard_slice,
@@ -123,7 +112,7 @@ class DummyDiffusionModel(DummyModel):
         return y_noised + 0.1 * pred
 
 
-def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
+def _make_minimal_index_collection(name_to_index: dict[str, int]) -> dict[str, IndexCollection]:
     cfg = DictConfig({"dataset": {"data": {"forcing": [], "diagnostic": []}}})
     return {"dataset": IndexCollection(data_config=cfg["dataset"], name_to_index=name_to_index)}
 
@@ -162,14 +151,13 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
             {
                 "training": {
                     "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
-                    "target_forcing": {"data": [], "time_fraction": False},
                 },
             },
         ),
-        graph_data={"data": HeteroData()},
+        graph_data={"dataset": HeteroData()},
         statistics={},
         statistics_tendencies={},
-        data_indices={"data": _make_minimal_index_collection(name_to_index)},
+        data_indices=_make_minimal_index_collection(name_to_index),
         metadata={},
         supporting_arrays={},
     )
@@ -237,13 +225,13 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     name_to_index = {"A": 0, "B": 1}
-    data_indices = {"data": _make_minimal_index_collection(name_to_index)}
+    data_indices = _make_minimal_index_collection(name_to_index)
 
     forecaster = GraphDiffusionForecaster(
         config=cfg,
-        graph_data={"data": HeteroData()},
-        statistics={"data": {}},
-        statistics_tendencies={"data": None},
+        graph_data={"dataset": HeteroData()},
+        statistics={"dataset": {}},
+        statistics_tendencies={"dataset": None},
         data_indices=data_indices,
         metadata={},
         supporting_arrays={},
