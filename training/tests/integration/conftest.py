@@ -478,12 +478,6 @@ def architecture_config_with_checkpoint(
     # Reuse the same overrides that architecture_config gets
     overrides = request.param
 
-    # ✅ Skip ONLY gnn on Python 3.10
-    import sys
-
-    if sys.version_info[:2] == (3, 10) and any("model=gnn" in o for o in overrides):
-        pytest.skip("GNN checkpoint incompatible with Python 3.10")
-
     cfg, dataset_url, model_architecture = build_architecture_config(
         overrides,
         testing_modifications_with_temp_dir,
@@ -492,11 +486,11 @@ def architecture_config_with_checkpoint(
     # rest of your logic...
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-12.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-23.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-01-23.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"
