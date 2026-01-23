@@ -484,7 +484,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         sharding_supported = (self.loss_supports_sharding or validation_mode) and (
             self.metrics_support_sharding or not validation_mode
         )
-        grid_shard_slice = self._get_grid_shard_slice(validation_mode)
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
             shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, grid_shard_shapes)

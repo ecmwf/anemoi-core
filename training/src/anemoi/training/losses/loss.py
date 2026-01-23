@@ -99,7 +99,7 @@ def get_loss_function(
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
-    if data_indices is not None:
+    if data_indices is not None and (predicted_variables is not None or target_variables is not None):
         loss_function = _wrap_loss_with_filtering(
             loss_function,
             predicted_variables,
@@ -124,12 +124,19 @@ def _wrap_loss_with_filtering(
     subloss = loss_function.loss
     if subloss.has_scaler_for_dim(TensorDim.VARIABLE) and predicted_variables is not None:
         # filter scaler to only predicted variables
-        # target variables will be scaled like the predicted variables since that is what
-        # it compares to in the loss
-        # even if a different scaling exists for the target variable
-        for key, (_, tens) in subloss.scaler.subset_by_dim(TensorDim.VARIABLE).tensors.items():
-            scaling = tens[loss_function.predicted_indices]
-            loss_function.loss.update_scaler(name=key, scaler=scaling, override=True)
+        n_variables = len(data_indices.model.output.full)
+        for key, (dims, tens) in subloss.scaler.subset_by_dim(TensorDim.VARIABLE).tensors.items():
+            # Normalize dims to tuple
+            if isinstance(dims, int):
+                dims = (dims,)
+            else:
+                dims = tuple(dims) if not isinstance(dims, tuple) else dims
+            # Find position of VARIABLE dimension
+            var_dim_pos = list(dims).index(TensorDim.VARIABLE)
+            # Only filter if the scaler has the full number of variables
+            if tens.shape[var_dim_pos] == n_variables:
+                scaling = tens[loss_function.predicted_indices]
+                loss_function.loss.update_scaler(name=key, scaler=scaling, override=True)
     return loss_function
 
 
