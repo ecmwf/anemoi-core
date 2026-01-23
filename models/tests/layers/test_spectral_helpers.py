@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import torch
 import pytest
+import torch
 
 from anemoi.models.layers.spectral_helpers import EcTransOctahedralSHTModule
 from anemoi.models.layers.spectral_helpers import InverseEcTransOctahedralSHTModule
@@ -20,14 +20,16 @@ By definition arranged on an upper triangular matrix of width and height (trunca
 values below the diagonal just set to zero. The m = 0 coefficients are also purely real, to ensure
 that inverse transformed fields are also real.
 """
+
+
 def random_spectral_array(truncation, dtype):
     # Shape: [batch index, ensemble member, l, m, variable]
     shape = (1, 1, truncation + 1, truncation + 1, 1)
     spectral_array = torch.complex(torch.randn(shape, dtype=dtype), torch.randn(shape, dtype=dtype))
-    spectral_array[0, 0, :, 0, :].imag = 0.0 # m = 0 modes must be real
+    spectral_array[0, 0, :, 0, :].imag = 0.0  # m = 0 modes must be real
     # Zero the lower triangle, which has no meaning
     for i in range(truncation + 1):
-        spectral_array[0, 0, : i, i, :] = 0.0 + 0.0j
+        spectral_array[0, 0, :i, i, :] = 0.0 + 0.0j
 
     return spectral_array
 
@@ -41,23 +43,16 @@ class TestEcTransOctahedralSHTModule:
         device = "cuda" if torch.cuda.is_available() else "cpu"  # Spectral truncation
         torch.set_default_device(device)
 
-        truncation = 39 # T39 corresponding to O40 grid
-        dtype = torch.float64 # float 64 for numerical correctness checking
-        torch.manual_seed(0) # set the random seed for reproducibility
-        tolerance = 1e-08 # define relative tolerance for numerical comparisons
+        truncation = 39  # T39 corresponding to O40 grid
+        dtype = torch.float64  # float 64 for numerical correctness checking
+        torch.manual_seed(0)  # set the random seed for reproducibility
+        tolerance = 1e-08  # define relative tolerance for numerical comparisons
 
         # Create SHT objects
         direct = EcTransOctahedralSHTModule(truncation, dtype=dtype).to(device)
         inverse = InverseEcTransOctahedralSHTModule(truncation, dtype=dtype).to(device)
 
-        return {
-            "truncation": truncation,
-            "dtype": dtype,
-            "tolerance": tolerance,
-            "direct": direct,
-            "inverse": inverse
-        }
-
+        return {"truncation": truncation, "dtype": dtype, "tolerance": tolerance, "direct": direct, "inverse": inverse}
 
     def test_idempotency_direct_inverse(self, init):
         """Test that direct followed by inverse transform returns the original data."""
@@ -77,7 +72,6 @@ class TestEcTransOctahedralSHTModule:
         after = inverse(direct(before))
         assert torch.allclose(before, after, rtol=tolerance)
 
-
     def test_idempotency_inverse_direct(self, init):
         """Test that inverse followed by direct transform returns the original data."""
 
@@ -93,8 +87,8 @@ class TestEcTransOctahedralSHTModule:
         # Compute max relative diff
         maxdiff = 0.0
         for i in range(truncation + 1):
-            maxdiff = max(maxdiff, torch.abs(
-                (before[0, 0, i :, i, :] - after[0, 0, i :, i, :]) / before[0, 0, i :, i, :]
-            ).max())
+            maxdiff = max(
+                maxdiff, torch.abs((before[0, 0, i:, i, :] - after[0, 0, i:, i, :]) / before[0, 0, i:, i, :]).max()
+            )
 
         assert maxdiff < tolerance
