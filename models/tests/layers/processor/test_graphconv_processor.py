@@ -17,7 +17,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
-from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
@@ -58,7 +58,7 @@ class TestGNNProcessor:
 
     @pytest.fixture
     def graph_provider(self, fake_graph):
-        return create_graph_provider(
+        return StaticGraphProvider(
             graph=fake_graph[("nodes", "to", "nodes")],
             edge_attributes=["edge_attr1", "edge_attr2"],
             src_size=self.NUM_NODES,

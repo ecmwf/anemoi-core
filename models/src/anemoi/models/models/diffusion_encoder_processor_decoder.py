@@ -26,7 +26,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.graph_provider import instantiate_graph_provider
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -68,17 +68,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
+        graph_providers = model_config.model.graph_providers
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            # Create graph providers
-            self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            self.encoder_graph_provider[dataset_name] = instantiate_graph_provider(
+                provider_config=graph_providers.get("encoder"),
+                graph_data=self._graph_data[dataset_name],
+                node_attributes=self.node_attributes[dataset_name],
             )
 
             self.encoder[dataset_name] = instantiate(
@@ -92,16 +90,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         # Processor hidden -> hidden (shared across all datasets)
         first_dataset_name = next(iter(self._graph_data.keys()))
-        processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
-        processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
 
         # Processor hidden -> hidden
-        self.processor_graph_provider = create_graph_provider(
-            graph=processor_graph,
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-            src_size=processor_grid_size,
-            dst_size=processor_grid_size,
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
+        self.processor_graph_provider = instantiate_graph_provider(
+            provider_config=graph_providers.get("processor"),
+            graph_data=self._graph_data[first_dataset_name],
+            node_attributes=self.node_attributes[first_dataset_name],
         )
 
         self.processor = instantiate(
@@ -115,12 +109,10 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            self.decoder_graph_provider[dataset_name] = instantiate_graph_provider(
+                provider_config=graph_providers.get("decoder"),
+                graph_data=self._graph_data[dataset_name],
+                node_attributes=self.node_attributes[dataset_name],
             )
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
@@ -238,7 +230,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     ) -> torch.Tensor:
         # Multi-dataset case
         dataset_names = list(x.keys())
-
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)

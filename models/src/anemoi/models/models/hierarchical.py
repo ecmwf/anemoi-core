@@ -17,7 +17,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.graph_provider import instantiate_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
@@ -29,23 +29,48 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
         return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden[0]]
 
+    def _assert_consistent_hierarchical_graphs(self) -> None:
+        if not (isinstance(self._graph_data, dict) and len(self._graph_data) > 1):
+            return
+
+        dataset_names = list(self._graph_data.keys())
+        reference_dataset = dataset_names[0]
+        reference_graph = self._graph_data[reference_dataset]
+        hidden_names = list(self._graph_name_hidden)
+
+        edge_types = [(hidden, "to", hidden) for hidden in hidden_names]
+        for i in range(len(hidden_names) - 1):
+            edge_types.append((hidden_names[i], "to", hidden_names[i + 1]))
+            edge_types.append((hidden_names[i + 1], "to", hidden_names[i]))
+
+        for edge_type in edge_types:
+            reference_edge = reference_graph[edge_type]
+            for dataset_name in dataset_names[1:]:
+                dataset_graph = self._graph_data[dataset_name]
+                dataset_edge = dataset_graph[edge_type]
+                assert torch.equal(reference_edge.edge_index, dataset_edge.edge_index), (
+                    f"Hierarchical graph edge structure mismatch between reference dataset '{reference_dataset}' "
+                    f"and dataset '{dataset_name}' for edge type '{edge_type}'. "
+                    f"All datasets must have identical hierarchical graph topology for shared processors."
+                )
+
     def _build_networks(self, model_config):
         """Builds the model components."""
         # note that this is called by the super class init
         # self.hidden_dims is the dimentionality of features at each depth
         self.hidden_dims = {hidden: self.num_channels * (2**i) for i, hidden in enumerate(self._graph_name_hidden)}
         self.num_hidden = len(self._graph_name_hidden)
+        graph_providers = model_config.model.graph_providers
+        self._assert_consistent_hierarchical_graphs()
 
         # Encoder data -> hidden
         self.encoder_graph_provider = nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden[0])],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden[0]],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            self.encoder_graph_provider[dataset_name] = instantiate_graph_provider(
+                provider_config=graph_providers.get("encoder"),
+                graph_data=self._graph_data[dataset_name],
+                node_attributes=self.node_attributes[dataset_name],
             )
 
             self.encoder[dataset_name] = instantiate(
@@ -67,16 +92,21 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.down_level_processor_graph_providers = nn.ModuleDict()
             self.up_level_processor = nn.ModuleDict()
             self.up_level_processor_graph_providers = nn.ModuleDict()
+
+            down_level_providers = graph_providers.get("down_level_processor")
+            up_level_providers = graph_providers.get("up_level_processor")
+            if down_level_providers is None or up_level_providers is None:
+                raise ValueError("Missing graph provider config for level processors.")
+
             for i in range(0, self.num_hidden - 1):
                 nodes_names = self._graph_name_hidden[i]
 
                 # Create graph providers for down level processor
-                self.down_level_processor_graph_providers[nodes_names] = create_graph_provider(
-                    graph=self._graph_data[first_dataset_name][(nodes_names, "to", nodes_names)],
-                    edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes[first_dataset_name].num_nodes[nodes_names],
-                    dst_size=self.node_attributes[first_dataset_name].num_nodes[nodes_names],
-                    trainable_size=model_config.model.processor.get("trainable_size", 0),
+                down_provider_config = down_level_providers.get(nodes_names)
+                self.down_level_processor_graph_providers[nodes_names] = instantiate_graph_provider(
+                    provider_config=down_provider_config,
+                    graph_data=self._graph_data[first_dataset_name],
+                    node_attributes=self.node_attributes[first_dataset_name],
                 )
 
                 self.down_level_processor[nodes_names] = instantiate(
@@ -88,12 +118,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 )
 
                 # Create graph providers for up level processor
-                self.up_level_processor_graph_providers[nodes_names] = create_graph_provider(
-                    graph=self._graph_data[first_dataset_name][(nodes_names, "to", nodes_names)],
-                    edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes[first_dataset_name].num_nodes[nodes_names],
-                    dst_size=self.node_attributes[first_dataset_name].num_nodes[nodes_names],
-                    trainable_size=model_config.model.processor.get("trainable_size", 0),
+                up_provider_config = up_level_providers.get(nodes_names)
+                self.up_level_processor_graph_providers[nodes_names] = instantiate_graph_provider(
+                    provider_config=up_provider_config,
+                    graph_data=self._graph_data[first_dataset_name],
+                    node_attributes=self.node_attributes[first_dataset_name],
                 )
 
                 self.up_level_processor[nodes_names] = instantiate(
@@ -105,14 +134,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 )
 
         # Main processor at deepest level
-        self.processor_graph_provider = create_graph_provider(
-            graph=self._graph_data[first_dataset_name][
-                (self._graph_name_hidden[self.num_hidden - 1], "to", self._graph_name_hidden[self.num_hidden - 1])
-            ],
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
-            dst_size=self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
+        self.processor_graph_provider = instantiate_graph_provider(
+            provider_config=graph_providers.get("processor"),
+            graph_data=self._graph_data[first_dataset_name],
+            node_attributes=self.node_attributes[first_dataset_name],
         )
 
         self.processor = instantiate(
@@ -125,16 +150,19 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Downscale
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
+        downscale_providers = graph_providers.get("downscale")
+        if downscale_providers is None:
+            raise ValueError("Missing graph provider config for downscale.")
+
         for i in range(0, self.num_hidden - 1):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
 
-            self.downscale_graph_providers[src_nodes_name] = create_graph_provider(
-                graph=self._graph_data[first_dataset_name][(src_nodes_name, "to", dst_nodes_name)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[first_dataset_name].num_nodes[src_nodes_name],
-                dst_size=self.node_attributes[first_dataset_name].num_nodes[dst_nodes_name],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            downscale_provider_config = downscale_providers.get(src_nodes_name)
+            self.downscale_graph_providers[src_nodes_name] = instantiate_graph_provider(
+                provider_config=downscale_provider_config,
+                graph_data=self._graph_data[first_dataset_name],
+                node_attributes=self.node_attributes[first_dataset_name],
             )
 
             self.downscale[src_nodes_name] = instantiate(
@@ -149,16 +177,19 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Upscale
         self.upscale = nn.ModuleDict()
         self.upscale_graph_providers = nn.ModuleDict()
+        upscale_providers = graph_providers.get("upscale")
+        if upscale_providers is None:
+            raise ValueError("Missing graph provider config for upscale.")
+
         for i in range(1, self.num_hidden):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i - 1]
 
-            self.upscale_graph_providers[src_nodes_name] = create_graph_provider(
-                graph=self._graph_data[first_dataset_name][(src_nodes_name, "to", dst_nodes_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[first_dataset_name].num_nodes[src_nodes_name],
-                dst_size=self.node_attributes[first_dataset_name].num_nodes[dst_nodes_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            upscale_provider_config = upscale_providers.get(src_nodes_name)
+            self.upscale_graph_providers[src_nodes_name] = instantiate_graph_provider(
+                provider_config=upscale_provider_config,
+                graph_data=self._graph_data[first_dataset_name],
+                node_attributes=self.node_attributes[first_dataset_name],
             )
 
             self.upscale[src_nodes_name] = instantiate(
@@ -175,12 +206,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self.decoder_graph_provider = nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_hidden[0], "to", self._graph_name_data)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden[0]],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            self.decoder_graph_provider[dataset_name] = instantiate_graph_provider(
+                provider_config=graph_providers.get("decoder"),
+                graph_data=self._graph_data[dataset_name],
+                node_attributes=self.node_attributes[dataset_name],
             )
 
             self.decoder[dataset_name] = instantiate(

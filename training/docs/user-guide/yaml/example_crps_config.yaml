@@ -13,8 +13,6 @@ config_validation: True
 # Changes in system
 system:
   input:
-    truncation: ${data.resolution}-O32-linear.mat.npz
-    truncation_inv: O32-${data.resolution}-linear.mat.npz
   hardware:
     num_gpus_per_ensemble: 1
     num_gpus_per_node: 1
