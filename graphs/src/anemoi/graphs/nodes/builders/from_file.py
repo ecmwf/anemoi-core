@@ -169,7 +169,7 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         reference_node_name: str,
         name: str,
         lat_key: str = "latitudes",
-        lon_key: str = "longiutdes",
+        lon_key: str = "longitudes",
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
     ) -> None:
