@@ -1,0 +1,11 @@
+training_task:
+  _target_: anemoi.training.train.training_task.ForecastingTask
+  multistep_input: ${training.multistep_input}
+  multistep_output: 1
+  timestep: "6H"
+  rollout:
+    start: 1
+    # increase rollout every n epochs
+    epoch_increment: 0
+    # maximum rollout to use
+    max: 1

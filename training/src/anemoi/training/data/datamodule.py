@@ -33,7 +33,7 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: BaseSchema, graph_data: HeteroData) -> None:
+    def __init__(self, config: BaseSchema, graph_data: HeteroData, task: "BaseTask") -> None:
         """Initialize Multi-dataset data module.
 
         Parameters
@@ -47,6 +47,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         self.config = config
         self.graph_data = graph_data
+        self.task = task
+
         self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
         self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
         self.test_dataloader_config = get_multiple_datasets_config(self.config.dataloader.test)
@@ -99,28 +101,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             # Get dataset-specific data config
             indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
-
-    def relative_date_indices(self, val_rollout: int = 1) -> list:
-        """Determine a list of relative time indices to load for each batch."""
-        if hasattr(self.config.training, "explicit_times"):
-            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
-
-        # Calculate indices using multistep, timeincrement and rollout
-        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
-
-        rollout_max = getattr(rollout_cfg, "max", None)
-        rollout_start = getattr(rollout_cfg, "start", 1)
-        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
-
-        rollout_value = rollout_start
-        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
-            rollout_value = rollout_max
-        else:
-            LOGGER.warning("Falling back rollout to: %s", rollout_value)
-
-        rollout = max(rollout_value, val_rollout)
-        multi_step = self.config.training.multistep_input
-        return list(range(multi_step + rollout))
 
     def add_trajectory_ids(self, data_reader: Callable) -> Callable:
         """Add trajectory IDs to data reader for forecast trajectory tracking."""
@@ -184,6 +164,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         val_rollout: int = 1,
         label: str = "generic",
     ) -> MultiDataset:
+        relative_date_indices = {
+            dataset_name: self.task.get_relative_time_indices(ds.frequency) for dataset_name, ds in datasets.items()
+        }
+
         data_readers = {}
         for name, dataset_config in datasets.items():
             data_reader = open_dataset(dataset_config)
@@ -192,7 +176,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         return MultiDataset(
             data_readers=data_readers,
-            relative_date_indices=self.relative_date_indices(val_rollout),
+            relative_date_indices=relative_date_indices,
             timestep=self.config.data.timestep,
             shuffle=shuffle,
             grid_indices=self.grid_indices,
@@ -234,7 +218,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
         timesteps = {
-            "relative_date_indices_training": self.relative_date_indices(),
+            #"relative_date_indices_training": self.relative_date_indices(),
             "timestep": self.config.data.timestep,
         }
         for dataset_name in self.dataset_names:

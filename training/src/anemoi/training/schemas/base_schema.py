@@ -150,6 +150,8 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Graph configuration."""
     model: Any
     """Model configuration."""
+    task: Any
+    """Task configuration."""
     training: Any
     """Training configuration."""
     config_validation: bool = False

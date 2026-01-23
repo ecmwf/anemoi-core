@@ -35,7 +35,7 @@ class MultiDataset(IterableDataset):
         self,
         data_readers: dict,
         grid_indices: dict,
-        relative_date_indices: list,
+        relative_date_indices: dict,
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
@@ -62,6 +62,7 @@ class MultiDataset(IterableDataset):
         self.label = label
         self.shuffle = shuffle
         self.timestep = timestep
+        self.relative_date_indices = relative_date_indices
         self.dataset_names = list(data_readers.keys())
 
         # Create individual NativeGridDataset for each dataset with its own grid_indices
@@ -76,13 +77,6 @@ class MultiDataset(IterableDataset):
                 grid_indices=grid_indices[name],
                 timestep=timestep,
             )
-
-        # relative_date_indices are computed in terms of data frequency
-        # data_relative_date_indices are in terms of the specific dataset
-        self.data_relative_date_indices = np.array(
-            [self.timeincrement * idx for idx in relative_date_indices],
-            dtype=np.int64,
-        )
 
         LOGGER.info(
             "MultiDataset initialized with %d datasets (%s), %d valid indices each",
@@ -209,11 +203,11 @@ class MultiDataset(IterableDataset):
         for every relative_date_index i.
         """
         valid_date_indices_ref = None
-        for ds in self.datasets.values():
+        for dataset_name, ds in self.datasets.items():
             valid_date_indices = get_usable_indices(
                 ds.data.missing,
                 len(ds.data),
-                self.data_relative_date_indices,
+                self.relative_date_indices[dataset_name],
                 ds.data.trajectory_ids,
             )
             if valid_date_indices_ref is None:
@@ -354,11 +348,11 @@ class MultiDataset(IterableDataset):
         )
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        start = index + self.data_relative_date_indices[0]
-        end = index + self.data_relative_date_indices[-1] + 1
-        timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
-        time_steps = slice(start, end, timeincrement)
-        return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
+        sample = {}
+        for dataset_name, dataset in self.datasets.items():
+            time_steps = self.task.get_batch_time_indices(index, dataset.frequency)
+            sample[dataset_name] = dataset.get_sample(time_steps, self.reader_group_rank)
+        return sample
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.

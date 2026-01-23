@@ -103,9 +103,14 @@ class AnemoiTrainer(ABC):
         self._log_information()
 
     @cached_property
+    def task(self) -> "BaseTask":
+        """Task instance."""
+        return instantiate(convert_to_omegaconf(self.config).task.training_task)
+
+    @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
+        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data, self.task)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset

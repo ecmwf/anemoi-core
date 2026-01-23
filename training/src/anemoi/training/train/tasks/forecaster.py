@@ -55,34 +55,14 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         """
         # start rollout of preprocessed batch
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.multi_step,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
-            msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {rollout + self.multi_step}"
-            )
-            assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
+        x = self.task.get_inputs(batch)
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
-            y = {}
-            for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[
-                    :,
-                    self.multi_step + rollout_step,
-                    ...,
-                    self.data_indices[dataset_name].data.output.full,
-                ]
-            # y includes the auxiliary variables, so we must leave those out when computing the loss
-            # Compute loss for each dataset and sum them up
+            y = self.task.get_targets(batch, step=rollout_step)
+
             loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,

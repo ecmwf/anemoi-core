@@ -321,10 +321,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             }
             md_dict["metadata_inference"][dataset]["shapes"] = shapes
 
-            rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
-            input_rel_date_indices = rel_date_indices[:-1]
-            output_rel_date_indices = rel_date_indices[-1]
-            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
-            md_dict["metadata_inference"][dataset]["timesteps"][
-                "output_relative_date_indices"
-            ] = output_rel_date_indices
+        #    rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
+        #    input_rel_date_indices = rel_date_indices[:-1]
+        #    output_rel_date_indices = rel_date_indices[-1]
+        #    md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
+        #    md_dict["metadata_inference"][dataset]["timesteps"][
+        #        "output_relative_date_indices"
+        #    ] = output_rel_date_indices
