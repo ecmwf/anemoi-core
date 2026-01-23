@@ -10,11 +10,11 @@
 import datetime
 import logging
 from abc import abstractmethod
-from typing import Optional
+
 import numpy as np
-from omegaconf import DictConfig
 import torch
 from einops import rearrange
+from omegaconf import DictConfig
 from rich.console import Console
 from rich.tree import Tree
 
@@ -47,7 +47,7 @@ class BaseAnemoiReader:
         """Return dataset statistics."""
         return self.data.statistics
 
-    def statistics_tendencies(self, timestep: Optional[datetime.timedelta] = None) -> dict | None:
+    def statistics_tendencies(self, timestep: datetime.timedelta | None = None) -> dict | None:
         """Return dataset tendency statistics."""
         try:
             return self.data.statistics_tendencies(timestep)
