@@ -71,7 +71,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         return (
             len(self.input_times) * self.num_input_channels[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-            + self.num_target_forcings[dataset_name]
+            + self.num_target_forcings[dataset_name] * len(self.output_times)
         )
 
     def _assemble_input(

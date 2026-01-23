@@ -71,20 +71,25 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict | None:
-        stats = self.ds_train.statistics_tendencies
-        if stats is None:
-            return None
-
+    def statistics_tendencies(self) -> dict[str, dict | None] | None:
+        """Return tendency statistics from all training datasets."""
         multi_out = self.config.training.multistep_output
         lead_times = [self._lead_time_for_step(step) for step in range(1, multi_out + 1)]
-        stats_by_lead = {}
-        for lead_time in lead_times:
-            all_stats_tend = self.ds_train.statistics_tendencies_for_timestep(lead_time)
-            for dataset_name in self.dataset_names:
-                stats_by_lead[dataset_name] = {lead_time: all_stats_tend.get(dataset_name, None)}
-                stats_by_lead[dataset_name]["lead_times"] = lead_times
-        return stats_by_lead
+
+        stats_by_dataset: dict[str, dict | None] = {}
+        for dataset_name, dataset in self.ds_train.datasets.items():
+            stats_by_lead = {
+                lead_time: dataset.statistics_tendencies_for_timestep(lead_time) for lead_time in lead_times
+            }
+            if all(stats is None for stats in stats_by_lead.values()):
+                stats_by_dataset[dataset_name] = None
+                continue
+            stats_by_lead["lead_times"] = lead_times
+            stats_by_dataset[dataset_name] = stats_by_lead
+
+        if not any(stats is not None for stats in stats_by_dataset.values()):
+            return None
+        return stats_by_dataset
 
     @cached_property
     def metadata(self) -> dict:

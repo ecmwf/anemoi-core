@@ -12,6 +12,7 @@
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import numpy as np
 import omegaconf
 import pytest
 import torch
@@ -123,24 +124,26 @@ def test_ensemble_plot_mixin_process():
     """Test EnsemblePlotMixin.process method."""
     mixin = EnsemblePlotMixin()
     mixin.sample_idx = 0
-    mixin.latlons = None
+    mixin.latlons = {"data": np.zeros((100, 2))}
 
     # Mock lightning module
     pl_module = MagicMock()
     pl_module.multi_step = 2
     pl_module.rollout = 3
-    pl_module.data_indices.data.output.full = slice(None)
-    pl_module.latlons_data = {"data": torch.randn(100, 2)}
+    pl_module.multi_out = 1
+    data_indices = MagicMock()
+    data_indices.data.output.full = slice(None)
+    pl_module.data_indices = {"data": data_indices}
 
     # Mock config
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
     # Create test tensors
-    # batch: bs, input_steps + forecast_steps, latlon, nvar
-    batch = {"data": torch.randn(2, 6, 100, 5)}
-    # input_tensor: bs, rollout + 1, latlon, nvar
-    data_tensor = torch.randn(2, 4, 100, 5)
-    # loss: 1, y_preds: bs, latlon, nvar
-    y_preds = [{"data": torch.randn(2, 1, 100, 5)} for _ in range(3)]
+    # batch: bs, input_steps + forecast_steps, ens, latlon, nvar
+    batch = {"data": torch.randn(2, 6, 1, 100, 5)}
+    # input_tensor: bs, rollout + 1, ens, latlon, nvar
+    data_tensor = torch.randn(2, 4, 1, 100, 5)
+    # loss: 1, y_preds: bs, multi-out, ens, latlon, nvar
+    y_preds = [{"data": torch.randn(2, 1, 1, 100, 5)} for _ in range(3)]
     outputs = [torch.tensor(0.5), y_preds]
 
     # Mock post_processors
@@ -176,7 +179,7 @@ def test_ensemble_plot_mixin_process():
     assert result_output_tensor is not None
 
     # Check dimensions
-    assert data.shape == (4, 100, 5), f"Expected data shape (4, 100, 5), got {data.shape}"
+    assert data.shape == (4, 1, 100, 5), f"Expected data shape (4, 1, 100, 5), got {data.shape}"
     assert result_output_tensor.shape == (
         3,
         1,

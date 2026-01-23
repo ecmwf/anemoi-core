@@ -25,3 +25,7 @@ training:
           weights:
             - 1.0
             - 2.0
+  training_loss:
+    datasets:
+      data:
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'output_steps']

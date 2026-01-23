@@ -1018,12 +1018,10 @@ class PlotLoss(BasePerBatchPlotCallback):
                 fc_times = [
                     pl_module.multi_step + rollout_step * pl_module.multi_out + i for i in range(pl_module.multi_out)
                 ]
-                y_true = batch[dataset_name][
-                    :,
-                    fc_times,
-                    ...,
-                    data_indices.data.output.full,
-                ]
+                time_idx = torch.tensor(fc_times, device=batch[dataset_name].device)
+                y_time = batch[dataset_name].index_select(1, time_idx)
+                var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
+                y_true = y_time.index_select(-1, var_idx)
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
@@ -1115,8 +1113,14 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
+        output_tensor = (
+            pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
+        )
+        data[1:, ...] = pl_module.output_mask[dataset_name].apply(
+            data[1:, ...],
+            dim=pl_module.grid_dim,
+            fill_value=np.nan,
+        )
         data = data.numpy()
 
         return data, output_tensor
@@ -1307,7 +1311,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     self.latlons[dataset_name],
                     data[init_step, ...].squeeze(),
                     data[rollout_step + 1, ...].squeeze(),
-                    output_tensor[rollout_step, ...].squeeze(),
+                    output_tensor[rollout_step, ...],
                     min_delta=self.min_delta,
                 )
 

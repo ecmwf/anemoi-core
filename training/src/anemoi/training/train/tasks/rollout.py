@@ -39,10 +39,10 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -52,11 +52,11 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
+        graph_data : dict[str, HeteroData]
+            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
-        data_indices : IndexCollection
+        data_indices : dict[str, IndexCollection]
             Indices of the training data,
         metadata : dict
             Provenance information
@@ -87,8 +87,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         x: torch.Tensor,
         y_pred: torch.Tensor,
         batch: torch.Tensor,
+        dataset_name: str,
         rollout_step: int = 0,
-        dataset_name: str | None = None,
     ) -> torch.Tensor:
         """Default implementation used by simple rollout tasks.
 
@@ -100,7 +100,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         # TODO(dieter): see if we can replace for loop with tensor operations
         for i in range(self.multi_out):
             # Get prognostic variables
-            x[:, -(i + 1), :, :, self.data_indices[dataset_name].model.input.prognostic] = y_pred[
+            x[:, -(i + 1), ..., self.data_indices[dataset_name].model.input.prognostic] = y_pred[
                 :,
                 -(i + 1),
                 ...,
@@ -113,15 +113,14 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
                 x[:, -(i + 1)],
                 batch[:, batch_time_index],
                 self.data_indices[dataset_name],
-                grid_shard_slice=self.grid_shard_slice[dataset_name] if self.grid_shard_slice is not None else None,
+                grid_shard_slice=self.grid_shard_slice[dataset_name],
             )
 
             # get new "constants" needed for time-varying fields
-            x[:, -(i + 1), :, :, self.data_indices[dataset_name].model.input.forcing] = batch[
+            x[:, -(i + 1), ..., self.data_indices[dataset_name].model.input.forcing] = batch[
                 :,
                 batch_time_index,
-                :,
-                :,
+                ...,
                 self.data_indices[dataset_name].data.input.forcing,
             ]
         return x
@@ -147,9 +146,9 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         step: int | None = None,
         grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.

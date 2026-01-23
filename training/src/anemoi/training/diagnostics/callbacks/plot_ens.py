@@ -136,7 +136,7 @@ class EnsemblePlotMixin:
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
-                self.post_processors[dataset_name](x[dataset_name].detach().cpu(), in_place=False)[
+                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
                     self.sample_idx : self.sample_idx + 1,
                     -1:,  # TODO (dieter): -1: -> :, and set up plotting of all output steps
                     members,

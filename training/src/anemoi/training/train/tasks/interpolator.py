@@ -188,6 +188,3 @@ class GraphInterpolator(BaseGraphModule):
             use_reentrant=False,
         )
         return loss, metrics, y_pred
-
-    def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
-        return super().forward(x, target_forcing=target_forcing)

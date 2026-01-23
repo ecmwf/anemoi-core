@@ -36,15 +36,13 @@ class DummyModel:
         self.add_skip = add_skip
         self.metrics = {}
 
-    def __call__(
+    def _forward_tensor(
         self,
-        x: torch.Tensor,
+        x: dict[str, torch.Tensor],
         model_comm_group: Any | None = None,
         grid_shard_slice: Any | None = None,
         grid_shard_shapes: Any | None = None,
-        **kwargs: Any,
     ) -> torch.Tensor:
-        del kwargs
         y = {}
         for dataset, x_ in x.items():
             x_input = einops.rearrange(x_, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
@@ -60,6 +58,33 @@ class DummyModel:
             y[dataset] = torch.randn(y_shape, dtype=x_.dtype, device=x_.device)
         return y
 
+    def __call__(
+        self,
+        x: torch.Tensor | dict[str, torch.Tensor],
+        model_comm_group: Any | None = None,
+        grid_shard_slice: Any | None = None,
+        grid_shard_shapes: Any | None = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        del kwargs
+        if isinstance(x, dict):
+            return {
+                dataset_name: self._forward_tensor(
+                    x_tensor,
+                    model_comm_group=model_comm_group,
+                    grid_shard_slice=grid_shard_slice,
+                    grid_shard_shapes=grid_shard_shapes,
+                )
+                for dataset_name, x_tensor in x.items()
+            }
+
+        return self._forward_tensor(
+            x,
+            model_comm_group=model_comm_group,
+            grid_shard_slice=grid_shard_slice,
+            grid_shard_shapes=grid_shard_shapes,
+        )
+
 
 class DummyDiffusionModel(DummyModel):
 
@@ -71,17 +96,31 @@ class DummyDiffusionModel(DummyModel):
 
     def fwd_with_preconditioning(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
-        sigma: torch.Tensor,
+        x: torch.Tensor | dict[str, torch.Tensor],
+        y_noised: torch.Tensor | dict[str, torch.Tensor],
+        sigma: torch.Tensor | dict[str, torch.Tensor],
         **kwargs,
     ) -> torch.Tensor:
         # behave like diffusion: call forward and combine
-        assert sigma["dataset"].shape[0] == x["dataset"].shape[0]
-        assert all(sigma["dataset"].shape[i] == 1 for i in range(1, sigma["dataset"].ndim))
         pred = self(x, **kwargs)
-        assert y_noised["dataset"].ndim == 5
-        return {"dataset": y_noised["dataset"] + 0.1 * pred["dataset"]}
+
+        if isinstance(pred, dict):
+            out: dict[str, torch.Tensor] = {}
+            for dataset_name, pred_tensor in pred.items():
+                sigma_tensor = sigma[dataset_name]
+                y_noised_tensor = y_noised[dataset_name]
+                assert sigma_tensor.shape[0] == pred_tensor.shape[0]
+                assert all(sigma_tensor.shape[i] == 1 for i in range(1, sigma_tensor.ndim))
+                if y_noised_tensor.ndim == 4:
+                    y_noised_tensor = y_noised_tensor.unsqueeze(1)
+                out[dataset_name] = y_noised_tensor + 0.1 * pred_tensor
+            return out
+
+        assert sigma.shape[0] == x.shape[0]
+        assert all(sigma.shape[i] == 1 for i in range(1, sigma.ndim))
+        if y_noised.ndim == 4:
+            y_noised = y_noised.unsqueeze(1)
+        return y_noised + 0.1 * pred
 
 
 def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
@@ -97,7 +136,7 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict | None = None,
         supporting_arrays: dict | None = None,
     ) -> None:
@@ -119,11 +158,18 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     name_to_index = {"A": 0, "B": 1}
     itp = GraphInterpolator.__new__(GraphInterpolator)
     itp = GraphInterpolator(
-        config=DictConfig({"training": {"explicit_times": {"input": [0, 6], "target": [1, 2, 3]}}}),
-        graph_data=HeteroData(),
+        config=DictConfig(
+            {
+                "training": {
+                    "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
+                    "target_forcing": {"data": [], "time_fraction": False},
+                },
+            },
+        ),
+        graph_data={"data": HeteroData()},
         statistics={},
         statistics_tendencies={},
-        data_indices=_make_minimal_index_collection(name_to_index),
+        data_indices={"data": _make_minimal_index_collection(name_to_index)},
         metadata={},
         supporting_arrays={},
     )
@@ -166,9 +212,12 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         self.is_first_step = False
         self.updating_scalars = {}
         self.data_indices = data_indices
+        self.dataset_names = list(data_indices.keys())
+        self.grid_dim = -2
         self.config = config
         self.loss = {"dataset": DummyLoss()}
         self.loss_supports_sharding = False
+        self.metrics_support_sharding = True
         self.multi_out = 1
         self.dataset_names = ["dataset"]
 
@@ -188,13 +237,13 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     name_to_index = {"A": 0, "B": 1}
-    data_indices = _make_minimal_index_collection(name_to_index)
+    data_indices = {"data": _make_minimal_index_collection(name_to_index)}
 
     forecaster = GraphDiffusionForecaster(
         config=cfg,
-        graph_data=HeteroData(),
-        statistics={},
-        statistics_tendencies={},
+        graph_data={"data": HeteroData()},
+        statistics={"data": {}},
+        statistics_tendencies={"data": None},
         data_indices=data_indices,
         metadata={},
         supporting_arrays={},
@@ -224,11 +273,11 @@ def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.M
 
     def _compute_loss_metrics_stub(
         self: GraphEnsForecaster,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
         step: int | None = None,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict, torch.Tensor]:
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
         del y, step, validation_mode
         assert isinstance(self, GraphEnsForecaster)
         return torch.zeros(1), {}, y_pred
@@ -258,6 +307,8 @@ def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.M
     forecaster.grid_shard_shapes = {"dataset": None}
     forecaster.grid_shard_slice = {"dataset": None}
     forecaster.model_comm_group = None
+    forecaster.model_comm_group_size = 1
+    forecaster.grid_dim = -2
 
     b, e_dummy, g, v = 2, 1, 4, len(name_to_index)
     batch = {
