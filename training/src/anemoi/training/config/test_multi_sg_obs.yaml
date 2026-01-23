@@ -1,0 +1,202 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: slurm
+- graph: multi_obs_debug
+- model: graphtransformer
+- training: default
+- _self_
+
+config_validation: False
+
+system:
+  input:
+    datasets: /leonardo_work/DestE_330_25/anemoi/datasets/
+    dataset_meps: MEPS/aifs-meps-2.5km-2020-2023-6h-v7.zarr
+    dataset_era_atm: IFS/aifs-od-an-oper-0001-mars-n320-2019-2023-6h-v6.zarr
+    dataset_era_sfc: ERA5/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v1-land.zarr
+    dataset: jajadingdong.zarr
+    graph: /leonardo_work/EUHPC_R04_079/hhaugen/multi_model_mapper_int/graphs/test_multiencdec_7p10.pt
+  
+  output:
+    root:  /leonardo_work/EUHPC_R04_079/hhaugen/multi_model_mapper_int/test_output/
+    logs:
+      mlflow: ${system.output.root}mlflow/
+  
+  hardware:
+    num_gpus_per_model: 4
+
+dataloader:
+  num_workers:
+    training: 4
+    validation: ${dataloader.num_workers.training}
+    test: ${dataloader.num_workers.training}
+
+  batch_size:
+    training: 1
+    validation: ${dataloader.batch_size.training}
+    test: ${dataloader.batch_size.training}
+
+  training:
+    start: 2020-01-01
+    end: 2022-05-31
+  validation:
+    start: 2022-06-01
+    end: 2023-12-31
+  test:
+    start: 2022-06-01
+    end: 2023-12-31
+
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    mlflow:
+      enabled: False #Had to turn this off because the number of params was too high (6000 > 2000)
+      offline: True
+      tracking_uri: None
+      save_dir: null
+    wandb:
+      enabled: False
+      entity: example
+
+model: 
+  trainable_parameters:
+    data: 0
+    hidden: 0
+    data2hidden: 0
+    hidden2data: 0
+    hidden2hidden: 0
+
+  num_channels: 1024
+  processor:
+    num_chunks: 8
+  encoder:
+    num_chunks: 8
+  decoder: 
+    num_chunks: 8
+
+#----------------------------------------------------------------------------------#
+# Dataset specific part of the config
+datasets:
+  era_meps_sg: 
+    dataset:
+      cutout:
+      - dataset: ${system.input.datasets}${system.input.dataset_meps}
+        trim_edge: 50
+        reorder: sort
+      - join:
+        - dataset: ${system.input.datasets}${system.input.dataset_era_atm}
+        - dataset: ${system.input.datasets}${system.input.dataset_era_sfc}
+        adjust: ["start", "end"]
+        reorder: sort
+      min_distance_km: 0
+      adjust: all
+    select: ${selected_vars}
+    reorder: sort
+
+  obs: 
+    dataset: 
+      dataset: ${system.input.datasets}${system.input.dataset_meps}
+      trim_edge: 200
+    thinning: 4
+    select: ["2t", "10u", "10v", "lsm", "z"]
+
+selected_vars: ['10u', '10v', '2d', '2t', 'cos_julian_day', 'cos_latitude', 'cos_local_time', 'cos_longitude', 'hcc', 'insolation', 'lcc', 'lsm', 'mcc', 'msl', 'q_100', 'q_1000', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_50', 'q_500', 'q_700', 'q_850', 'q_925', 'sin_julian_day', 'sin_latitude', 'sin_local_time', 'sin_longitude', 'skt', 'sp', 'ssrd', 'strd', 't_100', 't_1000', 't_150', 't_200', 't_250', 't_300', 't_400', 't_50', 't_500', 't_700', 't_850', 't_925', 'tcc', 'tcw', 'tp', 'u_100', 'u_1000', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_50', 'u_500', 'u_700', 'u_850', 'u_925', 'v_100', 'v_1000', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_50', 'v_500', 'v_700', 'v_850', 'v_925', 'w_100', 'w_1000', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_50', 'w_500', 'w_700', 'w_850', 'w_925', 'z', 'z_100', 'z_1000', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_50', 'z_500', 'z_700', 'z_850', 'z_925']
+
+#----------------------------------------------------------------------------------#
+#TODO: At the moment grid_indices and node_weight scaler must be overriden explicitly here since it inlcudes the dataset name
+per_dataset_overrides:
+  era_meps_sg: 
+    data:
+      dataset_specific:
+        forcing: ['cos_julian_day', 'cos_latitude', 'cos_local_time', 'cos_longitude', 'lsm', 'z', 'sin_julian_day', 'sin_latitude', 'sin_local_time', 'sin_longitude']
+        diagnostic: ['tp']
+        processors:
+          normalizer: 
+            _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+            config:
+              default: "mean-std"
+              std:
+              - "tp"
+              min-max: null
+              max:
+              - "z"
+              none:
+              - cos_latitude
+              - cos_longitude
+              - sin_latitude
+              - sin_longitude
+              - cos_julian_day
+              - cos_local_time
+              - sin_julian_day
+              - sin_local_time
+              - insolation
+              - lsm
+              - lcc
+              - mcc
+              - hcc
+              - tcc
+    dataloader:
+      grid_indices:
+        _target_: anemoi.training.data.grid_indices.FullGrid
+        nodes_name: era_meps_sg
+      bounding:
+      - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+        variables:
+        - tp
+      - _target_: anemoi.models.layers.bounding.HardtanhBounding #[min_val, max_val]
+        variables:
+        - tcc
+        - hcc
+        - mcc
+        - lcc
+        min_val: 0
+        max_val: 1
+    training:
+      scalers:
+        node_weights:
+          _target_: anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler
+          nodes_name: era_meps_sg
+          nodes_attribute_name: area_weight
+          scaling_mask_attribute_name: cutout_mask
+          weight_frac_of_total: 0.25
+          norm: "unit-sum"
+  obs:
+    data:
+      dataset_specific:
+        forcing: ["lsm", "z"]
+        diagnostic: []
+        processors:
+          normalizer: 
+            _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+            config:
+              default: "mean-std"
+              min-max: null
+              max:
+              - "z"
+              none:
+              - "lsm"
+    dataloader:
+      grid_indices:
+        _target_: anemoi.training.data.grid_indices.FullGrid
+        nodes_name: obs
+    model:
+      bounding: []
+    training: 
+      scalers:
+        node_weights:
+          _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+          nodes_name: obs
+          nodes_attribute_name: area_weight
+          norm: "unit-sum"
+
+      
+
+
+    
+
+
+
+

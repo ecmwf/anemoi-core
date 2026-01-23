@@ -1,0 +1,105 @@
+overwrite: False
+
+data: ["era_meps_sg", "obs"]
+
+hidden: "hidden"
+
+nodes:
+  era_meps_sg:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${datasets.era_meps_sg}
+    attributes:
+      cutout_mask:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
+      boundary_mask:
+        _target_: anemoi.graphs.nodes.attributes.BooleanNot
+        masks:
+          _target_: anemoi.graphs.nodes.attributes.CutOutMask
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+        norm: unit-max
+        fill_value: 0
+      lam_area_weight:
+        _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights
+        mask_node_attr_name: cutout_mask
+        norm: unit-max
+
+  obs:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${datasets.obs}
+    attributes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.UniformWeights
+        norm: unit-max
+
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.StretchedTriNodes
+      lam_resolution: 10
+      global_resolution: 7
+      reference_node_name: era_meps_sg
+      mask_attr_name: cutout_mask
+      margin_radius_km: 11
+
+edges:
+# Encoder era_meps_sg -> hidden
+- source_name: "era_meps_sg"
+  target_name: "hidden"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 12
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+# Encoder obs -> hidden
+- source_name: "obs"
+  target_name: "hidden"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges
+    cutoff_factor: 0.6
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+
+# Processor hidden -> hidden
+- source_name: "hidden"
+  target_name: "hidden"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.nodes.hidden.node_builder.global_resolution}
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+
+# Decoder hidden -> era_meps_sg
+- source_name: "hidden"
+  target_name: "era_meps_sg"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+# Decoder hidden -> obs
+- source_name: "hidden"
+  target_name: "obs"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+
+attributes:
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-max
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+
+post_processors: []

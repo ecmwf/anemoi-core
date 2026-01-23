@@ -110,6 +110,8 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Training configuration."""
     config_validation: bool = True
     """Flag to disable validation of the configuration"""
+    datasets: dict[str, Any] = {}
+    """Dataset-specific configurations for multi-dataset training."""
 
     @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> Self:
@@ -154,7 +156,8 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Training configuration."""
     config_validation: bool = False
     """Flag to disable validation of the configuration"""
-
+    datasets: dict[str, Any] = {}
+    """Dataset-specific configurations for multi-dataset training."""
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
     config = config.model_dump(by_alias=True)

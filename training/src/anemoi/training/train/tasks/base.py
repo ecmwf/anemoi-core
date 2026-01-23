@@ -171,13 +171,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         super().__init__()
 
         # Handle dictionary of graph_data
-        graph_data = {name: data.to(self.device) for name, data in graph_data.items()}
-        self.dataset_names = list(graph_data.keys())
+        graph_data = graph_data.to(self.device)
+        self.dataset_names = config.datasets
 
         # Create output_mask dictionary for each dataset
         self.output_mask = {}
         for name in self.dataset_names:
-            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data[name])
+            self.output_mask[name] = instantiate(config.model.output_mask.datasets[name], graph_data=graph_data)
 
         # Handle supporting_arrays merge for multi-dataset
         # Multi-dataset: merge supporting arrays from all output masks
@@ -221,18 +221,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
         for dataset_name in self.dataset_names:
-            self.latlons_data[dataset_name] = graph_data[dataset_name][config.graph.data].x
+            self.latlons_data[dataset_name] = graph_data[dataset_name].x
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
-                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
+                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"), #TODO: does this need to be changed?
             )
+            print("dataset_name:", dataset_name)
+            print(scalers_configs[dataset_name])
+            print(data_indices[dataset_name])
 
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
-                graph_data=graph_data[dataset_name],
+                graph_data=graph_data,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
@@ -295,7 +298,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 grid_indices_configs[dataset_name],
                 reader_group_size=reader_group_size,
             )
-            self.grid_indices[dataset_name].setup(graph_data[dataset_name])
+            self.grid_indices[dataset_name].setup(graph_data)
         self.grid_dim = -2
 
         # check sharding support
@@ -1026,7 +1029,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # The conditions should be separate, but are combined due to pre-commit hook
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
             # Log hyperparameters on rank 0
-            hyper_params = OmegaConf.to_container(convert_to_omegaconf(self.config), resolve=True)
+            hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)

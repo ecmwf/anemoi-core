@@ -70,7 +70,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         dataset_name: str = None,
     ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_ens_size)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name]
 
         x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
@@ -158,7 +158,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         torch.Tensor
             Output tensor
         """
-        dataset_names = list(x.keys())
+        dataset_names = self._graph_names_data
 
         # Extract and validate batch sizes across datasets
         batch_sizes = [x[dataset_name].shape[0] for dataset_name in dataset_names]
@@ -198,7 +198,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
-            x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_ens_size)
+            x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
             shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
             encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
@@ -236,7 +236,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x=x_latent,
             batch_size=batch_size,
             ensemble_size=ensemble_size,
-            grid_size=self.node_attributes[dataset_names[0]].num_nodes[self._graph_name_hidden],
+            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             shard_shapes_ref=shard_shapes_hidden,
             model_comm_group=model_comm_group,
         )
@@ -262,7 +262,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_latent_proc = x_latent_proc + x_latent
 
         # Compute decoder edges using updated latent representation
-        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider.get_edges(
+        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[dataset_name].get_edges(
             batch_size=batch_ens_size,
             model_comm_group=model_comm_group,
         )

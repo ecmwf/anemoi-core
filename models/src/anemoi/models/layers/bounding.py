@@ -307,7 +307,7 @@ class LeakyFractionBounding(FractionBounding):
 
 
 def _build_dataset_boundings(
-    model_config: Any,
+    boundings_config: Iterable[Any],
     data_indices: Any,
     statistics: dict | None,
 ) -> nn.ModuleList:
@@ -322,8 +322,7 @@ def _build_dataset_boundings(
     Parameters
     ----------
     model_config : Any
-        Object with a ``model`` attribute containing an iterable ``bounding``
-        (e.g. a list of Hydra configs). If absent or empty, an empty
+        An iterable ``bounding`` (e.g. a list of Hydra configs). If absent or empty, an empty
         ``nn.ModuleList`` is returned.
     data_indices : Any
         Object providing the mappings:
@@ -342,8 +341,6 @@ def _build_dataset_boundings(
         ``model_config.model.bounding``. May be empty.
     """
 
-    bounding_cfgs: Iterable[Any] = getattr(getattr(model_config, "model", object()), "bounding", []) or []
-
     return nn.ModuleList(
         [
             instantiate(
@@ -352,7 +349,7 @@ def _build_dataset_boundings(
                 statistics=statistics,
                 name_to_index_stats=data_indices.data.input.name_to_index,
             )
-            for cfg in bounding_cfgs
+            for cfg in boundings_config
         ]
     )
 
@@ -386,9 +383,12 @@ def build_boundings(
         passed to each bounding module. Use ``None`` if not required by the
         configured classes.
     """
+
+    bounding_cfgs = getattr(getattr(model_config, "model", object()), "bounding", []) or []
+
     bounding_modules = nn.ModuleDict()
     for dataset_name, dataset_indices in data_indices.items():
         bounding_modules[dataset_name] = _build_dataset_boundings(
-            model_config, dataset_indices, statistics[dataset_name]
+            bounding_cfgs.datasets[dataset_name], dataset_indices, statistics[dataset_name] #TODO: default bounding_cfgs
         )
     return bounding_modules

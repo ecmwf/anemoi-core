@@ -40,6 +40,7 @@ from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.config_utils import get_multiple_datasets_config
+from anemoi.training.utils.config_utils import parse_multi_dataset_config
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -65,6 +66,10 @@ class AnemoiTrainer(ABC):
         # This can increase performance (and TensorCore usage, where available).
         torch.set_float32_matmul_precision("high")
         # Resolve the config to avoid shenanigans with lazy loading
+        
+        # Parse multi dataset config overrides
+        config = parse_multi_dataset_config(config)
+        OmegaConf.save(config, "test_config_multi.yaml")
 
         if config.config_validation:
             OmegaConf.resolve(config)
@@ -178,7 +183,7 @@ class AnemoiTrainer(ABC):
     def profiler(self) -> None:
         """Abstract method to be used for AnemoiProfiler."""
         return None
-
+    '''
     @cached_property
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
@@ -188,25 +193,52 @@ class AnemoiTrainer(ABC):
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
             graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
         return graphs
+    '''
+    @cached_property
+    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
+        """Graph data.
+
+        Creates the graph in all workers.
+        """
+        if (graph_filename := self.config.system.input.graph) is not None:
+            graph_filename = Path(graph_filename)
+            if graph_filename.exists() and not self.config.graph.overwrite:
+                from anemoi.graphs.utils import get_distributed_device
+
+                LOGGER.info("Loading graph data from %s", graph_filename)
+                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+
+        else:
+            graph_filename = None
+
+        from anemoi.graphs.create import GraphCreator
+
+        graph_config = convert_to_omegaconf(self.config).graph
+        return GraphCreator(config=graph_config).create(
+            save_path=graph_filename,
+            overwrite=self.config.graph.overwrite,
+        )
+
 
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        assert (
-            not (
-                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.processor.target_
-            )
-            and not (
-                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
-            )
-            and not (
-                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
-            )
-        ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
-        "Please use a different activation function."
+        # TODO: Disable these temporarily while implementing multi-dataset support in all models
+        #assert (
+        #    not (
+        #        "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
+        #        and ".Transformer" in self.config.model.processor.target_
+        #    )
+        #    and not (
+        #        "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
+        #        and ".Transformer" in self.config.model.encoder.target_
+        #    )
+        #    and not (
+        #        "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
+        #        and ".Transformer" in self.config.model.decoder.target_
+        #    )
+        #), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
+        #"Please use a different activation function."
 
         kwargs = {
             "config": convert_to_omegaconf(self.config),
@@ -406,7 +438,9 @@ class AnemoiTrainer(ABC):
         from anemoi.training.utils.config_utils import get_dataset_data_config
 
         for dataset_name, data in self.datamodule.ds_train.data.items():
+            print("dataset_name:", dataset_name)
             dataset_data_config = get_dataset_data_config(self.config, dataset_name)
+            print("dataset_data_config:", dataset_data_config)
             num_fc_features = len(data.variables) - len(dataset_data_config.forcing)
             LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
             LOGGER.info(

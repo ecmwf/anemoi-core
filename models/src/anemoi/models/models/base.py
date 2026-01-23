@@ -60,24 +60,19 @@ class BaseGraphModel(nn.Module):
         self.statistics = statistics
 
         model_config = DotDict(model_config)
-        self._graph_name_data = (
-            model_config.graph.data
-        )  # assumed to be all the same because this is how we construct the graphs
+        self._graph_names_data = [model_config.graph.data] if isinstance(model_config.graph.data, str) else model_config.graph.data # TODO: should graph.data always be a list in the config?
         self._graph_name_hidden = (
             model_config.graph.hidden
-        )  # assumed to be all the same because this is how we construct the graphs
+        )
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
-        self.node_attributes = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.node_attributes[dataset_name] = NamedNodesAttributes(
-                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
-            )
+        self.node_attributes = NamedNodesAttributes(
+            model_config.model.trainable_parameters, self._graph_data
+        )
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
-        self._assert_consistent_hidden_graphs()
 
         # build networks
         self._build_networks(model_config)
@@ -107,16 +102,16 @@ class BaseGraphModel(nn.Module):
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
-            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
+            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent()
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return (
             self.multi_step * self.num_input_channels[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+            + self.node_attributes.attr_ndims[dataset_name]
         )
 
-    def _calculate_input_dim_latent(self, dataset_name: str) -> int:
-        return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
+    def _calculate_input_dim_latent(self) -> int:
+        return self.node_attributes.attr_ndims[self._graph_name_hidden]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
@@ -135,7 +130,7 @@ class BaseGraphModel(nn.Module):
                 dataset_internal_output_idx,
             ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
 
-    def _assert_consistent_hidden_graphs(self) -> None:
+    def _assert_consistent_hidden_graphs(self) -> None: #TODO: Not needed with a single graph object
         """Assert that all datasets have identical hidden-to-hidden graph structures.
 
         This is required because the processor is shared between datasets and operates
@@ -207,9 +202,9 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data[dataset_name])
-
+        for dataset_name in self._graph_names_data:
+            self.residual[dataset_name] = instantiate(residual_config.datasets[dataset_name], graph=self._graph_data) #TODO: default residual config
+            
     @abstractmethod
     def forward(
         self,
