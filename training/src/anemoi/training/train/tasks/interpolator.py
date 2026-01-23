@@ -14,8 +14,12 @@ from operator import itemgetter
 from typing import TYPE_CHECKING
 
 import torch
+from omegaconf import DictConfig
+from omegaconf import open_dict
 from torch.utils.checkpoint import checkpoint
+from torch_geometric.data import HeteroData
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.utils.config import DotDict
@@ -41,10 +45,10 @@ class GraphInterpolator(BaseGraphModule):
         self,
         *,
         config: DictConfig,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -54,18 +58,20 @@ class GraphInterpolator(BaseGraphModule):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
+        graph_data : dict[str, HeteroData]
+            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
-        data_indices : IndexCollection
-            Indices of the training data,
+        data_indices : dict[str, IndexCollection]
+            Indices of the training data
         metadata : dict
             Provenance information
         supporting_arrays : dict
             Supporting NumPy arrays to store in the checkpoint
 
         """
+        with open_dict(config.training):
+            config.training.multistep_output = len(config.training.explicit_times.target)
         super().__init__(
             config=config,
             graph_data=graph_data,
@@ -94,6 +100,7 @@ class GraphInterpolator(BaseGraphModule):
             self.use_time_fraction[dataset_name] = target_forcing_config[dataset_name].time_fraction
 
         self.num_tfi = {name: len(idxs) for name, idxs in self.target_forcing_indices.items()}
+
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
         config.training.multistep_input = len(self.boundary_times)
@@ -107,6 +114,9 @@ class GraphInterpolator(BaseGraphModule):
 
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
+
+        self.multi_step = 1
+        self.rollout = 1
 
     def get_target_forcing(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         batch_size = next(iter(batch.values())).shape[0]
@@ -136,9 +146,16 @@ class GraphInterpolator(BaseGraphModule):
                 ]
 
             if self.use_time_fraction[dataset_name]:
-                target_forcing[dataset_name][..., -1] = (self.interp_times - self.boundary_times[-2]) / (
-                    self.boundary_times[-1] - self.boundary_times[-2]
+                time_fractions = torch.tensor(
+                    [
+                        (interp_step - self.boundary_times[-2]) / (self.boundary_times[-1] - self.boundary_times[-2])
+                        for interp_step in self.interp_times
+                    ],
+                    device=self.device,
+                    dtype=batch_type,
                 )
+                time_fractions = time_fractions.view(1, -1, 1, 1, 1).expand(batch_size, -1, ens_size, grid_size, 1)
+                target_forcing[dataset_name][..., -1] = time_fractions
 
         return target_forcing
 
@@ -146,7 +163,7 @@ class GraphInterpolator(BaseGraphModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         x_bound = {}
         for dataset_name in self.dataset_names:
             x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][

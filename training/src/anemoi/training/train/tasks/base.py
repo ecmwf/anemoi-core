@@ -75,13 +75,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ----------
     config : BaseSchema
         Configuration object defining all parameters.
-    graph_data : HeteroData
-        Graph-structured input data containing node and edge features.
+    graph_data : dict[str, HeteroData]
+        Graph-structured input data containing node and edge features, keyed by dataset name.
     statistics : dict
         Dictionary of training statistics (mean, std, etc.) used for normalization.
     statistics_tendencies : dict
         Statistics related to tendencies (if used).
-    data_indices : IndexCollection
+    data_indices : dict[str, IndexCollection]
         Maps feature names to index ranges used for training and loss functions.
     metadata : dict
         Dictionary with metadata such as dataset provenance and variable descriptions.
@@ -132,10 +132,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -145,11 +145,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
+        graph_data : dict[str, HeteroData]
+            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
-        data_indices : IndexCollection
+        data_indices : dict[str, IndexCollection]
             Indices of the training data,
         metadata : dict
             Provenance information
@@ -158,6 +158,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         """
         super().__init__()
+
+        assert isinstance(graph_data, dict), "graph_data must be a dict keyed by dataset name"
+        assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
         # Handle dictionary of graph_data
         graph_data = {name: data.to(self.device) for name, data in graph_data.items()}
@@ -370,7 +373,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             },
         )
 
-    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
@@ -396,12 +399,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         callback: AvailableCallbacks,
         loss_obj: torch.nn.Module,
         metrics_dict: dict,
-        dataset_name: str | None = None,
+        dataset_name: str,
     ) -> None:
         """Update a single scaler for loss and metrics objects."""
-        kwargs = {"model": self.model}
-        if dataset_name is not None:
-            kwargs["dataset_name"] = dataset_name
+        kwargs = {"model": self.model, "dataset_name": dataset_name}
 
         scaler = scaler_builder.update_scaling_values(callback, **kwargs)
         if scaler is None:  # If scalar is None, no update to be applied
@@ -458,8 +459,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         validation_mode: bool = False,
-        dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
         """Prepare tensors for loss computation, handling sharding if necessary.
 
@@ -478,7 +479,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Prepared y_pred, y, and grid_shard_slice
         """
         # Handle multi-dataset case for grid shard slice and shapes
-        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
         grid_shard_slice = self.grid_shard_slice[dataset_name]
         grid_shard_shapes = self.grid_shard_shapes[dataset_name]
 
@@ -503,8 +503,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -517,7 +517,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
-        dataset_name : str | None
+        dataset_name : str
             Dataset name for multi-dataset scenarios
         **_kwargs
             Additional arguments
@@ -527,8 +527,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
-
         return self.loss[dataset_name](
             y_pred,
             y,
@@ -540,8 +538,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -566,8 +564,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         validation_mode: bool = False,
-        dataset_name: str | None = None,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss and metrics for the given predictions and targets.
@@ -646,6 +644,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
+        assert isinstance(y_pred, dict), "y_pred must be a dict keyed by dataset name"
+        assert isinstance(y, dict), "y must be a dict keyed by dataset name"
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.dataset_names:
@@ -672,21 +672,22 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return total_loss, metrics_next, y_preds
 
-    def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
+    def on_after_batch_transfer(self, batch: dict[str, torch.Tensor], _: int) -> dict[str, torch.Tensor]:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
         Also normalize the batch in-place if needed.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Batch to transfer
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Batch after transfer
         """
+        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
 
@@ -698,7 +699,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return batch
 
-    def _setup_batch_sharding(self, batch: dict) -> torch.Tensor:
+    def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Setup batch sharding before every step.
 
         If the batch is sharded, it will be setup with the grid shard shapes and slice.
@@ -706,14 +707,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Batch to setup
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Batch after setup
         """
+        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         self.grid_shard_shapes = {}
         self.grid_shard_slice = {}
 
@@ -749,19 +751,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
             )
         return transferred_batch
 
-    def _normalize_batch(self, batch: torch.Tensor) -> torch.Tensor:
+    def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Normalize batch for training and validation before every step.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Batch to prepare
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Normalized batch
         """
+        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         for dataset_name in batch:
             batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
         return batch
@@ -778,7 +781,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     @abstractmethod
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], torch.Tensor]:
         pass
@@ -814,15 +817,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
             batch,
             group=self.reader_groups[self.reader_group_id],
         )
-
         return torch.cat(tensor_list, dim=grid_dim)
 
     def calculate_val_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
         step: int | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -845,7 +847,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         metrics = {}
 
         # Handle multi-dataset case for post-processors
-        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
         post_processor = self.model.post_processors[dataset_name]
         metrics_dict = self.metrics[dataset_name]
         val_metric_ranges = self.val_metric_ranges[dataset_name]
@@ -892,6 +893,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         del batch_idx
+        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
 
@@ -922,6 +924,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Batch inces
         """
         del batch_idx
+        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
 
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
@@ -942,9 +945,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
         if val_loss_scales.numel() > 1:
+            loss_name = self._get_loss_name()
+            if len(self.loss) == 1:
+                loss_obj = next(iter(self.loss.values()))
+                loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
             for scale in range(val_loss_scales.numel()):
                 self.log(
-                    "val_" + self.loss.name + "_loss" + "_scale_" + str(scale),
+                    "val_" + loss_name + "_loss" + "_scale_" + str(scale),
                     val_loss_scales[scale],
                     on_epoch=True,
                     on_step=True,

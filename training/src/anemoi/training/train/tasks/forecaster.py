@@ -11,15 +11,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-
-    import torch
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,7 +53,8 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         """
         # start rollout of preprocessed batch
-        required_time_steps = rollout * self.multi_out + self.multi_step
+        rollout_steps = rollout or self.rollout
+        required_time_steps = rollout_steps * self.multi_out + self.multi_step
         x = {}
         for dataset_name, dataset_batch in batch.items():
             x[dataset_name] = dataset_batch[
@@ -69,17 +68,16 @@ class GraphForecaster(BaseRolloutGraphModule):
                 f", {dataset_batch.shape[1]} !>= {required_time_steps}"
             )
             assert dataset_batch.shape[1] >= required_time_steps, msg
-        for rollout_step in range(rollout or self.rollout):
+
+        for rollout_step in range(rollout_steps):
             y_pred = self(x)
-            y = {}
             fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
+            y = {}
             for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[
-                    :,
-                    fc_times,
-                    ...,
-                    self.data_indices[dataset_name].data.output.full,
-                ]
+                time_idx = torch.tensor(fc_times, device=dataset_batch.device)
+                y_time = dataset_batch.index_select(1, time_idx)
+                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+                y[dataset_name] = y_time.index_select(-1, var_idx)
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
             loss, metrics_next, y_pred = checkpoint(

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 ECMWF.
+# (C) Copyright 2024 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -119,6 +119,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
                 "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
+                time=self.multi_out,
             )
             .to(dtype=dtype)
             .clone()
@@ -126,25 +127,28 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
         # residual connection (just for the prognostic variables)
         if x_skip is not None:
-            # residual connection (just for the prognostic variables)
-            x_out[..., self._internal_output_idx[dataset_name]] += (
-                x_skip[..., self._internal_input_idx[dataset_name]].unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
-            )
+            assert x_skip.ndim == 4, "Residual must be (batch, ensemble, grid, vars)."
+            x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+            assert (
+                x_skip.shape[1] == x_out.shape[1]
+            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
+        x_out = x_out.contiguous()
         return x_out
 
     def forward(
         self,
-        x: Tensor,
+        x: dict[str, Tensor],
+        target_forcing: dict[str, Tensor],
         *,
-        target_forcing: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, Tensor]:
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets

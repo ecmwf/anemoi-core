@@ -12,7 +12,6 @@ import logging
 import warnings
 from typing import Callable
 from typing import Optional
-from typing import Sequence
 from typing import Union
 
 import einops
@@ -129,14 +128,13 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,
-                out_channels_dst=self.output_dim[dataset_name],
+                out_channels_dst=self.num_output_channels[dataset_name] * self.multi_out,
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
-        output_dim = self._calculate_output_dim()
-        input_dim += output_dim[dataset_name]  # input + noised targets
+        input_dim += self.output_dim[dataset_name]  # input + noised targets
         return input_dim
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
@@ -184,6 +182,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         return x_out
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
+        assert noise_emb.ndim in (4, 5), "noise_emb must be 4D or 5D."
+        if noise_emb.ndim == 4:
+            noise_emb = noise_emb.unsqueeze(3)
         out = einops.repeat(
             noise_emb,
             "batch time ensemble noise_level vars -> batch time ensemble (repeat noise_level) vars",
@@ -653,7 +654,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
             # Initialize output with noise
             batch_size, ensemble_size, grid_size = x_data.shape[0], x_data.shape[2], x_data.shape[-2]
-            shape = (batch_size, self.multi_out, ensemble_size, grid_size, self.num_output_channels)
+            shape = (batch_size, self.multi_out, ensemble_size, grid_size, self.num_output_channels[dataset_name])
             y_init[dataset_name] = torch.randn(shape, device=x_data.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
@@ -730,17 +731,11 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             statistics=statistics,
             graph_data=graph_data,
         )
-        if self.multi_out > 1:
-            warnings.warn(
-                "The currently implemented normalization of the tendencies when the model has more than one output step is unconventional. Using"
-                "more than one output step with tendency diffusion models is currently highly experimental and results should be "
-                "cautiously interpreted."
-            )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
         if self.condition_on_residual:
-            input_dim += len(self.data_indices[dataset_name].model.input.prognostic)  # truncated input state
+            input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.multi_out
         return input_dim
 
     def _assemble_input(
@@ -756,11 +751,12 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=bse)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group)
+        x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group)[
+            ..., self._internal_input_idx[dataset_name]
+        ]
+        assert x_skip.ndim == 4, "Residual must be (batch, ensemble, grid, vars)."
         x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
         x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
-        # Get node attributes
-        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
 
         # Shard node attributes if grid sharding is enabled
         if grid_shard_shapes is not None:
@@ -916,96 +912,87 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
     def _before_sampling(
         self,
-        batch: torch.Tensor,
-        pre_processors: nn.Module,
+        batch: dict[str, torch.Tensor],
+        pre_processors: dict[str, nn.Module],
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
-    ) -> tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]:
+    ) -> tuple[tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]], dict[str, Optional[list]]]:
         """Prepare batch before sampling.
 
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Input batch after pre-processing
-        pre_processors : nn.Module
-            Pre-processing module (already applied)
-        multi_step : int
-            Number of input timesteps
-        model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
-        **kwargs
-            Additional parameters for subclasses
-
-        Returns
-        -------
-        tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]
-            Prepared input tensor(s) and grid shard shapes.
-            Can return a single tensor or tuple of tensors for sampling input.
+        Returns (xs, x_t0s) and grid shard shapes per dataset.
         """
-        # Dimensions are batch, timesteps, grid, variables
-        x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
-        x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension
+        xs = {}
+        x_t0s = {}
+        grid_shard_shapes = dict.fromkeys(batch, None)
 
-        grid_shard_shapes = None
-        if model_comm_group is not None:
-            shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
-            grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-            x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-            shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group=model_comm_group)
-            x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
+        for dataset_name, x in batch.items():
+            # Dimensions are batch, timesteps, grid, variables
+            x_in = x[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+            x_t0 = x[:, -1, None, ...]  # add dummy ensemble dimension
 
-        x = pre_processors(x, in_place=False)
-        x_t0 = pre_processors(x_t0, in_place=False)
+            if model_comm_group is not None:
+                shard_shapes = get_shard_shapes(x_in, -2, model_comm_group=model_comm_group)
+                grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
+                x_in = shard_tensor(x_in, -2, shard_shapes, model_comm_group)
+                shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group=model_comm_group)
+                x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
 
-        return (x, x_t0), grid_shard_shapes
+            x_in = pre_processors[dataset_name](x_in, in_place=False)
+            x_t0 = pre_processors[dataset_name](x_t0, in_place=False)
+
+            xs[dataset_name] = x_in
+            x_t0s[dataset_name] = x_t0
+
+        return (xs, x_t0s), grid_shard_shapes
 
     def _after_sampling(
         self,
-        out: torch.Tensor,
-        post_processors: nn.Module,
-        before_sampling_data: Union[torch.Tensor, tuple[torch.Tensor, ...]],
+        out: dict[str, torch.Tensor],
+        post_processors: dict[str, nn.Module],
+        before_sampling_data: tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: dict[str, Optional[list]] = None,
         gather_out: bool = True,
-        post_processors_tendencies: Optional[Sequence[Optional[nn.Module]]] = None,
+        post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
         **kwargs,
-    ) -> torch.Tensor:
-        """Process sampled tendency to get state prediction.
-
-        Override to convert tendency to state using x_t0.
-        """
-        # Extract x_t0 from before_sampling_data
+    ) -> dict[str, torch.Tensor]:
+        """Process sampled tendency to get state prediction."""
         if isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 2:
-            x_t0 = before_sampling_data[1]
+            x_t0s = before_sampling_data[1]
         else:
-            raise ValueError("Expected before_sampling_data to contain x_t0")
+            raise ValueError("Expected before_sampling_data to contain x_t0s")
 
-        # truncate x_t0 if needed
-        x_t0 = self.apply_reference_state_truncation(x_t0, grid_shard_shapes, model_comm_group)
-        # Convert tendency to state
+        x_t0s = self.apply_reference_state_truncation(x_t0s, grid_shard_shapes, model_comm_group)
         assert post_processors_tendencies is not None, "Per-step tendency processors must be provided."
-        assert (
-            len(post_processors_tendencies) == out.shape[1]
-        ), "Per-step tendency processors must match the number of output steps."
-        states = []
-        for step, post_proc in enumerate(post_processors_tendencies):
-            out_step = out[:, step : step + 1]
-            x_t0_step = x_t0[:, step : step + 1]
-            state_step = self.add_tendency_to_state(
-                x_t0_step,
-                out_step,
-                post_processors,
-                post_proc,
-            )
-            states.append(state_step)
-        out = torch.cat(states, dim=1)
 
-        # Gather if needed
-        if gather_out and model_comm_group is not None:
-            out = gather_tensor(
-                out, -2, apply_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
-            )
+        for dataset_name, out_dataset in out.items():
+            post_tend = post_processors_tendencies[dataset_name]
+            assert post_tend is not None, "Per-step tendency processors must be provided per dataset."
+            assert (
+                len(post_tend) == out_dataset.shape[1]
+            ), "Per-step tendency processors must match the number of output steps."
+
+            states = []
+            for step, post_proc in enumerate(post_tend):
+                out_step = out_dataset[:, step : step + 1]
+                state_step = self.add_tendency_to_state(
+                    {dataset_name: x_t0s[dataset_name]},
+                    {dataset_name: out_step},
+                    {dataset_name: post_processors[dataset_name]},
+                    {dataset_name: post_proc},
+                )[dataset_name]
+                states.append(state_step)
+
+            out_dataset = torch.cat(states, dim=1)
+            if gather_out and model_comm_group is not None:
+                out_dataset = gather_tensor(
+                    out_dataset,
+                    -2,
+                    apply_shard_shapes(out_dataset, -2, shard_shapes_dim=grid_shard_shapes[dataset_name]),
+                    model_comm_group,
+                )
+            out[dataset_name] = out_dataset
 
         return out
 
@@ -1028,8 +1015,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name, in_x in x.items():
             x_skip = self.residual[dataset_name](in_x, grid_shard_shapes[dataset_name], model_comm_group)
+            assert x_skip.ndim == 4, "Residual must be (batch, ensemble, grid, vars)."
             x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
-            # x_skip.shape: (bs, time ens, latlon, nvar)
+            # x_skip.shape: (bs, time, ens, latlon, nvar)
             x_skips[dataset_name] = x_skip[..., self.data_indices[dataset_name].model.input.prognostic]
 
         return x_skips

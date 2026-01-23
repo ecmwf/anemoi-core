@@ -154,9 +154,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        x_out[..., self._internal_output_idx[dataset_name]] += (
-            x_skip[..., self._internal_input_idx[dataset_name]].unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
-        )
+        assert x_skip.ndim == 4, "Residual must be (batch, ensemble, grid, vars)."
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        assert (
+            x_skip.shape[1] == x_out.shape[1]
+        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
