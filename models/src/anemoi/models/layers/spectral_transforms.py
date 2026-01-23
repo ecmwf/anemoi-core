@@ -74,7 +74,8 @@ class FFT2D(SpectralTransform):
 
         self.x_dim = x_dim
         self.y_dim = y_dim
-        nodes_slice = nodes_slice or (0, x_dim * y_dim)
+        nodes_slice = nodes_slice or (0, None)  # we don't want einops to silently fail
+        # by slicing random parts of the input
         self.nodes_slice = slice(*nodes_slice)
         self.apply_filter = apply_filter
         if apply_filter:

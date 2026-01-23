@@ -137,7 +137,7 @@ def test_batch_invariance(
     target_batch_size_1 = target
 
     new_shape = list(pred.shape)
-    new_shape[0] = 2
+    new_shape[0] = 4
 
     pred_batch_size_2 = pred.expand(new_shape)
     target_batch_size_2 = target.expand(new_shape)
