@@ -104,15 +104,12 @@ class AnemoiModelInterface(torch.nn.Module):
         tuple
             (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies)
         """
-
         # Build processors for the dataset
-        def build_processors(statistics: dict) -> list:
-            return [
-                [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
-                for name, processor in processors_configs.items()
-            ]
+        processors = [
+            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
+            for name, processor in processors_configs.items()
+        ]
 
-        processors = build_processors(statistics)
         pre_processors = Processors(processors)
         post_processors = Processors(processors, inverse=True)
 
@@ -120,20 +117,27 @@ class AnemoiModelInterface(torch.nn.Module):
         pre_processors_tendencies = None
         post_processors_tendencies = None
         if statistics_tendencies is not None:
-            assert isinstance(statistics_tendencies, dict), "Tendency statistics must be a dict with per-step entries."
-            lead_times = statistics_tendencies.get("lead_times")
-            assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
-            assert all(
-                lead_time in statistics_tendencies for lead_time in lead_times
-            ), "Missing tendency statistics for one or more output steps."
-            pre_processors_tendencies = StepwiseProcessors(lead_times)
-            post_processors_tendencies = StepwiseProcessors(lead_times)
-            for lead_time in lead_times:
-                step_stats = statistics_tendencies[lead_time]
-                if step_stats is not None:
-                    step_processors = build_processors(step_stats)
-                    pre_processors_tendencies.set(lead_time, Processors(step_processors))
-                    post_processors_tendencies.set(lead_time, Processors(step_processors, inverse=True))
+            if "lead_times" in statistics_tendencies:
+                lead_times = statistics_tendencies.get("lead_times")
+                pre_processors_tendencies = StepwiseProcessors(lead_times)
+                post_processors_tendencies = StepwiseProcessors(lead_times)
+                for lead_time in lead_times:
+                    step_stats = statistics_tendencies.get(lead_time)
+                    if step_stats is None:
+                        continue
+                    processors_tendencies = [
+                        [name, instantiate(processor, data_indices=data_indices, statistics=step_stats)]
+                        for name, processor in processors_configs.items()
+                    ]
+                    pre_processors_tendencies.set(lead_time, Processors(processors_tendencies))
+                    post_processors_tendencies.set(lead_time, Processors(processors_tendencies, inverse=True))
+            else:
+                processors_tendencies = [
+                    [name, instantiate(processor, data_indices=data_indices, statistics=statistics_tendencies)]
+                    for name, processor in processors_configs.items()
+                ]
+                pre_processors_tendencies = Processors(processors_tendencies)
+                post_processors_tendencies = Processors(processors_tendencies, inverse=True)
 
         return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
 
