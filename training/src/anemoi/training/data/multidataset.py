@@ -350,7 +350,7 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         sample = {}
         for dataset_name, dataset in self.datasets.items():
-            time_steps = self.task.get_batch_time_indices(index, dataset.frequency)
+            time_steps = [index + i for i in self.relative_date_indices[dataset_name]]
             sample[dataset_name] = dataset.get_sample(time_steps, self.reader_group_rank)
         return sample
 

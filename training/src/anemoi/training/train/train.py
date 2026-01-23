@@ -215,6 +215,7 @@ class AnemoiTrainer(ABC):
 
         kwargs = {
             "config": convert_to_omegaconf(self.config),
+            "task": self.task,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,

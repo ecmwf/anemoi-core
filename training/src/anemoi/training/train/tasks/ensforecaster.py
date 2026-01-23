@@ -124,6 +124,26 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_subgroup_rank = ens_comm_subgroup_rank
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
+    
+    def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = torch.cat([dataset_batch] * self.nens_per_device, dim=2)
+            # shape == (bs, ms, nens_per_device, latlon, nvar)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+
+            assert (
+                len(x[dataset_name].shape) == 5
+            ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
+            assert (x[dataset_name].shape[1] == self.multi_step) and (
+                x[dataset_name].shape[2] == self.nens_per_device
+            ), (
+                "Shape mismatch in x! "
+                f"Expected ({self.multi_step}, {self.nens_per_device}), "
+                f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
+            )
+        return x
 
     def compute_dataset_loss_metrics(
         self,
@@ -191,31 +211,14 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         None
             None
         """
-        # Stack the analysis nens_per_device times along an ensemble dimension
-        # start rollout of preprocessed batch
-        x = self.task.get_inputs(batch)
-
-        for dataset_name in self.dataset_names:
-            x[dataset_name] = torch.cat([x[dataset_name]] * self.nens_per_device, dim=2)
-            # shape == (bs, ms, nens_per_device, latlon, nvar)
-            LOGGER.debug("Shapes: x.shape = %s", list(x[dataset_name].shape))
-
-            assert (
-                len(x[dataset_name].shape) == 5
-            ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
-            assert (x[dataset_name].shape[1] == self.multi_step) and (
-                x[dataset_name].shape[2] == self.nens_per_device
-            ), (
-                "Shape mismatch in x! "
-                f"Expected ({self.multi_step}, {self.nens_per_device}), "
-                f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
-            )
+        x = self.task.get_inputs(batch, self.data_indices)
+        x = self._expand_ens_dim(x)
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step,
             y_pred = self(x, fcstep=rollout_step)   # shape = (bs, latlon, nvar)
 
-            y = self.task.get_targets(batch, step=rollout_step)
+            y = self.task.get_targets(batch, self.data_indices, step=rollout_step)
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 

@@ -19,6 +19,7 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.training_task import BaseTask
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -39,6 +40,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         *,
         config: BaseSchema,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -52,6 +54,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         ----------
         config : DictConfig
             Job configuration
+        task : BaseTask
+            Training task
         graph_data : HeteroData
             Graph object
         statistics : dict
@@ -66,6 +70,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         """
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,

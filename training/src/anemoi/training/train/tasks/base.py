@@ -37,6 +37,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.train.training_task import BaseTask
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -132,6 +133,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         config: BaseSchema,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -158,6 +160,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         """
         super().__init__()
+        self.task = task
 
         # Handle dictionary of graph_data
         graph_data = {name: data.to(self.device) for name, data in graph_data.items()}

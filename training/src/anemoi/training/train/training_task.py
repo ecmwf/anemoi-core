@@ -7,9 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 from abc import ABC, abstractmethod
 from anemoi.utils.dates import frequency_to_seconds
 import datetime
+import torch
+from anemoi.models.data_indices.collection import IndexCollection
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseTask(ABC):
@@ -32,22 +37,21 @@ class BaseTask(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_inputs(self, index: int):
+    def get_inputs(self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection]) -> dict[str, torch.Tensor]:
         pass
 
     @abstractmethod
-    def get_targets(self, index: int):
+    def get_targets(self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection]) -> dict[str, torch.Tensor]:
         pass
 
 
 class ForecastingTask(BaseTask):
     """Forecasting task implementation."""
 
-    def __init__(self, multistep_input: int, multistep_output: int, timestep: str, rollout: dict | None = None) -> None:
+    def __init__(self, multistep_input: int, multistep_output: int, timestep: str, **kwargs) -> None:
         super().__init__(timestep)
         self.num_input_steps = multistep_input
         self.num_output_steps = multistep_output
-        self.rollout = rollout
 
     def get_relative_input_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
         """Get the relative time indices for the model input sequence.
@@ -55,7 +59,7 @@ class ForecastingTask(BaseTask):
         Returns:
             list[int]: List of relative time indices.
         """
-        return list(range(self.timeincrement(frequency) * self.num_input_steps))
+        return list(range(0, self.timeincrement(frequency) * self.num_input_steps, self.timeincrement(frequency)))
 
     def get_relative_target_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
         """Get the relative time indices for the model target sequence.
@@ -64,7 +68,11 @@ class ForecastingTask(BaseTask):
             list[int]: List of relative time indices.
         """
         start = self.timeincrement(frequency) * self.num_input_steps
-        return list(range(start, start + self.timeincrement(frequency) * self.num_output_steps))
+        return list(range(
+            start,
+            start + self.timeincrement(frequency) * self.num_output_steps,
+            self.timeincrement(frequency),
+        ))
 
     def get_relative_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
         """Get the relative time indices for the model input sequence.
@@ -74,19 +82,25 @@ class ForecastingTask(BaseTask):
         """
         return self.get_relative_input_time_indices(frequency) + self.get_relative_target_time_indices(frequency)
 
-    def get_batch_time_indices(self, index: int, frequency: str | datetime.timedelta) -> list[int]:
-        """Get the time indices for the model input and target sequences.
+    def get_inputs(self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection]) -> dict[str, torch.Tensor]:
+        timesteps = slice(0, self.num_input_steps)
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[:, timesteps, ..., data_indices[dataset_name].data.input.full]
+            # (bs, multi_step, latlon, nvar)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+        return x
 
-        Returns:
-            list[int]: List of time indices.
-        """
-        return [index + i for i in self.get_relative_time_indices(frequency)]
+    def get_targets(self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection], step) -> dict[str, torch.Tensor]:
+        timesteps = self.num_input_steps # slice(self.num_input_steps, self.num_input_steps + self.num_output_steps)
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            y[dataset_name] = dataset_batch[:, timesteps, ..., data_indices[dataset_name].data.output.full]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+        return y
 
-    def get_inputs(self, index: int, frequency: str | datetime.timedelta):
-        return [index + i for i in self.get_relative_input_time_indices(frequency)]
-
-    def get_targets(self, index: int, frequency: str | datetime.timedelta):
-        return [index + i for i in self.get_relative_target_time_indices(frequency)]
+    def advance_input(self, batch):
+        pass
 
 
 class BaseExplicitIndicesTask(BaseTask):
