@@ -427,12 +427,6 @@ def architecture_config_with_checkpoint(
     # Reuse the same overrides that architecture_config gets
     overrides = request.param
 
-    # ✅ Skip ONLY gnn on Python 3.10
-    import sys
-
-    if sys.version_info[:2] == (3, 10) and any("model=gnn" in o for o in overrides):
-        pytest.skip("GNN checkpoint incompatible with Python 3.10")
-
     cfg, dataset_url, model_architecture = build_architecture_config(
         overrides,
         testing_modifications_with_temp_dir,
