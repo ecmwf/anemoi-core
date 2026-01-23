@@ -62,7 +62,7 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
 
     if isinstance(loss, FilteringLossWrapper):
         subloss = loss.loss
-        subset_vars = enumerate(loss.predicted_variables)
+        subset_vars = zip(loss.predicted_indices, loss.predicted_variables, strict=False)
     else:
         subloss = loss
         subset_vars = enumerate(data_indices.model.output.name_to_index.keys())
