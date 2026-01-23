@@ -54,7 +54,7 @@ class KernelCRPS(BaseLoss):
         Returns
         -------
         kCRPS : torch.Tensor
-            The point-wise kernel CRPS, shape (batch_size, n_out_steps, n_vars, latlon).
+            The point-wise kernel CRPS.
         """
         ens_size = preds.shape[-1]
         mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
