@@ -83,7 +83,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             return (
                 len(self.input_times) * self.num_input_channels[dataset_name]
                 + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-                + self.num_target_forcings[dataset_name] * len(self.output_times)
+                + self.num_target_forcings[dataset_name]
             )
 
     def _assemble_input(
@@ -113,7 +113,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_data_latent = torch.cat(
                 (
                     einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                    einops.rearrange(target_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),                    
+                    einops.rearrange(target_forcing, "batch ensemble grid vars -> (batch ensemble grid) (vars)"),                    
                     node_attributes_data,
                 ),
                 dim=-1,  # feature dimension
@@ -137,6 +137,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype, dataset_name: str):
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
 
+        import ipdb; ipdb.set_trace()
         x_out = (
             einops.rearrange(
                 x_out,
@@ -214,6 +215,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
             )
 
+            import ipdb; ipdb.set_trace()
             # Run encoder
             x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),

@@ -111,7 +111,6 @@ class GraphInterpolator(BaseGraphModule):
         for dataset_name, num_tfi in self.num_tfi.items():
             target_forcing[dataset_name] = torch.empty(
                 batch_size,
-                1,
                 ens_size,
                 grid_size,
                 num_tfi + self.use_time_fraction[dataset_name],
@@ -123,7 +122,7 @@ class GraphInterpolator(BaseGraphModule):
             if num_tfi >= 1:
                 target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][
                     :,
-                    self.imap[interp_step]:self.imap[interp_step]+1,
+                    self.imap[interp_step],
                     :,
                     :,
                     self.target_forcing_indices[dataset_name],
