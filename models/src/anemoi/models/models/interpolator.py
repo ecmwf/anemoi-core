@@ -49,14 +49,20 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             Graph definition
         """
         model_config = DotDict(model_config)
-        target_forcing_config = get_multiple_datasets_config(model_config.training.target_forcing)
-
-        self.num_target_forcings = {}
-        for dataset_name, target_forcing in target_forcing_config.items():
-            self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction
-
         self.input_times = model_config.training.explicit_times.input
         self.output_times = model_config.training.explicit_times.target
+
+        self.multi_out = model_config.training.multistep_output
+
+        if self.multi_out == 1:
+            target_forcing_config = get_multiple_datasets_config(model_config.training.target_forcing)
+
+            self.num_target_forcings = {}
+            for dataset_name, target_forcing in target_forcing_config.items():
+                self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction        
+
+        self.latent_skip = model_config.model.latent_skip        
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -64,15 +70,21 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             graph_data=graph_data,
         )
 
-        self.latent_skip = model_config.model.latent_skip
+
 
     # Overwrite base class
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return (
-            len(self.input_times) * self.num_input_channels[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-            + self.num_target_forcings[dataset_name] * len(self.output_times)
-        )
+        if self.multi_out > 1:
+            return (
+                len(self.input_times) * self.num_input_channels[dataset_name]
+                + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+            )
+        else:
+            return (
+                len(self.input_times) * self.num_input_channels[dataset_name]
+                + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+                + self.num_target_forcings[dataset_name] * len(self.output_times)
+            )
 
     def _assemble_input(
         self,
@@ -95,15 +107,27 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
-        # normalize and add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(target_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
-        )
+        if target_forcing is not None:
+            # normalize and add data positional info (lat/lon)
+            import ipdb; ipdb.set_trace()
+            x_data_latent = torch.cat(
+                (
+                    einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                    einops.rearrange(target_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),                    
+                    node_attributes_data,
+                ),
+                dim=-1,  # feature dimension
+            )
+        else:
+            # normalize and add data positional info (lat/lon)
+            x_data_latent = torch.cat(
+                (
+                    einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                    node_attributes_data,
+                ),
+                dim=-1,  # feature dimension
+            )
+            
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
@@ -143,7 +167,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
     def forward(
         self,
         x: dict[str, Tensor],
-        target_forcing: dict[str, Tensor],
+        target_forcing: dict[str, Tensor] = None,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
@@ -165,9 +189,13 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         shard_shapes_data_dict = {}
         shard_shapes_hidden_dict = {}
         for dataset_name in dataset_names:
+            if target_forcing is not None:
+                tf = target_forcing[dataset_name]
+            else:
+                tf = None
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
                 x[dataset_name],
-                target_forcing[dataset_name],
+                tf,
                 batch_size,
                 grid_shard_shapes,
                 model_comm_group,
