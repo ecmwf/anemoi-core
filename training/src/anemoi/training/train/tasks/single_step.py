@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -20,15 +20,13 @@ if TYPE_CHECKING:
 
     import torch
 
+
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphDownscaler(BaseGraphModule):
-    """Graph neural network downscaler for PyTorch Lightning."""
+class BaseSingleStepGraphModule(BaseGraphModule):
 
-    task_type = "downscaler"
-
-    def get_inputs(self, batch: dict, sample_length: int) -> dict:
+    def get_inputs(self, batch: dict[str, torch.Tensor], sample_length: int) -> dict[str, torch.Tensor]:
         # start rollout of preprocessed batch
         x = {}
         for dataset_name, dataset_batch in batch.items():
@@ -45,7 +43,7 @@ class GraphDownscaler(BaseGraphModule):
             assert dataset_batch.shape[1] >= sample_length, msg
         return x
 
-    def get_targets(self, batch: dict, lead_step: int) -> dict:
+    def get_targets(self, batch: dict[str, torch.Tensor], lead_step: int) -> dict[str, torch.Tensor]:
         y = {}
         for dataset_name, dataset_batch in batch.items():
             y[dataset_name] = dataset_batch[
@@ -58,9 +56,9 @@ class GraphDownscaler(BaseGraphModule):
 
     def _step(
         self,
-        batch: dict,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+    ) -> tuple[dict[str, torch.Tensor], Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         x = self.get_inputs(batch, sample_length=self.multi_step)
         y = self.get_targets(batch, lead_step=self.multi_step - 1)
 
@@ -75,3 +73,15 @@ class GraphDownscaler(BaseGraphModule):
         )
 
         return loss, metrics, y_pred
+
+
+class GraphDownscaler(BaseSingleStepGraphModule):
+    """Graph neural network downscaler for PyTorch Lightning."""
+
+    task_type = "downscaler"
+
+
+class GraphAutoEncoder(BaseSingleStepGraphModule):
+    """Graph neural network autoencoder for PyTorch Lightning."""
+
+    task_type = "autoencoder"
