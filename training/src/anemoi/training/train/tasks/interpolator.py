@@ -291,12 +291,5 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             loss += loss_step
             metrics.update(metrics_next)
 
-            loss_step, metrics_next, _ = self.compute_loss_metrics(
-                y_pred_step,
-                y_step,
-                validation_mode=validation_mode,
-                use_reentrant=False,
-            )
-
         loss *= 1.0 / len(self.interp_times)
         return loss, metrics, y_pred
