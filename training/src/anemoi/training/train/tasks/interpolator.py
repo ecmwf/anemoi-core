@@ -249,50 +249,62 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         x_bound = {}
-        for dataset_name in self.dataset_names:
-            x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            x_bound[dataset_name] = dataset_batch[:, itemgetter(*self.boundary_times)(self.imap)][
                 ...,
                 self.data_indices[dataset_name].data.input.full,
             ]  # (bs, time, ens, latlon, nvar)
-            x_bound_device = x_bound[dataset_name].device
+
+            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)][
+                                            ...,
+                                            self.data_indices[dataset_name].data.output.full,
+                                            ]
 
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
         metrics = {}
-        y_preds =[]
 
         y_pred = self(x_bound)
 
         for interp_step in self.interp_times:
             y_step = {}
             y_pred_step = {}
-            for dataset_name, dataset_batch in batch.items():
+            for dataset_name in self.dataset_names:
+
                 y_pred_step[dataset_name] = y_pred[dataset_name][
                     :,
                     self.imap[interp_step]-1,
                     :,
                     :,
                     self.data_indices[dataset_name].data.output.full,
-                ]                    
-                y_step[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap), ...][
+                ]  
+
+                
+                y_step[dataset_name] = y[dataset_name][
                     :,
                     self.imap[interp_step]-1,
                     :,
                     :,
-                    self.data_indices[dataset_name].data.output.full,
+                    :
                 ]    
 
-            loss_step, metrics_next, y_pred = checkpoint(
-                    self.compute_loss_metrics,
+            loss_step, metrics_next, _ = self.compute_loss_metrics(
                     y_pred_step,
                     y_step,
-                    step=self.imap[interp_step]-1,
                     validation_mode=validation_mode,
                     use_reentrant=False,
             )
 
             loss += loss_step
             metrics.update(metrics_next)
-            y_preds.append(y_pred)
+
+            loss_step, metrics_next, _ = self.compute_loss_metrics(
+                    y_pred_step,
+                    y_step,
+                    validation_mode=validation_mode,
+                    use_reentrant=False,
+            )
+
 
         loss *= 1.0 / len(self.interp_times)
-        return loss, metrics, y_preds
+        return loss, metrics, y_pred
