@@ -39,6 +39,7 @@ log:
   tensorboard:
     enabled: False
   mlflow:
+    _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
     enabled: True
     offline: False
     experiment_name: 'test_plotting_multi_datasets'
@@ -64,7 +65,6 @@ log:
       - config
     http_max_retries: 35
     max_params_length: 10000
-    save_dir: ${system.output.logs.mlflow}
   interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True

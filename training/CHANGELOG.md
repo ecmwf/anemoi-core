@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.4](https://github.com/ecmwf/anemoi-core/compare/training-0.8.3...training-0.8.4) (2026-01-14)
+
+
+### Features
+
+* Introduce spectral losses module ([#678](https://github.com/ecmwf/anemoi-core/issues/678)) ([9745b46](https://github.com/ecmwf/anemoi-core/commit/9745b4688482986f62c0590b53a2bf4d551e077d))
+* **models:** Mapper refactor ([#574](https://github.com/ecmwf/anemoi-core/issues/574)) ([83820c8](https://github.com/ecmwf/anemoi-core/commit/83820c8ad049d8dfd4ed4b737b5e4f597b9f2b1f))
+
+
+### Bug Fixes
+
+* **graphs,aicon:** Integration test ([#794](https://github.com/ecmwf/anemoi-core/issues/794)) ([1d8770c](https://github.com/ecmwf/anemoi-core/commit/1d8770c649a08ac319dd9132a41485afb88ab78e))
+* Remove limit on numpy version ([#688](https://github.com/ecmwf/anemoi-core/issues/688)) ([bc6c6cb](https://github.com/ecmwf/anemoi-core/commit/bc6c6cbaacb0968c3bb10bbaa5cb71f09b49ce28))
+* **training:** Dataloader worker ranges ([#764](https://github.com/ecmwf/anemoi-core/issues/764)) ([3ce36ae](https://github.com/ecmwf/anemoi-core/commit/3ce36ae54cbfe4181434dbb9fb35c613d5aa541c))
+
 ## [0.8.3](https://github.com/ecmwf/anemoi-core/compare/training-0.8.2...training-0.8.3) (2026-01-05)
 
 

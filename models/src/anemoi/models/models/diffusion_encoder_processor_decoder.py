@@ -68,16 +68,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
-
-        # Create graph providers
-        self.encoder_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-            edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            trainable_size=model_config.model.encoder.get("trainable_size", 0),
-        )
-
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
@@ -239,8 +229,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def forward(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
         sigma: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[dict[str, list]] = None,
@@ -249,20 +239,10 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         # Multi-dataset case
         dataset_names = list(x.keys())
 
-        # Extract and validate batch sizes across datasets
-        batch_sizes = [x[dataset_name].shape[0] for dataset_name in dataset_names]
-        ensemble_sizes = [x[dataset_name].shape[2] for dataset_name in dataset_names]
+        # Extract and validate batch & ensemble sizes across datasets
+        batch_size = self._get_consistent_dim(x, 0)
+        ensemble_size = self._get_consistent_dim(x, 2)
 
-        # Assert all datasets have the same batch and ensemble sizes
-        assert all(
-            bs == batch_sizes[0] for bs in batch_sizes
-        ), f"Batch sizes must be the same across datasets: {batch_sizes}"
-        assert all(
-            es == ensemble_sizes[0] for es in ensemble_sizes
-        ), f"Ensemble sizes must be the same across datasets: {ensemble_sizes}"
-
-        batch_size = batch_sizes[0]
-        ensemble_size = ensemble_sizes[0]
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
@@ -358,12 +338,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         # Processor skip connection
         x_latent_proc = x_latent_proc + x_latent
-
-        # Compute decoder edges using updated latent representation
-        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider.get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
 
         # Decoder
         x_out_dict = {}

@@ -22,7 +22,7 @@ from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
-from anemoi.training.utils.config_utils import get_multiple_datasets_config
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
@@ -209,6 +209,28 @@ def stretched_config(
 
 
 @pytest.fixture
+def multidatasets_config(
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, list[str]]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidatasets"):
+        template = compose(config_name="multi")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "dataset_b"])
+    dataset, dataset_b = rel_paths
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
+    use_case_modifications.system.input.dataset_b = str(Path(tmp_dir, dataset_b))
+
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls
+
+
+@pytest.fixture
 def lam_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
@@ -239,9 +261,12 @@ def lam_config_with_graph(
     cfg, urls = lam_config
     cfg.graph = existing_graph_config
 
-    url_graph = cfg.system.input.graph
-    tmp_path_graph = get_test_data(url_graph)
-    cfg.system.input.graph = Path(tmp_path_graph)
+    dataset_name = "data"  # default dataset name
+    url_graph = "anemoi-integration-tests/training/graphs/lam-graph.pt"
+    tmp_path_graph = Path(get_test_data(url_graph))
+    dataset_graph_filename = tmp_path_graph.name.replace(".pt", f"_{dataset_name}.pt")
+    tmp_path_graph.rename(tmp_path_graph.parent / dataset_graph_filename)
+    cfg.system.input.graph = tmp_path_graph
     return cfg, urls
 
 
@@ -402,12 +427,6 @@ def architecture_config_with_checkpoint(
     # Reuse the same overrides that architecture_config gets
     overrides = request.param
 
-    # ✅ Skip ONLY gnn on Python 3.10
-    import sys
-
-    if sys.version_info[:2] == (3, 10) and any("model=gnn" in o for o in overrides):
-        pytest.skip("GNN checkpoint incompatible with Python 3.10")
-
     cfg, dataset_url, model_architecture = build_architecture_config(
         overrides,
         testing_modifications_with_temp_dir,
@@ -416,11 +435,11 @@ def architecture_config_with_checkpoint(
     # rest of your logic...
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-12.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-23.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-01-23.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"

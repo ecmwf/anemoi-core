@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.config_utils import get_multiple_datasets_config
 
@@ -26,6 +27,8 @@ LOGGER = logging.getLogger(__name__)
 
 class GraphInterpolator(BaseGraphModule):
     """Graph neural network interpolator for PyTorch Lightning."""
+
+    task_type = "time-interpolator"
 
     def __init__(
         self,
@@ -85,6 +88,8 @@ class GraphInterpolator(BaseGraphModule):
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
+        self.multi_step = 1
+        self.rollout = 1
 
     def get_target_forcing(self, batch: dict[str, torch.Tensor], interp_step: int) -> dict[str, torch.Tensor]:
         batch_size = next(iter(batch.values())).shape[0]

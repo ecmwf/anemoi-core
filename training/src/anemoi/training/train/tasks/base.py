@@ -26,6 +26,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -36,7 +37,6 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -181,6 +181,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # Handle supporting_arrays merge for multi-dataset
         # Multi-dataset: merge supporting arrays from all output masks
+        # TODO: Check if supporting arrays work as intended
         combined_supporting_arrays = supporting_arrays.copy()
         for mask in self.output_mask.values():
             combined_supporting_arrays.update(mask.supporting_arrays)
@@ -226,11 +227,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
-                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"), #TODO: does this need to be changed?
+                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
             )
-            print("dataset_name:", dataset_name)
-            print(scalers_configs[dataset_name])
-            print(data_indices[dataset_name])
 
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
@@ -333,15 +331,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """Get the loss name for multi-dataset cases."""
         # For multi-dataset, use a generic name or combine dataset names
         return "multi_dataset"
-
-    def _get_task_type_from_config(self, config: dict) -> str:
-        task_class_name = str(config.training.model_task).split(".")[-1]
-
-        try:
-            return TASK_TYPE_MAP[task_class_name]
-        except KeyError as exc:
-            err_msg = f"Unknown task type: {task_class_name}"
-            raise ValueError(err_msg) from exc
 
     def _check_sharding_support(self) -> None:
         self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())
@@ -548,7 +537,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return self.loss[dataset_name](
             y_pred,
             y,
-            grid_shard_slice=grid_shard_slice[dataset_name] if grid_shard_slice is not None else None,
+            grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )
 
@@ -633,7 +622,60 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
 
-        return loss, metrics_next, y_pred_full
+        return loss, metrics_next, y_pred
+
+    def compute_loss_metrics(
+        self,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        validation_mode: bool = False,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """Compute loss and metrics for the given predictions and targets.
+
+        Parameters
+        ----------
+        y_pred : dict[str, torch.Tensor]
+            Predicted values
+        y : dict[str, torch.Tensor]
+            Target values
+        step : int, optional
+            Current step
+        validation_mode : bool, optional
+            Whether to compute validation metrics
+        **kwargs
+            Additional arguments to pass to loss computation
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
+            Loss, metrics dictionary (if validation_mode), and full predictions
+        """
+        # Prepare tensors for loss/metrics computation
+        total_loss, metrics_next, y_preds = None, {}, {}
+        for dataset_name in self.dataset_names:
+            dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
+                y_pred[dataset_name],
+                y[dataset_name],
+                validation_mode=validation_mode,
+                dataset_name=dataset_name,
+                **kwargs,
+            )
+
+            if dataset_loss is not None:
+                dataset_loss_sum = dataset_loss.sum()  # collapse potential multi-scale loss
+                total_loss = dataset_loss_sum if total_loss is None else total_loss + dataset_loss_sum
+
+                if validation_mode:
+                    loss_obj = self.loss[dataset_name]
+                    loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
+                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = dataset_loss
+
+            # Prefix dataset name to metric keys
+            for metric_name, metric_value in dataset_metrics.items():
+                metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
+
+        return total_loss, metrics_next, y_preds
 
     def compute_loss_metrics(
         self,

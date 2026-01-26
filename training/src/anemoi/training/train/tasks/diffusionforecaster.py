@@ -30,6 +30,8 @@ LOGGER = logging.getLogger(__name__)
 class BaseDiffusionForecaster(BaseGraphModule):
     """Base class for diffusion forecasters."""
 
+    task_type = "forecaster"
+
     def __init__(
         self,
         *,

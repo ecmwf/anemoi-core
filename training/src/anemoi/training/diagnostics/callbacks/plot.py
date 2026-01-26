@@ -760,11 +760,13 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         if (
             hasattr(model, "encoder_graph_provider")
             and dataset_name in model.encoder_graph_provider
-            and hasattr(model.encoder_graph_provider[dataset_name].graph_provider, "trainable")
+            and hasattr(model.encoder_graph_provider[dataset_name], "trainable")
             and model.encoder_graph_provider[dataset_name].trainable is not None
             and model.encoder_graph_provider[dataset_name].trainable.trainable is not None
         ):
-            trainable_modules[(dataset_name, model._graph_name_hidden)] = model.encoder_graph_provider[dataset_name]
+            trainable_modules[(model._graph_name_data, model._graph_name_hidden)] = model.encoder_graph_provider[
+                dataset_name
+            ]
 
         # Check decoder
         if (
@@ -774,7 +776,9 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             and model.decoder_graph_provider[dataset_name].trainable is not None
             and model.decoder_graph_provider[dataset_name].trainable.trainable is not None
         ):
-            trainable_modules[(model._graph_name_hidden, dataset_name)] = model.decoder_graph_provider[dataset_name]
+            trainable_modules[(model._graph_name_hidden, model._graph_name_data)] = model.decoder_graph_provider[
+                dataset_name
+            ]
 
         # Check processor
         if (

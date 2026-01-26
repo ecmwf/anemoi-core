@@ -131,7 +131,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def forward(
         self,
-        x: torch.Tensor,
+        x: dict[str, torch.Tensor],
         *,
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -142,7 +142,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : dict[str, torch.Tensor]
             Input tensor, shape (bs, m, e, n, f)
         fcstep : int
             Forecast step
@@ -236,7 +236,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x=x_latent,
             batch_size=batch_size,
             ensemble_size=ensemble_size,
-            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            grid_size=self.node_attributes[dataset_names[0]].num_nodes[self._graph_name_hidden],
             shard_shapes_ref=shard_shapes_hidden,
             model_comm_group=model_comm_group,
         )
