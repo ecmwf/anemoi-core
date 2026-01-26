@@ -224,6 +224,13 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
             try:
                 return super().find_class(module_name, global_name)
             except (ImportError, AttributeError) as e:
+                attr_name = f"{module_name}.{global_name}"
+                wild_name = f"{module_name}.*"
+
+                # For retro-compatibility with checkpoints with rollbacks (now removed from code)
+                if attr_name == "anemoi.models.migrations.migrator._SerializedRollback":
+                    return MissingAttribute
+
                 deleted_modules: list[str] = []
                 deleted_attributes: list[str] = []
 
@@ -231,9 +238,6 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
                 if isinstance(replace_attrs, dict):
                     deleted_modules = replace_attrs.get("deleted_modules", [])
                     deleted_attributes = replace_attrs.get("deleted_attributes", [])
-
-                attr_name = f"{module_name}.{global_name}"
-                wild_name = f"{module_name}.*"
 
                 if replace_attrs is False:
                     raise e
