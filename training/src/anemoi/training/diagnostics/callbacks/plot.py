@@ -266,6 +266,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
+
             # gather tensors if necessary
             batch = {
                 dataset_name: pl_module.allgather_batch(
@@ -276,21 +277,35 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 for dataset_name, dataset_tensor in batch.items()
             }
             # output: [loss, [pred_dict1, pred_dict2, ...]], gather predictions for plotting
-            output = [
-                output[0],
-                [
-                    {
-                        dataset_name: pl_module.allgather_batch(
-                            dataset_pred,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
-                        )
-                        for dataset_name, dataset_pred in pred.items()
-                    }
-                    for pred in output[1]
-                ],
-            ]
-
+            if len(output[1]) > 1:
+                output = [
+                    output[0],
+                    [
+                        {
+                            dataset_name: pl_module.allgather_batch(
+                                dataset_pred,
+                                pl_module.grid_indices[dataset_name],
+                                pl_module.grid_dim,
+                            )
+                            for dataset_name, dataset_pred in pred.items()
+                        }
+                        for pred in output[1]
+                    ],
+                ]
+            else:
+                output = [
+                    output[0],
+                    [
+                        {
+                            dataset_name: pl_module.allgather_batch(
+                                dataset_pred,
+                                pl_module.grid_indices[dataset_name],
+                                pl_module.grid_dim,
+                            )
+                            for dataset_name, dataset_pred in output[1].items()
+                        }
+                    ],
+                ]
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem
