@@ -53,8 +53,6 @@ def test_boolean_or_mask(graph_with_nodes: HeteroData):
     """Test attribute builder for BooleanOrMask."""
     node_attr_builder = BooleanOrMask(["mask2"])
     mask = node_attr_builder.compute(graph_with_nodes, "test_nodes")
-    print(mask.shape)
-    print(graph_with_nodes["test_nodes"]["mask2"].shape)
     assert torch.allclose(mask, graph_with_nodes["test_nodes"]["mask2"])
 
     node_attr_builder = BooleanOrMask(["mask", "mask2"])

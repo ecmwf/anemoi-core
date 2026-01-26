@@ -12,6 +12,8 @@ model:
     noise_cond_dim: 16
     sigma_max: 100.0
     sigma_min: 0.02
+    log_normal_mean: -1.2
+    log_normal_std: 1.2
     rho: 7.0
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings

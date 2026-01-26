@@ -523,6 +523,38 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
         
+        if diffusion_sampler_config['SDEdit']:
+            
+            forcings = self.data_indices["forcing"] #TODO faire une fonction qui permet de choisir les bons indices pour pas avoir à faire ça ici
+            # print(self.data_indices)
+            name_to_index = self.data_indices["name_to_index"]
+            idx_to_drop = torch.tensor([name_to_index[var] for var in forcings])
+            print("shape de idc to drop :", idx_to_drop.shape, idx_to_drop)
+            mask_idx = torch.ones(x.size(-1), dtype=torch.bool)
+            print("shape de mask idx ", mask_idx.shape)
+            # mask_idx[idx_to_drop] = False  
+            x_removed = x[:,0,:,:,mask_idx]
+            print("x drop : ", x.shape)
+            num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
+            num_steps = len(sigmas) #total number of denoising steps when not using sdedit
+            print(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
+            init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
+            # y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * init_sigma + x
+            sigmas = sigmas[num_steps - num_steps_sdedit :]
+            print('longueur de sigma : ', sigmas, len(sigmas))
+        # rank_zero_info(f"[DEBUG] dans sample d encprodec x no cond: {x_no_cond}")
+            C = x.shape[-1]
+            idx_remove = []
+            removed_names = []
+
+            for name in forcings:
+                if name in name_to_index:
+                    idx = name_to_index[name]
+                    if idx < C:   # évite l’index 78 si C=78
+                        idx_remove.append(idx)
+                        removed_names.append(name)
+
+            print("remove:", list(zip(removed_names, idx_remove)), len(idx_remove))
         return sampler_instance.sample(
             x,
             y_init,
