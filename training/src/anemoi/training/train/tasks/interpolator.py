@@ -78,6 +78,9 @@ class GraphInterpolator(BaseGraphModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
+
+        assert self.multi_out==1, "For multiple outputs, use GraphMultiOutInterpolator"
+
         target_forcing_config = get_multiple_datasets_config(config.training.target_forcing)
         self.target_forcing_indices, self.use_time_fraction = {}, {}
         for dataset_name in self.dataset_names:

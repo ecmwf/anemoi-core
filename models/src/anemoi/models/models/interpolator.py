@@ -59,9 +59,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
             self.num_target_forcings = {}
             for dataset_name, target_forcing in target_forcing_config.items():
-                self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction        
-
-        self.latent_skip = model_config.model.latent_skip        
+                self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction           
 
         super().__init__(
             model_config=model_config,
@@ -69,6 +67,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             statistics=statistics,
             graph_data=graph_data,
         )
+
+        self.latent_skip = model_config.model.latent_skip        
 
 
 
@@ -109,7 +109,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
         if target_forcing is not None:
             # normalize and add data positional info (lat/lon)
-            import ipdb; ipdb.set_trace()
             x_data_latent = torch.cat(
                 (
                     einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
@@ -137,7 +136,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype, dataset_name: str):
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
 
-        import ipdb; ipdb.set_trace()
         x_out = (
             einops.rearrange(
                 x_out,
@@ -215,7 +213,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
             )
 
-            import ipdb; ipdb.set_trace()
             # Run encoder
             x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
