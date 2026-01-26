@@ -293,9 +293,9 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
 
         # Add noise
         eps = torch.randn_like(y)
-        # y_noised = self._noise_target(y, sigma)
+        y_noised = self._noise_target(y, sigma)
 
-        y_noised = y + sigma * eps
+        # y_noised = y + sigma * eps
 
         # ---------------------------------------------------------------------
         # Create unconditional dummy x

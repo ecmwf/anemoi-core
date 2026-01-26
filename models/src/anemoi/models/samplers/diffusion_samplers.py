@@ -282,7 +282,6 @@ class DPMpp2MSampler(DiffusionSampler):
         **kwargs,
     ) -> torch.Tensor:
         # DPM++ sampler converts to x.dtype
-        rank_zero_info("[DEBUG] Le sample utilisé est le DMPp2Msapler")
         y = y.to(x.dtype)
         sigmas = sigmas.to(x.dtype)
 

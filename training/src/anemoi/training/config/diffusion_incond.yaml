@@ -4,8 +4,8 @@ defaults:
 - diagnostics: evaluation
 - datamodule: single
 - hardware: example
-- graph: graph_AROME.yaml
-# - graph: existing_graph
+# - graph: graph_AROME.yaml
+- graph: existing_graph
 - model: graphtransformer_diffusionuncond
 - training: diffusion
 - _self_
@@ -15,11 +15,11 @@ config_validation: False
 diagnostics:
   log:
     mlflow:
-      enabled: True
+      enabled: False
       offline: False
       experiment_name: 'dev_uncond_diffusion'
       project_name: 'uncond-diffusion'
-      run_name: 'uncond_v0_test_x=0'
+      run_name: 'nodes_16_freq_1_maxsteps_32000_probabilistic_high_noise'
       tracking_uri: 'https://mlflow.ecmwf.int'
       authentication: True
       terminal: False
@@ -27,7 +27,7 @@ diagnostics:
       enabled: False
       entity: "none"
 data:
-    # frequency: 1h 
+    frequency: 1h 
     diagnostic: ["tp"] #variables que le modÃ¨le ne prendra pas en input mais va sortir en output : tp est la pluie, on ne la prend pas en input 
     # Ã§a peut perturber en input les variables et tout le modne fait comme Ã§a.
     forcing:
@@ -79,20 +79,20 @@ model:
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
-    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/tests_bs_gpus_nodes/gpu_per_model_1/
+    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/multi_nodes/nodes_16_freq_1_maxsteps_32000/probabilistic_high_noise/
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
-    # graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
-    graph: /project/home/p200177/DE_371/angeliquebonamy/anemoi/graph/graph_AROME_full.pt
+    graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
+    # graph: /project/home/p200177/DE_371/angeliquebonamy/anemoi/graph/graph_AROME_full.pt
 
   # num_nodes: 2
   # accelerator: gpu
   # devices: 1 
   num_gpus_per_node: 4
   num_gpus_per_model: 2
-  num_nodes: 2 
+  num_nodes: 16
 training:
+  max_steps: 32000
   max_epochs: 500
   model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
-  training_approach: probabilistic_low_noise
-  # run_id: 73f7278e180543469b320e3311bfff27
+  training_approach: probabilistic_high_noise

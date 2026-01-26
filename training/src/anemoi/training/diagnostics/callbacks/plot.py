@@ -46,6 +46,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample_unconditional
+                                                
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.schemas.base_schema import BaseSchema
 
@@ -1033,7 +1034,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         epoch: int,
     ) -> None:
         logger = trainer.logger
-        print('JE PASSE PAR PLOT SAMPLE UNCOccNDITIONNAL ')
 
         # Build dictionary of indices and parameters to be plotted
         diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
@@ -1133,7 +1133,9 @@ class PlotSampleUnconditionalDiffusion(BasePlotAdditionalMetrics):
         epoch: int,
     ):
         logger = trainer.logger
-
+        rank_zero_info("[DEBUG] on passe dans PlotSampleUnconditionalDiffusion")
+        print("Lightning", trainer.state.fn)
+        print("Model training flag", pl_module.training)
         # Build dictionary of indices and parameters to be plotted
         diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
         plot_parameters_dict = {
