@@ -20,9 +20,9 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.training.data.dataset import create_dataset
+from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.usable_indices import get_usable_indices
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
@@ -63,6 +63,7 @@ class MultiDataset(IterableDataset):
         self.shuffle = shuffle
         self.timestep = timestep
         self.dataset_names = list(data_readers.keys())
+        self.grid_indices = grid_indices
 
         # Create individual NativeGridDataset for each dataset with its own grid_indices
         self.datasets = {}
@@ -71,11 +72,7 @@ class MultiDataset(IterableDataset):
                 msg = f"No grid_indices configuration found for dataset '{name}'"
                 raise ValueError(msg)
 
-            self.datasets[name] = NativeGridDataset(
-                data_reader=data_reader,
-                grid_indices=grid_indices[name],
-                timestep=timestep,
-            )
+            self.datasets[name] = create_dataset(data_reader)
 
         # relative_date_indices are computed in terms of data frequency
         # data_relative_date_indices are in terms of the specific dataset
@@ -131,7 +128,7 @@ class MultiDataset(IterableDataset):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None]:
         """Return combined tendency statistics from all datasets."""
-        return self._collect("statistics_tendencies")
+        return {name: dataset.statistics_tendencies(self.timestep) for name, dataset in self.datasets.items()}
 
     @cached_property
     def metadata(self) -> dict[str, dict]:
@@ -211,17 +208,17 @@ class MultiDataset(IterableDataset):
         valid_date_indices_ref = None
         for ds in self.datasets.values():
             valid_date_indices = get_usable_indices(
-                ds.data.missing,
-                len(ds.data),
+                ds.missing,
+                len(ds.dates),
                 self.data_relative_date_indices,
-                ds.data.trajectory_ids,
+                ds.trajectory_ids if ds.has_trajectories else None,
             )
             if valid_date_indices_ref is None:
                 valid_date_indices_ref = valid_date_indices
-            assert np.array_equal(
-                valid_date_indices_ref,
-                valid_date_indices,
-            ), "Datasets have different valid_date_indices, cannot synchronize samples"
+
+            err_msg = "Datasets have different valid_date_indices, cannot synchronize samples"
+            assert np.array_equal(valid_date_indices_ref, valid_date_indices), err_msg
+
         return valid_date_indices_ref
 
     def set_comm_group_info(
@@ -360,9 +357,14 @@ class MultiDataset(IterableDataset):
             timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
         else:
             timeincrement = 1  # single time step
+        time_indices = slice(start, end, timeincrement)
 
-        time_steps = slice(start, end, timeincrement)
-        return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
+        x = {}
+        for name, dataset in self.datasets.items():
+            grid_shard_indices = self.grid_indices[name].get_shard_indices(self.reader_group_rank)
+            x[name] = dataset.get_sample(time_indices, grid_shard_indices)
+
+        return x
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
