@@ -20,6 +20,7 @@ from torch.cuda import reset_peak_memory_stats
 from anemoi.training.diagnostics.benchmark_server import benchmark
 from anemoi.training.diagnostics.benchmark_server import parse_benchmark_config
 from anemoi.training.train.profiler import AnemoiProfiler
+from anemoi.training.train.train import AnemoiTrainer
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
@@ -43,7 +44,9 @@ def test_benchmark_training_cycle(
     empty_cache()
     gc.collect()
     # Run model with profiler
-    AnemoiProfiler(cfg).profile()
+    #AnemoiProfiler(cfg).profile()
+    AnemoiTrainer(cfg).train()
+    return
 
     # determine store from benchmark config
     config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
