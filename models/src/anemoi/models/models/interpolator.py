@@ -59,7 +59,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
             self.num_target_forcings = {}
             for dataset_name, target_forcing in target_forcing_config.items():
-                self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction           
+                self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction
 
         super().__init__(
             model_config=model_config,
@@ -68,9 +68,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             graph_data=graph_data,
         )
 
-        self.latent_skip = model_config.model.latent_skip        
-
-
+        self.latent_skip = model_config.model.latent_skip
 
     # Overwrite base class
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -112,7 +110,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_data_latent = torch.cat(
                 (
                     einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                    einops.rearrange(target_forcing, "batch ensemble grid vars -> (batch ensemble grid) (vars)"),                    
+                    einops.rearrange(target_forcing, "batch ensemble grid vars -> (batch ensemble grid) (vars)"),
                     node_attributes_data,
                 ),
                 dim=-1,  # feature dimension
@@ -126,7 +124,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
                 ),
                 dim=-1,  # feature dimension
             )
-            
+
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )

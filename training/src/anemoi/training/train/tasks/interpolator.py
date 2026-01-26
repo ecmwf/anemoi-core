@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from omegaconf import DictConfig
 from omegaconf import open_dict
-from torch_geometric.data import HeteroData
 from torch.utils.checkpoint import checkpoint
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -79,7 +79,7 @@ class GraphInterpolator(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
-        assert self.multi_out==1, "For multiple outputs, use GraphMultiOutInterpolator"
+        assert self.multi_out == 1, "For multiple outputs, use GraphMultiOutInterpolator"
 
         target_forcing_config = get_multiple_datasets_config(config.training.target_forcing)
         self.target_forcing_indices, self.use_time_fraction = {}, {}
@@ -186,7 +186,7 @@ class GraphInterpolator(BaseGraphModule):
 
     def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
         return super().forward(x, target_forcing=target_forcing)
-    
+
 
 class GraphMultiOutInterpolator(BaseGraphModule):
     """Graph neural network interpolator with multiple output steps for PyTorch Lightning."""
@@ -257,9 +257,9 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             ]  # (bs, time, ens, latlon, nvar)
 
             y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)][
-                                            ...,
-                                            self.data_indices[dataset_name].data.output.full,
-                                            ]
+                ...,
+                self.data_indices[dataset_name].data.output.full,
+            ]
 
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -273,31 +273,23 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
                 y_pred_step[dataset_name] = y_pred[dataset_name][
                     :,
-                    self.imap[interp_step]-1,
+                    self.imap[interp_step] - 1,
                     :,
                     :,
                     self.data_indices[dataset_name].data.output.full,
-                ]  
+                ]
 
-                
-                y_step[dataset_name] = y[dataset_name][
-                    :,
-                    self.imap[interp_step]-1,
-                    :,
-                    :,
-                    :
-                ]    
+                y_step[dataset_name] = y[dataset_name][:, self.imap[interp_step] - 1, :, :, :]
 
             loss_step, metrics_next, _ = self.compute_loss_metrics(
-                    y_pred_step,
-                    y_step,
-                    validation_mode=validation_mode,
-                    use_reentrant=False,
+                y_pred_step,
+                y_step,
+                validation_mode=validation_mode,
+                use_reentrant=False,
             )
 
             loss += loss_step
             metrics.update(metrics_next)
-
 
         loss *= 1.0 / len(self.interp_times)
         return loss, metrics, y_pred

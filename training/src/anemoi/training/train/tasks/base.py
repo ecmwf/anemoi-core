@@ -539,7 +539,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,        
+        dataset_name: str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -565,7 +565,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         validation_mode: bool = False,
-        dataset_name: str| None = None,      
+        dataset_name: str | None = None,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss and metrics for the given predictions and targets.
@@ -824,7 +824,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,        
+        dataset_name: str | None = None,
         step: int | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:

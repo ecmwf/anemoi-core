@@ -20,5 +20,5 @@ __all__ = [
     "GraphEnsForecaster",
     "GraphForecaster",
     "GraphInterpolator",
-    "GraphMultiOutInterpolator"
+    "GraphMultiOutInterpolator",
 ]
