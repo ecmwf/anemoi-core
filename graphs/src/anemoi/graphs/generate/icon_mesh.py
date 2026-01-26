@@ -300,12 +300,15 @@ class ICONCellDataGrid:
                 nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
                 nearest_neighbour.fit(multi_mesh.nodeset.cc_vertices)
                 adj_matrix = nearest_neighbour.kneighbors_graph(
-                    self.nodeset.cc_vertices[np.unique(np.floor((np.where(edge_vertices[:,1] == -1)[0])/3).astype(int)),:],n_neighbors=3,
+                    self.nodeset.cc_vertices[
+                        np.unique(np.floor((np.where(edge_vertices[:, 1] == -1)[0]) / 3).astype(int)), :
+                    ],
+                    n_neighbors=3,
                 ).tocoo()
-                index=0
-                for line in np.unique(np.floor((np.where(edge_vertices[:,1] == -1)[0])/3).astype(int)):
-                    edge_vertices[(line*3):(line*3+3),1]=adj_matrix.tocsr()[index].indices
-                    index+=1
+                index = 0
+                for line in np.unique(np.floor((np.where(edge_vertices[:, 1] == -1)[0]) / 3).astype(int)):
+                    edge_vertices[(line * 3) : (line * 3 + 3), 1] = adj_matrix.tocsr()[index].indices
+                    index += 1
             super().__init__((self.nodeset, multi_mesh.nodeset), edge_vertices)
 
     def get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:
