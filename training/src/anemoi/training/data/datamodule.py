@@ -135,7 +135,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
+        return self._get_dataset(
+            self.train_dataloader_config,
+            shuffle=True,
+            label="training",
+        )
 
     @cached_property
     def ds_valid(self) -> MultiDataset:
@@ -156,7 +160,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self,
         datasets: dict[str, dict],
         shuffle: bool = True,
-        val_rollout: int = 1,
+        val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
         return MultiDataset(
