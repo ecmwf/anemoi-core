@@ -519,7 +519,7 @@ _COMPLEX_DTYPE_MAP = {
 
 
 class EcTransOctahedralSHTModule(Module):
-    """Octahedral SHT based on ecTrans assets (via ectrans4py or precomputed npz).
+    """Octahedral SHT based on precomputed ecTrans assets.
 
     Notes
     -----
@@ -530,7 +530,7 @@ class EcTransOctahedralSHTModule(Module):
       respectively. The lower triangular parts of the spectrum is stored as zeroes.
     """
 
-    def __init__(self, truncation: int, dtype: torch.dtype = torch.float32, filepath: str | Path | None = None) -> None:
+    def __init__(self, truncation: int, dir_path: str | Path, dtype: torch.dtype = torch.float32) -> None:
         super().__init__()
         self.truncation = truncation
         self.n_lat_nh = truncation + 1
@@ -543,7 +543,7 @@ class EcTransOctahedralSHTModule(Module):
         # Needed to access the corresponding grid points from the 1D input fields
         self.cumsum_indices = torch.cat([torch.tensor([0]), torch.cumsum(torch.tensor(self.lons_per_lat), dim=0)])
 
-        symmetric, antisymmetric, gaussian_weights = self._get_polynomials_and_weights(filepath)
+        symmetric, antisymmetric, gaussian_weights = self._get_polynomials_and_weights(dir_path)
 
         self._register_polynomials(symmetric, antisymmetric, gaussian_weights)
 
@@ -576,60 +576,24 @@ class EcTransOctahedralSHTModule(Module):
             ].shape[0]
         return n_lats_per_wavenumber
 
-    def generate(self):
-        # Fetch relevant arrays from ecTrans
-        # Note that all of these arrays (including the input points-per-latitude array) are
-        # specified across the full globe, pole to pole
-        try:
-            import ectrans4py  # type: ignore
-        except Exception as exc:  # pragma: no cover
-            msg = (
-                "ectrans4py is required to generate octahedral SHT assets. "
-                "Either install ectrans4py or provide a precomputed npz via `filepath=`."
-            )
-            raise ModuleNotFoundError(msg) from exc
-
-        poly_size = sum(self.truncation + 2 - im for im in range(self.truncation + 1))
-
-        (highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials) = ectrans4py.get_legendre_assets(
-            2 * self.n_lat_nh,
-            self.truncation,
-            2 * self.n_lat_nh,
-            poly_size,
-            np.array(self.lons_per_lat),
-            1,
-        )
-        return highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials
-
-    def generate_and_save(self, filepath: Path):
-        highest_zonal_wavenumber_per_lat, gaussian_weights, legendre_polynomials = self.generate()
-        if filepath:
-            np.savez(
-                filepath,
-                legendre_polynomials=legendre_polynomials,
-                gaussian_weights=gaussian_weights,
-                highest_zonal_wavenumber_per_lat=highest_zonal_wavenumber_per_lat,
-            )
-        return highest_zonal_wavenumber_per_lat, gaussian_weights, legendre_polynomials
-
-    def load_from_disk(self, filepath: Path):
-        loaded_assets = np.load(filepath)
+    def load_assets_from_disk(self, dir_path: str | Path):
+        filepath = f"{dir_path}/sht_assets_o{self.n_lat_nh}.npz"
+        loaded_assets = np.load(Path(filepath))
         return (
             loaded_assets["highest_zonal_wavenumber_per_lat"],
             loaded_assets["gaussian_weights"],
             loaded_assets["legendre_polynomials"],
         )
 
-    def _get_polynomials_and_weights(self, filepath: Path | str = None) -> list[torch.Tensor]:
+    def _get_polynomials_and_weights(self, dir_path: str | Path) -> list[torch.Tensor]:
         """Provides associated Legendre polynomials.
 
-        Either loads precomputed polynomials and normalisation from disk or generates them via ectrans4py. Note
-        that the latter requires ectrans to be installed in your environment.
+        Loads precomputed polynomials, Gaussian weights, and cutoff wavenumber arrays from disk.
 
         Parameters
         ----------
-        filepath : Path, optional
-            Path to polynomials, by default None
+        dir_path : str or Path
+            Path to directory containing SHT assets (weights, polynomials etc.)
 
         Returns
         -------
@@ -637,14 +601,9 @@ class EcTransOctahedralSHTModule(Module):
             Returns symmetric and antisymmetric polynomials and normalisation
         """
 
-        if filepath and Path(filepath).exists():
-            self.highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials = self.load_from_disk(
-                filepath
-            )
-        else:
-            self.highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials = self.generate_and_save(
-                filepath
-            )
+        self.highest_zonal_wavenumber_per_lat, gaussian_weights, all_legendre_polynomials = self.load_assets_from_disk(
+            dir_path
+        )
 
         # Flatten Legendre polynomial array to make it easier to unpack
         all_legendre_polynomials = all_legendre_polynomials.flatten()
@@ -808,8 +767,7 @@ class EcTransOctahedralSHTModule(Module):
 
 
 class InverseEcTransOctahedralSHTModule(EcTransOctahedralSHTModule):
-    """Octahedral SHT based on ecTrans assets (via ectrans4py or precomputed npz).
-    Inverse version.
+    """Octahedral SHT based on precomputed ecTrans assets, inverse version.
 
     Notes
     -----
