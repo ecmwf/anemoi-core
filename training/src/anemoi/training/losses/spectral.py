@@ -99,18 +99,27 @@ class SpectralLoss(BaseLoss):
         _ = scalers  # intentionally unused
         kwargs.pop("scalers", None)
 
+        # Sharding over grid dimension is not supported for spectral transforms.
+        # Enforce loss to be calculated on full grids.
+        self.supports_sharding = False
+
         if transform == "fft2d":
+            LOGGER.info("Using FFT2D spectral transform in spectral loss.")
             self.transform = FFT2D(**kwargs)
         elif transform == "dct2d":
+            LOGGER.info("Using DCT2D spectral transform in spectral loss.")
             self.transform = DCT2D(**kwargs)
         elif transform == "cartesian_sht":
             # expected additional args: grid
+            LOGGER.info("Using Cartesian SHT spectral transform in spectral loss.")
             self.transform = CartesianSHT(**kwargs)
         elif transform == "octahedral_sht":
             # expected additional args: lmax/mmax/folding
+            LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
         elif transform == "ectrans_octahedral_sht":
             # expected args: truncation (+ optional dtype, filepath)
+            LOGGER.info("Using EcTrans Octahedral SHT spectral transform in spectral loss.")
             self.transform = EcTransOctahedralSHT(**kwargs)
         else:
             msg = f"Unknown transform type: {transform}"
