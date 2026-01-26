@@ -50,11 +50,9 @@ reference it in the config as follows:
 
    # loss function for the model
    training_loss:
-      datasets:
-         your_dataset_name:
-            # loss class to initialise
-            _target_: anemoi.training.losses.mse.WeightedMSELoss
-            # loss function kwargs here
+      # loss class to initialise
+      _target_: anemoi.training.losses.mse.WeightedMSELoss
+      # loss function kwargs here
 
 ******************************
  Probabilistic Loss Functions
@@ -75,14 +73,12 @@ deterministic:
 
    # loss function for the model
    training_loss:
-      datasets:
-         your_dataset_name:
-            # loss class to initialise
-            _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
-            # loss function kwargs here
+      # loss class to initialise
+      _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
+      # loss function kwargs here
 
 ***************************
- Multiscale Loss Functions
+ Multisclae Loss Functions
 ***************************
 
 The `MultiscaleLossWrapper` implements the multiscale loss formulation
@@ -95,21 +91,19 @@ The config for the multiscale loss functions is the following:
 .. code:: yaml
 
    training_loss:
-      datasets:
-         your_dataset_name:
-            _target_: anemoi.training.losses.MultiscaleLossWrapper
-            loss_matrices_path: ${system.input.loss_matrices_path}
-            loss_matrices: ["matrix.npz", null]
-            weights:
-               - 1.0
-               - 1.0
+      _target_: anemoi.training.losses.MultiscaleLossWrapper
+      loss_matrices_path: ${system.input.loss_matrices_path}
+      loss_matrices: ["matrix.npz", null]
+      weights:
+         - 1.0
+         - 1.0
 
-            per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-               scalers: ['node_weights']
-               ignore_nans: False
-               no_autocast: True
-               alpha: 1.0
+      per_scale_loss:
+         _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+         scalers: ['node_weights']
+         ignore_nans: False
+         no_autocast: True
+         alpha: 1.0
 
 ************************
  Spatial Loss Functions
@@ -145,11 +139,9 @@ define whether to include them in the loss function by setting
 
    # loss function for the model
    training_loss:
-      datasets:
-         your_dataset_name:
-            # loss class to initialise
-            _target_: anemoi.training.losses.mse.WeightedMSELoss
-            scalers: ['scaler1', 'scaler2']
+      # loss class to initialise
+      _target_: anemoi.training.losses.mse.WeightedMSELoss
+      scalers: ['scaler1', 'scaler2']
 
 Scalers can be added as options for the loss functions using the
 `scaler` builders in `config.training.scaler`.
@@ -235,14 +227,12 @@ are available.
 .. code:: yaml
 
    variable_groups:
-      datasets:
-         your_dataset_name:
-            default: sfc
-            pl:
-               is_pressure_level: True
-            z_ml:
-               is_model_level: True
-               param: 'z'
+     default: sfc
+     pl:
+        is_pressure_level: True
+     z_ml:
+        is_model_level: True
+        param: 'z'
 
 The list of available metadata attributes is:
 
@@ -269,16 +259,14 @@ level, several groups can be defined:
 .. code:: yaml
 
    variable_groups:
-      datasets:
-         your_dataset_name:
-            default: sfc
-            pl:
-               is_pressure_level: True
-            l_50:  # this needs to come first to take priority
-               param: ["z"]
-               level: [50]
-            l:
-               param: ["z"]
+     default: sfc
+     pl:
+        is_pressure_level: True
+     l_50:  # this needs to come first to take priority
+        param: ["z"]
+        level: [50]
+     l:
+        param: ["z"]
 
 If metadata is not available, complex variable groups cannot be defined,
 and an error will be raised.
@@ -401,15 +389,13 @@ losses above.
 .. code:: yaml
 
    training_loss:
-      datasets:
-         your_dataset_name:
-            _target_: anemoi.training.losses.combined.CombinedLoss
-            losses:
-               - __target__: anemoi.training.losses.mse.WeightedMSELoss
-               - __target__: anemoi.training.losses.mae.WeightedMAELoss
-            scalers: ['variable']
-            loss_weights: [1.0,0.5]
-            scalars: ['variable']
+      _target_: anemoi.training.losses.combined.CombinedLoss
+      losses:
+         - __target__: anemoi.training.losses.mse.WeightedMSELoss
+         - __target__: anemoi.training.losses.mae.WeightedMAELoss
+      scalers: ['variable']
+      loss_weights: [1.0,0.5]
+      scalars: ['variable']
 
 All extra kwargs passed to ``CombinedLoss`` are passed to each of the
 loss functions, and the loss weights are used to scale the individual
@@ -426,16 +412,14 @@ individual loss config.
 .. code:: yaml
 
    training_loss:
-      datasets:
-         your_dataset_name:
-            _target_: anemoi.training.losses.combined.CombinedLoss
-            losses:
-                  - _target_: anemoi.training.losses.mse.WeightedMSELoss
-                  scalars: ['variable']
-                  - _target_: anemoi.training.losses.mae.WeightedMAELoss
-                  scalars: ['loss_weights_mask']
-            loss_weights: [1.0, 1.0]
-            scalars: ['*']
+      _target_: anemoi.training.losses.combined.CombinedLoss
+      losses:
+            - _target_: anemoi.training.losses.mse.WeightedMSELoss
+              scalars: ['variable']
+            - _target_: anemoi.training.losses.mae.WeightedMAELoss
+              scalars: ['loss_weights_mask']
+      loss_weights: [1.0, 1.0]
+      scalars: ['*']
 
 .. automodule:: anemoi.training.losses.combined
    :members:

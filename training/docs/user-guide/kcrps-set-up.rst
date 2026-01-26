@@ -26,7 +26,7 @@ training:
       -  :class:`DDPEnsGroupStrategy`
 
    -  -  Training loss
-      -  :class:`MSELoss`
+      -  :class:`WeightedMSELoss`
       -  :class:`AlmostFairKernelCRPS`
 
    -  -  Model
@@ -35,7 +35,7 @@ training:
 
    -  -  Datamodule
       -  :class:`AnemoiDatasetsDataModule`
-      -  :class:`AnemoiDatasetsDataModule`
+      -  :class:`AnemoiEnsDatasetsDataModule`
 
 **************************
  Changes in System config

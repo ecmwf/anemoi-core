@@ -169,13 +169,13 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         reference_node_name: str,
         name: str,
         lat_key: str = "latitudes",
-        lon_key: str = "longitudes",
+        lon_key: str = "longiutdes",
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
     ) -> None:
-        super().__init__(npz_file, name, lat_key, lon_key)
-
         self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
+
+        super().__init__(npz_file, name, lat_key, lon_key)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)

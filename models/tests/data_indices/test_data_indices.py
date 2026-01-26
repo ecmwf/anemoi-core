@@ -78,14 +78,10 @@ def test_output_tensor_index_todict(output_tensor_index) -> None:
         "diagnostic": torch.Tensor([2]).to(torch.int),
         "forcing": torch.Tensor([0, 1]).to(torch.int),
         "prognostic": torch.Tensor([3, 4]).to(torch.int),
-        "name_to_index": dict(x=0, y=1, z=2, q=3, other=4),
     }
     for key, value in output_tensor_index.todict().items():
         assert key in expected_output
-        if isinstance(value, dict):
-            assert value == expected_output[key]
-        else:
-            assert torch.allclose(value, expected_output[key])
+        assert torch.allclose(value, expected_output[key])
 
 
 def test_output_tensor_index_getattr(output_tensor_index) -> None:
@@ -116,14 +112,10 @@ def test_input_tensor_index_todict(input_tensor_index) -> None:
         "diagnostic": torch.Tensor([2]).to(torch.int),
         "forcing": torch.Tensor([0, 1]).to(torch.int),
         "prognostic": torch.Tensor([3, 4]).to(torch.int),
-        "name_to_index": dict(x=0, y=1, z=2, q=3, other=4),
     }
     for key, value in input_tensor_index.todict().items():
         assert key in expected_output
-        if isinstance(value, dict):
-            assert value == expected_output[key]
-        else:
-            assert torch.allclose(value, expected_output[key])
+        assert torch.allclose(value, expected_output[key])
 
 
 def test_input_tensor_index_getattr(input_tensor_index) -> None:

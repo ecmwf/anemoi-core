@@ -24,7 +24,6 @@ from pydantic import PositiveInt
 from pydantic import field_validator
 from pydantic import model_validator
 
-from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
@@ -150,8 +149,6 @@ class TendencyScalerSchema(BaseModel):
         example="anemoi.training.losses.scalers.StdevTendencyScaler",
         alias="_target_",
     )
-    timestep: str | None = Field(default=None, example="6h")
-    "Timestep key used to select tendency statistics for scalers."
 
 
 class VariableLevelScalerTargets(str, Enum):
@@ -371,8 +368,6 @@ class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
 
 StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
 
-VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]]
-
 
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
@@ -409,15 +404,15 @@ class BaseTrainingSchema(BaseModel):
     "Strategy to use."
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
-    training_loss: DatasetDict[LossSchemas]
+    training_loss: LossSchemas
     "Training loss configuration."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
-    scalers: DatasetDict[dict[str, ScalerSchema]]
+    scalers: dict[str, ScalerSchema]
     "Scalers to use in the computation of the loss and validation scores."
-    validation_metrics: DatasetDict[dict[str, LossSchemas]]
+    validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations."
-    variable_groups: DatasetDict[VariableGroupType]
+    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str | int]]]
     "Groups for variable loss scaling"
     max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
@@ -429,7 +424,7 @@ class BaseTrainingSchema(BaseModel):
     "Optimizer configuration."
     recompile_limit: PositiveInt = 32
     "How many times torch.compile will recompile a function for a given input shape."
-    metrics: DatasetDict[list[str]]
+    metrics: list[str]
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
@@ -465,7 +460,7 @@ class InterpolationSchema(BaseTrainingSchema):
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
-    target_forcing: DatasetDict[TargetForcing]
+    target_forcing: TargetForcing
     "Forcing parameters for target output times."
 
 

@@ -15,13 +15,21 @@ the model (``__iter__``).
 .. note::
 
    Users wishing to change the format of the batch input into the model
-   should sub-class ``MultiDataset`` and change the ``__iter__``
+   should sub-class ``NativeGridDataset`` and change the ``__iter__``
    function.
 
-The ``multidataset.py`` file contains the ``MultiDataset`` class
-which is used for deterministic and probabilistic model training.
+The ``singledataset.py`` file contains the ``NativeGridDataset`` class
+which is used for deterministic model training.
 
-.. automodule:: anemoi.training.data.multidataset
+.. automodule:: anemoi.training.data.dataset.singledataset
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+The ``ensdataset.py`` file contains the ``EnsNativeGridDataset`` class
+which is used for ensemble model training.
+
+.. automodule:: anemoi.training.data.dataset.ensdataset
    :members:
    :no-undoc-members:
    :show-inheritance:

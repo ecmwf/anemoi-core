@@ -119,9 +119,9 @@ as there is no message passing or interaction between nodes.
  Encoders/Decoders
 *******************
 
-The encoders and decoders can be chosen to be GNNs, GraphTransformers,
-or Transformers. This choice is independent of the processor, but
-currently the encoders and decoders must be the same model type otherwise
+The encoder and decoder can be chosen to be a GNN, a GraphTransformer,
+or a Transformer. This choice is independent of the processor, but
+currently the encoder and decoder must be the same model type otherwise
 the code will break.
 
 *******************

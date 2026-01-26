@@ -16,46 +16,38 @@ dataloader:
     adjust: all
     min_distance_km: 0
   training:
-    datasets:
-      data:
-        end: 2017-12-29
+    end: 2017-12-29
   validation:
-    datasets:
-      data:
-        start: 2017-12-30
+    start: 2017-12-30
 
 # need this modification since some variables set in the default zarr config are not part of the dataset
 data:
-  datasets:
-    data:
-      forcing:
-        - "cos_latitude"
-        - "cos_longitude"
-        - "sin_latitude"
-        - "sin_longitude"
-        - "cos_julian_day"
-        - "cos_local_time"
-        - "sin_julian_day"
-        - "sin_local_time"
-      diagnostic:
-        - tp
-      processors:
-        normalizer:
-          config:
-            default: "mean-std"
-            std:
-              - "tp"
-            min-max:
-            max:
-            none:
-              - "cos_latitude"
-              - "cos_longitude"
-              - "sin_latitude"
-              - "sin_longitude"
-              - "cos_julian_day"
-              - "cos_local_time"
-              - "sin_julian_day"
-              - "sin_local_time"
+  forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+  diagnostic:
+    - tp
+  normalizer:
+    default: "mean-std"
+    std:
+      - "tp"
+    min-max:
+    max:
+    none:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
 
 graph:
   nodes:
@@ -69,7 +61,5 @@ model:
 
 training:
   scalers:
-    datasets:
-      data:
-        node_weights:
-          weight_frac_of_total: 0.25
+    node_weights:
+      weight_frac_of_total: 0.25

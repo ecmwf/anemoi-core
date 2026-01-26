@@ -122,14 +122,12 @@ which is recommended for interactive terminals and
 
          callbacks:
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
-            dataset_names: ["your_dataset_name"]
             # group parameters by categories when visualizing contributions to the loss
             # one-parameter groups are possible to highlight individual parameters
             parameter_groups:
                moisture: [tp, cp, tcw]
                sfc_wind: [10u, 10v]
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
-            dataset_names: ["your_dataset_name"]
             sample_idx: ${diagnostics.plot.sample_idx}
             per_sample : 6
             parameters: ${diagnostics.plot.parameters}

@@ -18,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 def worker_init_func(worker_id: int) -> None:
     """Configures each dataset worker process.
 
-    Calls per_worker_init() on each dataset object.
+    Calls WeatherBenchDataset.per_worker_init() on each dataset object.
 
     Parameters
     ----------

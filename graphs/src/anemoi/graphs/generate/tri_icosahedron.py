@@ -175,7 +175,7 @@ def add_1_hop_edges(
         trimesh.creation.icosphere(subdivisions=max(node_resolutions), radius=1.0).vertices
     )
     assert np.all(
-        (nodes_coords_rad.cpu().numpy() - unmasked_nodes[node_ordering]) == 0
+        (nodes_coords_rad.numpy() - unmasked_nodes[node_ordering]) == 0
     ), "Node coordates do not match coordinates used for multi-scale edge building"
     LOGGER.debug("unmasked_nodes shape[0]: %d", unmasked_nodes.shape[0])
     if area_mask_builder is not None:

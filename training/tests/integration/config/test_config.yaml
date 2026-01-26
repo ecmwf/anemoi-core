@@ -1,17 +1,13 @@
 # Modifications for the basic template "config.yaml"
 system:
   input:
-    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
 
 dataloader:
   training:
-    datasets:
-      data:
-        end: 2017-01-08 12:00:00
+    end: 1979-01-08 12:00:00
   validation:
-    datasets:
-      data:
-        start: 2017-01-08 18:00:00
+    start: 1979-01-08 18:00:00
 
 diagnostics:
   log:

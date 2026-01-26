@@ -29,7 +29,6 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -106,12 +105,9 @@ class AnemoiTrainer(ABC):
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
         datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
-        # Multi-dataset case: store num_features per dataset
-        self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
-        # Log information for each dataset
-        for name, data in datamodule.ds_train.data.items():
-            LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
-            LOGGER.info("Dataset '%s' - Variables: %s", name, str(data.variables))
+        self.config.data.num_features = len(datamodule.ds_train.data.variables)
+        LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
+        LOGGER.info("Variables: %s", str(datamodule.ds_train.data.variables))
         return datamodule
 
     @cached_property
@@ -141,33 +137,26 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
-        """Create graph for a specific dataset, overriding the dataset path in config."""
-        # Determine filename
+    @cached_property
+    def graph_data(self) -> HeteroData:
+        """Graph data.
+
+        Creates the graph in all workers.
+        """
         if (graph_filename := self.config.system.input.graph) is not None:
             graph_filename = Path(graph_filename)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
-
-            # Try loading existing
             if graph_filename.exists() and not self.config.graph.overwrite:
                 from anemoi.graphs.utils import get_distributed_device
 
                 LOGGER.info("Loading graph data from %s", graph_filename)
                 return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+
         else:
             graph_filename = None
 
-        # Create new graph
         from anemoi.graphs.create import GraphCreator
 
         graph_config = convert_to_omegaconf(self.config).graph
-
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
-
         return GraphCreator(config=graph_config).create(
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,
@@ -178,16 +167,6 @@ class AnemoiTrainer(ABC):
     def profiler(self) -> None:
         """Abstract method to be used for AnemoiProfiler."""
         return None
-
-    @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
-        return graphs
 
     @cached_property
     def model(self) -> pl.LightningModule:
@@ -209,7 +188,7 @@ class AnemoiTrainer(ABC):
         "Please use a different activation function."
 
         kwargs = {
-            "config": convert_to_omegaconf(self.config),
+            "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
@@ -241,8 +220,7 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            self.data_indices.compare_variables(model._ckpt_model_name_to_index, self.data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -340,33 +318,18 @@ class AnemoiTrainer(ABC):
     @cached_property
     def metadata(self) -> dict:
         """Metadata and provenance information."""
-        metadata_inference = {
-            "seed": self.initial_seed,
-            "run_id": self.run_id,
-            "dataset_names": None,  # will be populated in DataModule
-            "task": None,  # will be populated in BaseGraphModule
-        }
-        # Store metadata needed in inference in a separate dict "metadata_inference"
-        # For each group, we add a dictionary with:
-        # - data_indices, containing name_to_index mappings
-        # - variable_types, specifyting forcing/diagnostics/prognostic/target splits
-        # - shapes, specifying the shape of the input tensor (for dimensions where the size is fixed)
-        # - timesteps, specifying the time steps used during training for input and output
-
-        md_dict = {
-            "version": "2.0",
-            "config": convert_to_omegaconf(self.config),
-            "seed": self.initial_seed,
-            "run_id": self.run_id,
-            "dataset": None,  # will be populated in DataModule
-            "data_indices": None,  # will be populated in DataModule
-            "provenance_training": gather_provenance_info(),
-            "timestamp": datetime.datetime.now(tz=datetime.UTC),
-            "metadata_inference": metadata_inference,
-            "uuid": None,  # will be populated in checkpoint callback
-        }
-        self.datamodule.fill_metadata(md_dict)
-        return map_config_to_primitives(md_dict)
+        return map_config_to_primitives(
+            {
+                "version": "1.0",
+                "config": convert_to_omegaconf(self.config),
+                "seed": self.initial_seed,
+                "run_id": self.run_id,
+                "dataset": self.datamodule.metadata,
+                "data_indices": self.datamodule.data_indices,
+                "provenance_training": gather_provenance_info(),
+                "timestamp": datetime.datetime.now(tz=datetime.UTC),
+            },
+        )
 
     @cached_property
     def supporting_arrays(self) -> dict:
@@ -401,16 +364,10 @@ class AnemoiTrainer(ABC):
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
-        # Log number of variables (features) per dataset
-        for dataset_name, data in self.datamodule.ds_train.data.items():
-            num_forcing_features = len(self.data_indices[dataset_name].forcing)
-            num_fc_features = len(data.variables) - num_forcing_features
-            LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
-            LOGGER.info(
-                "Dataset '%s' - Total number of auxiliary variables: %d",
-                dataset_name,
-                num_forcing_features,
-            )
+        # Log number of variables (features)
+        num_fc_features = len(self.datamodule.ds_train.data.variables) - len(self.config.data.forcing)
+        LOGGER.info("Total number of prognostic variables: %d", num_fc_features)
+        LOGGER.info("Total number of auxiliary variables: %d", len(self.config.data.forcing))
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node
         total_number_of_model_instances = (

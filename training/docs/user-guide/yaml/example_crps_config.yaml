@@ -38,22 +38,18 @@ training:
 
   # Changes in training loss
   training_loss:
-    datasets:
-      your_dataset_name:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-        scalars: ["variable"]
-        ignore_nans: False
-        alpha: 1.0
+    _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+    scalars: ["variable"]
+    ignore_nans: False
+    alpha: 1.0
 
   # Changes in validation metrics
   validation_metrics:
-    datasets:
-      your_dataset_name:
-        kcrps:
-          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-          scalars: []
-          ignore_nans: False
-          alpha: 1.0
+    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+      scalars: []
+      ignore_nans: False
+      alpha: 1.0
+
 diagnostics:
   plot:
     callbacks: []

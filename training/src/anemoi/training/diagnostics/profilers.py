@@ -499,15 +499,14 @@ class BenchmarkProfiler(Profiler):
             f.write(model_summary)
             f.close()
 
-    def get_model_summary(self, model: BaseGraphModule, example_input_array: dict[str, np.ndarray]) -> str:
+    def get_model_summary(self, model: BaseGraphModule, example_input_array: np.ndarray) -> str:
 
         from torchinfo import summary
 
         # when using flash attention model, we need to convert the input and model to float16 and cuda
         # since FlashAttention only supports fp16 and bf16 data type
-        for dataset_name in example_input_array:
-            example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
-            example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")
+        example_input_array = example_input_array.to(dtype=torch.float16)
+        example_input_array = example_input_array.to("cuda")
         model.half()
         model = model.to("cuda")
 

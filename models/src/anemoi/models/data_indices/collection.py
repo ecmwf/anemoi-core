@@ -27,21 +27,15 @@ LOGGER = logging.getLogger(__name__)
 class IndexCollection:
     """Collection of data and model indices."""
 
-    def __init__(self, data_config, name_to_index) -> None:
-        self.config = OmegaConf.to_container(data_config, resolve=True)
+    def __init__(self, config, name_to_index) -> None:
+        self.config = OmegaConf.to_container(config, resolve=True)
         self.name_to_index = dict(sorted(name_to_index.items(), key=operator.itemgetter(1)))
-        self.forcing = (
-            []
-            if data_config.get("forcing", None) is None
-            else OmegaConf.to_container(data_config.forcing, resolve=True)
-        )
+        self.forcing = [] if config.data.forcing is None else OmegaConf.to_container(config.data.forcing, resolve=True)
         self.diagnostic = (
-            []
-            if data_config.get("diagnostic", None) is None
-            else OmegaConf.to_container(data_config.diagnostic, resolve=True)
+            [] if config.data.diagnostic is None else OmegaConf.to_container(config.data.diagnostic, resolve=True)
         )
         self.target = (
-            [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
+            [] if config.data.get("target", None) is None else OmegaConf.to_container(config.data.target, resolve=True)
         )
         defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
         self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
@@ -76,7 +70,7 @@ class IndexCollection:
         )
 
     def __repr__(self) -> str:
-        return f"IndexCollection(data_config={self.config}, name_to_index={self.name_to_index})"
+        return f"IndexCollection(config={self.config}, name_to_index={self.name_to_index})"
 
     def __eq__(self, other):
         if not isinstance(other, IndexCollection):

@@ -36,8 +36,6 @@ training:
     target: [1, 2, 3, 4, 5]
 
   target_forcing: #forcing parameters for the target time to include as input
-    datasets:
-      data: # dataset name
-        data: #of which come from the dataset
-          - "insolation"
-        time_fraction: True
+    data: #of which come from the dataset
+      - "insolation"
+    time_fraction: True

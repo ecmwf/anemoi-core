@@ -15,6 +15,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
@@ -111,7 +112,7 @@ def _apply_scalers(
             loss_function.set_data_indices(data_indices)
 
 
-def get_metric_ranges(
+def _get_metric_ranges(
     extract_variable_group_and_level: ExtractVariableGroupAndLevel,
     output_data_indices: OutputTensorIndex,
     metrics_to_log: list,
@@ -131,3 +132,18 @@ def get_metric_ranges(
     # Add the full list of output indices
     metric_ranges["all"] = output_data_indices.full.tolist()
     return metric_ranges
+
+
+def get_metric_ranges(
+    config: DictConfig,
+    data_indices: IndexCollection,
+    metadata_extractor: ExtractVariableGroupAndLevel,
+) -> tuple[METRIC_RANGE_DTYPE, METRIC_RANGE_DTYPE]:
+
+    metrics_to_log = config.training.metrics or []
+
+    return _get_metric_ranges(
+        metadata_extractor,
+        data_indices.model.output,
+        metrics_to_log,
+    )
