@@ -60,6 +60,26 @@ background thread, allowing plotting tasks to be offloaded to worker
 threads. This setup keeps the main thread responsive, handling
 plot-related tasks asynchronously and efficiently in the background.
 
+**Focus Area**
+
+Plotting callbacks (such as ``PlotSample``, ``PlotLoss``, and ``LongRolloutPlots``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
+
+* **Mask Name**: A ``mask_attr_name`` string referencing a boolean mask defined within the graph data.
+* **Lat/Lon Bounds**: A ``latlon_bbox`` list specifying a bounding box: ``[lat_min, lon_min, lat_max, lon_max]``.
+
+When a focus area is applied, the plot filenames and experiment log tags will automatically include a suffix (e.g., ``_mask_attr_name`` or ``_latlon_bbox``) to distinguish them from global plots.
+
+.. code:: yaml
+
+   # Example: Focusing on a specific geographic region
+   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+     sample_idx: ${diagnostics.plot.sample_idx}
+     parameters: ${diagnostics.plot.parameters}
+     focus_area:
+       latlon_bbox: [30.0, -20.0, 60.0, 40.0]
+
+**Rendering Methods**
+
 There is an additional flag in the plotting callbacks to control the
 rendering method for geospatial plots, offering a trade-off between
 performance and detail. When `datashader` is set to True, Datashader is
@@ -122,12 +142,14 @@ which is recommended for interactive terminals and
 
          callbacks:
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
-            dataset_names: ["your_dataset_name"]
-            # group parameters by categories when visualizing contributions to the loss
-            # one-parameter groups are possible to highlight individual parameters
-            parameter_groups:
-               moisture: [tp, cp, tcw]
-               sfc_wind: [10u, 10v]
+           # group parameters by categories when visualizing contributions to the loss
+           parameter_groups:
+              moisture: [tp, cp, tcw]
+              sfc_wind: [10u, 10v]
+           # Example focusing loss on a predefined mask
+           focus_area:
+             mask_attr_name: "cutout_mask"
+
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
             dataset_names: ["your_dataset_name"]
             sample_idx: ${diagnostics.plot.sample_idx}

@@ -35,6 +35,21 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
     "Epoch frequency to plot at."
 
 
+class FocusAreaSchema(BaseModel):
+    mask_attr_name: str | None = Field(default=None)
+    "Name of the node attribute to use as masking. eg. cutout_mask"
+
+    latlon_bbox: list[float] | None = Field(default=None, min_items=4, max_items=4)
+    "Latitude and longitude bounds as [lat_min, lon_min, lat_max, lon_max]."
+
+    @model_validator(mode="after")
+    def exactly_one_present(self) -> "FocusAreaSchema":
+        if (self.mask_attr_name is None) == (self.latlon_bbox is None):
+            msg = "Provide exactly one of 'mask_attr_name' or 'latlon_bbox' (not both)."
+            raise ValueError(msg)
+        return self
+
+
 class PlotLossSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
     "PlotLoss object from anemoi training diagnostics callbacks."
@@ -44,6 +59,8 @@ class PlotLossSchema(BaseModel):
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -106,6 +123,8 @@ class LongRolloutPlotsSchema(BaseModel):
     "Delay between frames in the animation in milliseconds, by default 400."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotSampleSchema(BaseModel):
@@ -129,6 +148,31 @@ class PlotSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
+
+
+class PlotReconstructionSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotReconstruction"] = Field(alias="_target_")
+    "PlotReconstruction object from anemoi training diagnostics callbacks."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    accumulation_levels_plot: list[float]
+    "Accumulation levels to plot."
+    cmap_accumulation: list[str] | None = Field(default=None)
+    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
+    precip_and_related_fields: list[str] | None = Field(default=None)
+    "List of precipitation related fields, by default None."
+    per_sample: int = Field(example=6)
+    "Number of plots per sample, by default 6."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
+    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
+    "List of colormaps to use, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotSpectrumSchema(BaseModel):
@@ -142,6 +186,8 @@ class PlotSpectrumSchema(BaseModel):
     "List of parameters to plot."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotHistogramSchema(BaseModel):
