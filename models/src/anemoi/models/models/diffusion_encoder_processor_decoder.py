@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from pytorch_lightning.utilities.rank_zero import rank_zero_info
 
 import logging
 import warnings
@@ -568,7 +569,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
     ) -> torch.Tensor:
         batch_size = x.shape[0]
         in_out_sharded = grid_shard_shapes is not None
-
+        # print("dans forward : x", x.shape, x)
         self._assert_valid_sharding(batch_size, 1, in_out_sharded, model_comm_group)
 
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
@@ -585,9 +586,13 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
             x, y_noised, batch_size, grid_shard_shapes, model_comm_group
         )
+
+        # print(f"dans forward :  shape de x latent {x_data_latent.shape}")
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
-
+        # print("x data latent shape,", x_data_latent.shape)
+        # print("x hidden latent shape ", x_hidden_latent.shape)
+        # print(f"dans forward :  shape de x hidden latent {x_hidden_latent.shape}")
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
@@ -631,7 +636,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
     ) -> torch.Tensor:
-       
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes
@@ -647,7 +651,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ):# -> torch.Tensor:
         """Sample from the diffusion model.
 
         Parameters
@@ -710,11 +714,15 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
 
         sdedit_in_config = "SDEdit" in noise_scheduler_config.keys()
-
+        
+        print("noise_scheduler_config", noise_scheduler_config)
+        params_inference = kwargs["params_inference"]
+        sdedit_in_config = 'SDEdit' in params_inference.keys()
+        #DEV ONLY
         if sdedit_in_config :
-            if noise_scheduler_config['SDEdit']:
+            if params_inference['SDEdit']:
 
-                num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
+                num_steps_sdedit = params_inference["num_steps_sdedit"]
                 
                 num_steps = len(sigmas) #total number of denoising steps when not using sdedit
                 
@@ -725,7 +733,23 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
                 sigmas = sigmas[num_steps - num_steps_sdedit :]
                 y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
 
-        x = torch.zeros_like(x, device=x.device) #set condition to constant = 0 as in training
+        # x = torch.zeros_like(x, device=x.device) #set condition to constant = 0 as in training
+
+        # if sdedit_in_config :
+        #     if noise_scheduler_config['SDEdit']:
+
+        #         num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
+                
+        #         num_steps = len(sigmas) #total number of denoising steps when not using sdedit
+                
+        #         assert num_steps_sdedit <= num_steps, f"num_steps_sdedit ({num_steps_sdedit}) must be <= num_steps ({num_steps})"
+        #         warnings.warn(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
+                
+        #         init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
+        #         sigmas = sigmas[num_steps - num_steps_sdedit :]
+        #         y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
+
+        # x = torch.zeros_like(x, device=x.device) #set condition to constant = 0 as in training
 
         return sampler_instance.sample(
             x,
@@ -765,6 +789,9 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         # To prepare the tensor, we must partially noise the condition tensor, with the right variables (prognostic variables).
         # To do so, we must remove from the condition tensor the forcings variables.
 
+        print("init sigma : ", init_sigma)
+        print("x", x)
+        
         forcings = self.data_indices["forcing"] 
         name_to_index = self.data_indices["name_to_index"]
 
@@ -778,9 +805,9 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
 
         mask = torch.ones(x.shape[-1], dtype=torch.bool, device=x.device) #creating a mask to removed the forcing variables, keeping only the prognostics variables
         mask[idx_to_drop] = False
-        x = x[:,1,:,:,mask] #We take only the time t= t0 (dim 1 corresponding to time = (t0-1, t0))
+        x = x[:,-1,:,:,mask] #We take only the time t= t0 (dim 1 corresponding to time = (t0-1, t0))
         y_init = (torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma + x).to(x.device)
-        
+        print("y _init", y_init)
         return y_init
     
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):

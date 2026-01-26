@@ -212,6 +212,7 @@ class EDMHeunSampler(DiffusionSampler):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
+        print("x dans edm sampler", x)
         # Override instance defaults with any kwargs
         S_churn = kwargs.get("S_churn", self.S_churn)
         S_min = kwargs.get("S_min", self.S_min)
@@ -219,17 +220,24 @@ class EDMHeunSampler(DiffusionSampler):
         S_noise = kwargs.get("S_noise", self.S_noise)
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
-
+        print("S chrun : ", S_churn)
+        print("S_min ", S_min)
+        print("S amx ", S_max)
+        print("S noise", S_noise)
+        print("denoising function ", DenoisingFunction)
         batch_size, ensemble_size = x.shape[0], x.shape[2]
+
         num_steps = len(sigmas) - 1
-        
+        print("num steps :", num_steps)
         # Heun sampling loop
         for i in range(num_steps):
             sigma_i = sigmas[i]
             sigma_next = sigmas[i + 1]
 
             apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
+            # print("apply_churn", apply_churn)
             if apply_churn:
+                print("apply churn")
                 gamma = min(S_churn / num_steps, torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1)
                 sigma_effective = sigma_i + gamma * sigma_i
                 epsilon = torch.randn_like(y) * S_noise
@@ -240,13 +248,21 @@ class EDMHeunSampler(DiffusionSampler):
             D1 = denoising_fn(
                 x,
                 y.to(dtype=x.dtype),
-                sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(x.dtype),
+                sigma_effective.view(1, 1, 1, 1).expand(y.shape[0], y.shape[1], 1, 1).to(x.dtype),
                 model_comm_group,
                 grid_shard_shapes,
             ).to(dtype)
-
+                      
             d = (y - D1) / (sigma_effective + eps_prec)
+            # print("D1 : ", D1.shape, D1)
+            if i in [0, 1, 2, num_steps//2, num_steps-3, num_steps-2, num_steps-1]:
+                with torch.no_grad():
+                    y_std  = y.float().std().item()
+                    d1_std = D1.float().std().item()
+                    resid_std = (y - D1).float().std().item()
 
+                    print(f"[i={i:02d}] sigma={float(sigma_effective):.6g}  "
+              f"std(y)={y_std:.4g} std(D1)={d1_std:.4g} std(y-D1)={resid_std:.4g}") 
             y_next = y + (sigma_next - sigma_effective) * d
 
             if sigma_next > eps_prec:

@@ -1,6 +1,6 @@
 ---
 defaults:
-  - scalers: global
+  - scalers: global_notendency
 
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null

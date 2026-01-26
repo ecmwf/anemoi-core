@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from __future__ import annotations
-
+from pytorch_lightning.utilities.rank_zero import rank_zero_info
 import numpy as np 
 import logging
 from typing import TYPE_CHECKING
@@ -197,6 +197,7 @@ class GraphDiffusionForecaster(GraphForecaster):
         rho: float,
         device: torch.device,
     ) -> tuple[torch.Tensor]:
+        print("sinon on passe dans graph normal ?")
         rnd_uniform = torch.rand(shape, device=device)
         sigma = (sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))) ** rho
         weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
@@ -232,7 +233,9 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
         self.rho = config.model.model.diffusion.rho
        
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) :#-> torch.Tensor:
-     
+        print("on passe bien la dedans ? forward")
+        rank_zero_info("shape x dans diff forecaster ", x.shape)
+        rank_zero_info("shape de y ", y_noised.shape)
         return self.model.model.fwd_with_preconditioning(
             x,
             y_noised,
@@ -262,7 +265,7 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
             device=y.device,
             dtype=y.dtype,
         )
-
+        print("on apsse bien la dedans ? rollout step ?")
         # Sample noise level
         sigma, noise_weights = self._get_noise_level(
             shape=(x.shape[0],) + (1,) * (x.ndim - 2),
@@ -306,6 +309,8 @@ class GraphUnconditionalDiffusionForecaster(GraphForecaster):
         rho,
         device,
     ):
+
+        print("on passe get noise ")
         rnd_uniform = torch.rand(shape, device=device)
         sigma = (sigma_max ** (1.0 / rho)
                  + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))) ** rho
