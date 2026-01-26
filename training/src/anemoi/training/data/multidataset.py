@@ -356,7 +356,11 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         start = index + self.data_relative_date_indices[0]
         end = index + self.data_relative_date_indices[-1] + 1
-        timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
+        if len(self.data_relative_date_indices) > 1:
+            timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
+        else:
+            timeincrement = 1  # single time step
+
         time_steps = slice(start, end, timeincrement)
         return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
 
