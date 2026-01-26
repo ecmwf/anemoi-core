@@ -200,7 +200,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         # Initialize components for multi-dataset
-        self.target_dataset_names = [] # list of dataset names used for loss computation
+        self.target_dataset_names = []  # list of dataset names used for loss computation
         self.scalers = {}  # dict of dict of tensors
         self.updating_scalars = {}  # dict of dict of objects
         self.val_metric_ranges = {}  # dict of dict of lists
@@ -651,7 +651,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.dataset_names:
             if dataset_name not in self.target_dataset_names:
-                # Loss and metrics not defined for this dataset
+                # Loss and metrics not defined for this dataset
                 continue
 
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(

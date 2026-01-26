@@ -118,10 +118,10 @@ training_loss:
       # CERRA uses additional scalers
       _target_: anemoi.training.losses.MSELoss
       scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: false 
+      ignore_nans: false
 
 validation_metrics:
-  datasets:   
+  datasets:
     era5: null
     cerra:
       mse:
