@@ -266,30 +266,12 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         y_pred = self(x_bound)
 
-        for interp_step in self.interp_times:
-            y_step = {}
-            y_pred_step = {}
-            for dataset_name in self.dataset_names:
-
-                y_pred_step[dataset_name] = y_pred[dataset_name][
-                    :,
-                    self.imap[interp_step] - 1,
-                    :,
-                    :,
-                    self.data_indices[dataset_name].data.output.full,
-                ]
-
-                y_step[dataset_name] = y[dataset_name][:, self.imap[interp_step] - 1, :, :, :]
-
-            loss_step, metrics_next, _ = self.compute_loss_metrics(
-                y_pred_step,
-                y_step,
+        loss, metrics, _ = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
                 validation_mode=validation_mode,
                 use_reentrant=False,
-            )
+        )
 
-            loss += loss_step
-            metrics.update(metrics_next)
-
-        loss *= 1.0 / len(self.interp_times)
         return loss, metrics, y_pred
