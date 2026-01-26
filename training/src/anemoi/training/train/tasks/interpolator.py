@@ -261,31 +261,31 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         y_preds =[]
 
         y_pred = self(x_bound)
-        # interp_indices = torch.as_tensor(
-        #                     [self.imap[interp_step] for interp_step in self.interp_times],
-        #                     device=x_bound_device,
-        #                     )
-        for i in self.interp_times:
+
+        for interp_step in self.interp_times:
             y_step = {}
             y_pred_step = {}
             for dataset_name, dataset_batch in batch.items():
                 y_pred_step[dataset_name] = y_pred[dataset_name][
                     :,
-                    i-1,
+                    self.imap[interp_step]-1,
                     :,
                     :,
                     self.data_indices[dataset_name].data.output.full,
                 ]                    
-                y_step[dataset_name] = dataset_batch.index_select(1, i-1)[
-                    ...,
-                self.data_indices[dataset_name].data.output.full,
-                ]
+                y_step[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap), ...][
+                    :,
+                    self.imap[interp_step]-1,
+                    :,
+                    :,
+                    self.data_indices[dataset_name].data.output.full,
+                ]    
 
             loss_step, metrics_next, y_pred = checkpoint(
                     self.compute_loss_metrics,
                     y_pred_step,
                     y_step,
-                    step=i-1,
+                    step=self.imap[interp_step]-1,
                     validation_mode=validation_mode,
                     use_reentrant=False,
             )
