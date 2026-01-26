@@ -200,7 +200,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         # Initialize components for multi-dataset
-        self.latlons_data = {}  # plotting only, dict of tensors
+        self.target_dataset_names = [] # list of dataset names used for loss computation
         self.scalers = {}  # dict of dict of tensors
         self.updating_scalars = {}  # dict of dict of objects
         self.val_metric_ranges = {}  # dict of dict of lists
@@ -214,7 +214,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
         for dataset_name in self.dataset_names:
-            self.latlons_data[dataset_name] = graph_data[dataset_name][config.graph.data].x
+            if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
+                LOGGER.warning(f"Dataset {dataset_name} is skipped for loss & metric computation.")
+                continue
+
+            self.target_dataset_names.append(dataset_name)
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
@@ -646,6 +650,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.dataset_names:
+            if dataset_name not in self.target_dataset_names:
+                # Loss and metrics not defined for this dataset
+                continue
+
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
                 y_pred[dataset_name],
                 y[dataset_name],

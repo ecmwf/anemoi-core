@@ -113,19 +113,16 @@ submodules_to_freeze: []
 # Dataset-specific loss and metrics configuration
 training_loss:
   datasets:
-    era5:
-      _target_: anemoi.training.losses.MSELoss
-      scalers: []
-      ignore_nans: true
+    era5: null
     cerra:
       # CERRA uses additional scalers
       _target_: anemoi.training.losses.MSELoss
       scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: false
+      ignore_nans: false 
 
 validation_metrics:
-  datasets:
-    era5:
+  datasets:   
+    era5: null
     cerra:
       mse:
         _target_: anemoi.training.losses.MSELoss
@@ -135,8 +132,7 @@ validation_metrics:
 # ERA5-specific variable groups (extends default with more variables)
 variable_groups:
   datasets:
-    era5:
-      default: none
+    era5: null
     cerra:
       default: sfc
       pl:
