@@ -267,11 +267,11 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         y_pred = self(x_bound)
 
         loss, metrics, _ = checkpoint(
-                self.compute_loss_metrics,
-                y_pred,
-                y,
-                validation_mode=validation_mode,
-                use_reentrant=False,
+            self.compute_loss_metrics,
+            y_pred,
+            y,
+            validation_mode=validation_mode,
+            use_reentrant=False,
         )
 
         return loss, metrics, y_pred

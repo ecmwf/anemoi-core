@@ -303,7 +303,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                                 pl_module.grid_dim,
                             )
                             for dataset_name, dataset_pred in output[1].items()
-                        }
+                        },
                     ],
                 ]
             # When running in Async mode, it might happen that in the last epoch these tensors
