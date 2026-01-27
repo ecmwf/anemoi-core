@@ -267,11 +267,12 @@ class ICONCellDataGrid:
 
     uuidOfHGrid: str
     nodeset: NodeSet  # set of ICON cell circumcenters
+    multi_mesh: ICONMultiMesh
     max_level: int
     select_c: np.ndarray
 
     def __init__(
-        self, icon_grid_filename: str, max_level: int | None = None, multi_mesh: Optional[ICONMultiMesh] = None
+        self, icon_grid_filename: str, max_level: int | None = None, multi_mesh: ICONMultiMesh | None = None
     ):
         self.grid_filename = icon_grid_filename
 
