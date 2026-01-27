@@ -370,7 +370,6 @@ def downscaler_config(
     return cfg, dataset_urls
 
 
-
 @pytest.fixture
 def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths) -> tuple[DictConfig, str]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
