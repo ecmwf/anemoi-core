@@ -54,6 +54,8 @@ grid_indices:
 
 dataset: ${system.input.dataset}
 
+model_run_info: null  # Add for non-analysis training
+
 training:
   datasets:
     data:
@@ -62,6 +64,7 @@ training:
       end: 2020
       frequency: ${data.frequency}
       drop: []
+      trajectory: ${dataloader.model_run_info}
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
 
@@ -73,6 +76,7 @@ validation:
       end: 2021
       frequency: ${data.frequency}
       drop: []
+      trajectory: ${dataloader.model_run_info}
 
 test:
   datasets:
@@ -82,3 +86,4 @@ test:
       end: null
       frequency: ${data.frequency}
       drop: []
+      trajectory: ${dataloader.model_run_info}

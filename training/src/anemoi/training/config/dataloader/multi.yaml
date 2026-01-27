@@ -60,12 +60,14 @@ training:
       end: 2020
       frequency: ${data.frequency}
       drop: []
+      trajectory: null
     cerra:
       dataset: ${system.input.dataset_b}  # Using same dataset as duplicate for testing
       start: 1985
       end: 2020
       frequency: ${data.frequency}
       drop: []
+      trajectory: null
 
 validation_rollout: 1 # number of rollouts to use for validation
 
@@ -78,12 +80,14 @@ validation:
       end: 2021
       frequency: ${data.frequency}
       drop: []
+      trajectory: null
     cerra:
       dataset: ${system.input.dataset_b}
       start: 2021
       end: 2021
       frequency: ${data.frequency}
       drop: []
+      trajectory: null
 
 # Multi-dataset test with same datasets, different time period
 test:
@@ -94,9 +98,11 @@ test:
       end: null
       frequency: ${data.frequency}
       drop: []
+      trajectory: null
     cerra:
       dataset: ${system.input.dataset_b}
       start: 2022
       end: null
       frequency: ${data.frequency}
       drop: []
+      trajectory: null
