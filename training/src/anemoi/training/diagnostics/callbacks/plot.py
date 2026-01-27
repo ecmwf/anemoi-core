@@ -33,6 +33,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.models import AnemoiModelEncProcDecInterpolator
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -45,7 +46,6 @@ from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sam
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.models.models import AnemoiModelEncProcDecInterpolator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -303,7 +303,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                                 pl_module.grid_dim,
                             )
                             for dataset_name, dataset_pred in output[1].items()
-                        }
+                        },
                     ],
                 ]
             # When running in Async mode, it might happen that in the last epoch these tensors
