@@ -121,20 +121,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return list(range(multi_step + rollout))
 
     @cached_property
-    def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
-        """Initialize grid indices for spatial sharding for each dataset."""
-        grid_indices_dict = {}
-
-        # Each dataset can have its own grid indices configuration
-        grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
-        for dataset_name, grid_config in grid_indices_config.items():
-            grid_indices = instantiate(grid_config, reader_group_size=self.config.dataloader.read_group_size)
-            grid_indices.setup(self.graph_data[dataset_name])
-            grid_indices_dict[dataset_name] = grid_indices
-
-        return grid_indices_dict
-
-    @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
         return self._get_dataset(

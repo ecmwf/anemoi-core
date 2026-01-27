@@ -25,6 +25,9 @@ from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.balanced_partition import get_partition_range
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -33,8 +36,7 @@ class MultiDataset(IterableDataset):
 
     def __init__(
         self,
-        data_readers: dict,
-        grid_indices: dict,
+        data_readers: dict[str, dict],
         relative_date_indices: dict[str, list[int]],
         timestep: str = "6h",
         shuffle: bool = True,
@@ -47,9 +49,6 @@ class MultiDataset(IterableDataset):
         datasets_config : dict
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
-        grid_indices_config : dict
-            Dictionary mapping dataset names to their grid_indices
-            Format: {"dataset_a": grid_indices_a, "dataset_b": grid_indices_b, ...}
         relative_date_indices: dict[str, list[int]]
             list of time indices to load from the data relative to the current sample
         timestep : str, optional
@@ -64,24 +63,12 @@ class MultiDataset(IterableDataset):
         self.timestep = timestep
         self.relative_date_indices = relative_date_indices
         self.dataset_names = list(data_readers.keys())
-        self.grid_indices = grid_indices
+        self.datasets = {name: create_dataset(data_reader) for name, data_reader in data_readers.items()}
 
-        # Create individual NativeGridDataset for each dataset with its own grid_indices
-        self.datasets = {}
-        for name, data_reader in data_readers.items():
-            if name not in grid_indices:
-                msg = f"No grid_indices configuration found for dataset '{name}'"
-                raise ValueError(msg)
+        self._lazy_init_model_and_reader_group_info()
 
-            self.datasets[name] = create_dataset(data_reader)
-
-        LOGGER.info(
-            "MultiDataset initialized with %d datasets (%s), %d valid indices each",
-            len(self.datasets),
-            ", ".join(self.dataset_names),
-            len(self.valid_date_indices),
-        )
-
+    def _lazy_init_model_and_reader_group_info(self) -> None:
+        """Lazy initialize model and reader group info."""
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_rank = 0
         self.model_comm_num_groups = 1
@@ -104,10 +91,7 @@ class MultiDataset(IterableDataset):
 
     def _collect(self, attr_name: str) -> dict:
         """Helper method to collect attributes from all datasets."""
-        combined_attr = {}
-        for name, dataset in self.datasets.items():
-            combined_attr[name] = getattr(dataset, attr_name)
-        return combined_attr
+        return {name: getattr(dataset, attr_name) for name, dataset in self.datasets.items()}
 
     def _apply_to_all_datasets(self, method_name: str, *args, **kwargs) -> None:
         """Call a method by name with given arguments on all datasets."""
@@ -344,13 +328,28 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
+    @cached_property
+    def shard_shapes(self) -> dict[str, list]:
+        """Return shard shapes for all datasets."""
+        shard_shapes = {}
+        for name, dataset in self.datasets.items():
+            shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
+        return shard_shapes
+
+    def get_shard_slice(self, dataset_name: str, reader_group_rank: int) -> slice:
+        """Get the grid shard slice according to the reader rank."""
+        start, end = get_partition_range(
+            partition_sizes=self.shard_shapes[dataset_name],
+            partition_id=reader_group_rank,
+        )
+        return slice(start, end)
+
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         x = {}
         for name, dataset in self.datasets.items():
             time_steps = [index + i for i in self.relative_date_indices[name]]
-            grid_shard_indices = self.grid_indices[name].get_shard_indices(self.reader_group_rank)
+            grid_shard_indices = self.get_shard_slice(name, self.reader_group_rank)
             x[name] = dataset.get_sample(time_steps, grid_shard_indices)
-
         return x
 
     def __iter__(self) -> dict[str, torch.Tensor]:
