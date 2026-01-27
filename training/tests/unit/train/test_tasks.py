@@ -175,7 +175,6 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     assert itp.boundary_times == [0, 6]
     assert itp.interp_times == [1, 2, 3]
     b, e, g, v = 2, 1, 3, len(name_to_index)
-    t = len(itp.imap)
     batch = torch.randn((b, e, g, v), dtype=torch.float32)
     loss, metrics, y_preds = itp._step(batch={"data": batch}, validation_mode=False)
     assert isinstance(loss, torch.Tensor)
