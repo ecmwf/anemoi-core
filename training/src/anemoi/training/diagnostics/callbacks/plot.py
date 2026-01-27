@@ -33,9 +33,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.training.diagnostics.focus_area import BoundingBoxSpatialMask
-from anemoi.training.diagnostics.focus_area import NodeAttributeSpatialMask
-from anemoi.training.diagnostics.focus_area import NoOpSpatialMask
+from anemoi.training.diagnostics.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -87,7 +85,7 @@ class BasePlotCallback(Callback, ABC):
 
         # Focus area for plotting
         self.focus_masks = [
-            self.build_spatial_mask(
+            build_spatial_mask(
                 node_attribute_name=fa.get("mask_attr_name", None) if fa is not None else None,
                 latlon_bbox=fa.get("latlon_bbox", None) if fa is not None else None,
             )
@@ -107,17 +105,6 @@ class BasePlotCallback(Callback, ABC):
             self._executor = ThreadPoolExecutor(max_workers=1)
             self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
             self.loop_thread.start()
-
-    def build_spatial_mask(
-        self,
-        node_attribute_name: str | None = None,
-        latlon_bbox: tuple[float, float, float, float] | None = None,
-    ) -> Any:
-        if node_attribute_name is not None:
-            return NodeAttributeSpatialMask(node_attribute_name)
-        if latlon_bbox is not None:
-            return BoundingBoxSpatialMask(latlon_bbox)
-        return NoOpSpatialMask()
 
     def start_event_loop(self) -> None:
         """Start the event loop in a separate thread."""
