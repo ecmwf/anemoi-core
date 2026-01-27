@@ -106,7 +106,17 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout = max(rollout_value, val_rollout)
 
         multi_step = self.config.training.multistep_input
-        return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
+
+        # Include DA cycles if configured (for DAGraphForecaster)
+        da_cycles = getattr(self.config.training, "da_cycles", 0)
+        if da_cycles > 0:
+            LOGGER.info(
+                "DA cycling enabled: adding %d extra timesteps for DA targets",
+                da_cycles,
+            )
+
+        total_steps = multi_step + da_cycles + rollout
+        return [self.timeincrement * mstep for mstep in range(total_steps)]
 
     def add_trajectory_ids(self, data_reader: Callable) -> Callable:
         """Determine an index of forecast trajectories associated with the time index and add to a data_reader object.

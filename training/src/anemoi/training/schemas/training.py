@@ -369,6 +369,46 @@ class ForecasterSchema(BaseTrainingSchema):
     "Rollout configuration."
 
 
+class DAForecasterSchema(BaseTrainingSchema):
+    """Schema for DA (Data Assimilation) Graph Forecaster.
+
+    This forecaster performs DA cycling before the standard autoregressive rollout.
+    DA cycling assimilates sparse observations to create an analysis state for forecasting.
+
+    How it works:
+        1. Start with first `multistep_input` frames (standard model input)
+        2. For each DA cycle: predict next step, blend with observations, advance window
+        3. After DA cycles complete, run standard rollout from the analysis state
+
+    Batch requirements:
+        Batch must have at least: multistep_input + da_cycles + rollout timesteps
+
+    Imputer configuration:
+        The InputOnlyImputer should use multi_step = multistep_input (standard).
+        DA target timesteps (at indices multistep_input onwards) will naturally
+        retain NaNs in prognostic variables since the imputer only fills the
+        first multi_step timesteps.
+
+    Example config:
+        training.multistep_input: 2
+        training.da_cycles: 3
+        training.da_loss_weight: 0.0
+        training.rollout.start: 4
+        # Batch needs 2 + 3 + 4 = 9 timesteps minimum
+    """
+
+    model_task: Literal["anemoi.training.train.tasks.DAGraphForecaster",] = Field(..., alias="model_task")
+    "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
+    da_cycles: NonNegativeInt = Field(default=0, example=3)
+    """Number of DA cycles to perform before forecast starts.
+    Set to 0 for standard forecasting (no DA)."""
+    da_loss_weight: NonNegativeFloat = Field(default=0.0, example=0.5)
+    """Weight for loss computed during DA cycles.
+    Set to 0.0 to not compute loss during DA phase."""
+
+
 class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
@@ -398,6 +438,7 @@ class InterpolationSchema(BaseTrainingSchema):
 
 TrainingSchema = Annotated[
     ForecasterSchema
+    | DAForecasterSchema
     | ForecasterEnsSchema
     | InterpolationSchema
     | DiffusionForecasterSchema

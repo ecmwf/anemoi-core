@@ -400,7 +400,10 @@ class MlFlowSync:
                 dst_run_id,
                 src_user_id,
             )
-            _import_inputs(http_client, src_run_dct, dst_run_id)
+            try:
+                _import_inputs(http_client, src_run_dct, dst_run_id)
+            except Exception as e:
+                LOGGER.warning("Failed to import inputs (non-critical): %s", e)
 
             mlflow.set_tracking_uri(self.dest_tracking_uri)
             dest_mlflow_client.log_artifacts(dst_run_id, artifact_path)
