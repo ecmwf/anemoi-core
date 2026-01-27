@@ -698,6 +698,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             shapes = {
                 "variables": self.input_dim[dataset],
                 "input_timesteps": self.multi_step,
+                "output_timesteps": self.multi_out,
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
