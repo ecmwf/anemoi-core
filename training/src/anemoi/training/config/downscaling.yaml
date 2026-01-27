@@ -56,6 +56,16 @@ dataloader:
         dataset:
           dataset: ${system.input.dataset_b}
           select: ${data.datasets.cerra.diagnostic}
+  validation:
+    datasets:
+      era5: # low-res dataset: all variables should be forcing variables
+        dataset:
+          dataset: ${system.input.dataset}
+          select: ${data.datasets.era5.forcing}
+      cerra: # high-res dataset: all variables should be diagnostic or forcing variables
+        dataset:
+          dataset: ${system.input.dataset_b}
+          select: ${data.datasets.cerra.diagnostic}
 
 diagnostics:
   plot:
