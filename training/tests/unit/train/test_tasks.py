@@ -150,6 +150,7 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
         self.loss_supports_sharding = True
         self.metrics_support_sharding = True
         self.grid_dim = -2
+        self.multi_out = 1
 
     monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
     name_to_index = {"A": 0, "B": 1}
@@ -160,7 +161,6 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
                 "training": {
                     "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
                     "target_forcing": {"data": [], "time_fraction": False},
-                    "multistep_output": 1,
                 },
             },
         ),
