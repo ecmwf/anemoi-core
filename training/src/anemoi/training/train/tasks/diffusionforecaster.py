@@ -404,6 +404,14 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
 
+        pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
+        if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
+            msg = (
+                "pre_processors_tendencies not found. This is required for tendency-based diffusion models. "
+                "Ensure that statistics_tendencies is provided during model initialization."
+            )
+            raise AttributeError(msg)
+
         x_ref = self.model.model.apply_reference_state_truncation(
             x,
             self.grid_shard_shapes,
