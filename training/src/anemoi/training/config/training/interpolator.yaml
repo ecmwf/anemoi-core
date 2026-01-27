@@ -56,12 +56,7 @@ explicit_times:
   input: [0, 6]
   target: [1, 2, 3, 4, 5]
 
-target_forcing:
-  datasets:
-    data: # user-defined key in data #forcing parameters for the target time to include as input
-      data: #of which come from the dataset
-        - "insolation"
-      time_fraction: True
+target_forcing: null
 
 # select strategy
 strategy:
