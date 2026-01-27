@@ -56,7 +56,7 @@ class Frequency(RootModel):
         return int(self.as_timedelta.total_seconds())
 
 
-class DatasetSchema(PydanticBaseModel):
+class NativeDatasetSchema(PydanticBaseModel):
     """Dataset configuration schema."""
 
     dataset: str | dict | Path | list[dict] | None = None
@@ -69,6 +69,22 @@ class DatasetSchema(PydanticBaseModel):
     "Temporal resolution, frequency must be >= to dataset frequency."
     drop: list | None = Field(default=None)
     "List of variables to drop from dataset"
+
+
+class TrajectorySchema(PydanticBaseModel):
+    """Trajectory configuration schema."""
+
+    start: datetime.datetime = Field(example="2020-02-05T12:00:00")
+    "Starting datetime for the trajectory."
+    length: PositiveInt = Field(example=12)
+    "Length of the trajectory in number of time steps."
+
+
+class TrajectoryDatasetSchema(NativeDatasetSchema):
+    """Dataset configuration schema."""
+
+    trajectory: TrajectorySchema | None = Field(default=None)
+    "Trajectory configuration."
 
 
 class LoaderSet(BaseModel):
@@ -116,11 +132,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetDict[DatasetSchema]
+    training: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Training DatasetSchema."
-    validation: DatasetDict[DatasetSchema]
+    validation: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Validation DatasetSchema."
-    test: DatasetDict[DatasetSchema]
+    test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Test DatasetSchema."
     validation_rollout: NonNegativeInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
