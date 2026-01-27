@@ -99,6 +99,7 @@ class BaseGraphModel(nn.Module):
         self._internal_input_idx = {}
         self._internal_output_idx = {}
         self.input_dim = {}
+        self.output_dim = {}
         self.input_dim_latent = {}
 
         for dataset_name, dataset_indices in data_indices.items():
@@ -108,6 +109,7 @@ class BaseGraphModel(nn.Module):
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
+            self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
             self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -115,6 +117,9 @@ class BaseGraphModel(nn.Module):
             self.multi_step * self.num_input_channels[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
         )
+
+    def _calculate_output_dim(self, dataset_name: str) -> int:
+        return self.multi_out * self.num_output_channels[dataset_name]
 
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
         return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]

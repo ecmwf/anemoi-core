@@ -128,13 +128,13 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,
-                out_channels_dst=self.num_output_channels[dataset_name] * self.multi_out,
+                out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         base_input_dim = super()._calculate_input_dim(dataset_name)
-        output_dim = self.num_output_channels[dataset_name] * self.multi_out
+        output_dim = super()._calculate_output_dim(dataset_name)
         input_dim = base_input_dim + output_dim  # input + noised targets
         return input_dim
 
@@ -698,6 +698,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             shapes = {
                 "variables": self.input_dim[dataset],
                 "input_timesteps": self.multi_step,
+                "output_timesteps": self.multi_out,
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
