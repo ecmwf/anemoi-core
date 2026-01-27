@@ -35,7 +35,7 @@ class MultiDataset(IterableDataset):
         self,
         data_readers: dict,
         grid_indices: dict,
-        relative_date_indices: dict,
+        relative_date_indices: dict[str, list[int]],
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
@@ -50,7 +50,7 @@ class MultiDataset(IterableDataset):
         grid_indices_config : dict
             Dictionary mapping dataset names to their grid_indices
             Format: {"dataset_a": grid_indices_a, "dataset_b": grid_indices_b, ...}
-        relative_date_indices: list
+        relative_date_indices: dict[str, list[int]]
             list of time indices to load from the data relative to the current sample
         timestep : str, optional
             the time frequency of the samples, by default '6h'
@@ -74,13 +74,6 @@ class MultiDataset(IterableDataset):
                 raise ValueError(msg)
 
             self.datasets[name] = create_dataset(data_reader)
-
-        # relative_date_indices are computed in terms of data frequency
-        # data_relative_date_indices are in terms of the specific dataset
-        self.data_relative_date_indices = np.array(
-            [self.timeincrement * idx for idx in relative_date_indices],
-            dtype=np.int64,
-        )
 
         LOGGER.info(
             "MultiDataset initialized with %d datasets (%s), %d valid indices each",
@@ -354,7 +347,7 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         x = {}
         for name, dataset in self.datasets.items():
-            time_steps = [index + i for i in self.data_relative_date_indices[dataset_name]]
+            time_steps = [index + i for i in self.relative_date_indices[name]]
             grid_shard_indices = self.grid_indices[name].get_shard_indices(self.reader_group_rank)
             x[name] = dataset.get_sample(time_steps, grid_shard_indices)
 
