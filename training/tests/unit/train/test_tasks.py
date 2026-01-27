@@ -13,7 +13,6 @@ from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.interpolator import GraphInterpolator
-from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
 from anemoi.training.train.tasks.obsinterpolator import ObsGraphInterpolator
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -186,7 +185,6 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     assert y_pred.shape == (b, len(itp.interp_times), e, g, v)
 
 
-
 def test_graphmultioutinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     def _stub_init(
         self: BaseGraphModule,
@@ -246,6 +244,7 @@ def test_graphmultioutinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     y_pred = torch.stack([pred["data"] for pred in y_preds], dim=1)
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, len(itp.interp_times), e, g, v)
+
 
 def test_obsinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     def _stub_init(
