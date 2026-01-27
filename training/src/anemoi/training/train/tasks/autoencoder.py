@@ -61,7 +61,7 @@ class GraphAutoEncoder(BaseGraphModule):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]
 
     def on_train_epoch_end(self) -> None:
         pass

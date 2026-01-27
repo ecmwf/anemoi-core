@@ -59,7 +59,7 @@ class PlotLossSchema(BaseModel):
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
-    focus_area: FocusAreaSchema | None = Field(default=None)
+    focus_areas: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
@@ -123,7 +123,7 @@ class LongRolloutPlotsSchema(BaseModel):
     "Delay between frames in the animation in milliseconds, by default 400."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
+    focus_areas: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
@@ -148,7 +148,7 @@ class PlotSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
+    focus_areas: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
@@ -163,7 +163,7 @@ class PlotSpectrumSchema(BaseModel):
     "List of parameters to plot."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
+    focus_areas: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 

@@ -1378,7 +1378,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
             # Apply spatial mask
             if focus_mask is not None:
-                latlons, data, output_tensor = self.focus_mask.apply(
+                latlons, data, output_tensor = focus_mask.apply(
                     pl_module.model.model._graph_data,
                     self.latlons[dataset_name],
                     data,
@@ -1493,7 +1493,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
             # Apply spatial mask
             if focus_mask is not None:
-                _, data, output_tensor = self.focus_mask.apply(
+                _, data, output_tensor = focus_mask.apply(
                     pl_module.model.model._graph_data,
                     self.latlons[dataset_name],
                     data,
