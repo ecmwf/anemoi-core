@@ -160,7 +160,7 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
                 "training": {
                     "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
                     "target_forcing": {"data": [], "time_fraction": False},
-                    "multistep_output": {1},
+                    "multistep_output": 1,
                 },
             },
         ),
@@ -222,7 +222,7 @@ def test_graphmultioutinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
             {
                 "training": {
                     "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
-                    "multistep_output": {3}
+                    "multistep_output": 3
                 },
             },
         ),
