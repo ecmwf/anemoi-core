@@ -220,10 +220,7 @@ def test_graphmultioutinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     itp = GraphInterpolator(
         config=DictConfig(
             {
-                "training": {
-                    "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
-                    "multistep_output": 3
-                },
+                "training": {"explicit_times": {"input": [0, 6], "target": [1, 2, 3]}, "multistep_output": 3},
             },
         ),
         graph_data={"data": HeteroData()},
