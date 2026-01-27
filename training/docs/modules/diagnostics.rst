@@ -149,6 +149,8 @@ which is recommended for interactive terminals and
            # Example focusing loss on a predefined mask
            focus_area:
              mask_attr_name: "cutout_mask"
+            dataset_names: ["your_dataset_name"]
+
 
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
             dataset_names: ["your_dataset_name"]
