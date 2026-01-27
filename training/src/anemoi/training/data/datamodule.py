@@ -9,23 +9,19 @@
 
 
 import logging
-from collections.abc import Callable
 from functools import cached_property
 
-import numpy as np
 import pytorch_lightning as pl
 from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 from torch_geometric.data import HeteroData
 
-from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
-from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -102,26 +98,27 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
 
-    def add_trajectory_ids(self, data_reader: Callable) -> Callable:
-        """Add trajectory IDs to data reader for forecast trajectory tracking."""
-        if not hasattr(self.config.dataloader, "model_run_info"):
-            data_reader.trajectory_ids = None
-            return data_reader
+    def relative_date_indices(self, val_rollout: int = 1) -> list:
+        """Determine a list of relative time indices to load for each batch."""
+        if hasattr(self.config.training, "explicit_times"):
+            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
 
-        mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
-        mr_len = self.config.dataloader.model_run_info.length
+        # Calculate indices using multistep, timeincrement and rollout
+        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
 
-        if hasattr(self.config.training, "rollout") and self.config.training.rollout.max is not None:
-            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
-            assert (
-                max_rollout_index < mr_len
-            ), f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}"
+        rollout_max = getattr(rollout_cfg, "max", None)
+        rollout_start = getattr(rollout_cfg, "start", 1)
+        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
 
-        data_reader.trajectory_ids = (data_reader.dates - mr_start) // np.timedelta64(
-            mr_len * frequency_to_seconds(self.config.data.frequency),
-            "s",
-        )
-        return data_reader
+        rollout_value = rollout_start
+        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
+            rollout_value = rollout_max
+        else:
+            LOGGER.warning("Falling back rollout to: %s", rollout_value)
+
+        rollout = max(rollout_value, val_rollout)
+        multi_step = self.config.training.multistep_input
+        return list(range(multi_step + rollout))
 
     @cached_property
     def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
@@ -140,7 +137,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
+        return self._get_dataset(
+            self.train_dataloader_config,
+            shuffle=True,
+            label="training",
+        )
 
     @cached_property
     def ds_valid(self) -> MultiDataset:
@@ -161,21 +162,15 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self,
         datasets: dict[str, dict],
         shuffle: bool = True,
-        val_rollout: int = 1,
+        val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
         relative_date_indices = {
             dataset_name: self.task.get_relative_time_indices(ds.frequency) for dataset_name, ds in datasets.items()
         }
 
-        data_readers = {}
-        for name, dataset_config in datasets.items():
-            data_reader = open_dataset(dataset_config)
-            data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
-            data_readers[name] = data_reader
-
         return MultiDataset(
-            data_readers=data_readers,
+            data_readers=datasets,
             relative_date_indices=relative_date_indices,
             timestep=self.config.data.timestep,
             shuffle=shuffle,
