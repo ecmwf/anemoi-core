@@ -215,7 +215,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
         for dataset_name in self.dataset_names:
             if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
-                LOGGER.warning(f"Dataset {dataset_name} is skipped for loss & metric computation.")
+                LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
                 continue
 
             self.target_dataset_names.append(dataset_name)
