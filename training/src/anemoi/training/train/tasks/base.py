@@ -649,10 +649,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
-        for dataset_name in self.dataset_names:
-            if dataset_name not in self.target_dataset_names:
-                # Loss and metrics not defined for this dataset
-                continue
+        for dataset_name in self.target_dataset_names:
 
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
                 y_pred[dataset_name],
