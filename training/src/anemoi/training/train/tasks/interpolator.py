@@ -147,7 +147,6 @@ class GraphInterpolator(BaseGraphModule):
         metrics = {}
         y_preds = []
 
-        import ipdb; ipdb.set_trace()
         x_bound = {}
         for dataset_name in self.dataset_names:
             x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][
