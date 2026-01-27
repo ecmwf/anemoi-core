@@ -25,9 +25,13 @@ if is_triton_available():
 def setup_torch():
     """Set up torch defaults for all tests."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    prev_device = torch.get_default_device() if hasattr(torch, "get_default_device") else torch.tensor(0).device
+    prev_dtype = torch.get_default_dtype()
     torch.set_default_device(device)
     torch.set_default_dtype(torch.float32)
     yield
+    torch.set_default_device(prev_device)
+    torch.set_default_dtype(prev_dtype)
 
 
 @contextmanager
