@@ -240,7 +240,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         )
         self.rho = config.model.model.diffusion.rho
         
-        rank_zero_info("[DEBUG] : unconditional diffusion ")
 
     # -------------------------------------------------------------------------
     # FORWARD : identical to conditional version
@@ -335,7 +334,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         rho: float,
         device: torch.device,
     ) -> tuple[torch.Tensor]:
-        # print('DEBUG: Je passe dans get_noise_level', self.training_approach)
 
         if self.training_approach == "probabilistic_high_noise":
             rnd_uniform = torch.rand(shape, device=device)
