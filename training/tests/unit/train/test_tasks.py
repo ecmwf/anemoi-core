@@ -161,6 +161,7 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
                 "training": {
                     "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
                     "target_forcing": {"data": [], "time_fraction": False},
+                    "multistep_output": {1},
                 },
             },
         ),
@@ -223,6 +224,7 @@ def test_graphmultioutinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
             {
                 "training": {
                     "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
+                    "multistep_output": {3}
                 },
             },
         ),
@@ -246,6 +248,7 @@ def test_graphmultioutinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     y_pred = torch.stack([pred["data"] for pred in y_preds], dim=1)
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, len(itp.interp_times), e, g, v)
+
 
 def test_obsinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     def _stub_init(
