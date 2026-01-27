@@ -55,10 +55,10 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         if model_config.training.target_forcing is not None:
 
             target_forcing_config = get_multiple_datasets_config(model_config.training.target_forcing)
-        
+
             self.num_target_forcings = {}
             for dataset_name, target_forcing in target_forcing_config.items():
-                self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction        
+                self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction
 
         super().__init__(
             model_config=model_config,
@@ -359,7 +359,6 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDecInterpolato
         )
 
         return x_data_latent, x_skip, shard_shapes_data
-
 
     def forward(
         self,

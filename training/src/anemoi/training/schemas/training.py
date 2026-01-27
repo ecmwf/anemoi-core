@@ -468,6 +468,7 @@ class InterpolationSchema(BaseTrainingSchema):
     target_forcing: DatasetDict[TargetForcing]
     "Forcing parameters for target output times."
 
+
 class InterpolationMultiSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
     "Training objective."
@@ -475,6 +476,7 @@ class InterpolationMultiSchema(BaseTrainingSchema):
     "Time indices for input and output."
     target_forcing: None
     "Forcing parameters not applied for multi-outputs."
+
 
 TrainingSchema = Annotated[
     ForecasterSchema
