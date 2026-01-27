@@ -42,6 +42,7 @@ from anemoi.training.diagnostics.plots import plot_histogram
 from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_recon
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -87,14 +88,17 @@ class BasePlotCallback(Callback, ABC):
             self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
             self.loop_thread.start()
 
-    def get_focus_mask(self, pl_module: pl.LightningModule) -> np.ndarray | None:
+    def get_focus_mask(self, pl_module: pl.LightningModule, dataset_name: str) -> np.ndarray | None:
         """Get the focus mask based on the focus area configuration."""
-        if self.latlons is None:
-            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
+        if self.latlons[dataset_name] is None:
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][
+                pl_module.model.model._graph_name_data
+            ].x.detach()
+            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+
 
         # Compute focus mask
-        focus_mask = np.ones(self.latlons.shape[0], dtype=bool)
+        focus_mask = np.ones(self.latlons[dataset_name].shape[0], dtype=bool)
         self.tag = None
 
         if self.focus_area is not None:
@@ -104,14 +108,14 @@ class BasePlotCallback(Callback, ABC):
                     f"Spatial mask '{mask_key}' not found in graph_data['data']. "
                     f"Available masks: {list(pl_module.model.graph_data['data'].keys())}"
                 )
-                focus_mask = np.zeros(self.latlons.shape[0], dtype=bool)
+                focus_mask = np.zeros(self.latlons[dataset_name].shape[0], dtype=bool)
                 mask_attr_name_idxs = pl_module.model.graph_data["data"][mask_key]
                 focus_mask[mask_attr_name_idxs.squeeze()] = True
                 self.tag = self.focus_area["mask_attr_name"]
 
             elif self.focus_area["latlon_bbox"] is not None:
                 (lat_min, lon_min, lat_max, lon_max) = self.focus_area["latlon_bbox"]
-                lat, lon = self.latlons[:, 0], self.latlons[:, 1]
+                lat, lon = self.latlons[dataset_name][:, 0], self.latlons[dataset_name][:, 1]
                 focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
                 self.tag = f"_bbox_lat-{lat_min}-{lat_max}_lon-{lon_min}-{lon_max}"
 
@@ -1311,6 +1315,7 @@ class PlotReconstruction(BasePlotAdditionalMetrics):
         per_sample: int = 3,
         every_n_batches: int | None = None,
         focus_area: dict | None = None,
+        dataset_names: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotReconstruction callback.
@@ -1339,7 +1344,7 @@ class PlotReconstruction(BasePlotAdditionalMetrics):
             - {"latlon_bbox": [lat_min, lon_min, lat_max, lon_max]}
         """
         del kwargs
-        super().__init__(config, every_n_batches=every_n_batches)
+        super().__init__(config, every_n_batches=every_n_batches,dataset_names=dataset_names)
         self.sample_idx = sample_idx
         self.parameters = parameters
 
@@ -1359,6 +1364,7 @@ class PlotReconstruction(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_names: list[str],
         outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
@@ -1367,49 +1373,56 @@ class PlotReconstruction(BasePlotAdditionalMetrics):
     ) -> None:
         logger = trainer.logger
 
-        # Build dictionary of indices and parameters to be plotted
-        diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
-        plot_parameters_dict = {
-            pl_module.data_indices.model.output.name_to_index[name]: (
-                name,
-                name not in diagnostics,
+        for dataset_name in dataset_names:
+
+            # Build dictionary of indices and parameters to be plotted
+            diagnostics = (
+                    []
+                    if self.config.data.datasets[dataset_name].diagnostic is None
+                    else self.config.data.datasets[dataset_name].diagnostic
             )
-            for name in self.parameters
-        }
 
-        data, reconstruction = self.process(pl_module, outputs, batch, output_times)
+            plot_parameters_dict = {
+                    pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
+                        name,
+                        name not in diagnostics,
+                    )
+                    for name in self.parameters
+            }
 
-        local_rank = pl_module.local_rank
+            data, reconstruction = self.process(pl_module, dataset_name,outputs, batch, output_times)
 
-        # Get focus mask
-        focus_mask = self.get_focus_mask(pl_module)
+            local_rank = pl_module.local_rank
 
-        data = data[0, 0, focus_mask, :]
-        reconstruction = reconstruction[0, 0, focus_mask, :]
-        diff = np.abs(data - reconstruction)
-        latlons = self.latlons[focus_mask]
+            # Get focus mask
+            focus_mask = self.get_focus_mask(pl_module,dataset_name)
 
-        # Plotting
-        fig = plot_predicted_multilevel_flat_recon(
-            plot_parameters_dict,
-            self.per_sample,
-            latlons,
-            self.accumulation_levels_plot,
-            data,
-            reconstruction,
-            diff,
-            datashader=self.datashader_plotting,
-            precip_and_related_fields=self.precip_and_related_fields,
-            colormaps=self.colormaps,
-        )
+            data = data[0, 0, focus_mask, :]
+            reconstruction = reconstruction[0, 0, focus_mask, :]
+            diff = np.abs(data - reconstruction)
+            latlons = self.latlons[dataset_name][focus_mask]
 
-        self._output_figure(
-            logger,
-            fig,
-            epoch=epoch,
-            tag=f"reconstruction_val_sample_batch{batch_idx:04d}_rank0{self.tag}",
-            exp_log_tag=f"val_pred_sample_rank{local_rank:01d}",
-        )
+            # Plotting
+            fig = plot_predicted_multilevel_flat_recon(
+                plot_parameters_dict,
+                self.per_sample,
+                latlons,
+                self.accumulation_levels_plot,
+                data,
+                reconstruction,
+                diff,
+                datashader=self.datashader_plotting,
+                precip_and_related_fields=self.precip_and_related_fields,
+                colormaps=self.colormaps,
+            )
+
+            self._output_figure(
+                logger,
+                fig,
+                epoch=epoch,
+                tag=f"reconstruction_val_sample_batch{batch_idx:04d}_rank0{self.tag}",
+                exp_log_tag=f"val_pred_sample_rank{local_rank:01d}",
+            )
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):

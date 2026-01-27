@@ -35,6 +35,8 @@ diagnostics:
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotReconstruction
         sample_idx: ${diagnostics.plot.sample_idx}
         per_sample : 6
+        dataset_names: ['data']
+        focus_area: {"latlon_bbox": [35.0, -10.0, 70.0, 40.0]} #! todo dict for datasets
         parameters: ${diagnostics.plot.parameters}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         #Defining the accumulation levels for precipitation related fields and the colormap

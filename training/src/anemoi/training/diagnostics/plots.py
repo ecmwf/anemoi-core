@@ -672,11 +672,15 @@ def plot_predicted_multilevel_flat_recon(
         difference_t = difference[..., var_idx].squeeze()
 
         # Colormaps
-        cmap = colormaps.get("default", cm.get_cmap("viridis"))
-        error_cmap = colormaps.get("error", cm.get_cmap("magma"))
-        for key, cmap_obj in colormaps.items():
-            if key not in ["default", "error"] and hasattr(cmap_obj, "variables") and var_name in cmap_obj.variables:
-                cmap = cmap_obj.get_cmap()
+        # #!NEEDS FIXING
+        cmap = "viridis"
+        ##colormaps.get("default", cm.get_cmap("viridis"))
+        error_cmap = "magma"
+         #colormaps.get("error", cm.get_cmap("magma"))
+        print(cmap,error_cmap)
+        # for key, cmap_obj in colormaps.items():
+        #     if key not in ["default", "error"] and hasattr(cmap_obj, "variables") and var_name in cmap_obj.variables:
+        #         cmap = cmap_obj.get_cmap()
 
         plot_flat_recon(
             fig,
@@ -806,6 +810,7 @@ def single_plot(
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
+    transform: object | None = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -839,6 +844,7 @@ def single_plot(
     """
     if cmap is None:
         cmap = "viridis"
+    print(cmap)
     if not datashader:
         psc = ax.scatter(
             lon,
@@ -849,6 +855,7 @@ def single_plot(
             alpha=1.0,
             norm=norm,
             rasterized=False,
+            transform=transform,
         )
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})

@@ -173,7 +173,8 @@ class PlotReconstructionSchema(BaseModel):
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
-
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
 
 class PlotSpectrumSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSpectrum"] = Field(alias="_target_")
@@ -289,6 +290,7 @@ PlotCallbacks = Annotated[
     | PlotHistogramSchema
     | PlotEnsSampleSchema
     | PlotEnsLossSchema
+    | PlotReconstructionSchema
     | PlotEnsSpectrumSchema
     | PlotEnsHistogramSchema
     | GraphTrainableFeaturesPlotEnsSchema,
