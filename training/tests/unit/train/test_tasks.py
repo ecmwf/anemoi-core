@@ -150,7 +150,7 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
         self.loss_supports_sharding = True
         self.metrics_support_sharding = True
         self.grid_dim = -2
-        self.multi_out = 1
+        self.multi_out = config.training.multistep_output
 
     monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
     name_to_index = {"A": 0, "B": 1}
@@ -161,6 +161,7 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
                 "training": {
                     "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
                     "target_forcing": {"data": [], "time_fraction": False},
+                    "multistep_output": 1
                 },
             },
         ),
@@ -174,8 +175,8 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     assert itp.multi_out == 1
     assert itp.boundary_times == [0, 6]
     assert itp.interp_times == [1, 2, 3]
-    b, e, g, v = 2, 1, 3, len(name_to_index)
-    batch = torch.randn((b, e, g, v), dtype=torch.float32)
+    b, t, e, g, v = 2, itp.multi_out, 1, 3, len(name_to_index)
+    batch = torch.randn((b, t, e, g, v), dtype=torch.float32)
     loss, metrics, y_preds = itp._step(batch={"data": batch}, validation_mode=False)
     assert isinstance(loss, torch.Tensor)
     assert metrics == {}
@@ -234,7 +235,7 @@ def test_graphmultioutinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     assert itp.boundary_times == [0, 6]
     assert itp.interp_times == [1, 2, 3]
     b, e, g, v = 2, 1, 3, len(name_to_index)
-    t = len(itp.imap)
+    t = len(itp.multi_out)
     batch = torch.randn((b, t, e, g, v), dtype=torch.float32)
     loss, metrics, y_preds = itp._step(batch={"data": batch}, validation_mode=False)
     assert isinstance(loss, torch.Tensor)
