@@ -67,6 +67,21 @@ class BaseGraphModel(nn.Module):
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
+        # TODO: Placeholder properties to simplify the code structure, not sure if these belong in base module
+        # but they are here for now since _build_networks and _build_residual rely on them
+        self.use_encoder = {} 
+        self.use_decoder = {}
+        self.use_residual = {}
+        for dataset_name in self._graph_names_data:
+            self.use_encoder[dataset_name] = model_config.model.encoder.datasets[dataset_name].get("use_encoder", True)
+            self.use_decoder[dataset_name] = model_config.model.decoder.datasets[dataset_name].get("use_decoder", True)
+            self.use_residual[dataset_name] = model_config.model.residual.datasets[dataset_name].get("use_residual", True)
+
+        self.inputs = [dataset for dataset in self._graph_names_data if self.use_encoder[dataset] or self.use_residual[dataset]]
+        self.outputs = [dataset for dataset in self._graph_names_data if self.use_decoder[dataset] or self.use_residual[dataset]]
+        
+        assert self.outputs == self._graph_names_data, "Not supported yet; all datasets must be outputs with use_decoder: True"
+
         self.node_attributes = NamedNodesAttributes(
             model_config.model.trainable_parameters, self._graph_data
         )
@@ -85,6 +100,7 @@ class BaseGraphModel(nn.Module):
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         # Multi-dataset: create dictionaries for each property
@@ -212,8 +228,9 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self._graph_names_data:
-            self.residual[dataset_name] = instantiate(residual_config.datasets[dataset_name], graph=self._graph_data) #TODO: default residual config
-            
+            if self.use_residual[dataset_name]:
+                self.residual[dataset_name] = instantiate(residual_config.datasets[dataset_name].residual_module, graph=self._graph_data)
+                
     @abstractmethod
     def forward(
         self,

@@ -4,7 +4,7 @@ defaults:
 - diagnostics: evaluation
 - system: slurm
 - graph: multi_obs_debug
-- model: graphtransformer
+- model: graphtransformer_ens
 - training: default
 - _self_
 
@@ -35,6 +35,11 @@ dataloader:
     validation: ${dataloader.num_workers.training}
     test: ${dataloader.num_workers.training}
 
+  limit_batches:
+    training: 50
+    validation: 50
+    test: 20
+    
   batch_size:
     training: 1
     validation: ${dataloader.batch_size.training}
@@ -204,6 +209,10 @@ per_dataset_overrides:
         nodes_name: obs
     model:
       bounding: []
+      encoder: 
+        use_encoder: False
+      residual:
+        use_residual: False
     training: 
       scalers:
         node_weights:

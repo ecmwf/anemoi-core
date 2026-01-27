@@ -38,6 +38,11 @@ dataloader:
     validation: ${dataloader.batch_size.training}
     test: ${dataloader.batch_size.training}
 
+  limit_batches:
+    training: 50
+    validation: 50
+    test: 20
+
   training:
     start: 2020-01-01
     end: 2022-05-31
@@ -184,6 +189,12 @@ per_dataset_overrides:
         nodes_name: obs
     model:
       bounding: []
+      encoder:
+        use_encoder: False
+      residual:
+        use_residual: False
+      decoder:
+        use_decoder: True
     training: 
       scalers:
         node_weights:

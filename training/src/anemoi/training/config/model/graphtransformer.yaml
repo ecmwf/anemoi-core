@@ -36,38 +36,44 @@ processor:
   edge_pre_mlp: False
 
 encoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-  trainable_size: ${model.trainable_parameters.data2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: False
-  cpu_offload: ${model.cpu_offload}
-  layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
-  edge_pre_mlp: False
+  use_encoder: True
+  encoder_module:
+    _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+    trainable_size: ${model.trainable_parameters.data2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    num_chunks: 4
+    mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+    num_heads: 16 # GraphTransformer or Transformer only
+    qk_norm: False
+    cpu_offload: ${model.cpu_offload}
+    layer_kernels: ${model.layer_kernels}
+    shard_strategy: "edges"
+    graph_attention_backend: "triton"  # Options: "triton", "pyg"
+    edge_pre_mlp: False
 
 decoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-  trainable_size: ${model.trainable_parameters.hidden2data}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: False
-  qk_norm: False
-  cpu_offload: ${model.cpu_offload}
-  layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
-  edge_pre_mlp: False
+  use_decoder: True
+  decoder_module:
+    _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+    trainable_size: ${model.trainable_parameters.hidden2data}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    num_chunks: 4
+    mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+    num_heads: 16 # GraphTransformer or Transformer only
+    initialise_data_extractor_zero: False
+    qk_norm: False
+    cpu_offload: ${model.cpu_offload}
+    layer_kernels: ${model.layer_kernels}
+    shard_strategy: "edges"
+    graph_attention_backend: "triton"  # Options: "triton", "pyg"
+    edge_pre_mlp: False
 
 
 residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
+  use_residual: True
+  residual_module:
+    _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+    step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

@@ -682,52 +682,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return total_loss, metrics_next, y_preds
 
-    def compute_loss_metrics(
-        self,
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
-        validation_mode: bool = False,
-        **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Compute loss and metrics for the given predictions and targets.
-
-        Parameters
-        ----------
-        y_pred : dict[str, torch.Tensor]
-            Predicted values
-        y : dict[str, torch.Tensor]
-            Target values
-        step : int, optional
-            Current step
-        validation_mode : bool, optional
-            Whether to compute validation metrics
-        **kwargs
-            Additional arguments to pass to loss computation
-
-        Returns
-        -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
-            Loss, metrics dictionary (if validation_mode), and full predictions
-        """
-        # Prepare tensors for loss/metrics computation
-        total_loss, metrics_next, y_preds = None, {}, {}
-        for dataset_name in self.dataset_names:
-            dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
-                y_pred[dataset_name],
-                y[dataset_name],
-                validation_mode=validation_mode,
-                dataset_name=dataset_name,
-                **kwargs,
-            )
-
-            total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
-
-            # Prefix dataset name to metric keys
-            for metric_name, metric_value in dataset_metrics.items():
-                metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
-
-        return total_loss, metrics_next, y_preds
-
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
