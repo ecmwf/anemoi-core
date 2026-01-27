@@ -331,7 +331,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
-        if pre_processors_tendencies is None:
+        if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
             msg = (
                 "pre_processors_tendencies not found. This is required for tendency-based diffusion models. "
                 "Ensure that statistics_tendencies is provided during model initialization."
