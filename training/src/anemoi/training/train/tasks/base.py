@@ -186,7 +186,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for mask in self.output_mask.values():
             combined_supporting_arrays.update(mask.supporting_arrays)
 
-        metadata["metadata_inference"]["task"] = self._get_task_type_from_config(config)
+        if not hasattr(self.__class__, "task_type"):
+            msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
+                indicating the type of task (e.g., 'forecaster', 'time-interpolator')."""
+            raise AttributeError(msg)
+
+        metadata["metadata_inference"]["task"] = self.task_type
 
         self.model = AnemoiModelInterface(
             statistics=statistics,

@@ -184,17 +184,7 @@ class AnemoiTrainer(ABC):
     def profiler(self) -> None:
         """Abstract method to be used for AnemoiProfiler."""
         return None
-    '''
-    @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
-        return graphs
-    '''
+
     @cached_property
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data.
@@ -203,43 +193,22 @@ class AnemoiTrainer(ABC):
         """
         if (graph_filename := self.config.system.input.graph) is not None:
             graph_filename = Path(graph_filename)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
-
-            # Try loading existing
             if graph_filename.exists() and not self.config.graph.overwrite:
                 from anemoi.graphs.utils import get_distributed_device
 
                 LOGGER.info("Loading graph data from %s", graph_filename)
                 return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+
         else:
             graph_filename = None
 
-        # Create new graph
         from anemoi.graphs.create import GraphCreator
 
         graph_config = convert_to_omegaconf(self.config).graph
-
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
-
         return GraphCreator(config=graph_config).create(
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,
         )
-
-
-    @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
-        return graphs
 
     @cached_property
     def model(self) -> pl.LightningModule:

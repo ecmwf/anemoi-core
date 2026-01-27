@@ -243,7 +243,7 @@ def parse_multi_dataset_config(config: DictConfig) -> DictConfig:
     PER_DATASET_CONFIG_KEY.dataset_name.override_value
 
     """
-
+    #TODO: hardcode which keys are per dataset, need to make this more flexible.
     PER_DATASET_CONFIG_KEYS = [
         "data.dataset_specific",
         "dataloader.grid_indices",

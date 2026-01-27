@@ -133,8 +133,8 @@ class AnemoiModelInterface(torch.nn.Module):
         self.pre_processors_tendencies = torch.nn.ModuleDict()
         self.post_processors_tendencies = torch.nn.ModuleDict()
 
-        data_config = get_multiple_datasets_config(self.config.data)
-        for dataset_name in self.statistics.keys():
+        data_config = get_multiple_datasets_config(self.config.data.dataset_specific)
+        for dataset_name in self.statistics.keys(): #TODO seems very random to use statistics.keys here?
             # Build processors for each dataset
             pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
                 data_config[dataset_name].processors,
