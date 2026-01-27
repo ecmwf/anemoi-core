@@ -271,9 +271,7 @@ class ICONCellDataGrid:
     max_level: int
     select_c: np.ndarray
 
-    def __init__(
-        self, icon_grid_filename: str, max_level: int | None = None, multi_mesh: ICONMultiMesh | None = None
-    ):
+    def __init__(self, icon_grid_filename: str, max_level: int | None = None, multi_mesh: ICONMultiMesh | None = None):
         self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
