@@ -211,15 +211,15 @@ class EcTransOctahedralSHT(SpectralTransform):
     def __init__(
         self,
         truncation: int,
+        dir_path: str,
         dtype: torch.dtype = torch.float32,
-        filepath: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__()
         self.truncation = int(truncation)
         self.dtype = dtype
 
-        self._sht = EcTransOctahedralSHTModule(truncation=self.truncation, dtype=self.dtype, filepath=filepath)
+        self._sht = EcTransOctahedralSHTModule(truncation=self.truncation, dtype=self.dtype, dir_path=dir_path)
         self._expected_points = int(self._sht.n_grid_points)
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:

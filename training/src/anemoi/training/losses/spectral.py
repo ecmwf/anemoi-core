@@ -110,7 +110,7 @@ class SpectralLoss(BaseLoss):
             # expected additional args: lmax/mmax/folding
             self.transform = OctahedralSHT(**kwargs)
         elif transform == "ectrans_octahedral_sht":
-            # expected args: truncation (+ optional dtype, filepath)
+            # expected args: truncation, dir_path (+ optional dtype)
             self.transform = EcTransOctahedralSHT(**kwargs)
         else:
             msg = f"Unknown transform type: {transform}"
