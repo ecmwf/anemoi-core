@@ -45,7 +45,7 @@ from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sam
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.train.tasks import GraphInterpolator
+from anemoi.models.models import AnemoiModelEncProcDecInterpolator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class BasePlotCallback(Callback, ABC):
 
     def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
         """Return times outputted by the model."""
-        if isinstance(pl_module, GraphInterpolator):
+        if isinstance(pl_module.model.model, AnemoiModelEncProcDecInterpolator):
             output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
             output_times = (getattr(pl_module, "rollout", 0), "forecast")

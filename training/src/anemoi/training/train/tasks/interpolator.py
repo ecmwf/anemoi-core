@@ -262,7 +262,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             ]
 
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-        metrics = {}
 
         y_pred = self(x_bound)
 
