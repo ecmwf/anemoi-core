@@ -9,16 +9,13 @@
 
 
 import logging
-from functools import cached_property
+from functools import cache, cached_property
 
 import pytorch_lightning as pl
-from hydra.utils import instantiate
 from torch.utils.data import DataLoader
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
@@ -29,20 +26,19 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: BaseSchema, graph_data: HeteroData, task: "BaseTask") -> None:
+    def __init__(self, config: BaseSchema, task: "BaseTask") -> None:
         """Initialize Multi-dataset data module.
 
         Parameters
         ----------
         config : BaseSchema
             Job configuration with multi-dataset specification
-        graph_data : HeteroData
-            Graph data for the model
+        task : BaseTask
+            Task defining the problem to solve
         """
         super().__init__()
 
         self.config = config
-        self.graph_data = graph_data
         self.task = task
 
         self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
@@ -79,13 +75,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def supporting_arrays(self) -> dict:
         """Return supporting arrays from all training datasets."""
-        supporting_arrays = self.ds_train.supporting_arrays
-        for dataset_name, grid_indices in self.grid_indices.items():
-            if dataset_name in supporting_arrays:
-                supporting_arrays[dataset_name] = supporting_arrays[dataset_name] | grid_indices.supporting_arrays
-            else:
-                supporting_arrays[dataset_name] = grid_indices.supporting_arrays
-        return supporting_arrays
+        return self.ds_train.supporting_arrays
 
     @cached_property
     def data_indices(self) -> dict[str, IndexCollection]:
