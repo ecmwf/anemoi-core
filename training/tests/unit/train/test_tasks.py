@@ -13,6 +13,7 @@ from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.interpolator import GraphInterpolator
+from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
 from anemoi.training.train.tasks.obsinterpolator import ObsGraphInterpolator
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -170,7 +171,7 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
         metadata={},
         supporting_arrays={},
     )
-    assert itp.multi_out == 3
+    assert itp.multi_out == 1
     assert itp.boundary_times == [0, 6]
     assert itp.interp_times == [1, 2, 3]
     b, e, g, v = 2, 1, 3, len(name_to_index)
@@ -184,6 +185,67 @@ def test_graphinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, len(itp.interp_times), e, g, v)
 
+
+
+def test_graphmultioutinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _stub_init(
+        self: BaseGraphModule,
+        *,
+        config: DictConfig,
+        graph_data: HeteroData,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: dict[str, IndexCollection],
+        metadata: dict | None = None,
+        supporting_arrays: dict | None = None,
+    ) -> None:
+        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
+        pl.LightningModule.__init__(self)
+        self.model = DummyModel(output_times=len(config.training.explicit_times.target), add_skip=True)
+        self.model_comm_group = None
+        self.grid_shard_slice = {"data": None}
+        self.grid_shard_shapes = {"data": None}
+        self.is_first_step = False  # avoid scaler init
+        self.updating_scalars = {}
+        self.data_indices = data_indices
+        self.dataset_names = list(data_indices.keys())
+        self.config = config
+        self.loss = {"data": DummyLoss()}
+        self.loss_supports_sharding = True
+        self.metrics_support_sharding = True
+        self.grid_dim = -2
+
+    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
+    name_to_index = {"A": 0, "B": 1}
+    itp = GraphInterpolator.__new__(GraphInterpolator)
+    itp = GraphInterpolator(
+        config=DictConfig(
+            {
+                "training": {
+                    "explicit_times": {"input": [0, 6], "target": [1, 2, 3]},
+                },
+            },
+        ),
+        graph_data={"data": HeteroData()},
+        statistics={},
+        statistics_tendencies={},
+        data_indices={"data": _make_minimal_index_collection(name_to_index)},
+        metadata={},
+        supporting_arrays={},
+    )
+    assert itp.multi_out == 3
+    assert itp.boundary_times == [0, 6]
+    assert itp.interp_times == [1, 2, 3]
+    b, e, g, v = 2, 1, 3, len(name_to_index)
+    t = len(itp.imap)
+    batch = torch.randn((b, t, e, g, v), dtype=torch.float32)
+    loss, metrics, y_preds = itp._step(batch={"data": batch}, validation_mode=False)
+    assert isinstance(loss, torch.Tensor)
+    assert metrics == {}
+    assert len(y_preds) == len(itp.interp_times)
+    y_pred = torch.stack([pred["data"] for pred in y_preds], dim=1)
+    assert y_pred.ndim == 5
+    assert y_pred.shape == (b, len(itp.interp_times), e, g, v)
 
 def test_obsinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
     def _stub_init(
