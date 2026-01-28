@@ -135,10 +135,11 @@ def test_normalize_remap(remap_normalizer) -> None:
 # Tests for target-only variables (e.g., satellite observations like 'imerg')
 # ============================================================================
 
+
 @pytest.fixture()
 def normalizer_with_target_only():
     """Create normalizer with target-only variable 'imerg'.
-    
+
     Setup:
     - 4 regular variables (x, y, z, q) in both model.output and data.output
     - 1 target-only variable (imerg) only in data.output
@@ -180,7 +181,7 @@ def test_model_output_idx_excludes_target_only(normalizer_with_target_only) -> N
     """Test that _model_output_idx excludes target-only variables."""
     model_idx = normalizer_with_target_only._model_output_idx
     output_idx = normalizer_with_target_only._output_idx
-    
+
     # imerg is at index 4, should not be in model_output_idx
     assert 4 not in model_idx.tolist()
     # But should be in output_idx
@@ -189,45 +190,53 @@ def test_model_output_idx_excludes_target_only(normalizer_with_target_only) -> N
 
 def test_inverse_transform_model_output_size(normalizer_with_target_only) -> None:
     """Test inverse_transform with model output size (excludes target-only vars).
-    
+
     This tests the scenario where the model predicts 4 variables but
     data.output has 5 variables (including target-only 'imerg').
     """
     # Normalized tensor with 4 variables (model output, no imerg)
     # Normalized values: (x - mean) / stdev
-    normalized = torch.Tensor([
-        [0.0, 0.0, 0.0, 0.0],  # All at mean
-        [2.0, 2.0, 2.0, 2.0],  # All at mean + stdev
-    ])
-    
+    normalized = torch.Tensor(
+        [
+            [0.0, 0.0, 0.0, 0.0],  # All at mean
+            [2.0, 2.0, 2.0, 2.0],  # All at mean + stdev
+        ]
+    )
+
     # After inverse transform: x * stdev + mean = x * 0.5 + [1,2,3,4]
-    expected = torch.Tensor([
-        [1.0, 2.0, 3.0, 4.0],  # means
-        [2.0, 3.0, 4.0, 5.0],  # mean + stdev
-    ])
-    
+    expected = torch.Tensor(
+        [
+            [1.0, 2.0, 3.0, 4.0],  # means
+            [2.0, 3.0, 4.0, 5.0],  # mean + stdev
+        ]
+    )
+
     result = normalizer_with_target_only.inverse_transform(normalized, in_place=False)
     assert torch.allclose(result, expected)
 
 
 def test_inverse_transform_data_output_size(normalizer_with_target_only) -> None:
     """Test inverse_transform with data output size (includes target-only vars).
-    
+
     This tests the scenario where we have the full data.output with 5 variables
     including the target-only 'imerg'.
     """
     # Normalized tensor with 5 variables (data output, includes imerg)
-    normalized = torch.Tensor([
-        [0.0, 0.0, 0.0, 0.0, 0.0],
-        [2.0, 2.0, 2.0, 2.0, 2.0],
-    ])
-    
+    normalized = torch.Tensor(
+        [
+            [0.0, 0.0, 0.0, 0.0, 0.0],
+            [2.0, 2.0, 2.0, 2.0, 2.0],
+        ]
+    )
+
     # After inverse transform
-    expected = torch.Tensor([
-        [1.0, 2.0, 3.0, 4.0, 5.0],  # means
-        [2.0, 3.0, 4.0, 5.0, 6.0],  # mean + stdev
-    ])
-    
+    expected = torch.Tensor(
+        [
+            [1.0, 2.0, 3.0, 4.0, 5.0],  # means
+            [2.0, 3.0, 4.0, 5.0, 6.0],  # mean + stdev
+        ]
+    )
+
     result = normalizer_with_target_only.inverse_transform(normalized, in_place=False)
     assert torch.allclose(result, expected)
 
@@ -238,14 +247,13 @@ def test_inverse_transform_different_tensor_sizes(normalizer_with_target_only) -
     model_output = torch.zeros(2, 4)
     result_model = normalizer_with_target_only.inverse_transform(model_output, in_place=False)
     assert result_model.shape[-1] == 4
-    
+
     # Data output size (5 variables)
     data_output = torch.zeros(2, 5)
     result_data = normalizer_with_target_only.inverse_transform(data_output, in_place=False)
     assert result_data.shape[-1] == 5
-    
+
     # Values should be correct for each
     # Model output gets indices [0,1,2,3], data output gets indices [0,1,2,3,4]
     assert torch.allclose(result_model, torch.Tensor([[1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]]))
     assert torch.allclose(result_data, torch.Tensor([[1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 2.0, 3.0, 4.0, 5.0]]))
-

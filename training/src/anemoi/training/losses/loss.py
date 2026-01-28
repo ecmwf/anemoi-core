@@ -126,7 +126,9 @@ def _wrap_loss_with_filtering(
         # filter scaler to only predicted variables
         # Map predicted variables to data output indices for scaler filtering
         data_indices_for_vars = [
-            (data_indices.data.output.full == data_indices.data.output.name_to_index[var]).nonzero(as_tuple=True)[0].item()
+            (data_indices.data.output.full == data_indices.data.output.name_to_index[var])
+            .nonzero(as_tuple=True)[0]
+            .item()
             for var in loss_function.predicted_variables
         ]
 
