@@ -33,6 +33,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.models import AnemoiModelEncProcDecInterpolator
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -45,7 +46,6 @@ from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sam
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.train.tasks import GraphInterpolator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class BasePlotCallback(Callback, ABC):
 
     def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
         """Return times outputted by the model."""
-        if isinstance(pl_module, GraphInterpolator):
+        if isinstance(pl_module.model.model, AnemoiModelEncProcDecInterpolator):
             output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
             output_times = (getattr(pl_module, "rollout", 0), "forecast")
@@ -190,7 +190,7 @@ class BasePlotCallback(Callback, ABC):
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
         if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
             # Fill with NaNs values where the mask is False
-            data[:, :, ~pl_module.output_mask, :] = np.nan
+            data[:, :, :, ~pl_module.output_mask, :] = np.nan
         return data
 
     @abstractmethod
@@ -266,6 +266,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
+
             # gather tensors if necessary
             batch = {
                 dataset_name: pl_module.allgather_batch(
@@ -276,21 +277,35 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 for dataset_name, dataset_tensor in batch.items()
             }
             # output: [loss, [pred_dict1, pred_dict2, ...]], gather predictions for plotting
-            output = [
-                output[0],
-                [
-                    {
-                        dataset_name: pl_module.allgather_batch(
-                            dataset_pred,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
-                        )
-                        for dataset_name, dataset_pred in pred.items()
-                    }
-                    for pred in output[1]
-                ],
-            ]
-
+            if len(output[1]) > 1:
+                output = [
+                    output[0],
+                    [
+                        {
+                            dataset_name: pl_module.allgather_batch(
+                                dataset_pred,
+                                pl_module.grid_indices[dataset_name],
+                                pl_module.grid_dim,
+                            )
+                            for dataset_name, dataset_pred in pred.items()
+                        }
+                        for pred in output[1]
+                    ],
+                ]
+            else:
+                output = [
+                    output[0],
+                    [
+                        {
+                            dataset_name: pl_module.allgather_batch(
+                                dataset_pred,
+                                pl_module.grid_indices[dataset_name],
+                                pl_module.grid_dim,
+                            )
+                            for dataset_name, dataset_pred in output[1].items()
+                        },
+                    ],
+                ]
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem
@@ -1015,12 +1030,13 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             for rollout_step in range(output_times[0]):
                 y_hat = outputs[1][rollout_step][dataset_name]
-                y_true = batch[dataset_name][
-                    :,
-                    pl_module.multi_step + rollout_step,
-                    ...,
-                    data_indices.data.output.full,
+                fc_times = [
+                    pl_module.multi_step + rollout_step * pl_module.multi_out + i for i in range(pl_module.multi_out)
                 ]
+                time_idx = torch.tensor(fc_times, device=batch[dataset_name].device)
+                y_time = batch[dataset_name].index_select(1, time_idx)
+                var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
+                y_true = y_time.index_select(-1, var_idx)
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
@@ -1112,8 +1128,14 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=2, fill_value=np.nan)
+        output_tensor = (
+            pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
+        )
+        data[1:, ...] = pl_module.output_mask[dataset_name].apply(
+            data[1:, ...],
+            dim=pl_module.grid_dim,
+            fill_value=np.nan,
+        )
         data = data.numpy()
 
         return data, output_tensor

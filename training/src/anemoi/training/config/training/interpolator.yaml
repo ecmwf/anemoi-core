@@ -20,6 +20,12 @@ precision: 16-mixed
 # Deepmind use k = 2 in their model
 multistep_input: 2
 
+# multistep output
+# 1 = single step output scheme, single model forward predicts X(t)
+# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
+# Deepmind use l = 1 in their model
+multistep_output: 1
+
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
@@ -50,12 +56,7 @@ explicit_times:
   input: [0, 6]
   target: [1, 2, 3, 4, 5]
 
-target_forcing:
-  datasets:
-    data: # user-defined key in data #forcing parameters for the target time to include as input
-      data: #of which come from the dataset
-        - "insolation"
-      time_fraction: True
+target_forcing: null
 
 # select strategy
 strategy:
