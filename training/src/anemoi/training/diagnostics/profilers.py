@@ -536,6 +536,7 @@ class BenchmarkProfiler(Profiler):
 
         training_rates_array = np.array(progressbar.training_rates)
         speed_metrics["training_avg_throughput"] = training_rates_array.mean()
+        speed_metrics["training_peak_throughput"] = max(training_rates_array)
         speed_metrics["training_avg_throughput_per_sample"] = training_rates_array.mean() / batch_size_tr
 
         validation_rates_array = np.array(progressbar.validation_rates)
