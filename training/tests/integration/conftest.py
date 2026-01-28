@@ -367,6 +367,19 @@ def autoencoder_config(
 
 
 @pytest.fixture
+def multi_out_autoencoder_config(autoencoder_config: tuple[OmegaConf, list[str]]) -> tuple[OmegaConf, list[str]]:
+
+    cfg, url = autoencoder_config
+
+    OmegaConf.set_struct(cfg.training, False)
+
+    cfg.training.multistep_input = 2
+    cfg.training["multistep_output"] = 2
+
+    return cfg, url
+
+
+@pytest.fixture
 def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths) -> tuple[DictConfig, str]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(config_name="config")
