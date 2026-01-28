@@ -574,6 +574,37 @@ def interpolator_config(
     return cfg, dataset_urls[0]
 
 
+def multi_out_interpolator_config(
+    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, str]:
+    """Compose a runnable configuration for the temporal-interpolation model with multiple output steps.
+
+    It is based on `interpolator_multiout.yaml` and only patches paths pointing to the
+    sample dataset that the tests download locally.
+    """
+    # No model override here - the template already sets the dedicated
+    # interpolator model + GraphMultiOutInterpolator Lightning task.
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_interpolator_multiout",
+    ):
+      	template = compose(config_name="interpolator_multiout")
+
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/test_interpolator_multiout.yaml",
+    )
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0]
+
+
 @pytest.fixture(
     params=[
         [],
