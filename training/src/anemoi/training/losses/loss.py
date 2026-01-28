@@ -116,16 +116,6 @@ def _wrap_loss_with_filtering(
     data_indices: IndexCollection,
 ) -> BaseLoss:
     """Wrap loss function with FilteringLossWrapper if predicted or target variables are specified."""
-    print(
-        f"DEBUG: model.output variables ({len(data_indices.model.output.full)}): {list(data_indices.model.output.name_to_index.keys())}",
-    )
-    print(
-        f"DEBUG: data.output variables ({len(data_indices.data.output.full)}): {list(data_indices.data.output.name_to_index.keys())}",
-    )
-    print(
-        f"DEBUG: Target-only variables: {set(data_indices.data.output.name_to_index.keys()) - set(data_indices.model.output.name_to_index.keys())}",
-    )
-
     loss_function = FilteringLossWrapper(
         loss=loss_function,
         predicted_variables=predicted_variables,
@@ -136,7 +126,8 @@ def _wrap_loss_with_filtering(
         # filter scaler to only predicted variables
         # Map predicted variables to data output indices for scaler filtering
         data_indices_for_vars = [
-            data_indices.data.output.name_to_index[var] for var in loss_function.predicted_variables
+            (data_indices.data.output.full == data_indices.data.output.name_to_index[var]).nonzero(as_tuple=True)[0].item()
+            for var in loss_function.predicted_variables
         ]
 
         for key, (dims, tens) in subloss.scaler.subset_by_dim(TensorDim.VARIABLE).tensors.items():
@@ -144,7 +135,6 @@ def _wrap_loss_with_filtering(
             var_dim_pos = list(dims).index(TensorDim.VARIABLE)
             # Only filter if the scaler has the full number of variables
 
-            # print(n_variables,tens.shape[var_dim_pos], key, dims)
             if tens.shape[var_dim_pos] in [len(data_indices.model.output.full), len(data_indices.data.output.full)]:
                 scaling = tens[data_indices_for_vars]
                 loss_function.loss.update_scaler(name=key, scaler=scaling, override=True)
