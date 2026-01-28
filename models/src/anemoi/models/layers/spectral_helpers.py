@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
 from functools import cached_property
 from pathlib import Path
 
@@ -375,6 +374,7 @@ class OctahedralInverseRealSHT(Module):
 
         return x
 
+
 polytype = np.float64
 
 _COMPLEX_DTYPE_MAP = {
@@ -382,6 +382,7 @@ _COMPLEX_DTYPE_MAP = {
     torch.float32: torch.complex64,
     torch.float64: torch.complex128,
 }
+
 
 class EcTransOctahedralSHTModule(Module):
     """Octahedral SHT based on ecTrans assets (via ectrans4py or precomputed npz).
