@@ -128,6 +128,18 @@ def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig,
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_multi_out_multidatasets(
+    multi_out_multidatasets_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multi_out_multidatasets_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_archive: GetTestArchive) -> None:
     cfg, urls = lam_config
     for url in urls:

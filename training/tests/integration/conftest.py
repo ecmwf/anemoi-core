@@ -231,6 +231,18 @@ def multidatasets_config(
 
 
 @pytest.fixture
+def multi_out_multidatasets_config(multidatasets_config: tuple[DictConfig, list[str]]) -> tuple[DictConfig, list[str]]:
+    cfg, urls = multidatasets_config
+
+    OmegaConf.set_struct(cfg.training, False)
+
+    cfg.training.multistep_input = 3
+    cfg.training["multistep_output"] = 2
+
+    return cfg, urls
+
+
+@pytest.fixture
 def lam_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
