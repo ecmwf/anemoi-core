@@ -590,7 +590,7 @@ def multi_out_interpolator_config(
         config_path="../../src/anemoi/training/config",
         job_name="test_interpolator_multiout",
     ):
-      	template = compose(config_name="interpolator_multiout")
+        template = compose(config_name="interpolator_multiout")
 
     use_case_modifications = OmegaConf.load(
         Path.cwd() / "training/tests/integration/config/test_interpolator_multiout.yaml",
