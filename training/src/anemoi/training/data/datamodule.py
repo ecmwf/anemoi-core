@@ -12,13 +12,10 @@ import logging
 from functools import cached_property
 
 import pytorch_lightning as pl
-from hydra.utils import instantiate
 from torch.utils.data import DataLoader
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
@@ -29,20 +26,17 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: BaseSchema, graph_data: HeteroData) -> None:
+    def __init__(self, config: BaseSchema) -> None:
         """Initialize Multi-dataset data module.
 
         Parameters
         ----------
         config : BaseSchema
             Job configuration with multi-dataset specification
-        graph_data : HeteroData
-            Graph data for the model
         """
         super().__init__()
 
         self.config = config
-        self.graph_data = graph_data
         self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
         self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
         self.test_dataloader_config = get_multiple_datasets_config(self.config.dataloader.test)
@@ -77,13 +71,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def supporting_arrays(self) -> dict:
         """Return supporting arrays from all training datasets."""
-        supporting_arrays = self.ds_train.supporting_arrays
-        for dataset_name, grid_indices in self.grid_indices.items():
-            if dataset_name in supporting_arrays:
-                supporting_arrays[dataset_name] = supporting_arrays[dataset_name] | grid_indices.supporting_arrays
-            else:
-                supporting_arrays[dataset_name] = grid_indices.supporting_arrays
-        return supporting_arrays
+        return self.ds_train.supporting_arrays
 
     @cached_property
     def data_indices(self) -> dict[str, IndexCollection]:
@@ -117,20 +105,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout = max(rollout_value, val_rollout)
         multi_step = self.config.training.multistep_input
         return list(range(multi_step + rollout))
-
-    @cached_property
-    def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
-        """Initialize grid indices for spatial sharding for each dataset."""
-        grid_indices_dict = {}
-
-        # Each dataset can have its own grid indices configuration
-        grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
-        for dataset_name, grid_config in grid_indices_config.items():
-            grid_indices = instantiate(grid_config, reader_group_size=self.config.dataloader.read_group_size)
-            grid_indices.setup(self.graph_data[dataset_name])
-            grid_indices_dict[dataset_name] = grid_indices
-
-        return grid_indices_dict
 
     @cached_property
     def ds_train(self) -> MultiDataset:
@@ -168,7 +142,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             relative_date_indices=self.relative_date_indices(val_rollout),
             timestep=self.config.data.timestep,
             shuffle=shuffle,
-            grid_indices=self.grid_indices,
             label=label,
         )
 
