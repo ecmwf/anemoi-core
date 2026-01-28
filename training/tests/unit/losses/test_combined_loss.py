@@ -209,4 +209,6 @@ def test_combined_loss_filtered_and_unfiltered_with_scalers() -> None:
     
     # Should not raise IndexError - print_variable_scaling should work with filtered losses
     scaling_values = print_variable_scaling(loss, data_indices)
-    assert "tp" in scaling_values  # The filtered variable should be in the output
+    # scaling_values is a dict with loss names as keys
+    assert "MSELoss" in scaling_values
+    assert "tp" in scaling_values["MSELoss"]

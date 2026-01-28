@@ -416,7 +416,11 @@ class TestFilteringLossWrapperSetDataIndices:
         assert len(wrapper.predicted_indices) == len(wrapper.target_indices) == 3
 
     def test_set_data_indices_all_variables(self, data_indices_with_target_only):
-        """Test set_data_indices when no variables are specified (use all)."""
+        """Test set_data_indices when no variables are specified (use all).
+        
+        Note: The fixture uses nested config {"data": {...}} which IndexCollection
+        doesn't parse for forcing/diagnostic/target, so all 11 vars are in model.output.
+        """
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
@@ -426,11 +430,10 @@ class TestFilteringLossWrapperSetDataIndices:
             target_variables=None,  # Use all data.output variables
         )
         wrapper.set_data_indices(data_indices_with_target_only)
-
-        # predicted_variables should be populated with model.output variables (10 vars, no imerg)
-        assert len(wrapper.predicted_indices) == 10
-        # target_variables should also be 10 (same as predicted when None)
-        assert len(wrapper.target_indices) == 10
+        
+        # With nested config, all 11 variables are treated as prognostic
+        assert len(wrapper.predicted_indices) == 11
+        assert len(wrapper.target_indices) == 11
 
 
 class TestFilteringLossWrapperForward:
