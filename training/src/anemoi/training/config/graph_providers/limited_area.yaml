@@ -1,0 +1,37 @@
+hidden:
+  _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
+  resolution: 6 # grid resolution for npz (o32, o48, ...)
+  reference_node_name: ${graph.data}
+  mask_attr_name: cutout_mask
+  margin_radius_km: 10
+
+encoder_edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 0.6 # only for cutoff method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  - _target_: anemoi.graphs.edges.CutOffEdges # connects only boundary nodes
+    cutoff_factor: 1.5 # only for cutoff method
+    source_mask_attr_name: boundary_mask
+    target_mask_attr_name: null
+
+processor_edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.hidden.resolution}
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+
+decoder_edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    num_nearest_neighbours: 3 # only for knn method
+    source_mask_attr_name: null
+    target_mask_attr_name: cutout_mask
+
+edge_attributes:
+  edge_length:
+    _target_: anemoi.graphs.edges.attributes.EdgeLength
+    norm: unit-std
+  edge_dirs:
+    _target_: anemoi.graphs.edges.attributes.EdgeDirection
+    norm: unit-std

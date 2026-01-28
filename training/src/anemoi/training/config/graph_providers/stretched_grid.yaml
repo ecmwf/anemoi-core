@@ -1,0 +1,35 @@
+# Stretched grid graph config intended to be used with a cutout dataset.
+# The stretched mesh resolution used here is intended for o96 global resolution with 10km
+# limited area resolution.
+hidden:
+  _target_: anemoi.graphs.nodes.StretchedTriNodes
+  lam_resolution: 8
+  global_resolution: 5
+  reference_node_name: ${graph.data}
+  mask_attr_name: cutout_mask
+  margin_radius_km: 11
+
+encoder_edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    num_nearest_neighbours: 12 # only for knn method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+
+processor_edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.hidden.lam_resolution}
+
+decoder_edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    num_nearest_neighbours: 3 # only for knn method
+    source_mask_attr_name: null
+    target_mask_attr_name: cutout_mask
+
+edge_attributes:
+  edge_length:
+    _target_: anemoi.graphs.edges.attributes.EdgeLength
+    norm: unit-std
+  edge_dirs:
+    _target_: anemoi.graphs.edges.attributes.EdgeDirection
+    norm: unit-std
