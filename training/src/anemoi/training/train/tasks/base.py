@@ -306,9 +306,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 position = (full_output_indices == index).nonzero(as_tuple=True)[0].item()
                 # Mark this position as True (keep it for model output)
                 model_mask[position] = True
-                
 
-        self.mask_target=model_mask 
+        self.mask_target = model_mask
 
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
@@ -868,7 +867,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         y_postprocessed = post_processor(y, in_place=False)
         y_pred_postprocessed = post_processor(y_pred, in_place=False)
-        if y_postprocessed.shape[3] != y_pred_postprocessed.shape[3]: #maybe 3 shouldn't be hardcoded
+        if y_postprocessed.shape[3] != y_pred_postprocessed.shape[3]:  # maybe 3 shouldn't be hardcoded
 
             y_postprocessed = y_postprocessed[..., self.mask_target]
         suffix = "" if step is None else f"/{step + 1}"

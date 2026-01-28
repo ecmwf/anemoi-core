@@ -59,11 +59,11 @@ class FilteringLossWrapper(BaseLoss):
         self.data_indices = data_indices
         name_to_index = data_indices.data.output.name_to_index
         reindexed = {
-                k: i
-                for i, (k, _) in enumerate(
-                    (kv for kv in name_to_index.items() if kv[1] in set(data_indices.data.output.full.tolist()))
-                )
-            }
+            k: i
+            for i, (k, _) in enumerate(
+                kv for kv in name_to_index.items() if kv[1] in set(data_indices.data.output.full.tolist())
+            )
+        }
         model_output = data_indices.model.output
         output_indices = model_output.full
 
