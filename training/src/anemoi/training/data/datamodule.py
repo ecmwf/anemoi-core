@@ -123,7 +123,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if hasattr(self.config.training, "explicit_times"):
             return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
 
-        # Calculate indices using multistep, timeincrement and rollout
+        # Calculate indices using multi_step, multi_out and rollout
         rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
 
         rollout_max = getattr(rollout_cfg, "max", None)
