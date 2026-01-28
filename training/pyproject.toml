@@ -45,6 +45,7 @@ dependencies = [
   "anemoi-utils[mlflow,provenance]>=0.4.37",
   "datashader>=0.17",
   "einops>=0.6.1",
+  "ruamel-yaml>=0.19.1", # datasets depndancy enforce here so we dont get too old a version 
   "hydra-core>=1.3",
   "matplotlib>=3.7.1",
   "mlflow-skinny>=2.11.1",
