@@ -75,7 +75,12 @@ class GraphForecaster(BaseRolloutGraphModule):
 
             y = {}
             for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[:, self.multi_step + rollout_step]
+                y[dataset_name] = dataset_batch[
+                    :,
+                    self.multi_step + rollout_step,
+                    ...,
+                    self.data_indices[dataset_name].data.output.full,
+                ]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
             loss, metrics_next, y_pred = checkpoint(
