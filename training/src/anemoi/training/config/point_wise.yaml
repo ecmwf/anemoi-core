@@ -4,6 +4,8 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: point_wise
+- loss_graphs: none
+- truncation: none
 - model: point_wise
 - training: default
 - _self_

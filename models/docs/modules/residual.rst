@@ -30,6 +30,44 @@ in Anemoi.
  Truncated Connection
 **********************
 
+Use file-based matrices:
+
+.. code-block:: yaml
+
+   residual:
+     _target_: anemoi.models.layers.residual.TruncatedConnection
+     truncation_down_file_path: o96_to_o32.npz
+     truncation_up_file_path: o32_to_o96.npz
+     truncation_matrices_path: /path/to/matrices
+
+Use a graph-based truncation definition:
+
+.. code-block:: yaml
+
+   residual:
+     _target_: anemoi.models.layers.residual.TruncatedConnection
+     truncation_graph:
+       graph_config:
+         nodes:
+           data: ...
+           trunc: ...
+         edges:
+           - source_name: data
+             target_name: trunc
+             edge_builders: [...]
+             attributes:
+               gauss_weight: ...
+           - source_name: trunc
+             target_name: data
+             edge_builders: [...]
+             attributes:
+               gauss_weight: ...
+         post_processors: []
+       down_edges_name: [data, to, trunc]
+       up_edges_name: [trunc, to, data]
+       edge_weight_attribute: gauss_weight
+
+
 .. autoclass:: anemoi.models.layers.residual.TruncatedConnection
    :members:
    :no-undoc-members:

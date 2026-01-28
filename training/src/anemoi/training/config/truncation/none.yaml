@@ -1,0 +1,3 @@
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection
+  step: -1

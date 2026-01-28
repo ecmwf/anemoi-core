@@ -147,7 +147,7 @@ class TestMultiScaleEdgesStretched:
     def test_fast_1_hop_method(selg, tri_graph: HeteroData, edge_resolutions):
         nodes = tri_graph["hidden"]
         all_points_mask_builder = KNNAreaMaskBuilder("all_nodes", 1.0)
-        all_points_mask_builder.fit_coords(nodes.x.numpy())
+        all_points_mask_builder.fit_coords(nodes.x.cpu().numpy())
 
         fast_edges = tri_icosahedron.add_1_hop_edges(
             nodes_coords_rad=nodes["x"],

@@ -4,6 +4,8 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: limited_area
+- loss_graphs: none
+- truncation: none
 - model: graphtransformer
 - training: lam
 - _self_
