@@ -28,6 +28,47 @@ class GraphAutoEncoder(BaseGraphModule):
 
     task_type = "autoencoder"
 
+    def __init__(
+        self,
+        *,
+        config: DictConfig,
+        graph_data: HeteroData,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: IndexCollection,
+        metadata: dict,
+        supporting_arrays: dict,
+    ) -> None:
+        """Initialize graph neural network interpolator.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Job configuration
+        graph_data : HeteroData
+            Graph object
+        statistics : dict
+            Statistics of the training data
+        data_indices : IndexCollection
+            Indices of the training data,
+        metadata : dict
+            Provenance information
+        supporting_arrays : dict
+            Supporting NumPy arrays to store in the checkpoint
+
+        """
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
+
+        assert self.multi_step == self.multi_out, "Autoencoders must have the same number of input and output steps."
+
     def _step(
         self,
         batch: dict[str, torch.Tensor],

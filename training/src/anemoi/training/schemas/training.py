@@ -490,7 +490,7 @@ TrainingSchema = Annotated[
     | InterpolationSchema
     | InterpolationMultiSchema
     | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema,
-    |  AutoencoderSchema
+    | DiffusionTendForecasterSchema
+    | AutoencoderSchema,
     Discriminator("model_task"),
 ]
