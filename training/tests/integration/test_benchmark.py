@@ -44,9 +44,9 @@ def test_benchmark_training_cycle(
     empty_cache()
     gc.collect()
     # Run model with profiler
-    #AnemoiProfiler(cfg).profile()
-    AnemoiTrainer(cfg).train()
-    return
+    AnemoiProfiler(cfg).profile()
+    #AnemoiTrainer(cfg).train()
+    #return
 
     # determine store from benchmark config
     config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
