@@ -60,18 +60,26 @@ def build_mock_config(
 @pytest.fixture
 def trainer_factory() -> AnemoiTrainer:
     def _make_trainer(mock_config: MagicMock) -> AnemoiTrainer:
-        with patch("anemoi.training.train.train.OmegaConf.to_object", return_value=mock_config), patch(
-            "anemoi.training.train.train.DictConfig",
-            return_value=mock_config,
-        ), patch("anemoi.training.train.train.UnvalidatedBaseSchema", return_value=mock_config), patch(
-            "anemoi.training.train.train.LOGGER",
-        ), patch(
-            "anemoi.training.train.train.AnemoiTrainer._check_dry_run",
-        ), patch(
-            "anemoi.training.train.train.AnemoiTrainer._log_information",
-        ), patch(
-            "pathlib.Path.exists",
-            return_value=True,
+        with (
+            patch("anemoi.training.train.train.OmegaConf.to_object", return_value=mock_config),
+            patch(
+                "anemoi.training.train.train.DictConfig",
+                return_value=mock_config,
+            ),
+            patch("anemoi.training.train.train.UnvalidatedBaseSchema", return_value=mock_config),
+            patch(
+                "anemoi.training.train.train.LOGGER",
+            ),
+            patch(
+                "anemoi.training.train.train.AnemoiTrainer._check_dry_run",
+            ),
+            patch(
+                "anemoi.training.train.train.AnemoiTrainer._log_information",
+            ),
+            patch(
+                "pathlib.Path.exists",
+                return_value=True,
+            ),
         ):
             return AnemoiTrainer(config=mock_config)
 
