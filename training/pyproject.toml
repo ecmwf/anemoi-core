@@ -64,7 +64,7 @@ dependencies = [
 ]
 
 optional-dependencies.all = [  ]
-optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow", "strenum" ]
+optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
   "pre-commit>=3.3.3",
