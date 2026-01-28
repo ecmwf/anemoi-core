@@ -474,7 +474,7 @@ class AutoencoderSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
     "Training objective."
 
-
+    
 class InterpolationMultiSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
     "Training objective."
@@ -485,12 +485,14 @@ class InterpolationMultiSchema(BaseTrainingSchema):
 
 
 TrainingSchema = Annotated[
+  (
     ForecasterSchema
     | ForecasterEnsSchema
     | InterpolationSchema
     | InterpolationMultiSchema
     | DiffusionForecasterSchema
     | DiffusionTendForecasterSchema
-    | AutoencoderSchema,
+    | AutoencoderSchema
+  ),
     Discriminator("model_task"),
 ]

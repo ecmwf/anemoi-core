@@ -47,7 +47,8 @@ class BaseAnemoiReader:
         """Return dataset statistics."""
         return self.data.statistics
 
-    def statistics_tendencies(self, timestep: str | None = None) -> dict | None:
+      
+    def statistics_tendencies(self, timestep: datetime.timedelta | None = None) -> dict | None:
         """Return dataset tendency statistics."""
         if timestep is None:
             timestep = getattr(self, "timestep", None)
@@ -60,7 +61,7 @@ class BaseAnemoiReader:
         """Return dataset tendency statistics for a specific timestep."""
         try:
             return self.data.statistics_tendencies(timestep)
-        except (KeyError, AttributeError, ValueError):
+        except (KeyError, AttributeError):
             return None
 
     @property
