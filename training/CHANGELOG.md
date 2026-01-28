@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.0](https://github.com/ecmwf/anemoi-core/compare/training-0.8.4...training-0.9.0) (2026-01-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models,training:** multi dataset integration
+
+### Features
+
+* Drop python 3.10 ([#795](https://github.com/ecmwf/anemoi-core/issues/795)) ([ebea6d0](https://github.com/ecmwf/anemoi-core/commit/ebea6d09b4f7ea834865134670d0f2e187140ae1))
+* **models,training:** Multi dataset integration ([f537d7f](https://github.com/ecmwf/anemoi-core/commit/f537d7f209092215a94b9e7c613acc781ca4966b))
+* **training:** Autoencoder 🗜️ ([#252](https://github.com/ecmwf/anemoi-core/issues/252)) ([50e497b](https://github.com/ecmwf/anemoi-core/commit/50e497bd3c815a78638185081e9d008e6d828aa2))
+
+
+### Bug Fixes
+
+* **deps:** Workaround for failing uv dependency resolution ([#828](https://github.com/ecmwf/anemoi-core/issues/828)) ([bc64bac](https://github.com/ecmwf/anemoi-core/commit/bc64bac8df31f8ffb9951de4f7d02bf4f442a4be))
+* Set min version for azureml-mlflow ([#842](https://github.com/ecmwf/anemoi-core/issues/842)) ([0f721a5](https://github.com/ecmwf/anemoi-core/commit/0f721a56fc5bb59b7a405f2fe81fa34d027ff1b1))
+
 ## [0.8.4](https://github.com/ecmwf/anemoi-core/compare/training-0.8.3...training-0.8.4) (2026-01-14)
 
 

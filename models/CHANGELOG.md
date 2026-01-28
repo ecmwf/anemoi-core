@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.12.0](https://github.com/ecmwf/anemoi-core/compare/models-0.11.3...models-0.12.0) (2026-01-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models,training:** multi dataset integration
+
+### Features
+
+* Drop python 3.10 ([#795](https://github.com/ecmwf/anemoi-core/issues/795)) ([ebea6d0](https://github.com/ecmwf/anemoi-core/commit/ebea6d09b4f7ea834865134670d0f2e187140ae1))
+* **models, training:** Expose row_normalize kwarg to TruncatedConnectionSchema ([#805](https://github.com/ecmwf/anemoi-core/issues/805)) ([20b2da6](https://github.com/ecmwf/anemoi-core/commit/20b2da6fc89c40de67d22eb33b7d29735299fac5))
+* **models,training:** Multi dataset integration ([f537d7f](https://github.com/ecmwf/anemoi-core/commit/f537d7f209092215a94b9e7c613acc781ca4966b))
+* **training:** Autoencoder 🗜️ ([#252](https://github.com/ecmwf/anemoi-core/issues/252)) ([50e497b](https://github.com/ecmwf/anemoi-core/commit/50e497bd3c815a78638185081e9d008e6d828aa2))
+
 ## [0.11.3](https://github.com/ecmwf/anemoi-core/compare/models-0.11.2...models-0.11.3) (2026-01-14)
 
 
