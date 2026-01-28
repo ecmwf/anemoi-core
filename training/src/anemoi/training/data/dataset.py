@@ -47,7 +47,6 @@ class BaseAnemoiReader:
         """Return dataset statistics."""
         return self.data.statistics
 
-      
     def statistics_tendencies(self, timestep: datetime.timedelta | None = None) -> dict | None:
         """Return dataset tendency statistics."""
         if timestep is None:
