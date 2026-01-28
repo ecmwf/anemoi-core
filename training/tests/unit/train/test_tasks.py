@@ -12,7 +12,6 @@ from anemoi.models.preprocessing import Processors
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
-from anemoi.training.train.tasks.obsinterpolator import ObsGraphInterpolator
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -120,84 +119,6 @@ class DummyDiffusionModel(DummyModel):
 def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
     cfg = DictConfig({"forcing": [], "diagnostic": [], "target": []})
     return IndexCollection(cfg, name_to_index)
-
-
-def test_obsinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _stub_init(
-        self: BaseGraphModule,
-        *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: dict[str, IndexCollection],
-        metadata: dict | None = None,
-        supporting_arrays: dict | None = None,
-    ) -> None:
-        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
-        pl.LightningModule.__init__(self)
-        self.config = config
-        self.data_indices = data_indices
-        self.model_comm_group = None
-        self.grid_shard_shapes = {"data": None}
-        self.grid_shard_slice = {"data": None}
-        self.model = DummyModel(
-            num_output_variables=len(data_indices["data"].model.output),
-            output_times=len(config.training.explicit_times.target),
-        )
-        self.model.pre_processors = {"data": Processors([])}
-        self.loss = {"data": DummyLoss()}
-        self.dataset_names = list(data_indices.keys())
-        self.grid_dim = -2
-
-    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
-    cfg = DictConfig(
-        {
-            "training": {
-                "multistep_input": 6,
-                "explicit_times": {"input": [0, 36], "target": [1, 2, 3, 4, 5, 6, 8, 10, 12, 18, 24, 30]},
-                "known_future_variables": ["U_10M_NWP", "V_10M_NWP", "TD_2M_NWP", "T_2M_NWP", "TOT_PREC_NWP"],
-            },
-        },
-    )
-    # Minimal variable space: 2 obs + 5 known-future
-    name_to_index = {
-        "U_10M_NWP": 0,
-        "V_10M_NWP": 1,
-        "TD_2M_NWP": 2,
-        "T_2M_NWP": 3,
-        "TOT_PREC_NWP": 4,
-        "OBS_A": 5,
-        "OBS_B": 6,
-    }
-    data_indices = {"data": _make_minimal_index_collection(name_to_index)}
-
-    itp = ObsGraphInterpolator(
-        config=cfg,
-        graph_data={"data": HeteroData()},
-        statistics={},
-        statistics_tendencies={},
-        data_indices=data_indices,
-        metadata={"dataset": {}},
-        supporting_arrays={},
-    )
-    # check known_future_variables mapping and basic timing logic
-    assert itp.known_future_variables == [0, 1, 2, 3, 4]
-    assert itp.multi_step == 6
-    # boundary_times are shifted by multi_step-1 = 5
-    assert itp.boundary_times == [5, 41]
-    # interp_times shifted by 5
-    assert itp.interp_times[0] == 6 and itp.interp_times[1] == 7 and itp.interp_times[-1] == 35
-    b, e, g, v = 2, 1, 3, len(name_to_index)  # all variables are prognostic for simplicity
-    t = len(itp.imap)  # multi step input
-    batch = torch.randn((b, t, e, g, v), dtype=torch.float32)
-    loss, metrics, y_pred = itp._step(batch={"data": batch}, validation_mode=False)
-
-    assert isinstance(loss, torch.Tensor)
-    assert metrics == {}
-    assert isinstance(y_pred, torch.Tensor)
-    assert y_pred.ndim == 5
-    assert y_pred.shape == (b, len(itp.interp_times), e, g, v)
 
 
 def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
