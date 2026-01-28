@@ -291,6 +291,25 @@ class BaseGraphModule(pl.LightningModule, ABC):
             self.grid_indices[dataset_name].setup(graph_data[dataset_name])
         self.grid_dim = -2
 
+        # We need some special handling when target variables are defined.
+        model_output_names = set(self.data_indices[dataset_name].model.output.name_to_index.keys())
+        data_output_names = list(self.data_indices[dataset_name].data.output.name_to_index.keys())
+
+        # Create a boolean mask with same length as output size (nvars)
+        model_mask = torch.zeros(len(self.data_indices[dataset_name].data.output.full), dtype=torch.bool)
+        for i, var_name in enumerate(data_output_names):
+            if var_name in model_output_names:
+                # Get the index value for this variable in data.output
+                full_output_indices = self.data_indices[dataset_name].data.output.full
+                index = self.data_indices[dataset_name].data.output.name_to_index[var_name]
+                # Find which position in full_output_indices has this index value
+                position = (full_output_indices == index).nonzero(as_tuple=True)[0].item()
+                # Mark this position as True (keep it for model output)
+                model_mask[position] = True
+                
+
+        self.mask_target=model_mask 
+
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
         read_group_supports_sharding = reader_group_size == self.config.system.hardware.num_gpus_per_model
@@ -849,7 +868,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         y_postprocessed = post_processor(y, in_place=False)
         y_pred_postprocessed = post_processor(y_pred, in_place=False)
+        if y_postprocessed.shape[3] != y_pred_postprocessed.shape[3]: #maybe 3 shouldn't be hardcoded
 
+            y_postprocessed = y_postprocessed[..., self.mask_target]
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
             if not isinstance(metric, BaseLoss):

@@ -58,6 +58,12 @@ class FilteringLossWrapper(BaseLoss):
         """Hook to set the data indices for the loss."""
         self.data_indices = data_indices
         name_to_index = data_indices.data.output.name_to_index
+        reindexed = {
+                k: i
+                for i, (k, _) in enumerate(
+                    (kv for kv in name_to_index.items() if kv[1] in set(data_indices.data.output.full.tolist()))
+                )
+            }
         model_output = data_indices.model.output
         output_indices = model_output.full
 
@@ -67,7 +73,7 @@ class FilteringLossWrapper(BaseLoss):
             predicted_indices = output_indices
             self.predicted_variables = list(name_to_index.keys())
         if self.target_variables is not None:
-            target_indices = [name_to_index[name] for name in self.target_variables]
+            target_indices = [reindexed[name] for name in self.target_variables]
         else:
             target_indices = output_indices
             self.target_variables = list(name_to_index.keys())
