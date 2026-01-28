@@ -149,9 +149,6 @@ class GraphInterpolator(BaseGraphModule):
                 y[dataset_name] = dataset_batch[
                     :,
                     self.imap[interp_step],
-                    :,
-                    :,
-                    self.data_indices[dataset_name].data.output.full,
                 ]
 
             loss_step, metrics_next, y_pred = checkpoint(

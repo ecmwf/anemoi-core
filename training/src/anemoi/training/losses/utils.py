@@ -14,6 +14,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from anemoi.training.losses.combined import CombinedLoss
+from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -55,18 +57,27 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
             variable_scaling[sub_loss.__class__.__name__] = print_variable_scaling(sub_loss, data_indices)
         return variable_scaling
 
-    variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).reshape(-1)
+    if isinstance(loss, MultiscaleLossWrapper):
+        return print_variable_scaling(loss.loss, data_indices)
+
+    if isinstance(loss, FilteringLossWrapper):
+        subloss = loss.loss
+        subset_vars = zip(loss.predicted_indices, loss.predicted_variables, strict=False)
+    else:
+        subloss = loss
+        subset_vars = enumerate(data_indices.model.output.name_to_index.keys())
+
+    variable_scaling = subloss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).reshape(-1)
     log_text = f"Final Variable Scaling in {loss.__class__.__name__}: "
     scaling_values, scaling_sum = {}, 0.0
-
-    for idx, name in enumerate(data_indices.model.output.name_to_index.keys()):
+    for idx, name in subset_vars:
         value = float(variable_scaling[idx])
         log_text += f"{name}: {value:.4g}, "
         scaling_values[name] = value
         scaling_sum += value
 
-    log_text += f"Total scaling sum: {scaling_sum:.4g}, "
-    scaling_values["total_sum"] = scaling_sum
+        log_text += f"Total scaling sum: {scaling_sum:.4g}, "
+        scaling_values["total_sum"] = scaling_sum
     LOGGER.debug(log_text)
 
     return scaling_values

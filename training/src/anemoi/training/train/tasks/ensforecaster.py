@@ -231,13 +231,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
             y = {}
             for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[
-                    :,
-                    self.multi_step + rollout_step,
-                    0,
-                    :,
-                    self.data_indices[dataset_name].data.output.full,
-                ]
+                y[dataset_name] = dataset_batch[:, self.multi_step + rollout_step, 0]
                 LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss

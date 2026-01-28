@@ -15,9 +15,12 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
@@ -30,7 +33,7 @@ LOGGER = logging.getLogger(__name__)
 def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
-    data_indices: dict | None = None,
+    data_indices: IndexCollection | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -46,7 +49,7 @@ def get_loss_function(
         If a scaler is to be added to the loss, ensure it is in `scalers` in the loss config.
         For instance, if `scalers: ['variable']` is set in the config, and `variable` in `scalers`
         `variable` will be added to the scaler of the loss function.
-    data_indices : dict, optional
+    data_indices : IndexCollection, optional
         Indices of the training data
     kwargs : Any
         Additional arguments to pass to the loss function
@@ -65,6 +68,8 @@ def get_loss_function(
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
+    predicted_variables = loss_config.pop("predicted_variables", None)
+    target_variables = loss_config.pop("target_variables", None)
 
     if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
@@ -77,13 +82,56 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
+    if "CombinedLoss" in loss_config.get("_target_", ""):
+        if data_indices is not None:
+            loss_config.update(
+                {"data_indices": data_indices},
+            )
+            data_indices = None  # for combined loss we want the individual losses to handle data indices
+        loss_config.update(
+            {"scalers": scalers},
+        )
+        scalers_to_include = []
+        scalers = {}  # for combined loss we want the individual losses to handle scalers
     loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
+    if data_indices is not None:
+        loss_function = _wrap_loss_with_filtering(
+            loss_function,
+            predicted_variables,
+            target_variables,
+            data_indices,
+        )
+    return loss_function
 
+
+def _wrap_loss_with_filtering(
+    loss_function: BaseLoss,
+    predicted_variables: list[str] | None,
+    target_variables: list[str] | None,
+    data_indices: IndexCollection,
+) -> BaseLoss:
+    """Wrap loss function with FilteringLossWrapper if predicted or target variables are specified."""
+    loss_function = FilteringLossWrapper(
+        loss=loss_function,
+        predicted_variables=predicted_variables,
+        target_variables=target_variables,
+    ).set_data_indices(data_indices)
+    subloss = loss_function.loss
+    if subloss.has_scaler_for_dim(TensorDim.VARIABLE) and predicted_variables is not None:
+        # filter scaler to only predicted variables
+        n_variables = len(data_indices.model.output.full)
+        for key, (dims, tens) in subloss.scaler.subset_by_dim(TensorDim.VARIABLE).tensors.items():
+            dims = (dims,) if isinstance(dims, int) else tuple(dims) if not isinstance(dims, tuple) else dims
+            var_dim_pos = list(dims).index(TensorDim.VARIABLE)
+            # Only filter if the scaler has the full number of variables
+            if tens.shape[var_dim_pos] == n_variables:
+                scaling = tens[loss_function.predicted_indices]
+                loss_function.loss.update_scaler(name=key, scaler=scaling, override=True)
     return loss_function
 
 
@@ -91,7 +139,7 @@ def _apply_scalers(
     loss_function: BaseLoss,
     scalers_to_include: list,
     scalers: dict[str, TENSOR_SPEC] | None,
-    data_indices: dict | None,
+    data_indices: IndexCollection | None,
 ) -> None:
     """Attach scalers to a loss function and set data indices if needed."""
     for key in scalers_to_include:
@@ -106,9 +154,6 @@ def _apply_scalers(
                     scaling = scalers[key][1][idx]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
-
-        if hasattr(loss_function, "set_data_indices"):
-            loss_function.set_data_indices(data_indices)
 
 
 def get_metric_ranges(
