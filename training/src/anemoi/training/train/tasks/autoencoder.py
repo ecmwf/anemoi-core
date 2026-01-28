@@ -12,8 +12,8 @@ import logging
 from typing import TYPE_CHECKING
 
 import torch
-from torch.utils.checkpoint import checkpoint
 from omegaconf import DictConfig
+from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
