@@ -34,6 +34,7 @@ processor:
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   qk_norm: False
   use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
@@ -42,6 +43,7 @@ encoder:
   _target_: anemoi.models.layers.mapper.TransformerForwardMapper
   _convert_: all
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -59,6 +61,7 @@ decoder:
   _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
   _convert_: all
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
