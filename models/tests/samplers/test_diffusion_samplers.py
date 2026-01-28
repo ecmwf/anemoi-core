@@ -59,8 +59,8 @@ class MockDenoisingFunction:
                 denoised[dataset_name] = (1 - sigma_normalized * self.noise_reduction_factor) * y_
             else:
                 # Add some controlled randomness
-                denoised = (1 - sigma_normalized * self.noise_reduction_factor) * y_
-                denoised += 0.01 * sigma_normalized * torch.randn_like(y_)
+                denoised[dataset_name] = (1 - sigma_normalized * self.noise_reduction_factor) * y_
+                denoised[dataset_name] += 0.01 * sigma_normalized * torch.randn_like(y_)
 
         return denoised
 
@@ -74,7 +74,7 @@ class TestEDMHeunSampler:
         batch_size, time_steps, ensemble_size, grid_size, vars_size = 2, 3, 1, 10, 5
 
         x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-        y = {DATASET_NAME: torch.randn(batch_size, 1, ensemble_size, grid_size, vars_size)}
+        y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
 
         # Create a simple noise schedule
         num_steps = 5
@@ -116,7 +116,7 @@ class TestEDMHeunSampler:
         for shape in test_shapes:
             batch_size, time_steps, ensemble_size, grid_size, vars_size = shape
             x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-            y = {DATASET_NAME: torch.randn(batch_size, 1, ensemble_size, grid_size, vars_size)}
+            y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
             sigmas = torch.linspace(1.0, 0.0, 6)  # 5 steps
 
             mock_denoising_fn.call_count = 0  # Reset counter
@@ -133,7 +133,7 @@ class TestEDMHeunSampler:
     def test_different_step_counts(self, mock_denoising_fn, num_steps):
         """Test sampler with different numbers of steps."""
         x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(1, 1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
         sigmas = torch.linspace(1.0, 0.0, num_steps + 1)
 
         mock_denoising_fn.call_count = 0
@@ -262,7 +262,7 @@ class TestDPMPP2MSampler:
         batch_size, time_steps, ensemble_size, grid_size, vars_size = 2, 3, 1, 10, 5
 
         x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-        y = {DATASET_NAME: torch.randn(batch_size, 1, ensemble_size, grid_size, vars_size)}
+        y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
 
         # Create a simple noise schedule
         num_steps = 5
@@ -304,7 +304,7 @@ class TestDPMPP2MSampler:
         for shape in test_shapes:
             batch_size, time_steps, ensemble_size, grid_size, vars_size = shape
             x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-            y = {DATASET_NAME: torch.randn(batch_size, 1, ensemble_size, grid_size, vars_size)}
+            y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
             sigmas = torch.linspace(1.0, 0.0, 6)  # 5 steps
 
             mock_denoising_fn.call_count = 0  # Reset counter
@@ -320,7 +320,7 @@ class TestDPMPP2MSampler:
     def test_different_step_counts(self, mock_denoising_fn, num_steps):
         """Test sampler with different numbers of steps."""
         x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(1, 1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
         sigmas = torch.linspace(1.0, 0.0, num_steps + 1)
 
         mock_denoising_fn.call_count = 0
@@ -372,7 +372,7 @@ class TestDPMPP2MSampler:
     def test_numerical_stability_small_sigmas(self, mock_denoising_fn):
         """Test numerical stability with very small sigma values."""
         x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(1, 1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
 
         # Create schedule with very small sigmas
         sigmas = torch.tensor([1e-3, 1e-4, 1e-5, 0.0])
@@ -395,7 +395,7 @@ class TestSamplerComparison:
         batch_size, time_steps, ensemble_size, grid_size, vars_size = 2, 3, 1, 10, 5
 
         x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-        y = {DATASET_NAME: torch.randn(batch_size, 1, ensemble_size, grid_size, vars_size)}
+        y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
 
         # Create a simple noise schedule
         num_steps = 5
@@ -489,7 +489,7 @@ class TestSamplerEdgeCases:
     def test_single_step_sampling(self):
         """Test samplers with only one step."""
         x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(1, 1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
         sigmas = torch.tensor([1.0, 0.0])  # Only one step
 
         mock_fn1 = MockDenoisingFunction(deterministic=True)
@@ -513,7 +513,7 @@ class TestSamplerEdgeCases:
         """Test samplers with large batch sizes."""
         batch_size = 10
         x = {DATASET_NAME: torch.randn(batch_size, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(batch_size, 1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(batch_size, 2, 1, 5, 3)}
         sigmas = torch.linspace(1.0, 0.0, 4)  # 3 steps
 
         mock_fn1 = MockDenoisingFunction(deterministic=True)
@@ -537,7 +537,7 @@ class TestSamplerEdgeCases:
         """Test samplers with multiple ensemble members."""
         ensemble_size = 5
         x = {DATASET_NAME: torch.randn(2, 3, ensemble_size, 10, 5)}
-        y = {DATASET_NAME: torch.randn(2, 1, ensemble_size, 10, 5)}
+        y = {DATASET_NAME: torch.randn(2, 3, ensemble_size, 10, 5)}
         sigmas = torch.linspace(1.0, 0.0, 4)  # 3 steps
 
         mock_fn1 = MockDenoisingFunction(deterministic=True)

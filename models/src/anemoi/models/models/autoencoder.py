@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -27,14 +27,14 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelEncProcDec(BaseGraphModel):
-    """Message passing graph neural network."""
+class AnemoiModelAutoEncoder(BaseGraphModel):
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
-        # Encoder data -> hidden
+
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
+
         for dataset_name in self._graph_data.keys():
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
@@ -54,27 +54,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
 
-        # Processor hidden -> hidden (shared across all datasets)
-        first_dataset_name = next(iter(self._graph_data.keys()))
-        processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
-        processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
-
-        # Processor hidden -> hidden
-        self.processor_graph_provider = create_graph_provider(
-            graph=processor_graph,
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-            src_size=processor_grid_size,
-            dst_size=processor_grid_size,
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
-        )
-
-        self.processor = instantiate(
-            model_config.model.processor,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            num_channels=self.num_channels,
-            edge_dim=self.processor_graph_provider.edge_dim,
-        )
-
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
@@ -91,36 +70,45 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
-                in_channels_dst=self.input_dim[dataset_name],
+                in_channels_dst=self.target_dim[dataset_name],
                 hidden_dim=self.num_channels,
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
-    def _assemble_input(
-        self,
-        x: torch.Tensor,
-        batch_size: int,
-        grid_shard_shapes: dict | None,
-        model_comm_group=None,
-        dataset_name: str = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, Optional[list]]:
+    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        super()._calculate_shapes_and_indices(data_indices)
+
+        self._forcing_input_idx = {}
+        self.num_input_channels_forcings = {}
+        self.target_dim = {}
+
+        for dataset_name, dataset_indices in data_indices.items():
+            forcing_names = dataset_indices.model._forcing
+            self._forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in forcing_names]
+            self.num_input_channels_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
+            self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
+
+    def _calculate_target_dim(self, dataset_name: str) -> int:
+        return (
+            self.multi_out * self.num_input_channels_forcings[dataset_name]
+            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+        )
+
+    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
-        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
-
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
-
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
+        x_input = x[:, : self.multi_step, ...]
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(x_input, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -129,17 +117,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
-        return x_data_latent, x_skip, shard_shapes_data
+        return x_data_latent, shard_shapes_data
 
-    def _assemble_output(
-        self,
-        x_out: torch.Tensor,
-        x_skip: torch.Tensor,
-        batch_size: int,
-        ensemble_size: int,
-        dtype: torch.dtype,
-        dataset_name: str,
-    ):
+    def _assemble_output(self, x_out, batch_size, ensemble_size, dtype, dataset_name=None):
         x_out = (
             einops.rearrange(
                 x_out,
@@ -151,51 +131,45 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             .to(dtype=dtype)
             .clone()
         )
-
-        # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        assert x_skip.ndim == 4, "Residual must be (batch, ensemble, grid, vars)."
-        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
-        assert (
-            x_skip.shape[1] == x_out.shape[1]
-        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
-        # TODO(dieter): verify if this is needed or can be solved alternatively
-        x_out = x_out.contiguous()  # necessary after expand()
         return x_out
 
-    def _assert_valid_sharding(
-        self,
-        batch_size: int,
-        ensemble_size: int,
-        in_out_sharded: bool,
-        model_comm_group: Optional[ProcessGroup] = None,
-    ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
+    def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_target = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
+        if grid_shard_shapes is not None:
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_target, 0, grid_shard_shapes, model_comm_group
+            )
+            node_attributes_target = shard_tensor(node_attributes_target, 0, shard_shapes_nodes, model_comm_group)
 
-        if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
-
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
+        x_forcing = x[:, : self.multi_out, ...]
+        # normalize and add data positional info (lat/lon)
+        x_target_latent = torch.cat(
+            (
+                einops.rearrange(
+                    x_forcing[..., self._forcing_input_idx[dataset_name]],
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                ),
+                node_attributes_target,
+            ),
+            dim=-1,  # feature dimension
+        )
+        shard_shapes_target = get_or_apply_shard_shapes(x_target_latent, 0, grid_shard_shapes, model_comm_group)
+        return x_target_latent, shard_shapes_target
 
     def forward(
         self,
-        x: dict[str, Tensor],
+        x: Tensor,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, list] | None = None,
+        grid_shard_shapes: Optional[list] = None,
         **kwargs,
-    ) -> dict[str, Tensor]:
+    ) -> Tensor:
         """Forward pass of the model.
 
         Parameters
@@ -209,9 +183,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Returns
         -------
-        dict[str, Tensor]
+        Tensor
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
+
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
@@ -223,22 +198,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
-        x_skip_dict = {}
-        x_data_latent_dict = {}
         shard_shapes_data_dict = {}
         shard_shapes_hidden_dict = {}
 
         for dataset_name in dataset_names:
-            x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                x[dataset_name],
-                batch_size=batch_size,
-                grid_shard_shapes=grid_shard_shapes,
-                model_comm_group=model_comm_group,
-                dataset_name=dataset_name,
+            x_data_latent, shard_shapes_data = self._assemble_input(
+                x[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name
             )
-            x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
-
             x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
             shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
@@ -248,7 +215,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
             )
-
             # Encoder for this dataset
             x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
@@ -262,48 +228,33 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 edge_shard_shapes=enc_edge_shard_shapes,
             )
-            x_data_latent_dict[dataset_name] = x_data_latent
+
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
         x_latent = sum(dataset_latents.values())
-
-        # Processor
         shard_shapes_hidden = shard_shapes_hidden_dict[dataset_names[0]]
-        assert all(
-            shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
-        ), "All datasets must have the same shard shapes for the hidden graph."
-
-        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
-            batch_size=batch_size,
-            model_comm_group=model_comm_group,
-        )
-
-        x_latent_proc = self.processor(
-            x=x_latent,
-            batch_size=batch_size,
-            shard_shapes=shard_shapes_hidden,
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
-            model_comm_group=model_comm_group,
-            edge_shard_shapes=proc_edge_shard_shapes,
-        )
-
-        # Skip
-        x_latent_proc = x_latent_proc + x_latent
 
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
+
+            # Do not pass x_data_latent to the decoder
+            # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
+            # Only pass data and forcing coordinates to the decoder
+            x_target_latent, shard_shapes_target = self._assemble_forcings(
+                x[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name
+            )
+
             # Compute decoder edges using updated latent representation
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
                 dataset_name
             ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent, x_target_latent),
                 batch_size=batch_size,
-                shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
+                shard_shapes=(shard_shapes_hidden, shard_shapes_target),
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
@@ -314,25 +265,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
+                x_out, batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
             )
 
         return x_out_dict
-
-    def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.multi_step,
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
-
-            rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
-            input_rel_date_indices = rel_date_indices[: self.multi_step]
-            output_rel_date_indices = rel_date_indices[-self.multi_out :]
-            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
-            md_dict["metadata_inference"][dataset]["timesteps"][
-                "output_relative_date_indices"
-            ] = output_rel_date_indices

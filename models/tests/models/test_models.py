@@ -8,5 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
-def main():
+def test_models():
     pass
+
+
+if __name__ == "__main__":
+    test_models()

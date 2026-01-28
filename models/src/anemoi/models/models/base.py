@@ -99,8 +99,8 @@ class BaseGraphModel(nn.Module):
         self._internal_input_idx = {}
         self._internal_output_idx = {}
         self.input_dim = {}
-        self.input_dim_latent = {}
         self.output_dim = {}
+        self.input_dim_latent = {}
 
         for dataset_name, dataset_indices in data_indices.items():
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
@@ -117,6 +117,9 @@ class BaseGraphModel(nn.Module):
             self.multi_step * self.num_input_channels[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
         )
+
+    def _calculate_output_dim(self, dataset_name: str) -> int:
+        return self.multi_out * self.num_output_channels[dataset_name]
 
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
         return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
@@ -197,14 +200,10 @@ class BaseGraphModel(nn.Module):
 
     def _get_consistent_dim(self, x: dict[str, Tensor], dim: int) -> int:
         dim_sizes = [_x.shape[dim] for _x in x.values()]
-
         # Assert all datasets have the same sizes
         assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
 
         return dim_sizes[0]
-
-    def _calculate_output_dim(self, dataset_name: str):
-        return self.multi_out * self.num_output_channels[dataset_name]
 
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:

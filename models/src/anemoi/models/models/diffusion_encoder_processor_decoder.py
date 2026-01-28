@@ -128,14 +128,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,
-                out_channels_dst=self.num_output_channels[dataset_name] * self.multi_out,
+                out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         base_input_dim = super()._calculate_input_dim(dataset_name)
-        output_dim = self.num_output_channels[dataset_name] * self.multi_out
-        return base_input_dim + output_dim  # input + noised targets
+        output_dim = super()._calculate_output_dim(dataset_name)
+        input_dim = base_input_dim + output_dim  # input + noised targets
+        return input_dim
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()
@@ -554,7 +555,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         with torch.no_grad():
 
             assert isinstance(batch, dict), "Input batch must be a dictionary!"
-            for dataset_name, dataset_tensor in batch.items():
+            for dataset_name, dataset_tensor in batch.values():
                 assert (
                     len(dataset_tensor.shape) == 4
                 ), f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'
@@ -703,8 +704,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             md_dict["metadata_inference"][dataset]["shapes"] = shapes
 
             rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
-            input_rel_date_indices = rel_date_indices[:-1]
-            output_rel_date_indices = rel_date_indices[-1]
+            input_rel_date_indices = rel_date_indices[: self.multi_step]
+            output_rel_date_indices = rel_date_indices[-self.multi_out :]
             md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
             md_dict["metadata_inference"][dataset]["timesteps"][
                 "output_relative_date_indices"

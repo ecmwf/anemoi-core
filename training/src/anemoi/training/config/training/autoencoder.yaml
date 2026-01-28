@@ -15,15 +15,16 @@ deterministic: False
 precision: 16-mixed
 
 # multistep input
-# 1 = single step scheme, X(t-1) used to predict X(t)
+# Number of timesteps to be loaded as model input
+# k = 1: single step scheme, uses only [X(t-1)] to predict X(t).
+# k = 1, is also necessary for autoencoder training as X(t) is used to predict X^(t)
 # k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
 # Deepmind use k = 2 in their model
-multistep_input: 2
+multistep_input: 1
 
 # multistep output
-# 1 = single step output scheme, single model forward predicts X(t)
-# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
-# Deepmind use l = 1 in their model
+# 1 = single step output scheme, single model forward predicts X^(t)
+# l > 1: multistep output scheme, single model forward predicts [X^(t), X^(t+1), ...]
 multistep_output: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
@@ -43,20 +44,43 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# Optimizer settings
+# =====================================================================
+# Optimizer configuration
+# =====================================================================
 optimizer:
+  # ---------------------------------------------------------------
+  # Choose optimizer type (_target_ approach)
+  # ---------------------------------------------------------------
+  # Default optimizer: AdamW
   _target_: torch.optim.AdamW
-  betas: [0.9, 0.95]
+
+  # ---------------------------------------------------------------
+  # Common optimizer parameters
+  # ---------------------------------------------------------------
+  # Learning rate is defined elsewhere
+  #kwargs:
+  betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
+
+  # ---------------------------------------------------------------
+  # Optional: configuration for AdEMAMix (custom optimizer)
+  # Uncomment the lines below to enable it
+  # ---------------------------------------------------------------
+  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
+  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
+  # alpha: 8.0                   # Mixing factor controlling EMA fusion
+  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
+  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
+  # weight_decay: 0.01
+
+  # Optional: configuration for ZeroRedundancyOptimizer
+  # _target_: torch.distributed.optim.ZeroRedundancyOptimizer
+  # optimizer_class:
+  #   _target_: torch.optim.AdamW
+  #   _partial_: true
+  # betas: [0.9, 0.95]
 
 # select model
-model_task: anemoi.training.train.tasks.GraphInterpolator
-
-# Instead of inferred using multistep and timeincrement, specify time indices explicitly
-explicit_times:
-  input: [0, 6]
-  target: [1, 2, 3, 4, 5]
-
-target_forcing: null
+model_task: anemoi.training.train.tasks.GraphAutoEncoder
 
 # select strategy
 strategy:
@@ -100,7 +124,7 @@ validation_metrics:
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
         # Use the `scale_validation_metrics` section to variable scale.
-        scalers: []
+        scalers: ["node_weights"]
         # other kwargs
         ignore_nans: True
 
@@ -125,6 +149,7 @@ validation_metrics:
 #  pl: [q, t, u, v, w, z]
 #
 # still works
+# param is an alias for the variable name in the case of no metadata.
 
 variable_groups:
   datasets:
@@ -140,6 +165,14 @@ metrics:
       - t_850
       - u_850
       - v_850
+
+# length of the "rollout" window (see Keisler's paper)
+rollout:
+  start: 0
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  max: 0
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null

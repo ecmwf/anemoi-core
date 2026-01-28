@@ -15,8 +15,10 @@ deterministic: False
 precision: 16-mixed
 
 # multistep input
-# 1 = single step input scheme, X(t-1) used to predict future time step(s)
-# k > 1: multistep input scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict future time step(s)
+# Number of timesteps to be loaded as model input
+# k = 1: single step scheme, uses only [X(t-1)] to predict X(t).
+# k = 1, is also necessary for autoencoder training as X(t) is used to predict X^(t)
+# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
 # Deepmind use k = 2 in their model
 multistep_input: 2
 
