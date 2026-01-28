@@ -18,8 +18,10 @@ from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
     from omegaconf import DictConfig
     from torch_geometric.data import HeteroData
+
     from anemoi.models.data_indices.collection import IndexCollection
 
 
