@@ -9,7 +9,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+      dataset: null
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
@@ -73,7 +73,7 @@ assets:
         data:
           node_builder:
             _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-            dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+            dataset: null
       edges:
         - source_name: data
           target_name: data
@@ -97,7 +97,7 @@ assets:
         data:
           node_builder:
             _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-            dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+            dataset: null
       edges:
         - source_name: data
           target_name: data
@@ -119,7 +119,7 @@ assets:
         data:
           node_builder:
             _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-            dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+            dataset: null
         trunc:
           node_builder:
             _target_: anemoi.graphs.nodes.TriNodes
