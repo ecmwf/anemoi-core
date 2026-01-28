@@ -14,7 +14,7 @@ jobs:
           repository: ${{github.repository}}
           ref: ${{github.ref}}
           python-version: '3.11'
-          install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
+          install-package: "--no-cache-dir  -e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
           test-directory: "training/tests/integration"
           pytest-options: "--slow"
           manual: ${{github.event_name == 'workflow_dispatch' && 'true' || 'false'}}
