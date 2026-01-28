@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.utils.dataset_context import DatasetContext
 
 
 LOGGER = logging.getLogger(__name__)
@@ -87,31 +88,32 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         x: torch.Tensor,
         y_pred: torch.Tensor,
         batch: torch.Tensor,
+        dataset_ctx: DatasetContext,
         rollout_step: int = 0,
-        dataset_name: str | None = None,
     ) -> torch.Tensor:
+        data_indices = dataset_ctx.static.data_indices
         x = x.roll(-1, dims=1)
 
         # Get prognostic variables
-        x[:, -1, :, :, self.data_indices[dataset_name].model.input.prognostic] = y_pred[
+        x[:, -1, :, :, data_indices.model.input.prognostic] = y_pred[
             ...,
-            self.data_indices[dataset_name].model.output.prognostic,
+            data_indices.model.output.prognostic,
         ]
 
-        x[:, -1] = self.output_mask[dataset_name].rollout_boundary(
+        x[:, -1] = dataset_ctx.static.output_mask.rollout_boundary(
             x[:, -1],
             batch[:, self.multi_step + rollout_step],
-            self.data_indices[dataset_name],
-            grid_shard_slice=self.grid_shard_slice[dataset_name],
+            data_indices,
+            grid_shard_slice=dataset_ctx.dynamic.batch_grid_shard_slice,
         )
 
         # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, self.data_indices[dataset_name].model.input.forcing] = batch[
+        x[:, -1, :, :, data_indices.model.input.forcing] = batch[
             :,
             self.multi_step + rollout_step,
             :,
             :,
-            self.data_indices[dataset_name].data.input.forcing,
+            data_indices.data.input.forcing,
         ]
         return x
 
@@ -121,14 +123,16 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         y_pred: dict[str, torch.Tensor],
         batch: dict[str, torch.Tensor],
         rollout_step: int,
+        dataset_contexts: dict[str, DatasetContext],
     ) -> dict[str, torch.Tensor]:
-        for dataset_name in x:
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
             x[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],
                 y_pred[dataset_name],
                 batch[dataset_name],
+                dataset_ctx=dataset_ctx,
                 rollout_step=rollout_step,
-                dataset_name=dataset_name,
             )
         return x
 
@@ -136,9 +140,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_ctx: DatasetContext,
         step: int | None = None,
-        grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -149,8 +152,10 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
-        grid_shard_slice : slice | None
-            Grid shard slice for distributed training
+        dataset_ctx : DatasetContext
+            Dataset context for the active dataset
+        step : int, optional
+            Step number
 
         Returns
         -------
@@ -161,8 +166,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             y_pred,
             y,
             step=step,
-            grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name,
+            dataset_ctx=dataset_ctx,
         )
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:

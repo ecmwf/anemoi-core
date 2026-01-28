@@ -20,6 +20,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.utils.dataset_context import DatasetContext
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,17 +88,25 @@ class GraphInterpolator(BaseGraphModule):
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
+
         self.multi_step = 1
         self.rollout = 1
 
-    def get_target_forcing(self, batch: dict[str, torch.Tensor], interp_step: int) -> dict[str, torch.Tensor]:
+    def get_target_forcing(
+        self,
+        batch: dict[str, torch.Tensor],
+        interp_step: int,
+        dataset_contexts: dict[str, DatasetContext],
+    ) -> dict[str, torch.Tensor]:
         batch_size = next(iter(batch.values())).shape[0]
         ens_size = next(iter(batch.values())).shape[2]
         grid_size = next(iter(batch.values())).shape[3]
         batch_type = next(iter(batch.values())).dtype
 
         target_forcing = {}
-        for dataset_name, num_tfi in self.num_tfi.items():
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
+            num_tfi = self.num_tfi[dataset_name]
             target_forcing[dataset_name] = torch.empty(
                 batch_size,
                 ens_size,
@@ -133,25 +142,29 @@ class GraphInterpolator(BaseGraphModule):
         metrics = {}
         y_preds = []
 
+        dataset_contexts = self._build_dataset_contexts()  # static only used here
         x_bound = {}
-        for dataset_name in self.dataset_names:
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
             x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][
                 ...,
-                self.data_indices[dataset_name].data.input.full,
+                dataset_ctx.static.data_indices.data.input.full,
             ]  # (bs, time, ens, latlon, nvar)
 
         for interp_step in self.interp_times:
-            target_forcing = self.get_target_forcing(batch, interp_step)
+            target_forcing = self.get_target_forcing(batch, interp_step, dataset_contexts)
 
             y_pred = self(x_bound, target_forcing)
             y = {}
-            for dataset_name, dataset_batch in batch.items():
+            for dataset_ctx in dataset_contexts.values():
+                dataset_name = dataset_ctx.static.name
+                dataset_batch = batch[dataset_name]
                 y[dataset_name] = dataset_batch[
                     :,
                     self.imap[interp_step],
                     :,
                     :,
-                    self.data_indices[dataset_name].data.output.full,
+                    dataset_ctx.static.data_indices.data.output.full,
                 ]
 
             loss_step, metrics_next, y_pred = checkpoint(

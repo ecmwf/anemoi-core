@@ -55,13 +55,16 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         """
         # start rollout of preprocessed batch
+        dataset_contexts = self._build_dataset_contexts()  # static only used here
         x = {}
-        for dataset_name, dataset_batch in batch.items():
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
+            dataset_batch = batch[dataset_name]
             x[dataset_name] = dataset_batch[
                 :,
                 0 : self.multi_step,
                 ...,
-                self.data_indices[dataset_name].data.input.full,
+                dataset_ctx.static.data_indices.data.input.full,
             ]  # (bs, multi_step, latlon, nvar)
             msg = (
                 f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
@@ -74,12 +77,14 @@ class GraphForecaster(BaseRolloutGraphModule):
             y_pred = self(x)
 
             y = {}
-            for dataset_name, dataset_batch in batch.items():
+            for dataset_ctx in dataset_contexts.values():
+                dataset_name = dataset_ctx.static.name
+                dataset_batch = batch[dataset_name]
                 y[dataset_name] = dataset_batch[
                     :,
                     self.multi_step + rollout_step,
                     ...,
-                    self.data_indices[dataset_name].data.output.full,
+                    dataset_ctx.static.data_indices.data.output.full,
                 ]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
@@ -93,6 +98,6 @@ class GraphForecaster(BaseRolloutGraphModule):
             )
 
             # Advance input state for each dataset
-            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step, dataset_contexts=dataset_contexts)
 
             yield loss, metrics_next, y_pred
