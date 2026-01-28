@@ -15,6 +15,7 @@ from functools import cached_property
 import netCDF4
 import numpy as np
 import scipy
+from sklearn.neighbors import NearestNeighbors
 from typeguard import typechecked
 from typing_extensions import Self
 
@@ -266,10 +267,11 @@ class ICONCellDataGrid:
 
     uuidOfHGrid: str
     nodeset: NodeSet  # set of ICON cell circumcenters
+    multi_mesh: ICONMultiMesh
     max_level: int
     select_c: np.ndarray
 
-    def __init__(self, icon_grid_filename: str, max_level: int | None = None):
+    def __init__(self, icon_grid_filename: str, max_level: int | None = None, multi_mesh: ICONMultiMesh | None = None):
         self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
@@ -290,6 +292,25 @@ class ICONCellDataGrid:
         self.select_c = np.argwhere(reflvl_cell <= self.max_level)
         # generate source grid node set:
         self.nodeset = NodeSet(clon[self.select_c], clat[self.select_c])
+
+        if multi_mesh is not None:
+            # generate edges between source grid nodes and multi-mesh nodes:
+            edge_vertices = self._get_grid2mesh_edges(self.select_c, multi_mesh=multi_mesh)
+            # refill incomplete edges at boundary of the LAM domain with 3 nearest neighbours
+            if np.any(np.any(edge_vertices == -1, axis=1)):
+                nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
+                nearest_neighbour.fit(multi_mesh.nodeset.cc_vertices)
+                adj_matrix = nearest_neighbour.kneighbors_graph(
+                    self.nodeset.cc_vertices[
+                        np.unique(np.floor((np.where(edge_vertices[:, 1] == -1)[0]) / 3).astype(int)), :
+                    ],
+                    n_neighbors=3,
+                ).tocoo()
+                index = 0
+                for line in np.unique(np.floor((np.where(edge_vertices[:, 1] == -1)[0]) / 3).astype(int)):
+                    edge_vertices[(line * 3) : (line * 3 + 3), 1] = adj_matrix.tocsr()[index].indices
+                    index += 1
+            super().__init__((self.nodeset, multi_mesh.nodeset), edge_vertices)
 
     def get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:
         """Create "grid-to-mesh" edges, ie. edges from (clat,clon) to the
