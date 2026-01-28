@@ -111,6 +111,35 @@ def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[st
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_multidatasets(
+    multidatasets_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multidatasets_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = multidatasets_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_out_multidatasets(
+    multi_out_multidatasets_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multi_out_multidatasets_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_archive: GetTestArchive) -> None:
     cfg, urls = lam_config
     for url in urls:
@@ -174,6 +203,35 @@ def test_training_cycle_hierarchical(
 def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = hierarchical_config
     BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_autoencoder(
+    autoencoder_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = autoencoder_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = autoencoder_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_out_autoencoder(
+    multi_out_autoencoder_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multi_out_autoencoder_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
 
 
 @skip_if_offline
