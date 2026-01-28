@@ -31,7 +31,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.diagnostics.callbacks import get_callbacks
+from anemoi.training.diagnostics.callbacks import get_callbacks, AnemoiProgressBar
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
@@ -567,6 +567,12 @@ class AnemoiTrainer(ABC):
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
+        #if self.config.diagnostics.print_throughput_summary:
+
+        if rank_zero_only.rank == 0: #non zero ransk dont have progress bar
+            progress_bar = next((cb for cb in self.callbacks if isinstance(cb, AnemoiProgressBar)),None,)
+            if progress_bar is not None:
+                LOGGER.info("Peak throughput: %0.3f", progress_bar.peak_throughput)
 
         LOGGER.debug("---- DONE. ----")
 

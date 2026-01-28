@@ -141,6 +141,38 @@ def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
     return callbacks
 
 
+class AnemoiProgressBar(TQDMProgressBar):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.peak_throughput = 0.0
+
+    def _extract_rate(self, pbar) -> float:
+        """Extracts the iteration rate from the progress bar.
+
+        Parameters
+        ----------
+        pbar : tqdm
+            The progress bar.
+
+        Returns
+        -------
+        float
+            The iteration rate.
+        """
+        #return (pbar.format_dict["n"] - pbar.format_dict["initial"]) / pbar.format_dict["elapsed"]
+        if  pbar.format_dict["elapsed"] == 0:
+            return 0.0
+        return (pbar.format_dict["n"]) / pbar.format_dict["elapsed"]
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+
+        bar = self.train_progress_bar
+        if bar is not None:
+            if bar.format_dict["n"] != 0:
+                rate = self._extract_rate(bar)
+                self.peak_throughput = max(self.peak_throughput, rate)
+
 def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
     """Get progress bar callback.
 
@@ -173,10 +205,10 @@ def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
             LOGGER.info("Using progress bar: %s", type(progress_bar))
         except InstantiationException:
             LOGGER.warning("Failed to instantiate progress bar callback from config: %s", progress_bar_cfg)
-            progress_bar = TQDMProgressBar(refresh_rate=1, process_position=0)
+            progress_bar = AnemoiProgressBar(refresh_rate=1, process_position=0)
     else:
-        LOGGER.info("Using default progress bar: TQDMProgressBar.")
-        progress_bar = TQDMProgressBar(refresh_rate=1, process_position=0)
+        LOGGER.info("Using default progress bar: AnemoiProgressBar.")
+        progress_bar = AnemoiProgressBar(refresh_rate=1, process_position=0)
 
     return [progress_bar]
 

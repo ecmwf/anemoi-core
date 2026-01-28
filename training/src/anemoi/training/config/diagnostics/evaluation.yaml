@@ -59,7 +59,8 @@ log:
 
 enable_progress_bar: True
 progress_bar:
-  _target_: pytorch_lightning.callbacks.TQDMProgressBar
+        #_target_: pytorch_lightning.callbacks.TQDMProgressBar
+  _target_: anemoi.training.diagnostics.callbacks.AnemoiProgressBar
   refresh_rate: 1
 
 check_val_every_n_epoch: 1
