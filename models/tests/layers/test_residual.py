@@ -1,77 +1,44 @@
 import pytest
 import torch
-from omegaconf import OmegaConf
+from torch_geometric.data import HeteroData
 
+from anemoi.graphs.bundle import GraphBundle
+from anemoi.models.layers.graph_provider_registry import GraphProviderRegistry
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import TruncatedConnection
 
 
 @pytest.fixture
-def truncation_graph():
-    graph_config = OmegaConf.create(
-        {
-            "nodes": {
-                "data": {
-                    "node_builder": {
-                        "_target_": "anemoi.graphs.nodes.LatLonNodes",
-                        "latitudes": [0.0, 1.0],
-                        "longitudes": [0.0, 1.0],
-                    },
-                },
-                "hidden": {
-                    "node_builder": {
-                        "_target_": "anemoi.graphs.nodes.LatLonNodes",
-                        "latitudes": [0.0],
-                        "longitudes": [0.0],
-                    },
-                },
-            },
-            "edges": [
-                {
-                    "source_name": "data",
-                    "target_name": "hidden",
-                    "edge_builders": [
-                        {
-                            "_target_": "anemoi.graphs.edges.CutOffEdges",
-                            "cutoff_distance_km": 10000,
-                            "max_num_neighbours": 2,
-                        },
-                    ],
-                    "attributes": {
-                        "edge_length": {
-                            "_target_": "anemoi.graphs.edges.attributes.EdgeLength",
-                            "norm": "l1",
-                        },
-                    },
-                },
-                {
-                    "source_name": "hidden",
-                    "target_name": "data",
-                    "edge_builders": [
-                        {
-                            "_target_": "anemoi.graphs.edges.CutOffEdges",
-                            "cutoff_distance_km": 10000,
-                            "max_num_neighbours": 2,
-                        },
-                    ],
-                    "attributes": {
-                        "edge_length": {
-                            "_target_": "anemoi.graphs.edges.attributes.EdgeLength",
-                            "norm": "l1",
-                        },
-                    },
-                },
-            ],
-            "post_processors": [],
-        },
-    )
+def graph_bundle() -> GraphBundle:
+    graph = HeteroData()
+    graph["data"].num_nodes = 2
+    graph["hidden"].num_nodes = 1
 
-    return {
-        "graph_config": graph_config,
-        "down_edges_name": ["data", "to", "hidden"],
-        "up_edges_name": ["hidden", "to", "data"],
-        "edge_weight_attribute": "edge_length",
+    graph[("data", "to", "hidden")].edge_index = torch.tensor([[0, 1], [0, 0]])
+    graph[("hidden", "to", "data")].edge_index = torch.tensor([[0, 0], [0, 1]])
+    graph[("data", "to", "hidden")].edge_weight = torch.ones(2)
+    graph[("hidden", "to", "data")].edge_weight = torch.ones(2)
+
+    return GraphBundle(main=graph, assets={})
+
+
+def _build_registry(graph_bundle: GraphBundle, edge_weight_attribute: str | None) -> GraphProviderRegistry:
+    provider_specs = {
+        "down": {
+            "_target_": "anemoi.models.layers.graph_provider.ProjectionGraphProvider",
+            "edges_name": ["data", "to", "hidden"],
+            "edge_weight_attribute": edge_weight_attribute,
+            "row_normalize": False,
+        },
+        "up": {
+            "_target_": "anemoi.models.layers.graph_provider.ProjectionGraphProvider",
+            "edges_name": ["hidden", "to", "data"],
+            "edge_weight_attribute": edge_weight_attribute,
+            "row_normalize": False,
+        },
     }
+
+    return GraphProviderRegistry({"data": graph_bundle}, provider_specs)
 
 
 @pytest.fixture
@@ -79,20 +46,37 @@ def flat_data():
     return torch.randn(11, 7, 5, 2, 3)  # batch, dates, ensemble, grid, features
 
 
-def test_truncation_mapper_init(truncation_graph):
-    _ = TruncatedConnection(truncation_graph=truncation_graph)
+def test_truncation_mapper_init(graph_bundle: GraphBundle):
+    graph_providers = _build_registry(graph_bundle, "edge_weight")
+    _ = TruncatedConnection(
+        down_provider="down",
+        up_provider="up",
+        graph_providers=graph_providers,
+        dataset_name="data",
+    )
 
 
-def test_forward(truncation_graph):
-    mapper = TruncatedConnection(truncation_graph=truncation_graph)
+def test_forward(graph_bundle: GraphBundle):
+    graph_providers = _build_registry(graph_bundle, "edge_weight")
+    mapper = TruncatedConnection(
+        down_provider="down",
+        up_provider="up",
+        graph_providers=graph_providers,
+        dataset_name="data",
+    )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, grid, features)
 
 
-def test_forward_no_weight(truncation_graph):
-    graph_spec = {**truncation_graph, "edge_weight_attribute": None}
-    mapper = TruncatedConnection(truncation_graph=graph_spec)
+def test_forward_no_weight(graph_bundle: GraphBundle):
+    graph_providers = _build_registry(graph_bundle, None)
+    mapper = TruncatedConnection(
+        down_provider="down",
+        up_provider="up",
+        graph_providers=graph_providers,
+        dataset_name="data",
+    )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, grid, features)

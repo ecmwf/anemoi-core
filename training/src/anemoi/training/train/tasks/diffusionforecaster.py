@@ -19,8 +19,7 @@ from torch.utils.checkpoint import checkpoint
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
-
+    from anemoi.graphs.bundle import GraphBundle
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
 
@@ -36,7 +35,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        graph_data: dict[str, GraphBundle],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,

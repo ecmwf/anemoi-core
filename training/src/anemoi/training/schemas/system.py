@@ -42,8 +42,6 @@ class InputSchema(PydanticBaseModel):
     "Path to the dataset file."
     graph: Path | None = None
     "Path to the graph file."
-    loss_matrices_path: Path | None = None
-    "Path to the directory containing smoothing matrices for the multiscale loss"
     warm_start: Path | None = None
     "Path of the checkpoint file to use for warm starting the training"
 

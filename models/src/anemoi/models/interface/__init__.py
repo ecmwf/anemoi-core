@@ -12,8 +12,8 @@ from typing import Optional
 
 import torch
 from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -34,8 +34,8 @@ class AnemoiModelInterface(torch.nn.Module):
         A unique identifier for the model instance.
     multi_step : bool
         Whether the model uses multi-step input.
-    graph_data : HeteroData
-        Graph data for the model.
+    graph_data : dict
+        Graph bundles for the model.
     statistics : dict
         Statistics for the data.
     metadata : dict
@@ -58,7 +58,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DotDict,
-        graph_data: HeteroData,
+        graph_data: dict,
         statistics: dict,
         data_indices: dict,
         metadata: dict,
@@ -150,10 +150,13 @@ class AnemoiModelInterface(torch.nn.Module):
 
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
-        model_instantiate_config = {
-            "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "all"),
-        }
+        model_instantiate_config = OmegaConf.create(
+            {
+                "_target_": self.config.model.model._target_,
+                "_convert_": getattr(self.config.model.model, "_convert_", "all"),
+            },
+            flags={"allow_objects": True},
+        )
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config,

@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 
     from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
+
+    from anemoi.graphs.bundle import GraphBundle
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         *,
         config: DictConfig,
-        graph_data: HeteroData,
+        graph_data: dict[str, GraphBundle],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,

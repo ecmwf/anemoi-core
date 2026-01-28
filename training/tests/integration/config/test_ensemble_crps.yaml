@@ -2,20 +2,19 @@
 system:
   input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
-    loss_matrices_path: "anemoi-integration-tests/training/assets/"
 
 training:
   training_loss:
     datasets:
       data:
-        loss_matrices: [ "o96_smoothing_o96.npz", null]
-        weights: [1.0, 1.0]
+        smoothing_providers: null
+        weights: [1.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
-          loss_matrices: ["o96_smoothing_o96.npz", null]
-          weights: [1.0, 1.0]
+          smoothing_providers: null
+          weights: [1.0]
 
 dataloader:
   training:

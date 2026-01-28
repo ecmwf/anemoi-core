@@ -22,7 +22,6 @@ from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
@@ -270,31 +269,10 @@ def lam_config_with_graph(
     return cfg, urls
 
 
-def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> DictConfig:
-    url_loss_matrices = cfg.system.input.loss_matrices_path
-    tmp_path_loss_matrices = None
-
-    training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
-    for dataset_name, training_loss_cfg in training_losses_cfg.items():
-        for file in training_loss_cfg.loss_matrices:
-            if file is not None:
-                tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
-        if tmp_path_loss_matrices is not None:
-            cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
-            training_loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
-
-            cfg.training.validation_metrics.datasets[dataset_name].multiscale.loss_matrices_path = str(
-                Path(tmp_path_loss_matrices).parent,
-            )
-        cfg.training.training_loss.datasets[dataset_name] = training_loss_cfg
-    return cfg
-
-
 @pytest.fixture
 def ensemble_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
-    get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
@@ -309,8 +287,6 @@ def ensemble_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
-
-    cfg = handle_truncation_matrices(cfg, get_test_data)
 
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls[0]
@@ -381,7 +357,6 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 def benchmark_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
-    get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
     base_config = "config"  # which config we start from in anemoi/training/configs/
@@ -418,8 +393,6 @@ def benchmark_config(
     cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
     OmegaConf.resolve(cfg)
 
-    if test_case == "ensemble_crps":
-        cfg = handle_truncation_matrices(cfg, get_test_data)
     return cfg, test_case
 
 

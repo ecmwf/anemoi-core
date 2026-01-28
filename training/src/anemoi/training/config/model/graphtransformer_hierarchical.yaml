@@ -6,72 +6,7 @@ keep_batch_sharded: True
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDecHierarchical
 
-presets:
-  providers:
-    data_to_hidden1:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [data, to, hidden_1]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.data2hidden}
-    hidden1_to_data:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_1, to, data]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2data}
-    hidden1_self:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_1, to, hidden_1]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2hidden}
-    hidden2_self:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_2, to, hidden_2]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2hidden}
-    hidden3_self:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_3, to, hidden_3]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2hidden}
-    down_1_2:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_1, to, hidden_2]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.data2hidden}
-    down_2_3:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_2, to, hidden_3]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.data2hidden}
-    up_3_2:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_3, to, hidden_2]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2data}
-    up_2_1:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_2, to, hidden_1]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2data}
-
 # Edges must match graph/hierarchical_3level.yaml exactly.
-graph_providers:
-  encoder: ${model.presets.providers.data_to_hidden1}
-  decoder: ${model.presets.providers.hidden1_to_data}
-  processor: ${model.presets.providers.hidden3_self}
-  downscale:
-    hidden_1: ${model.presets.providers.down_1_2}
-    hidden_2: ${model.presets.providers.down_2_3}
-  upscale:
-    hidden_2: ${model.presets.providers.up_2_1}
-    hidden_3: ${model.presets.providers.up_3_2}
-  down_level_processor:
-    hidden_1: ${model.presets.providers.hidden1_self}
-    hidden_2: ${model.presets.providers.hidden2_self}
-  up_level_processor:
-    hidden_1: ${model.presets.providers.hidden1_self}
-    hidden_2: ${model.presets.providers.hidden2_self}
-
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
@@ -89,8 +24,8 @@ layer_kernels:
 
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
-  trainable_size: ${model.graph_providers.processor.trainable_size}
-  sub_graph_edge_attributes: ${model.graph_providers.processor.edge_attributes}
+  trainable_size: ${model.trainable_parameters.hidden2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
@@ -103,8 +38,8 @@ processor:
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-  trainable_size: ${model.graph_providers.encoder.trainable_size}
-  sub_graph_edge_attributes: ${model.graph_providers.encoder.edge_attributes}
+  trainable_size: ${model.trainable_parameters.data2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -117,8 +52,8 @@ encoder:
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-  trainable_size: ${model.graph_providers.decoder.trainable_size}
-  sub_graph_edge_attributes: ${model.graph_providers.decoder.edge_attributes}
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -130,7 +65,9 @@ decoder:
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
 
-residual: ${truncation.residual}
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection
+  step: -1
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

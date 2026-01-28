@@ -44,6 +44,8 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
     def __init__(self, graph_data: HeteroData, nodes_name: str, attribute_name: str) -> None:
         super().__init__()
 
+        if hasattr(graph_data, "main"):
+            graph_data = graph_data.main
         mask = graph_data[nodes_name][attribute_name].bool().squeeze()
         self.register_buffer("mask", mask)
 

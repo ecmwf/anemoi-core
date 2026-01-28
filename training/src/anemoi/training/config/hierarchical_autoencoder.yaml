@@ -6,7 +6,6 @@ defaults:
 - hardware: example
 - graph: hierarchical_2level_encoder_decoder_only
 - model: graphtransformer
-- truncation: none
 - training: autoencoder
 - _self_
 
@@ -15,34 +14,6 @@ model:
     _target_: anemoi.models.models.AnemoiModelHierarchicalAutoEncoder
   enable_hierarchical_level_processing: False
   keep_batch_sharded: True
-  graph_providers:
-    encoder:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [data, to, hidden_1]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.data2hidden}
-    decoder:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_1, to, data]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2data}
-    processor:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden_2, to, hidden_2]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2hidden}
-    downscale:
-      hidden_1:
-        _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-        edges: [hidden_1, to, hidden_2]
-        edge_attributes: ${model.attributes.edges}
-        trainable_size: ${model.trainable_parameters.data2hidden}
-    upscale:
-      hidden_2:
-        _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-        edges: [hidden_2, to, hidden_1]
-        edge_attributes: ${model.attributes.edges}
-        trainable_size: ${model.trainable_parameters.hidden2data}
 
 training:
   model_task: anemoi.training.train.tasks.GraphAutoEncoder

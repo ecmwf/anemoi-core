@@ -42,9 +42,10 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
 
+    from anemoi.graphs.bundle import GraphBundle
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.layers.graph_provider_registry import GraphProviderRegistry
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     Key Features
     ------------
     - Supports model and data parallelism through model and reader process groups.
-    - Handles graph data via `torch_geometric.data.HeteroData` format.
+    - Handles graph bundles that can include auxiliary assets (e.g., smoothing graphs).
     - Supports sharded input batches and reconstruction via `allgather`.
     - Integrates modular loss and metric functions with support for variable scaling.
     - Enables deferred creation of variable scalers post-model instantiation.
@@ -75,8 +76,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ----------
     config : BaseSchema
         Configuration object defining all parameters.
-    graph_data : HeteroData
-        Graph-structured input data containing node and edge features.
+    graph_data : dict[str, GraphBundle]
+        Graph bundles containing main graphs and optional assets per dataset.
     statistics : dict
         Dictionary of training statistics (mean, std, etc.) used for normalization.
     statistics_tendencies : dict
@@ -132,7 +133,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        graph_data: dict[str, GraphBundle],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -145,8 +146,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
+        graph_data : dict
+            Graph bundles for the model
         statistics : dict
             Statistics of the training data
         data_indices : IndexCollection
@@ -159,14 +160,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         super().__init__()
 
-        # Handle dictionary of graph_data
-        graph_data = {name: data.to(self.device) for name, data in graph_data.items()}
-        self.dataset_names = list(graph_data.keys())
+        # Handle dictionary of graph bundles
+        from anemoi.graphs.bundle import GraphBundle
+
+        graph_bundles = {}
+        for name, bundle in graph_data.items():
+            assets = {asset_name: asset.to(self.device) for asset_name, asset in bundle.assets.items()}
+            graph_bundles[name] = GraphBundle(main=bundle.main.to(self.device), assets=assets)
+        self.graph_bundles = graph_bundles
+        self.dataset_names = list(self.graph_bundles.keys())
 
         # Create output_mask dictionary for each dataset
         self.output_mask = {}
         for name in self.dataset_names:
-            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data[name])
+            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=self.graph_bundles[name].main)
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
@@ -186,9 +193,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=combined_supporting_arrays,
-            graph_data=graph_data,
+            graph_data=self.graph_bundles,
             config=config,
         )
+        self.graph_providers = self.model.model.graph_providers
         self.config = config
 
         self.data_indices = data_indices
@@ -214,7 +222,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
         for dataset_name in self.dataset_names:
-            self.latlons_data[dataset_name] = graph_data[dataset_name][config.graph.data].x
+            self.latlons_data[dataset_name] = self.graph_bundles[dataset_name].main[config.graph.data].x
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
@@ -225,7 +233,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
-                graph_data=graph_data[dataset_name],
+                graph_data=self.graph_bundles[dataset_name].main,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
@@ -242,16 +250,22 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 metrics_to_log=metrics_to_log[dataset_name],
             )
 
+            loss_kwargs = {}
+            if getattr(loss_configs[dataset_name], "_target_", None) == "anemoi.training.losses.MultiscaleLossWrapper":
+                loss_kwargs = {"graph_providers": self.graph_providers, "dataset_name": dataset_name}
             self.loss[dataset_name] = get_loss_function(
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
+                **loss_kwargs,
             )
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
+                graph_providers=self.graph_providers,
+                dataset_name=dataset_name,
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
@@ -288,7 +302,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 grid_indices_configs[dataset_name],
                 reader_group_size=reader_group_size,
             )
-            self.grid_indices[dataset_name].setup(graph_data[dataset_name])
+            self.grid_indices[dataset_name].setup(self.graph_bundles[dataset_name].main)
         self.grid_dim = -2
 
         # check sharding support
@@ -359,13 +373,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
         validation_metrics_configs: dict,
         scalers: dict,
         data_indices: IndexCollection,
+        graph_providers: GraphProviderRegistry,
+        dataset_name: str,
     ) -> torch.nn.ModuleDict:
-        return torch.nn.ModuleDict(
-            {
-                metric_name: get_loss_function(val_metric_config, scalers=scalers, data_indices=data_indices)
-                for metric_name, val_metric_config in validation_metrics_configs.items()
-            },
-        )
+        metrics = {}
+        for metric_name, val_metric_config in validation_metrics_configs.items():
+            metric_kwargs = {}
+            if getattr(val_metric_config, "_target_", None) == "anemoi.training.losses.MultiscaleLossWrapper":
+                metric_kwargs = {"graph_providers": graph_providers, "dataset_name": dataset_name}
+            metrics[metric_name] = get_loss_function(
+                val_metric_config,
+                scalers=scalers,
+                data_indices=data_indices,
+                **metric_kwargs,
+            )
+        return torch.nn.ModuleDict(metrics)
 
     def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
         """Forward method.

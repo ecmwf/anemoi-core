@@ -23,7 +23,6 @@ from pydantic._internal import _model_construction
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
-from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema
 from anemoi.utils.schemas import BaseModel
@@ -35,6 +34,7 @@ from anemoi.utils.schemas.errors import convert_errors
 from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .diagnostics import DiagnosticsSchema
+from .graph import TrainingGraphSchema
 from .system import SystemSchema
 from .training import TrainingSchema
 
@@ -102,12 +102,8 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Diagnostics configuration such as logging, plots and metrics."""
     system: SystemSchema
     """System configuration, including filesystem and hardware specification."""
-    graph: BaseGraphSchema
+    graph: TrainingGraphSchema
     """Graph configuration."""
-    loss_graphs: dict[str, Any] | None = None
-    """Loss graph configuration."""
-    truncation: dict[str, Any] | None = None
-    """Truncation configuration."""
     model: ModelSchema
     """Model configuration."""
     training: TrainingSchema
@@ -140,41 +136,6 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
             )
         return self
 
-    @model_validator(mode="after")
-    def check_truncation_multi_dataset(self) -> Self:
-        """Ensure truncation is not enabled across heterogeneous multi-dataset configs."""
-        if not self.config_validation:
-            return self
-
-        training_cfg = self.dataloader.training
-        datasets = None
-        if isinstance(training_cfg, dict):
-            datasets = training_cfg.get("datasets")
-        elif hasattr(training_cfg, "datasets"):
-            datasets = training_cfg.datasets
-
-        if not datasets or len(datasets) <= 1:
-            return self
-
-        truncation_cfg: Any = self.truncation
-        if OmegaConf.is_config(truncation_cfg):
-            truncation_cfg = OmegaConf.to_container(truncation_cfg, resolve=True)
-
-        if isinstance(truncation_cfg, dict):
-            residual_cfg: Any = truncation_cfg.get("residual", {})
-            if OmegaConf.is_config(residual_cfg):
-                residual_cfg = OmegaConf.to_container(residual_cfg, resolve=True)
-            if isinstance(residual_cfg, dict):
-                target = residual_cfg.get("_target_") or residual_cfg.get("target_")
-                if target and target != "anemoi.models.layers.residual.SkipConnection":
-                    msg = (
-                        "Field truncation with multiple datasets is only supported when all datasets share the same "
-                        "grid/resolution. Set truncation: none or provide dataset-specific truncation settings."
-                    )
-                    raise ValueError(msg)
-
-        return self
-
 
 class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     data: Any
@@ -187,10 +148,6 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Hardware configuration."""
     graph: Any
     """Graph configuration."""
-    loss_graphs: Any
-    """Loss graph configuration."""
-    truncation: Any
-    """Truncation configuration."""
     model: Any
     """Model configuration."""
     training: Any

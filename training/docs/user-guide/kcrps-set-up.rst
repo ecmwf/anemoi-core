@@ -46,14 +46,10 @@ training:
    :start-after: # Changes in system
    :end-before: num_gpus_per_ensemble:
 
-Truncation matrices can be configured via the top-level `truncation` group
-for deterministic or CRPS training. As described in :ref:`Field Truncation`,
-this transforms the input to the model.
-
-.. literalinclude:: yaml/example_crps_config.yaml
-   :language: yaml
-   :start-after: # Changes in truncation
-   :end-before: data:
+Projection providers can be configured via ``graph.providers`` for
+deterministic or CRPS training. As described in
+:ref:`Projection Providers <usage-field_truncation>`, this transforms the
+input to the model via projection graph providers.
 
 The CRPS training uses a different DDP strategy which requires to
 specify the number of GPUs per ensemble.

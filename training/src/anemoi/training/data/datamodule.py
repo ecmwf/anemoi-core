@@ -14,7 +14,6 @@ from functools import cached_property
 import pytorch_lightning as pl
 from hydra.utils import instantiate
 from torch.utils.data import DataLoader
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -29,15 +28,15 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: BaseSchema, graph_data: HeteroData) -> None:
+    def __init__(self, config: BaseSchema, graph_data: dict) -> None:
         """Initialize Multi-dataset data module.
 
         Parameters
         ----------
         config : BaseSchema
             Job configuration with multi-dataset specification
-        graph_data : HeteroData
-            Graph data for the model
+        graph_data : dict
+            Graph bundles for the model
         """
         super().__init__()
 
@@ -127,7 +126,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
         for dataset_name, grid_config in grid_indices_config.items():
             grid_indices = instantiate(grid_config, reader_group_size=self.config.dataloader.read_group_size)
-            grid_indices.setup(self.graph_data[dataset_name])
+            grid_indices.setup(self.graph_data[dataset_name].main)
             grid_indices_dict[dataset_name] = grid_indices
 
         return grid_indices_dict

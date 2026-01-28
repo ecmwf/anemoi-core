@@ -5,7 +5,6 @@ defaults:
 - system: example
 - graph: encoder_decoder_only
 - model: graphtransformer
-- truncation: none
 - training: autoencoder
 - _self_
 

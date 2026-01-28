@@ -7,20 +7,6 @@ keep_batch_sharded: True
 model:
   _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
 
-graph_providers:
-  encoder:
-    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-    edges: [data, to, hidden]
-    edge_attributes: ${model.attributes.edges}
-    trainable_size: ${model.trainable_parameters.data2hidden}
-  processor:
-    _target_: anemoi.models.layers.graph_provider.NoOpGraphProvider
-  decoder:
-    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-    edges: [hidden, to, data]
-    edge_attributes: ${model.attributes.edges}
-    trainable_size: ${model.trainable_parameters.hidden2data}
-
 noise_injector:
   _target_: anemoi.models.layers.ensemble.NoiseConditioning
   noise_std: 1
@@ -76,8 +62,8 @@ processor:
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-  trainable_size: ${model.graph_providers.encoder.trainable_size}
-  sub_graph_edge_attributes: ${model.graph_providers.encoder.edge_attributes}
+  trainable_size: ${model.trainable_parameters.data2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -89,8 +75,8 @@ encoder:
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-  trainable_size: ${model.graph_providers.decoder.trainable_size}
-  sub_graph_edge_attributes: ${model.graph_providers.decoder.edge_attributes}
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -101,7 +87,9 @@ decoder:
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
-residual: ${truncation.residual}
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection
+  step: -1
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

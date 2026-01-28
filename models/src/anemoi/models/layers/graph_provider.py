@@ -12,14 +12,11 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any
 from typing import Optional
 from typing import Union
 
 import numpy as np
 import torch
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -31,36 +28,6 @@ from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.layers.graph import TrainableTensor
 
 LOGGER = logging.getLogger(__name__)
-
-
-def instantiate_graph_provider(
-    *,
-    provider_config: dict,
-    graph_data: HeteroData,
-    node_attributes: Any,
-) -> "BaseGraphProvider":
-    assert provider_config is not None, "graph provider config must be set"
-
-    if OmegaConf.is_config(provider_config):
-        provider_kwargs = OmegaConf.to_container(provider_config, resolve=True)
-    else:
-        provider_kwargs = dict(provider_config)
-
-    edges = provider_kwargs.pop("edges", None)
-    if edges is not None:
-        assert graph_data is not None, "graph_data must be provided if edges are present in config"
-        assert node_attributes is not None, "node_attributes must be provided if edges are present in config"
-        assert len(edges) == 3, "edges must be [src, relation, dst]"
-        edge_key = tuple(edges)
-        assert edge_key in graph_data.edge_types, f"unknown edge type: {edge_key}"
-        assert edge_key[0] in node_attributes.num_nodes, f"unknown source node type: {edge_key[0]}"
-        assert edge_key[2] in node_attributes.num_nodes, f"unknown destination node type: {edge_key[2]}"
-        graph = graph_data[edge_key]
-        src_size = node_attributes.num_nodes[edge_key[0]]
-        dst_size = node_attributes.num_nodes[edge_key[2]]
-        return instantiate(provider_kwargs, graph=graph, src_size=src_size, dst_size=dst_size)
-
-    return instantiate(provider_kwargs)
 
 
 class BaseGraphProvider(nn.Module, ABC):
@@ -479,12 +446,14 @@ class ProjectionGraphProvider(BaseGraphProvider):
     def _build_from_graph(
         self,
         graph: HeteroData,
-        edges_name: tuple[str, str, str],
+        edges_name: tuple[str, str, str] | list[str],
         edge_weight_attribute: Optional[str],
         src_node_weight_attribute: Optional[str],
         row_normalize: bool,
     ) -> None:
         """Build projection matrix from graph."""
+        if not isinstance(edges_name, tuple):
+            edges_name = tuple(edges_name)
         sub_graph = graph[edges_name]
 
         if edge_weight_attribute:

@@ -4,7 +4,6 @@ defaults:
 - diagnostics: evaluation_multi
 - system: example
 - graph: multi_scale
-- truncation: none
 - model: graphtransformer
 - training: multi
 - _self_

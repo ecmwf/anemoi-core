@@ -4,3 +4,20 @@ overwrite: False
 data: "data"
 hidden: "hidden"
 # This config file can be used to load a graph from your local filesystem
+
+providers:
+  encoder:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: ["${graph.data}", "to", "${graph.hidden}"]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.data2hidden}
+  processor:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: ["${graph.hidden}", "to", "${graph.hidden}"]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2hidden}
+  decoder:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: ["${graph.hidden}", "to", "${graph.data}"]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2data}

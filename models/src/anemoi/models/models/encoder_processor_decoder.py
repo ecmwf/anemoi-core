@@ -20,7 +20,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph_provider import instantiate_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
 
@@ -32,16 +31,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
-        graph_providers = model_config.model.graph_providers
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.encoder_graph_provider[dataset_name] = instantiate_graph_provider(
-                provider_config=graph_providers.get("encoder"),
-                graph_data=self._graph_data[dataset_name],
-                node_attributes=self.node_attributes[dataset_name],
-            )
+            self.encoder_graph_provider[dataset_name] = self.graph_providers.get("encoder", dataset_name)
 
             self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
@@ -56,11 +50,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         first_dataset_name = next(iter(self._graph_data.keys()))
 
         # Processor hidden -> hidden
-        self.processor_graph_provider = instantiate_graph_provider(
-            provider_config=graph_providers.get("processor"),
-            graph_data=self._graph_data[first_dataset_name],
-            node_attributes=self.node_attributes[first_dataset_name],
-        )
+        self.processor_graph_provider = self.graph_providers.get("processor", first_dataset_name)
 
         self.processor = instantiate(
             model_config.model.processor,
@@ -73,11 +63,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.decoder_graph_provider[dataset_name] = instantiate_graph_provider(
-                provider_config=graph_providers.get("decoder"),
-                graph_data=self._graph_data[dataset_name],
-                node_attributes=self.node_attributes[dataset_name],
-            )
+            self.decoder_graph_provider[dataset_name] = self.graph_providers.get("decoder", dataset_name)
 
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,

@@ -8,9 +8,9 @@ Anemoi graphs supports the creation of sparse matrices using the
 ``export_to_sparse`` command. See the :ref:`Export To Sparse Command
 <export-to-sparse-command>` for details.
 
-The main use case in Anemoi is to create the truncation matrices used in
-the models for the residual connection as explained :ref:`here
-<anemoi-training:usage-field_truncation>`.
+The main use case in Anemoi is to create projection matrices used by
+``ProjectionGraphProvider`` for residual smoothing or multiscale loss,
+as explained :ref:`here <anemoi-training:usage-field_truncation>`.
 
 **************************
  Create your graph recipe
@@ -43,9 +43,9 @@ For example, running the following command:
 
 .. code:: bash
 
-   % anemoi-graphs export_to_sparse graph_recipe.yaml truncation_matrices/
+   % anemoi-graphs export_to_sparse graph_recipe.yaml projection_matrices/
 
-will create a set of NPZ files in the ``truncation_matrices/``
+will create a set of NPZ files in the ``projection_matrices/``
 directory, with each file corresponding to a specific edge attribute in
 a subgraph.
 

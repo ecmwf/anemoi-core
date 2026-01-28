@@ -102,3 +102,44 @@ attributes:
       norm: unit-std
 
 post_processors: []
+
+providers:
+  encoder:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: [data, to, hidden_1]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.data2hidden}
+  decoder:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: [hidden_1, to, data]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2data}
+  processor:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: [hidden_2, to, hidden_2]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2hidden}
+  downscale:
+    hidden_1:
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+      edges: [hidden_1, to, hidden_2]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.data2hidden}
+  upscale:
+    hidden_2:
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+      edges: [hidden_2, to, hidden_1]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2data}
+  down_level_processor:
+    hidden_1:
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+      edges: [hidden_1, to, hidden_1]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2hidden}
+  up_level_processor:
+    hidden_1:
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+      edges: [hidden_1, to, hidden_1]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2hidden}

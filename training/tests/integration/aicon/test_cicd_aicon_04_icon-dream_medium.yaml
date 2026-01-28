@@ -97,6 +97,22 @@ graph:
       edge_dirs:
         _target_: anemoi.graphs.edges.attributes.EdgeDirection
         norm: unit-std
+  providers:
+    encoder:
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+      edges: ["${graph.data}", "to", "${graph.hidden}"]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.data2hidden}
+    processor:
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+      edges: ["${graph.hidden}", "to", "${graph.hidden}"]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2hidden}
+    decoder:
+      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+      edges: ["${graph.hidden}", "to", "${graph.data}"]
+      edge_attributes: ${model.attributes.edges}
+      trainable_size: ${model.trainable_parameters.hidden2data}
 
 
 data:
@@ -159,28 +175,11 @@ model:
 
   keep_batch_sharded: True
 
-  graph_providers:
-    encoder:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [data, to, hidden]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.data2hidden}
-    processor:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden, to, hidden]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2hidden}
-    decoder:
-      _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
-      edges: [hidden, to, data]
-      edge_attributes: ${model.attributes.edges}
-      trainable_size: ${model.trainable_parameters.hidden2data}
-
   num_channels: 5 # reduced for CI/CD test. original value 512
   processor:
     _target_: anemoi.models.layers.processor.GNNProcessor
-    trainable_size: ${model.graph_providers.processor.trainable_size}
-    sub_graph_edge_attributes: ${model.graph_providers.processor.edge_attributes}
+    trainable_size: ${model.trainable_parameters.hidden2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
     num_layers: 2
     num_chunks: 2
     mlp_extra_layers: 0
@@ -190,8 +189,8 @@ model:
         _target_: torch.nn.GELU
   encoder:
     _target_: anemoi.models.layers.mapper.GNNForwardMapper
-    trainable_size: ${model.graph_providers.encoder.trainable_size}
-    sub_graph_edge_attributes: ${model.graph_providers.encoder.edge_attributes}
+    trainable_size: ${model.trainable_parameters.data2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
     num_chunks: 1
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
@@ -200,8 +199,8 @@ model:
         _target_: torch.nn.GELU
   decoder:
     _target_: anemoi.models.layers.mapper.GNNBackwardMapper
-    trainable_size: ${model.graph_providers.decoder.trainable_size}
-    sub_graph_edge_attributes: ${model.graph_providers.decoder.edge_attributes}
+    trainable_size: ${model.trainable_parameters.hidden2data}
+    sub_graph_edge_attributes: ${model.attributes.edges}
     num_chunks: 3
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}

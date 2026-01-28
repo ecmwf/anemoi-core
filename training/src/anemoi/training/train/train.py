@@ -28,6 +28,7 @@ from packaging import version
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.bundle import GraphBundle
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
@@ -141,37 +142,84 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
-        """Create graph for a specific dataset, overriding the dataset path in config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
+    def _resolve_graph_path(self, base_path: Path | str | None, dataset_name: str) -> Path | None:
+        if base_path is None:
+            return None
+        if isinstance(base_path, str):
+            base_path = Path(base_path)
+        if base_path.name.endswith(".pt"):
+            graph_name = base_path.name.replace(".pt", f"_{dataset_name}.pt")
+            return base_path.parent / graph_name
+        return base_path
 
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
+    def _override_dataset_path(self, graph_config: DictConfig, dataset_path: str) -> None:
+        if (
+            hasattr(graph_config, "nodes")
+            and hasattr(graph_config.nodes, "data")
+            and hasattr(graph_config.nodes.data, "node_builder")
+            and hasattr(graph_config.nodes.data.node_builder, "dataset")
+        ):
+            graph_config.nodes.data.node_builder.dataset = dataset_path
 
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-        else:
-            graph_filename = None
-
-        # Create new graph
+    def _create_graph(
+        self,
+        graph_config: DictConfig,
+        dataset_path: str,
+        save_path: Path | None,
+        overwrite: bool,
+    ) -> HeteroData:
+        """Create a graph from config, overriding dataset path."""
         from anemoi.graphs.create import GraphCreator
+
+        self._override_dataset_path(graph_config, dataset_path)
+        return GraphCreator(config=graph_config).create(save_path=save_path, overwrite=overwrite)
+
+    def _maybe_load_graph(self, graph_path: Path, overwrite: bool) -> HeteroData | None:
+        if graph_path.exists() and not overwrite:
+            from anemoi.graphs.utils import get_distributed_device
+
+            LOGGER.info("Loading graph data from %s", graph_path)
+            return torch.load(graph_path, map_location=get_distributed_device(), weights_only=False)
+        return None
+
+    def _create_graph_bundle_for_dataset(self, dataset_path: str, dataset_name: str) -> GraphBundle:
+        """Create main graph + asset graphs for a dataset."""
+        from anemoi.graphs.bundle import GraphBundle
 
         graph_config = convert_to_omegaconf(self.config).graph
 
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
+        main_graph_path = self._resolve_graph_path(self.config.system.input.graph, dataset_name)
+        main_graph = None
+        if main_graph_path is not None:
+            main_graph = self._maybe_load_graph(main_graph_path, self.config.graph.overwrite)
 
-        return GraphCreator(config=graph_config).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
+        if main_graph is None:
+            main_graph = self._create_graph(
+                graph_config,
+                dataset_path,
+                save_path=main_graph_path,
+                overwrite=self.config.graph.overwrite,
+            )
+
+        assets = {}
+        for asset_name, asset_cfg in (graph_config.get("assets") or {}).items():
+            asset_graph_config = asset_cfg.graph_config
+            asset_path = self._resolve_graph_path(asset_cfg.file_path, dataset_name) if asset_cfg.file_path else None
+
+            asset_graph = None
+            if asset_path is not None:
+                asset_graph = self._maybe_load_graph(asset_path, asset_cfg.overwrite)
+
+            if asset_graph is None:
+                asset_graph = self._create_graph(
+                    asset_graph_config,
+                    dataset_path,
+                    save_path=asset_path,
+                    overwrite=asset_cfg.overwrite,
+                )
+            assets[asset_name] = asset_graph
+
+        return GraphBundle(main=main_graph, assets=assets)
 
     @cached_property
     @abstractmethod
@@ -180,13 +228,13 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
-        """Graph data. Always uses dataset paths from dataloader config."""
+    def graph_data(self) -> dict[str, GraphBundle]:
+        """Graph data bundles. Always uses dataset paths from dataloader config."""
         graphs = {}
         dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
         for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
+            LOGGER.info("Creating graph bundle for dataset '%s'", dataset_name)
+            graphs[dataset_name] = self._create_graph_bundle_for_dataset(dataset_config.dataset, dataset_name)
         return graphs
 
     @cached_property

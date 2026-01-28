@@ -6,20 +6,19 @@ system:
   input:
     dataset:  /home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
     graph: ./ens-bm-graph.pt
-    loss_matrices_path: "anemoi-integration-tests/training/assets/"
 
 training:
   ensemble_size_per_device: 1
   training_loss:
     datasets:
       data:
-        loss_matrices: [ null]
+        smoothing_providers: null
         weights: [1.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
-          loss_matrices: [null]
+          smoothing_providers: null
           weights: [1.0]
 
 dataloader:

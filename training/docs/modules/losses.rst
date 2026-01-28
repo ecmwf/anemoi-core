@@ -98,8 +98,7 @@ The config for the multiscale loss functions is the following:
       datasets:
          your_dataset_name:
             _target_: anemoi.training.losses.MultiscaleLossWrapper
-            loss_matrices_path: ${system.input.loss_matrices_path}
-            loss_matrices: ["matrix.npz", null]
+            smoothing_providers: ["smooth_200", null]
             weights:
                - 1.0
                - 1.0
@@ -110,6 +109,13 @@ The config for the multiscale loss functions is the following:
                ignore_nans: False
                no_autocast: True
                alpha: 1.0
+
+The ``smoothing_providers`` list references providers defined under
+``graph.providers``. Each named provider must be a
+``ProjectionGraphProvider`` (either built from a graph or loaded from a
+NPZ file). Use ``null`` entries to disable smoothing at specific scales.
+The number of ``weights`` must match the number of entries in
+``smoothing_providers``.
 
 ************************
  Spatial Loss Functions

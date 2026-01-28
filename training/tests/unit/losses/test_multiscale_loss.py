@@ -9,10 +9,10 @@
 
 import pytest
 import torch
-from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.graphs.bundle import GraphBundle
+from anemoi.models.layers.graph_provider_registry import GraphProviderRegistry
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
@@ -57,7 +57,6 @@ def test_multi_scale(
     loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     per_scale_loss: BaseLoss,
     weights: torch.Tensor,
-    mocker: MockerFixture,
 ) -> None:
     """Test multiscale loss with different per-scale losses and weights."""
     graph = HeteroData()
@@ -66,23 +65,24 @@ def test_multi_scale(
     graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 0, 1, 1, 2, 2, 3, 3], [0, 1, 1, 2, 2, 3, 3, 0]])
     graph[("src", "to", "dst")].edge_weight = torch.ones(8) / 2
 
-    smoothing_provider = ProjectionGraphProvider(
-        graph=graph,
-        edges_name=("src", "to", "dst"),
-        edge_weight_attribute="edge_weight",
-        row_normalize=False,
-    )
-
-    mocker.patch(
-        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
-        return_value=[None, smoothing_provider],
-    )
+    graph_bundles = {"data": GraphBundle(main=graph, assets={})}
+    provider_specs = {
+        "smooth": {
+            "_target_": "anemoi.models.layers.graph_provider.ProjectionGraphProvider",
+            "edges_name": ["src", "to", "dst"],
+            "edge_weight_attribute": "edge_weight",
+            "row_normalize": False,
+        },
+    }
+    graph_providers = GraphProviderRegistry(graph_bundles, provider_specs)
 
     multiscale_loss = MultiscaleLossWrapper(
-        loss_matrices=[None, "fake"],
         per_scale_loss=per_scale_loss,
         weights=weights,
         keep_batch_sharded=False,
+        smoothing_providers=[None, "smooth"],
+        graph_providers=graph_providers,
+        dataset_name="data",
     )
 
     pred, target, _ = loss_inputs_multiscale

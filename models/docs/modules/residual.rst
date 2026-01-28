@@ -30,42 +30,28 @@ in Anemoi.
  Truncated Connection
 **********************
 
-Use file-based matrices:
+Use projection providers (NPZ or graph-based):
 
 .. code-block:: yaml
 
-   residual:
-     _target_: anemoi.models.layers.residual.TruncatedConnection
-     truncation_down_file_path: o96_to_o32.npz
-     truncation_up_file_path: o32_to_o96.npz
-     truncation_matrices_path: /path/to/matrices
+   graph:
+     providers:
+       trunc_down:
+         _target_: anemoi.models.layers.graph_provider.ProjectionGraphProvider
+         file_path: /path/to/down_matrix.npz
+       trunc_up:
+         _target_: anemoi.models.layers.graph_provider.ProjectionGraphProvider
+         file_path: /path/to/up_matrix.npz
 
-Use a graph-based truncation definition:
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       down_provider: trunc_down
+       up_provider: trunc_up
 
-.. code-block:: yaml
-
-   residual:
-     _target_: anemoi.models.layers.residual.TruncatedConnection
-     truncation_graph:
-       graph_config:
-         nodes:
-           data: ...
-           trunc: ...
-         edges:
-           - source_name: data
-             target_name: trunc
-             edge_builders: [...]
-             attributes:
-               gauss_weight: ...
-           - source_name: trunc
-             target_name: data
-             edge_builders: [...]
-             attributes:
-               gauss_weight: ...
-         post_processors: []
-       down_edges_name: [data, to, trunc]
-       up_edges_name: [trunc, to, data]
-       edge_weight_attribute: gauss_weight
+If you want to build the projection from a graph, define an auxiliary
+graph under ``graph.assets`` and reference it via ``graph_ref`` in the
+provider specification.
 
 
 .. autoclass:: anemoi.models.layers.residual.TruncatedConnection

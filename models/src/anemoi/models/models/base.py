@@ -17,14 +17,15 @@ from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
+from anemoi.graphs.bundle import GraphBundle
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.graph_provider_registry import GraphProviderRegistry
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ class BaseGraphModel(nn.Module):
         model_config: DotDict,
         data_indices: dict,
         statistics: dict,
-        graph_data: HeteroData,
+        graph_data: dict[str, GraphBundle],
     ) -> None:
         """Initializes the graph neural network.
 
@@ -51,11 +52,17 @@ class BaseGraphModel(nn.Module):
             Data indices
         statistics : dict
             Data statistics
-        graph_data : HeteroData
-            Graph definition
+        graph_data : dict[str, GraphBundle]
+            Graph bundles (with optional assets), keyed by dataset name
         """
         super().__init__()
-        self._graph_data = graph_data
+        assert isinstance(graph_data, dict), "graph_data must be dict[str, GraphBundle]"
+        assert all(isinstance(key, str) for key in graph_data.keys()), "graph_data keys must be strings"
+        assert all(
+            isinstance(bundle, GraphBundle) for bundle in graph_data.values()
+        ), "graph_data values must be GraphBundle instances"
+        self._graph_bundles = graph_data
+        self._graph_data = {dataset_name: bundle.main for dataset_name, bundle in graph_data.items()}
         self.data_indices = data_indices
         self.statistics = statistics
 
@@ -74,6 +81,9 @@ class BaseGraphModel(nn.Module):
             self.node_attributes[dataset_name] = NamedNodesAttributes(
                 model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
             )
+
+        provider_specs = getattr(model_config.graph, "providers", None)
+        self.graph_providers = GraphProviderRegistry(self._graph_bundles, provider_specs)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -223,7 +233,11 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.residual[dataset_name] = instantiate(residual_config)
+            self.residual[dataset_name] = instantiate(
+                residual_config,
+                graph_providers=self.graph_providers,
+                dataset_name=dataset_name,
+            )
 
     @abstractmethod
     def forward(

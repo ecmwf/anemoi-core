@@ -1,0 +1,189 @@
+---
+overwrite: True
+
+data: "data"
+hidden: "hidden"
+
+nodes:
+  # Data nodes
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+    attributes: ${graph.attributes.nodes}
+  # Hidden nodes
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 5
+
+edges:
+  # Encoder configuration
+  - source_name: ${graph.data}
+    target_name: ${graph.hidden}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.CutOffEdges
+        cutoff_factor: 0.6
+        source_mask_attr_name: null
+        target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  # Processor configuration
+  - source_name: ${graph.hidden}
+    target_name: ${graph.hidden}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.MultiScaleEdges
+        x_hops: 1
+        scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
+        source_mask_attr_name: null
+        target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  # Decoder configuration
+  - source_name: ${graph.hidden}
+    target_name: ${graph.data}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: 3
+        source_mask_attr_name: null
+        target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+      norm: unit-max
+      fill_value: 0
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+
+post_processors: []
+
+assets:
+  smoothing_200:
+    graph_config:
+      overwrite: True
+      data: "data"
+      hidden: "data"
+      nodes:
+        data:
+          node_builder:
+            _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+            dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+      edges:
+        - source_name: data
+          target_name: data
+          edge_builders:
+            - _target_: anemoi.graphs.edges.CutOffEdges
+              cutoff_distance_km: 200
+              max_num_neighbours: 256
+          attributes:
+            gauss_weight:
+              _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+              norm: l1
+              # 2-sigma cutoff: 200 km -> sigma approx 0.01570 rad
+              sigma: 0.01570
+      post_processors: []
+  smoothing_400:
+    graph_config:
+      overwrite: True
+      data: "data"
+      hidden: "data"
+      nodes:
+        data:
+          node_builder:
+            _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+            dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+      edges:
+        - source_name: data
+          target_name: data
+          edge_builders:
+            - _target_: anemoi.graphs.edges.CutOffEdges
+              cutoff_distance_km: 400
+              max_num_neighbours: 256
+          attributes:
+            gauss_weight:
+              _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+              norm: l1
+              # 2-sigma cutoff: 400 km -> sigma approx 0.03139 rad
+              sigma: 0.03139
+      post_processors: []
+  truncation:
+    graph_config:
+      overwrite: True
+      nodes:
+        data:
+          node_builder:
+            _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+            dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+        trunc:
+          node_builder:
+            _target_: anemoi.graphs.nodes.TriNodes
+            resolution: 4
+      edges:
+        - source_name: data
+          target_name: trunc
+          edge_builders:
+            - _target_: anemoi.graphs.edges.CutOffEdges
+              cutoff_distance_km: 600
+              max_num_neighbours: 256
+          attributes:
+            gauss_weight:
+              _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+              norm: l1
+              # 2-sigma cutoff: 600 km -> sigma approx 0.04709 rad
+              sigma: 0.04709
+        - source_name: trunc
+          target_name: data
+          edge_builders:
+            - _target_: anemoi.graphs.edges.KNNEdges
+              num_nearest_neighbours: 3
+              source_mask_attr_name: null
+              target_mask_attr_name: null
+          attributes:
+            gauss_weight:
+              _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+              norm: l1
+              sigma: 0.04709
+      post_processors: []
+
+providers:
+  encoder:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: ["${graph.data}", "to", "${graph.hidden}"]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.data2hidden}
+  processor:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: ["${graph.hidden}", "to", "${graph.hidden}"]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2hidden}
+  decoder:
+    _target_: anemoi.models.layers.graph_provider.StaticGraphProvider
+    edges: ["${graph.hidden}", "to", "${graph.data}"]
+    edge_attributes: ${model.attributes.edges}
+    trainable_size: ${model.trainable_parameters.hidden2data}
+  smooth_200:
+    _target_: anemoi.models.layers.graph_provider.ProjectionGraphProvider
+    graph_ref: smoothing_200
+    edges_name: [data, to, data]
+    edge_weight_attribute: gauss_weight
+  smooth_400:
+    _target_: anemoi.models.layers.graph_provider.ProjectionGraphProvider
+    graph_ref: smoothing_400
+    edges_name: [data, to, data]
+    edge_weight_attribute: gauss_weight
+  trunc_down:
+    _target_: anemoi.models.layers.graph_provider.ProjectionGraphProvider
+    graph_ref: truncation
+    edges_name: [data, to, trunc]
+    edge_weight_attribute: gauss_weight
+  trunc_up:
+    _target_: anemoi.models.layers.graph_provider.ProjectionGraphProvider
+    graph_ref: truncation
+    edges_name: [trunc, to, data]
+    edge_weight_attribute: gauss_weight

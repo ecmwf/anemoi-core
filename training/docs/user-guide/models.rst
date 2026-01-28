@@ -144,71 +144,61 @@ For detailed information and examples, see
 
 .. _usage-field_truncation:
 
-******************
- Field Truncation
-******************
+**********************
+ Projection Providers
+**********************
 
-Field truncation is a pre-processing step applied during autoregressive
-rollout. It smooths the skipped connection data which helps maintain
-stability during rollout and can be used for multi-scale loss
-computation.
+Projection-based graph providers can be used to smooth skip connections
+(formerly “truncation”) and to apply multi-scale loss smoothing. Providers
+are configured under ``graph.providers`` and referenced by name from the
+model or loss configuration. Projection providers can load sparse matrices
+from NPZ files or build them from graph edges.
 
 **********
  Overview
 **********
 
-Truncation matrices are sparse transformation matrices that filter
-high-frequency components from the input data. This process serves two
-main purposes:
+Use a pair of projection providers for residual smoothing:
 
-#. **Stability Enhancement**: Smoothing the skipped connection data
-   helps maintain numerical stability during long autoregressive
-   rollouts by reducing noise amplification.
+.. code:: yaml
 
-#. **Multi-scale Loss Computation**: For ensemble training, truncation
-   matrices can be used to compute losses at different scales.
+   graph:
+     providers:
+       trunc_down:
+         _target_: anemoi.models.layers.graph_provider.ProjectionGraphProvider
+         file_path: /path/to/down_matrix.npz
+       trunc_up:
+         _target_: anemoi.models.layers.graph_provider.ProjectionGraphProvider
+         file_path: /path/to/up_matrix.npz
 
-**************
- Matrix Types
-**************
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       down_provider: trunc_down
+       up_provider: trunc_up
 
-The truncation system supports several types of transformation matrices:
+Use projection providers for multi-scale loss smoothing by listing their
+names under ``smoothing_providers``:
 
-**Truncation Down Matrix (``truncation.matrices.down``)**
-   The forward transformation matrix that applies the truncation filter
-   to the skipped connection.
+.. code:: yaml
 
-**Truncation Up Matrix (``truncation.matrices.up``)**
-   The inverse transformation matrix.
+   training:
+     training_loss:
+       datasets:
+         data:
+           _target_: anemoi.training.losses.MultiscaleLossWrapper
+           smoothing_providers: [smooth_200, smooth_400, null]
+           weights: [1.0, 1.0, 1.0]
 
-**Truncation Matrices Path (``truncation.matrices.path``)**
-   Optional base path for resolving truncation matrix filenames.
-
-**Truncation Graph (``truncation.graph``)**
-   Optional graph-based definition for building truncation projections.
-
-**Loss Matrices Path (``loss_matrices_path``)**
-   Path to the directory containing smoothing matrices for multi-scale
-   loss computation. The list of matrix filenames is configured directly
-   in the ``training_loss`` section as ``loss_matrices``. Works only for
-   ensemble training. Each matrix corresponds to a different scale for
-   loss evaluation. These need to be ordered so that the first matrix
-   corresponds to the largest scales. The following matrices then
-   include smaller and smaller scales.
+Providers are resolved per dataset. If you need additional graphs for
+projections, define them under ``graph.assets`` and reference them with
+``graph_ref`` in the provider specification.
 
 .. note::
 
-   The truncation matrices required for field truncation can be
-   generated using the ``anemoi-graphs`` package.
-
-   For detailed instructions on how to create these matrices, see the
-   documentation at :ref:`Create sparse matrices with anemoi-graphs
-   <anemoi-graphs:usage-create_sparse_matrices>` tutorial.
-
-.. note::
-
-   Multi-dataset training assumes identical grids/resolutions for field truncation.
-   If datasets differ, set ``truncation: none``.
+   Projection matrices can be generated with ``anemoi-graphs``. See
+   :ref:`Create sparse matrices with anemoi-graphs
+   <anemoi-graphs:usage-create_sparse_matrices>` for details.
 
 ***************
  Ensemble Size

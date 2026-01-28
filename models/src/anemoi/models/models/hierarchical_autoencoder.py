@@ -19,7 +19,6 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.graph_provider import instantiate_graph_provider
 from anemoi.models.models import AnemoiModelAutoEncoder
 from anemoi.utils.config import DotDict
 
@@ -98,17 +97,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # self.hidden_dims is the dimentionality of features at each depth
         self.hidden_dims = {hidden: self.num_channels * (2**i) for i, hidden in enumerate(self._graph_name_hidden)}
         self.num_hidden = len(self._graph_name_hidden)
-        graph_providers = model_config.model.graph_providers
-
         # Encoder data -> hidden
         self.encoder_graph_provider = nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.encoder_graph_provider[dataset_name] = instantiate_graph_provider(
-                provider_config=graph_providers.get("encoder"),
-                graph_data=self._graph_data[dataset_name],
-                node_attributes=self.node_attributes[dataset_name],
-            )
+            self.encoder_graph_provider[dataset_name] = self.graph_providers.get("encoder", dataset_name)
             self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -127,20 +120,17 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             self.up_level_processor = nn.ModuleDict()
             self.up_level_processor_graph_providers = nn.ModuleDict()
 
-            down_level_providers = graph_providers.get("down_level_processor")
-            up_level_providers = graph_providers.get("up_level_processor")
-            if down_level_providers is None or up_level_providers is None:
+            if not self.graph_providers.has("down_level_processor") or not self.graph_providers.has(
+                "up_level_processor"
+            ):
                 raise ValueError("Missing graph provider config for level processors.")
 
             for i in range(0, self.num_hidden - 1):
                 nodes_names = self._graph_name_hidden[i]
 
                 # Create graph providers for down level processor
-                down_provider_config = down_level_providers.get(nodes_names)
-                self.down_level_processor_graph_providers[nodes_names] = instantiate_graph_provider(
-                    provider_config=down_provider_config,
-                    graph_data=self._graph_data[first_dataset_name],
-                    node_attributes=self.node_attributes[first_dataset_name],
+                self.down_level_processor_graph_providers[nodes_names] = self.graph_providers.get(
+                    "down_level_processor", first_dataset_name, subkey=nodes_names
                 )
 
                 self.down_level_processor[nodes_names] = instantiate(
@@ -152,11 +142,8 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 )
 
                 # Create graph providers for up level processor
-                up_provider_config = up_level_providers.get(nodes_names)
-                self.up_level_processor_graph_providers[nodes_names] = instantiate_graph_provider(
-                    provider_config=up_provider_config,
-                    graph_data=self._graph_data[first_dataset_name],
-                    node_attributes=self.node_attributes[first_dataset_name],
+                self.up_level_processor_graph_providers[nodes_names] = self.graph_providers.get(
+                    "up_level_processor", first_dataset_name, subkey=nodes_names
                 )
 
                 self.up_level_processor[nodes_names] = instantiate(
@@ -170,19 +157,15 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # Downscale
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
-        downscale_providers = graph_providers.get("downscale")
-        if downscale_providers is None:
+        if not self.graph_providers.has("downscale"):
             raise ValueError("Missing graph provider config for downscale.")
 
         for i in range(0, self.num_hidden - 1):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
 
-            downscale_provider_config = downscale_providers.get(src_nodes_name)
-            self.downscale_graph_providers[src_nodes_name] = instantiate_graph_provider(
-                provider_config=downscale_provider_config,
-                graph_data=self._graph_data[first_dataset_name],
-                node_attributes=self.node_attributes[first_dataset_name],
+            self.downscale_graph_providers[src_nodes_name] = self.graph_providers.get(
+                "downscale", first_dataset_name, subkey=src_nodes_name
             )
 
             self.downscale[src_nodes_name] = instantiate(
@@ -197,19 +180,15 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # Upscale
         self.upscale = nn.ModuleDict()
         self.upscale_graph_providers = nn.ModuleDict()
-        upscale_providers = graph_providers.get("upscale")
-        if upscale_providers is None:
+        if not self.graph_providers.has("upscale"):
             raise ValueError("Missing graph provider config for upscale.")
 
         for i in range(1, self.num_hidden):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i - 1]
 
-            upscale_provider_config = upscale_providers.get(src_nodes_name)
-            self.upscale_graph_providers[src_nodes_name] = instantiate_graph_provider(
-                provider_config=upscale_provider_config,
-                graph_data=self._graph_data[first_dataset_name],
-                node_attributes=self.node_attributes[first_dataset_name],
+            self.upscale_graph_providers[src_nodes_name] = self.graph_providers.get(
+                "upscale", first_dataset_name, subkey=src_nodes_name
             )
 
             self.upscale[src_nodes_name] = instantiate(
@@ -226,11 +205,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.decoder_graph_provider = nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.decoder_graph_provider[dataset_name] = instantiate_graph_provider(
-                provider_config=graph_providers.get("decoder"),
-                graph_data=self._graph_data[dataset_name],
-                node_attributes=self.node_attributes[dataset_name],
-            )
+            self.decoder_graph_provider[dataset_name] = self.graph_providers.get("decoder", dataset_name)
 
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,

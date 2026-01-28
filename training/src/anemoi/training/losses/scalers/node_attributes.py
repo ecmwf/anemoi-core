@@ -54,6 +54,8 @@ class GraphNodeAttributeScaler(BaseScaler):
         super().__init__(norm=norm)
         del kwargs
         self.output_mask = output_mask if output_mask is not None else NoOutputMask()
+        if hasattr(graph_data, "main"):
+            graph_data = graph_data.main
         self.nodes = graph_data[nodes_name]
         self.nodes_attribute_name = nodes_attribute_name
         self.inverse = inverse

@@ -15,7 +15,6 @@ from operator import itemgetter
 import torch
 from omegaconf import DictConfig
 from torch.utils.checkpoint import checkpoint
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -33,7 +32,7 @@ class GraphInterpolator(BaseGraphModule):
         self,
         *,
         config: DictConfig,
-        graph_data: HeteroData,
+        graph_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -46,8 +45,8 @@ class GraphInterpolator(BaseGraphModule):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
+        graph_data : dict
+            Graph bundles for the model
         statistics : dict
             Statistics of the training data
         data_indices : IndexCollection

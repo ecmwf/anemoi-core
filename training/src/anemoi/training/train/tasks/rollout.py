@@ -23,8 +23,7 @@ from anemoi.training.train.tasks.base import BaseGraphModule
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from torch_geometric.data import HeteroData
-
+    from anemoi.graphs.bundle import GraphBundle
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
 
@@ -39,7 +38,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        graph_data: dict[str, GraphBundle],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -52,8 +51,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
+        graph_data : dict[str, GraphBundle]
+            Graph bundles for the model
         statistics : dict
             Statistics of the training data
         data_indices : IndexCollection
