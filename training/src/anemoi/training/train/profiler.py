@@ -24,6 +24,7 @@ from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
 
+from anemoi.training.config_types import Settings
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.profilers import BenchmarkProfiler
 from anemoi.training.diagnostics.profilers import ProfilerProgressBar
@@ -36,7 +37,7 @@ console = Console(record=True, width=200)
 class AnemoiProfiler(AnemoiTrainer):
     """Profiling for Anemoi."""
 
-    def __init__(self, config: DictConfig) -> None:
+    def __init__(self, config: Settings) -> None:
         super().__init__(config)
 
     def print_report(self, title: str, dataframe: pd.DataFrame, color: str = "white", emoji: str = "") -> None:
@@ -285,7 +286,7 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        self.config.diagnostics.progress_bar.target_ = (
+        self.config.diagnostics.progress_bar._target_ = (
             ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
         )
         callbacks = super().callbacks
@@ -357,7 +358,9 @@ class AnemoiProfiler(AnemoiTrainer):
 
 @hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(config: DictConfig) -> None:
-    AnemoiProfiler(config).profile()
+    from anemoi.training.api import normalize_config
+
+    AnemoiProfiler(normalize_config(config)).profile()
 
 
 if __name__ == "__main__":

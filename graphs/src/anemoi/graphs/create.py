@@ -9,14 +9,16 @@
 
 
 import logging
+from collections.abc import Mapping
 from itertools import chain
 from pathlib import Path
 
 import torch
-from hydra.utils import instantiate
-from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.builders.components import build_component
+from anemoi.graphs.config_types import ConfigBase
+from anemoi.graphs.config_types import GraphConfig
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -25,18 +27,24 @@ LOGGER = logging.getLogger(__name__)
 class GraphCreator:
     """Graph creator."""
 
-    config: DotDict
+    config: GraphConfig
 
     def __init__(
         self,
-        config: str | Path | DotDict | DictConfig,
+        config: str | Path | Mapping[str, object] | ConfigBase,
     ):
         if isinstance(config, Path) or isinstance(config, str):
-            self.config = DotDict.from_file(config)
-        elif isinstance(config, DictConfig):
-            self.config = DotDict(config)
-        else:
+            loaded = DotDict.from_file(config)
+            self.config = GraphConfig.model_validate(loaded)
+        elif isinstance(config, GraphConfig):
             self.config = config
+        elif hasattr(config, "model_dump"):
+            self.config = GraphConfig.model_validate(config.model_dump(by_alias=True))
+        elif isinstance(config, Mapping):
+            self.config = GraphConfig.model_validate(config)
+        else:
+            msg = f"Graph config must be a path, mapping, or Pydantic config, got {type(config).__name__}."
+            raise TypeError(msg)
 
     def update_graph(self, graph: HeteroData) -> HeteroData:
         """Update the graph.
@@ -54,21 +62,24 @@ class GraphCreator:
         HeteroData
             The updated graph with new nodes and edges added based on the configuration.
         """
-        for nodes_name, nodes_cfg in self.config.get("nodes", {}).items():
-            graph = instantiate(nodes_cfg.node_builder, name=nodes_name).update_graph(
-                graph, attrs_config=nodes_cfg.get("attributes", {})
+        nodes_cfgs = self.config.nodes or {}
+        for nodes_name, nodes_cfg in nodes_cfgs.items():
+            graph = build_component(nodes_cfg.node_builder, name=nodes_name).update_graph(
+                graph,
+                attrs_config=nodes_cfg.attributes or {},
             )
 
-        for edges_cfg in self.config.get("edges", {}):
+        edges_cfgs = self.config.edges or []
+        for edges_cfg in edges_cfgs:
             for edge_builder_cfg in edges_cfg.edge_builders:
-                edge_builder = instantiate(
+                edge_builder = build_component(
                     edge_builder_cfg,
                     source_name=edges_cfg.source_name,
                     target_name=edges_cfg.target_name,
                 )
                 graph = edge_builder.update_graph(graph, attrs_config=None)
 
-            graph = edge_builder.register_attributes(graph, edges_cfg.get("attributes", {}))
+            graph = edge_builder.register_attributes(graph, edges_cfg.attributes or {})
 
         if graph.num_nodes == 0:
             LOGGER.warning("The graph that was created has no nodes. Please check your graph configuration file.")
@@ -118,8 +129,9 @@ class GraphCreator:
         Post-processors are applied in the order they are specified in the configuration.
         Each post-processor should implement an `update_graph` method that takes and returns a HeteroData object.
         """
-        for processor in self.config.get("post_processors", []):
-            graph = instantiate(processor).update_graph(graph, graph_config=self.config)
+        processors = self.config.post_processors or []
+        for processor in processors:
+            graph = build_component(processor).update_graph(graph, graph_config=self.config)
 
         return graph
 

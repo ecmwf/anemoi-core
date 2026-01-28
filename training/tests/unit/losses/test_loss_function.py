@@ -11,8 +11,8 @@
 import einops
 import pytest
 import torch
-from omegaconf import DictConfig
 
+from anemoi.training.builders.losses import build_loss_from_config
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
@@ -24,7 +24,6 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
-from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.spectral import SpectralLoss
@@ -241,7 +240,7 @@ def test_grid_invariance(
     [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(DictConfig({"_target_": f"anemoi.training.losses.{loss_cls.__name__}"}))
+    loss = build_loss_from_config({"_target_": f"anemoi.training.losses.{loss_cls.__name__}"})
     assert isinstance(loss, BaseLoss)
 
 
@@ -250,13 +249,11 @@ def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
     [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["test"],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": ["test"],
+        },
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -270,13 +267,11 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["*"],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": ["*"],
+        },
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -290,13 +285,11 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": [],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": [],
+        },
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -308,13 +301,11 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["*", "!test"],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
+            "scalers": ["*", "!test"],
+        },
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -323,15 +314,13 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
 
 def test_logfft2dist_loss() -> None:
     """Test that LogFFT2Distance can be instantiated and validates input shape."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.spectral.LogFFT2Distance",
-                "x_dim": 710,
-                "y_dim": 640,
-                "scalers": [],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": "anemoi.training.losses.spectral.LogFFT2Distance",
+            "x_dim": 710,
+            "y_dim": 640,
+            "scalers": [],
+        },
     )
     assert isinstance(loss, BaseLoss)
     assert hasattr(loss, "x_dim")
@@ -359,15 +348,13 @@ def test_logfft2dist_loss() -> None:
 
 def test_fcl_loss() -> None:
     """Test that FourierCorrelationLoss can be instantiated and validates input shape."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.spectral.FourierCorrelationLoss",
-                "x_dim": 710,
-                "y_dim": 640,
-                "scalers": [],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": "anemoi.training.losses.spectral.FourierCorrelationLoss",
+            "x_dim": 710,
+            "y_dim": 640,
+            "scalers": [],
+        },
     )
     assert isinstance(loss, BaseLoss)
     assert isinstance(loss, SpectralLoss)

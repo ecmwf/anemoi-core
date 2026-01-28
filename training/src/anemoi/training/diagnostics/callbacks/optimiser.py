@@ -7,12 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from omegaconf import DictConfig
 from pytorch_lightning.callbacks import LearningRateMonitor as pl_LearningRateMonitor
 from pytorch_lightning.callbacks.stochastic_weight_avg import StochasticWeightAveraging as pl_StochasticWeightAveraging
+
+if TYPE_CHECKING:
+    from anemoi.training.config_types import Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +26,7 @@ class LearningRateMonitor(pl_LearningRateMonitor):
 
     def __init__(
         self,
-        config: DictConfig,
+        config: Settings,
         logging_interval: str = "step",
         log_momentum: bool = False,
     ) -> None:
@@ -35,7 +39,7 @@ class StochasticWeightAveraging(pl_StochasticWeightAveraging):
 
     def __init__(
         self,
-        config: DictConfig,
+        config: Settings,
         swa_lrs: int | None = None,
         swa_epoch_start: int | None = None,
         annealing_epochs: int | None = None,
@@ -47,7 +51,7 @@ class StochasticWeightAveraging(pl_StochasticWeightAveraging):
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Full configuration object
         swa_lrs : int, optional
             Stochastic Weight Averaging Learning Rate, by default None

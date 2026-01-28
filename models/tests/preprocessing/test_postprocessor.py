@@ -11,7 +11,6 @@
 import numpy as np
 import pytest
 import torch
-from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.normalizer import InputNormalizer
@@ -19,11 +18,12 @@ from anemoi.models.preprocessing.postprocessor import ConditionalNaNPostprocesso
 from anemoi.models.preprocessing.postprocessor import ConditionalZeroPostprocessor
 from anemoi.models.preprocessing.postprocessor import NormalizedReluPostprocessor
 from anemoi.models.preprocessing.postprocessor import Postprocessor
+from anemoi.utils.config import DotDict
 
 
 @pytest.fixture()
 def postprocessor():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -54,7 +54,7 @@ def inference_output_data():
 
 @pytest.fixture()
 def normmrelupostprocessor():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -96,7 +96,7 @@ def normmrelupostprocessor_inference_output_data():
 
 @pytest.fixture()
 def conditionalzeropostprocessor():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -127,7 +127,7 @@ def conditionalzero_inference_output_data():
 
 @pytest.fixture()
 def conditionalnanpostprocessor():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -198,7 +198,7 @@ def test_postprocessor_inplace(postprocessor_fixture, data_fixture, request) -> 
 
 @pytest.fixture()
 def input_normalizer_postprocessor():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {

@@ -8,16 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 import uuid
+from typing import Any
+from typing import Mapping
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
-from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.utils.config import DotDict
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -28,7 +27,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
     Attributes
     ----------
-    config : DotDict
+    config : Mapping[str, Any]
         Configuration settings for the model.
     id : str
         A unique identifier for the model instance.
@@ -57,13 +56,18 @@ class AnemoiModelInterface(torch.nn.Module):
     def __init__(
         self,
         *,
-        config: DotDict,
+        config: Mapping[str, Any],
         graph_data: HeteroData,
         statistics: dict,
         data_indices: dict,
         metadata: dict,
         statistics_tendencies: dict | None = None,
         supporting_arrays: dict | None = None,
+        model: torch.nn.Module | None = None,
+        pre_processors: Mapping[str, Processors] | Processors | None = None,
+        post_processors: Mapping[str, Processors] | Processors | None = None,
+        pre_processors_tendencies: Mapping[str, Processors] | Processors | None = None,
+        post_processors_tendencies: Mapping[str, Processors] | Processors | None = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -75,93 +79,72 @@ class AnemoiModelInterface(torch.nn.Module):
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
-        self._build_model()
+        self._build_model(
+            model=model,
+            pre_processors=pre_processors,
+            post_processors=post_processors,
+            pre_processors_tendencies=pre_processors_tendencies,
+            post_processors_tendencies=post_processors_tendencies,
+        )
         self._update_metadata()
 
-    def _build_processors_for_dataset(
+    def _ensure_processors_mapping(
         self,
-        processors_configs: dict,
-        statistics: dict,
-        data_indices: dict,
-        statistics_tendencies: dict = None,
-    ):
-        """Build processors for a single dataset.
+        processors: Mapping[str, Processors] | Processors | None,
+        dataset_names: list[str],
+        label: str,
+    ) -> Mapping[str, Processors] | None:
+        if processors is None:
+            return None
+        if isinstance(processors, Processors):
+            if len(dataset_names) != 1:
+                msg = f"{label} must be a mapping for multi-dataset models."
+                raise ValueError(msg)
+            return {dataset_names[0]: processors}
+        if isinstance(processors, torch.nn.ModuleDict):
+            processors_map = {name: processors[name] for name in processors}
+        elif isinstance(processors, Mapping):
+            processors_map = dict(processors)
+        else:
+            msg = f"{label} must be a Processors instance or a mapping of dataset_name -> Processors."
+            raise TypeError(msg)
 
-        Parameters
-        ----------
-        processors_configs : dict
-            Configuration for the processors
-        statistics : dict
-            Statistics for the dataset
-        data_indices : dict
-            Data indices for the dataset
-        statistics_tendencies : dict, optional
-            Tendencies statistics for the dataset
+        return processors_map
 
-        Returns
-        -------
-        tuple
-            (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies)
-        """
-        # Build processors for the dataset
-        processors = [
-            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
-            for name, processor in processors_configs.items()
-        ]
-
-        pre_processors = Processors(processors)
-        post_processors = Processors(processors, inverse=True)
-
-        # Build tendencies processors if provided
-        pre_processors_tendencies = None
-        post_processors_tendencies = None
-        if statistics_tendencies is not None:
-            processors_tendencies = [
-                [name, instantiate(processor, data_indices=data_indices, statistics=statistics_tendencies)]
-                for name, processor in processors_configs.items()
-            ]
-            pre_processors_tendencies = Processors(processors_tendencies)
-            post_processors_tendencies = Processors(processors_tendencies, inverse=True)
-
-        return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
-
-    def _build_model(self) -> None:
+    def _build_model(
+        self,
+        *,
+        model: torch.nn.Module | None = None,
+        pre_processors: Mapping[str, Processors] | Processors | None = None,
+        post_processors: Mapping[str, Processors] | Processors | None = None,
+        pre_processors_tendencies: Mapping[str, Processors] | Processors | None = None,
+        post_processors_tendencies: Mapping[str, Processors] | Processors | None = None,
+    ) -> None:
         """Builds the model and pre- and post-processors."""
-        # Multi-dataset mode: create processors for each dataset
-        self.pre_processors = torch.nn.ModuleDict()
-        self.post_processors = torch.nn.ModuleDict()
-        self.pre_processors_tendencies = torch.nn.ModuleDict()
-        self.post_processors_tendencies = torch.nn.ModuleDict()
-
-        data_config = get_multiple_datasets_config(self.config.data)
-        for dataset_name in self.statistics.keys():
-            # Build processors for each dataset
-            pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
-                data_config[dataset_name].processors,
-                self.statistics[dataset_name],
-                self.data_indices[dataset_name],
-                self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
-            )
-            self.pre_processors[dataset_name] = pre
-            self.post_processors[dataset_name] = post
-            if pre_tend is not None:
-                self.pre_processors_tendencies[dataset_name] = pre_tend
-                self.post_processors_tendencies[dataset_name] = post_tend
-
-        # Instantiate the model
-        # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
-        model_instantiate_config = {
-            "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "all"),
-        }
-        self.model = instantiate(
-            model_instantiate_config,
-            model_config=self.config,
-            data_indices=self.data_indices,
-            statistics=self.statistics,
-            graph_data=self.graph_data,
-            _recursive_=False,  # Disables recursive instantiation by Hydra
+        dataset_names = list(self.statistics.keys())
+        pre_map = self._ensure_processors_mapping(pre_processors, dataset_names, "pre_processors")
+        post_map = self._ensure_processors_mapping(post_processors, dataset_names, "post_processors")
+        pre_tend_map = self._ensure_processors_mapping(
+            pre_processors_tendencies,
+            dataset_names,
+            "pre_processors_tendencies",
         )
+        post_tend_map = self._ensure_processors_mapping(
+            post_processors_tendencies,
+            dataset_names,
+            "post_processors_tendencies",
+        )
+
+        if model is None:
+            msg = "model must be provided; construct it outside the interface."
+            raise ValueError(msg)
+
+        self.pre_processors = torch.nn.ModuleDict(dict(pre_map or {}))
+        self.post_processors = torch.nn.ModuleDict(dict(post_map or {}))
+        self.pre_processors_tendencies = torch.nn.ModuleDict(dict(pre_tend_map or {}))
+        self.post_processors_tendencies = torch.nn.ModuleDict(dict(post_tend_map or {}))
+
+        self.model = model
 
         # Use the forward method of the model directly
         self.forward = self.model.forward

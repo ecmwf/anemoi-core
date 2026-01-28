@@ -10,7 +10,6 @@
 
 import pytest
 import torch
-from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.mapper import TransformerBaseMapper
@@ -38,14 +37,12 @@ class TestTransformerBaseMapper:
 
     @pytest.fixture
     def layer_kernels(self):
-        kernel_config = OmegaConf.create(
-            {
-                "LayerNorm": {
-                    "_target_": "torch.nn.LayerNorm",
-                },
-                "Linear": {"_target_": "torch.nn.Linear", "bias": False},
-            }
-        )
+        kernel_config = {
+            "LayerNorm": {
+                "_target_": "torch.nn.LayerNorm",
+            },
+            "Linear": {"_target_": "torch.nn.Linear", "bias": False},
+        }
         return load_layer_kernels(kernel_config, instance=False)
 
     @pytest.fixture

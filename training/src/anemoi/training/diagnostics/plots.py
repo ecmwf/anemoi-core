@@ -9,6 +9,7 @@
 
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import datashader as dsh
@@ -31,6 +32,7 @@ from scipy.interpolate import griddata
 from torch import Tensor
 
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.training.builders.components import build_component
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -46,6 +48,20 @@ class LatLonData:
     latitudes: np.ndarray
     longitudes: np.ndarray
     data: np.ndarray
+
+
+def _resolve_colormaps(colormaps: dict[str, Colormap]) -> dict[str, Colormap]:
+    resolved: dict[str, Colormap] = {}
+    for name, cmap in colormaps.items():
+        if hasattr(cmap, "get_cmap"):
+            resolved[name] = cmap
+            continue
+        if isinstance(cmap, Mapping) and cmap.get("_target_"):
+            resolved[name] = build_component(cmap)
+            continue
+        msg = f"Invalid colormap config for '{name}': expected CustomColormap or _target_ config."
+        raise TypeError(msg)
+    return resolved
 
 
 def equirectangular_projection(latlons: np.array) -> np.array:
@@ -442,6 +458,7 @@ def plot_predicted_multilevel_flat_sample(
     pc_lat, pc_lon = equirectangular_projection(latlons)
     if colormaps is None:
         colormaps = {}
+    colormaps = _resolve_colormaps(colormaps)
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
         xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
@@ -449,8 +466,10 @@ def plot_predicted_multilevel_flat_sample(
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
         # get the colormap for the variable as defined in config file
-        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-        error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+        default_cmap = colormaps.get("default")
+        error_cmap_cfg = colormaps.get("error")
+        cmap = default_cmap.get_cmap() if default_cmap else cm.get_cmap("viridis")
+        error_cmap = error_cmap_cfg.get_cmap() if error_cmap_cfg else cm.get_cmap("bwr")
         for key in colormaps:
             if key not in ["default", "error"] and variable_name in colormaps[key].variables:
                 cmap = colormaps[key].get_cmap()
@@ -964,6 +983,7 @@ def plot_predicted_ensemble(
 
     pc_lon, pc_lat = projection(lon, lat)
     colormaps = colormaps if colormaps is not None else {}
+    colormaps = _resolve_colormaps(colormaps)
     precip_and_related_fields = precip_and_related_fields if precip_and_related_fields is not None else []
 
     for plot_idx, (variable_idx, variable_name) in enumerate(parameters.items()):
@@ -972,8 +992,10 @@ def plot_predicted_ensemble(
         _axs = axs[plot_idx, :] if n_plots_x > 1 else axs
 
         # get the colormap for the variable as defined in config file
-        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-        error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+        default_cmap = colormaps.get("default")
+        error_cmap_cfg = colormaps.get("error")
+        cmap = default_cmap.get_cmap() if default_cmap else cm.get_cmap("viridis")
+        error_cmap = error_cmap_cfg.get_cmap() if error_cmap_cfg else cm.get_cmap("bwr")
         for key in colormaps:
             if key not in ["default", "error"] and variable_name in colormaps[key].variables:
                 cmap = colormaps[key].get_cmap()

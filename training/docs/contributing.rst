@@ -17,64 +17,14 @@ to Anemoi Training.
  Configuration guidelines
 ##########################
 
-Anemoi Training uses Hydra and Pydantic for configuration management,
-allowing for flexible and modular configuration of the training pipeline
-while provide robustness through validation. This guide explains how to
-use Hydra and Pydantic effectively in the project.
-
-***************************************
- Pydantic and Configuration Validation
-***************************************
-
-Pydantic is a package designed for data validation and settings
-management. It provides a simple way to define schemas which can be used
-to validate configuration files. For example, the following schema can
-be used to validate a training configuration:
-
-.. code:: python
-
-   from pydantic import BaseModel, Field, PositiveFloat, Literal
-
-   class TrainingSchema(BaseModel):
-      model: Literal{"AlexNet", "ResNet", "VGG"} = Field(default="AlexNet")
-      """Model architecture to use for training."""
-      learning_rate: PositiveFloat = Field(default=0.01)
-      """Learning rate."""
-      loss: str = Field(default="mse")
-      """Loss function."""
-
-To allow more complex configurations, Pydantic also supports nested
-schemas. For example, the following schema can be used to validate a
-configuration with a configurable model:
-
-.. code:: python
-
-   from pydantic import BaseModel, Field, PositiveFloat, Literal
-
-   from enum import StrEnum
-
-   class ActivationFunctions(StrEnum):
-       relu = "relu"
-       sigmoid = "sigmoid"
-       tanh = "tanh"
-
-   class ModelSchema(BaseModel):
-       num_layers: PositiveInt = Field(default=3)
-       """Number of layers in the model."""
-       activation: ActivationFunctions = Field(default="relu")
-       """Activation function to use."""
-
-   class TrainingSchema(BaseModel):
-       model: ModelSchema
-       """Model configuration."""
-       learning_rate: PositiveFloat = Field(default=0.01)
-       """Learning rate."""
-       loss: str = Field(default="mse")
-       """Loss function."""
-
-If your new feature requires a new configuration parameter, you should
-add it to the appropriate schemas and update the configuration files
-accordingly.
+Anemoi Training uses Hydra for configuration composition and provides a
+Python-first API for building training pipelines. Configuration
+validation is intentionally lightweight and lives in the adapter layer
+(``anemoi.training.api.normalize_config`` and
+``anemoi.training.utils.config.postprocess_config``). If your new feature
+requires a new configuration parameter, update the YAML defaults and any
+builder logic that consumes the field. Keep core modules strict (no
+auto-repair or implicit defaults).
 
 **************
  Hydra Basics
@@ -88,53 +38,13 @@ allows for:
 #. Dynamic object instantiation
 
 *********************************
- Object Instantiation with Hydra
+ Object Instantiation via Builders
 *********************************
 
-Hydra provides powerful tools for instantiating objects directly from
-configuration files:
-
--  `hydra.utils.instantiate()`: Creates object instances
--  `hydra.utils.call()`: Calls functions with configured parameters
-
-Example: Instantiating an Optimizer
-===================================
-
-Consider the following Python class:
-
-.. code:: python
-
-   class Optimizer:
-       def __init__(self, algorithm: str, learning_rate: float) -> None:
-           self.opt_algorithm = algorithm
-           self.lr = learning_rate
-
-Configuration in YAML:
-
-.. code:: yaml
-
-   optimizer:
-     _target_: my_code.Optimizer
-     algorithm: SGD
-     learning_rate: 0.01
-
-Pydantic schema:
-
-.. code:: python
-
-   from pydantic import BaseModel
-
-   class OptimizerSchema(BaseModel):
-       algorithm: str
-       learning_rate: float
-
-Instantiating in code:
-
-.. code:: python
-
-   from hydra.utils import instantiate
-
-   optimizer = instantiate(config.optimizer.model_dump())
+Core modules do not call Hydra's ``instantiate`` directly. Instantiation
+happens in adapter/builder utilities that resolve ``_target_`` entries.
+If you need new instantiation behavior, add it in a builder and wire it
+through the adapter layer rather than adding Hydra calls in core code.
 
 ********************************************
  Configurable Components in Anemoi Training

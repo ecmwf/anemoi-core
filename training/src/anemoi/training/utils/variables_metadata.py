@@ -11,9 +11,7 @@
 import logging
 from functools import lru_cache
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
-
+from anemoi.training.config_types import to_container
 from anemoi.transform.variables import Variable
 
 LOG = logging.getLogger(__name__)
@@ -67,8 +65,7 @@ class ExtractVariableGroupAndLevel:
         metadata_variables: dict[str, dict | Variable] | None = None,
     ) -> None:
 
-        if isinstance(variable_groups, DictConfig):
-            variable_groups = OmegaConf.to_container(variable_groups, resolve=True)
+        variable_groups = to_container(variable_groups)
 
         variable_groups = variable_groups.copy()
 

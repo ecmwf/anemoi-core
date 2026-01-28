@@ -26,7 +26,6 @@ from weakref import WeakValueDictionary
 
 import mlflow
 from mlflow.tracking import MlflowClient
-from omegaconf import DictConfig
 from pytorch_lightning.callbacks import Checkpoint
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
@@ -175,10 +174,15 @@ class LogsMonitor:
         if not self._buffer_registry:
             self._uninstall_stream_patches()
 
-        with self.file_save_path.open("a") as logfile:
-            logfile.write("\n\n")
-            logfile.flush()
-            logfile.close()
+        if not self.file_save_path.parent.exists():
+            LOGGER.warning("Terminal log directory missing; skipping final log write.")
+            return
+        try:
+            with self.file_save_path.open("a") as logfile:
+                logfile.write("\n\n")
+                logfile.flush()
+        except OSError as exc:
+            LOGGER.warning("Failed to write terminal log footer: %s", exc)
 
     def _log_collector(self) -> None:
         """Log collecting thread body.
@@ -201,6 +205,10 @@ class LogsMonitor:
     def _store_buffered_logs(self) -> None:
         _buffer_size = self._io_buffer.tell()
         if not _buffer_size:
+            return
+        if not self.file_save_path.parent.exists():
+            LOGGER.warning("Terminal log directory missing; stopping log collection.")
+            self._shutdown = True
             return
         self._io_buffer.seek(0)
         # read and reset the buffer
@@ -233,16 +241,26 @@ class LogsMonitor:
             return _remove_csi(line)
 
         line = None
-        with self.file_save_path.open("a") as logfile:
-            for line in lines:
-                # handle cursor up and down symbols
-                cleaned_line = _handle_csi(line)
-                # handle each line for carriage returns
-                cleaned_line = cleaned_line.rsplit(b"\r")[-1]
-                logfile.write(cleaned_line.decode())
+        try:
+            with self.file_save_path.open("a") as logfile:
+                for line in lines:
+                    # handle cursor up and down symbols
+                    cleaned_line = _handle_csi(line)
+                    # handle each line for carriage returns
+                    cleaned_line = cleaned_line.rsplit(b"\r")[-1]
+                    logfile.write(cleaned_line.decode())
 
-            logfile.flush()
-        self.experiment.log_artifact(self.run_id, str(self.file_save_path))
+                logfile.flush()
+        except OSError as exc:
+            LOGGER.warning("Failed to write terminal log: %s", exc)
+            self._shutdown = True
+            return
+
+        try:
+            self.experiment.log_artifact(self.run_id, str(self.file_save_path))
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Failed to log terminal output to MLflow: %s", exc)
+            self._shutdown = True
 
 
 class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
@@ -598,7 +616,10 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
             if config := params.get("config"):
-                params["config"] = config if isinstance(config, dict | DictConfig) else config.model_dump(by_alias=True)
+                if hasattr(config, "model_dump"):
+                    params["config"] = config.model_dump(by_alias=True)
+                elif isinstance(config, Mapping):
+                    params["config"] = dict(config)
 
             self.log_hyperparams_as_mlflow_artifact(
                 client=self.experiment,

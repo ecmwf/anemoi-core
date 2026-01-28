@@ -7,19 +7,28 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from operator import itemgetter
+from typing import TYPE_CHECKING
 
 import torch
-from omegaconf import DictConfig
 from torch.utils.checkpoint import checkpoint
-from torch_geometric.data import HeteroData
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.train.tasks.base import BaseGraphModule
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from collections.abc import Iterable
+    from collections.abc import Mapping
+
+    from torch_geometric.data import HeteroData
+
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.training.config_types import Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,46 +41,71 @@ class GraphInterpolator(BaseGraphModule):
     def __init__(
         self,
         *,
-        config: DictConfig,
+        config: Settings,
         graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
-        supporting_arrays: dict,
+        output_masks: dict,
+        grid_indices: dict,
+        scalers: dict,
+        updating_scalars: dict,
+        losses: dict,
+        metrics: dict,
+        val_metric_ranges: dict,
+        optimizer_builder: Callable[[Iterable[torch.nn.Parameter], float], torch.optim.Optimizer] | None = None,
+        model_interface: AnemoiModelInterface,
     ) -> None:
         """Initialize graph neural network interpolator.
 
         Parameters
         ----------
-        config : DictConfig
+        config : Settings
             Job configuration
         graph_data : HeteroData
             Graph object
-        statistics : dict
-            Statistics of the training data
-        data_indices : IndexCollection
+        data_indices : dict[str, IndexCollection]
             Indices of the training data,
         metadata : dict
             Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
+        output_masks : dict
+            Pre-built output masks keyed by dataset name.
+        grid_indices : dict
+            Pre-built grid indices keyed by dataset name.
+        scalers : dict
+            Pre-built scalers keyed by dataset name.
+        updating_scalars : dict
+            Pre-built updating scalers keyed by dataset name.
+        losses : dict
+            Pre-built losses keyed by dataset name.
+        metrics : dict
+            Pre-built metrics keyed by dataset name.
+        val_metric_ranges : dict
+            Pre-computed validation metric ranges keyed by dataset name.
+        optimizer_builder : Callable, optional
+            Callable that builds the optimizer from params and lr.
 
         """
         super().__init__(
             config=config,
             graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            output_masks=output_masks,
+            grid_indices=grid_indices,
+            scalers=scalers,
+            updating_scalars=updating_scalars,
+            losses=losses,
+            metrics=metrics,
+            val_metric_ranges=val_metric_ranges,
+            optimizer_builder=optimizer_builder,
+            model_interface=model_interface,
         )
         target_forcing_config = get_multiple_datasets_config(config.training.target_forcing)
         self.target_forcing_indices, self.use_time_fraction = {}, {}
         for dataset_name in self.dataset_names:
-            if len(target_forcing_config[dataset_name].data) >= 1:
-                self.target_forcing_indices[dataset_name] = itemgetter(*target_forcing_config[dataset_name].data)(
+            data_config = target_forcing_config[dataset_name]["data"]
+            if len(data_config) >= 1:
+                self.target_forcing_indices[dataset_name] = itemgetter(*data_config)(
                     data_indices[dataset_name].data.input.name_to_index,
                 )
                 if isinstance(self.target_forcing_indices[dataset_name], int):
@@ -79,7 +113,7 @@ class GraphInterpolator(BaseGraphModule):
             else:
                 self.target_forcing_indices[dataset_name] = []
 
-            self.use_time_fraction[dataset_name] = target_forcing_config[dataset_name].time_fraction
+            self.use_time_fraction[dataset_name] = target_forcing_config[dataset_name]["time_fraction"]
 
         self.num_tfi = {name: len(idxs) for name, idxs in self.target_forcing_indices.items()}
 

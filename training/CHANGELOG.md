@@ -369,7 +369,6 @@ Keep it human-readable, your future self will thank you!
 * --longtests not available ([#200](https://github.com/ecmwf/anemoi-core/issues/200)) ([9dfec0a](https://github.com/ecmwf/anemoi-core/commit/9dfec0a3bd2043e646cc49b5302fcc4d669e4a41))
 * Checkpoint path check for multiple tasks/GPUs training ([#242](https://github.com/ecmwf/anemoi-core/issues/242)) ([449f8bd](https://github.com/ecmwf/anemoi-core/commit/449f8bd6044043fc46160b602762785b475cd1ce))
 * **configs,schemas:** hierarchical schemas ([#221](https://github.com/ecmwf/anemoi-core/issues/221)) ([2d4a54d](https://github.com/ecmwf/anemoi-core/commit/2d4a54d3c6ed2d41fd6cbf2ef3ac57b9efb2f968))
-* correct config comment regarding config_validation flag ([#245](https://github.com/ecmwf/anemoi-core/issues/245)) ([d02e0bb](https://github.com/ecmwf/anemoi-core/commit/d02e0bb2a9bf1700de90c8d862f80a510f03eceb))
 * dataset schema too defined too strictly ([#143](https://github.com/ecmwf/anemoi-core/issues/143)) ([4792ee1](https://github.com/ecmwf/anemoi-core/commit/4792ee145a3bda05f934180485ddb7b6e3bb25d4))
 * datashader new release test ([#104](https://github.com/ecmwf/anemoi-core/issues/104)) ([e9c0701](https://github.com/ecmwf/anemoi-core/commit/e9c0701bce9e5dfff7184fc6210092b82b9386a6))
 * dry run forking ([#260](https://github.com/ecmwf/anemoi-core/issues/260)) ([a32cccd](https://github.com/ecmwf/anemoi-core/commit/a32cccd3179b049979b500ad878480ae5e46d050))

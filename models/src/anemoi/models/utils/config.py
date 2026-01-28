@@ -8,19 +8,19 @@
 # nor does it submit to any jurisdiction.
 """Configuration utilities for handling dataset-specific configurations."""
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from collections.abc import Mapping
+
+from anemoi.models.config_types import to_container
 
 DEFAULT_DATASET_NAME = "data"
 
 
-def get_multiple_datasets_config(config: DictConfig, default_dataset_name: str = DEFAULT_DATASET_NAME) -> dict:
+def get_multiple_datasets_config(config: Mapping, default_dataset_name: str = DEFAULT_DATASET_NAME) -> dict:
     """Get multiple datasets configuration for old configs.
     Use /'data/' as the default dataset name.
     """
     if "datasets" in config:
-        if isinstance(config, dict):
-            return config["datasets"]
-        return config.datasets
+        datasets = config["datasets"] if isinstance(config, Mapping) else getattr(config, "datasets")
+        return to_container(datasets)
 
-    return OmegaConf.create({default_dataset_name: config})
+    return {default_dataset_name: to_container(config)}

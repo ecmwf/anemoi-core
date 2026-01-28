@@ -10,8 +10,6 @@
 
 import logging
 
-from omegaconf import DictConfig
-
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.variable import GeneralVariableLossScaler
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -37,4 +35,4 @@ class VariableMaskingLossScaler(GeneralVariableLossScaler):
     ) -> None:
         weights = dict.fromkeys(variables, 0.0) if not invert else dict.fromkeys(variables, 1.0)
         weights["default"] = 1.0 if not invert else 0.0
-        super().__init__(data_indices, DictConfig(weights), metadata_extractor, norm, **kwargs)
+        super().__init__(data_indices, weights, metadata_extractor, norm, **kwargs)

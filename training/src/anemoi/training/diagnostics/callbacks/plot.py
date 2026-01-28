@@ -28,11 +28,11 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from matplotlib.colors import Colormap
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.training.config_types import Settings
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -44,7 +44,6 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.tasks import GraphInterpolator
 
 LOGGER = logging.getLogger(__name__)
@@ -53,12 +52,12 @@ LOGGER = logging.getLogger(__name__)
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
-    def __init__(self, config: BaseSchema, dataset_names: list[str] | None = None) -> None:
+    def __init__(self, config: Settings, dataset_names: list[str] | None = None) -> None:
         """Initialise the BasePlotCallback abstract base class.
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
 
         """
@@ -93,7 +92,7 @@ class BasePlotCallback(Callback, ABC):
         """Return index of initial step for plotting."""
         return rollout_step if mode == "time_interp" else 0
 
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
+    def _get_output_times(self, config: Settings, pl_module: pl.LightningModule) -> tuple:
         """Return times outputted by the model."""
         if isinstance(pl_module, GraphInterpolator):
             output_times = (len(config.training.explicit_times.target), "time_interp")
@@ -238,12 +237,12 @@ class BasePlotCallback(Callback, ABC):
 class BasePerBatchPlotCallback(BasePlotCallback):
     """Base Callback for plotting at the end of each batch."""
 
-    def __init__(self, config: OmegaConf, every_n_batches: int | None = None, dataset_names: list[str] | None = None):
+    def __init__(self, config: Settings, every_n_batches: int | None = None, dataset_names: list[str] | None = None):
         """Initialise the BasePerBatchPlotCallback.
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
         every_n_batches : int, optional
             Batch Frequency to plot at, by default None
@@ -323,12 +322,12 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 class BasePerEpochPlotCallback(BasePlotCallback):
     """Base Callback for plotting at the end of each epoch."""
 
-    def __init__(self, config: OmegaConf, every_n_epochs: int | None = None, dataset_names: list[str] | None = None):
+    def __init__(self, config: Settings, every_n_epochs: int | None = None, dataset_names: list[str] | None = None):
         """Initialise the BasePerEpochPlotCallback.
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
         every_n_epochs : int, optional
             Epoch frequency to plot at, by default None
@@ -386,7 +385,7 @@ class LongRolloutPlots(BasePlotCallback):
 
     def __init__(
         self,
-        config: OmegaConf,
+        config: Settings,
         rollout: list[int],
         sample_idx: int,
         parameters: list[str],
@@ -401,7 +400,7 @@ class LongRolloutPlots(BasePlotCallback):
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
         rollout : list[int]
             Rollout steps to plot at
@@ -714,7 +713,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
 
     def __init__(
         self,
-        config: OmegaConf,
+        config: Settings,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
     ) -> None:
@@ -722,7 +721,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
         every_n_epochs: int | None, optional
             Override for frequency to plot at, by default None
@@ -857,7 +856,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
     def __init__(
         self,
-        config: OmegaConf,
+        config: Settings,
         parameter_groups: dict[dict[str, list[str]]],
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
@@ -866,7 +865,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Object with configuration settings
         parameter_groups : dict
             Dictionary with parameter groups with parameter names as keys
@@ -1124,7 +1123,7 @@ class PlotSample(BasePlotAdditionalMetrics):
 
     def __init__(
         self,
-        config: OmegaConf,
+        config: Settings,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -1139,7 +1138,7 @@ class PlotSample(BasePlotAdditionalMetrics):
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
         sample_idx : int
             Sample to plot
@@ -1239,7 +1238,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
     def __init__(
         self,
-        config: OmegaConf,
+        config: Settings,
         sample_idx: int,
         parameters: list[str],
         min_delta: float | None = None,
@@ -1250,7 +1249,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
         sample_idx : int
             Sample to plot
@@ -1325,7 +1324,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
     def __init__(
         self,
-        config: OmegaConf,
+        config: Settings,
         sample_idx: int,
         parameters: list[str],
         precip_and_related_fields: list[str] | None = None,
@@ -1337,7 +1336,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
         sample_idx : int
             Sample to plot

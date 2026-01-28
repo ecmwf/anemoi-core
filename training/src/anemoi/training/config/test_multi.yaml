@@ -8,8 +8,6 @@ defaults:
 - training: multi_debug
 - _self_
 
-config_validation: False
-
 training:
   # select model
   model_task: anemoi.training.train.tasks.GraphMultiDatasetForecaster

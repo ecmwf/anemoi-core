@@ -11,15 +11,15 @@
 import numpy as np
 import pytest
 import torch
-from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.remapper import Remapper
+from anemoi.utils.config import DotDict
 
 
 @pytest.fixture()
 def input_remapper_1d():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -77,7 +77,7 @@ def test_monomap_inverse_transform(input_remapper_1d) -> None:
 
 
 def test_unsupported_remapper():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {

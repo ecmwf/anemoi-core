@@ -19,10 +19,14 @@ from torch.utils.checkpoint import checkpoint
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from collections.abc import Iterable
+
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.training.config_types import Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,23 +39,35 @@ class BaseDiffusionForecaster(BaseGraphModule):
     def __init__(
         self,
         *,
-        config: BaseSchema,
+        config: Settings,
         graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
-        supporting_arrays: dict,
+        output_masks: dict,
+        grid_indices: dict,
+        scalers: dict,
+        updating_scalars: dict,
+        losses: dict,
+        metrics: dict,
+        val_metric_ranges: dict,
+        optimizer_builder: Callable[[Iterable[torch.nn.Parameter], float], torch.optim.Optimizer] | None = None,
+        model_interface: AnemoiModelInterface,
     ) -> None:
 
         super().__init__(
             config=config,
             graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            output_masks=output_masks,
+            grid_indices=grid_indices,
+            scalers=scalers,
+            updating_scalars=updating_scalars,
+            losses=losses,
+            metrics=metrics,
+            val_metric_ranges=val_metric_ranges,
+            optimizer_builder=optimizer_builder,
+            model_interface=model_interface,
         )
 
         self.rho = config.model.model.diffusion.rho

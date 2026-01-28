@@ -1,0 +1,156 @@
+defaults:
+  - data: zarr
+  - dataloader: native_grid
+  - diagnostics: evaluation_ens
+  - system: example
+  - graph: encoder_decoder_only
+  - model: transformer_ens
+  - training: ensemble
+  - _self_
+
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# system:
+#   hardware:
+#     num_gpus_per_node: 1
+
+
+system:
+  input:
+    graph: graph_anemoi_new_${data.resolution}.pt
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6
+    loss_matrices_path: null
+  output:
+    root: ${oc.env:SCRATCH}/aifs-multi-ds
+  hardware:
+    accelerator: auto
+    num_gpus_per_ensemble: 1
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
+
+model:
+  num_channels: 128
+
+dataloader:
+  limit_batches:
+    training: 10
+    validation: 10
+
+data:
+  resolution: o96
+
+training:
+  ensemble_size_per_device: 2
+
+  num_sanity_val_steps: 0
+  precision: bf16-mixed
+  max_epochs: 1
+  max_iterations: 10000
+
+  lr:
+    warmup: 100 # number of warmup iterations
+    rate: 5e-4 # 10e-4 #local_lr
+    iterations: 10000 # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
+    min: 0 #Not scaled by #GPU
+
+
+  training_loss:
+    datasets:
+      data: # user-defined key in data
+        # loss class to initialise, can be anything subclassing torch.nn.Module
+        _target_: anemoi.training.losses.MultiscaleLossWrapper
+        loss_matrices_path: ${system.input.loss_matrices_path}
+        loss_matrices: [null, null]
+        weights: [1.0, 0.8]
+
+        keep_batch_sharded: ${model.keep_batch_sharded}
+
+        per_scale_loss:
+          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+
+          # Scalers to include in loss calculation
+          # A selection of available scalers are listed in training/scalers.
+          # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
+          # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+          # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+          ignore_nans: False
+          no_autocast: True
+          alpha: 0.95
+
+
+
+  # Validation metrics calculation,
+  # This may be a list, in which case all metrics will be calculated
+  # and logged according to their name.
+  # These metrics are calculated in the output model space, and thus
+  # have undergone postprocessing.
+  validation_metrics:
+    datasets:
+      data: # user-defined key in data
+        # loss class to initialise, can be anything subclassing torch.nn.Module
+        fkcrps:
+          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+          scalers: ['node_weights']
+          ignore_nans: False
+          alpha: 1.0
+
+        multiscale:
+          _target_: anemoi.training.losses.MultiscaleLossWrapper
+
+          loss_matrices_path: ${system.input.loss_matrices_path}
+          loss_matrices: [null, null]
+          weights: [1.0, 0.8]
+
+          keep_batch_sharded: ${model.keep_batch_sharded}
+
+          per_scale_loss:
+            _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+            scalers: ['node_weights']
+
+            # Scalers to include in loss calculation
+            # A selection of available scalers are listed in training/scalers.
+            # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
+            # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+            # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+            ignore_nans: False
+            no_autocast: True
+            alpha: 1.0
+
+
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    interval: 2
+    wandb:
+      entity: 'ecmwf'
+    mlflow:
+      enabled: True
+      offline: True
+      experiment_name: 'zdebug_det'
+      authentication: True
+      tracking_uri: 'https://mlflow.ecmwf.int'
+      run_name: 'det_graph_provider'
+      max_params_length: 10000
+  profiler: False
+  enable_progress_bar: True
+  check_val_every_n_epoch: 1
+  print_memory_summary: False
+
+  enable_checkpointing: True
+  checkpoint:
+    every_n_minutes:
+      save_frequency: 180 # Approximate, as this is checked at the end of training steps
+      num_models_saved: 3 # If set to k, saves the 'last' k model weights in the training.
+
+    every_n_epochs:
+      save_frequency: 1
+      num_models_saved: -1 # If set to -1, all checkpoints are kept ensuring runs can be continued/forked at any point in the training process
+
+    every_n_train_steps:
+      save_frequency: null # Does not scale with rollout
+      num_models_saved: 0

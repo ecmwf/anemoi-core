@@ -92,15 +92,14 @@ def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestDa
 
 @pytest.fixture(
     params=[
-        ["config_validation=True", "diagnostics.log.mlflow.enabled=True", "diagnostics.log.mlflow.offline=True"],
-        ["config_validation=True", "diagnostics.log.mlflow.enabled=False"],
+        ["diagnostics.log.mlflow.enabled=True", "diagnostics.log.mlflow.offline=True"],
+        ["diagnostics.log.mlflow.enabled=False"],
         [
-            "config_validation=False",
             "diagnostics.log.mlflow.enabled=True",
             "system.input.graph=null",
             "diagnostics.log.mlflow.offline=True",
         ],
-        ["config_validation=False", "diagnostics.log.mlflow.enabled=False", "system.input.graph=null"],
+        ["diagnostics.log.mlflow.enabled=False", "system.input.graph=null"],
     ],
 )
 def base_global_config(
@@ -109,7 +108,7 @@ def base_global_config(
     get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str, str]:
     overrides = request.param
-    model_architecture = overrides[0].split("=")[1]
+    model_architecture = "base"
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(
             config_name="config",
@@ -276,12 +275,12 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
 
     training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
     for dataset_name, training_loss_cfg in training_losses_cfg.items():
-        for file in training_loss_cfg.loss_matrices:
+        for file in training_loss_cfg.get("loss_matrices", []):
             if file is not None:
                 tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
         if tmp_path_loss_matrices is not None:
             cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
-            training_loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+            training_loss_cfg["loss_matrices_path"] = str(Path(tmp_path_loss_matrices).parent)
 
             cfg.training.validation_metrics.datasets[dataset_name].multiscale.loss_matrices_path = str(
                 Path(tmp_path_loss_matrices).parent,

@@ -8,8 +8,6 @@ defaults:
 - training: multi
 - _self_
 
-config_validation: True
-
 system:
   input:
     graph: graph_anemoi_new_${data.resolution}.pt

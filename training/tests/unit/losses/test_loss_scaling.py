@@ -13,25 +13,25 @@ from typing import Any
 import pytest
 import torch
 from _pytest.fixtures import SubRequest
-from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses import get_loss_function
+from anemoi.training.builders.losses import build_loss_from_config
+from anemoi.training.builders.scalers import build_scalers_from_config
 from anemoi.training.losses.loss import get_metric_ranges
-from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
+from anemoi.utils.config import DotDict
 
 
 @pytest.fixture
 def fake_data(
     request: SubRequest,
-) -> tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, list[float]]]:
-    config = DictConfig(
+) -> tuple[dict, IndexCollection, dict[str, list[float]], dict[str, list[float]]]:
+    config = DotDict(
         {
             "data": {
                 "forcing": ["x"],
@@ -65,15 +65,15 @@ def fake_data(
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config["data"], name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
 
 
 @pytest.fixture
-def fake_data_no_param() -> tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, list[float]]]:
-    config = DictConfig(
+def fake_data_no_param() -> tuple[dict, IndexCollection, dict[str, list[float]], dict[str, list[float]]]:
+    config = DotDict(
         {
             "data": {
                 "forcing": ["x"],
@@ -101,7 +101,7 @@ def fake_data_no_param() -> tuple[DictConfig, IndexCollection, dict[str, list[fl
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config["data"], name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
@@ -109,14 +109,14 @@ def fake_data_no_param() -> tuple[DictConfig, IndexCollection, dict[str, list[fl
 
 @pytest.fixture
 def fake_data_variable_groups() -> tuple[
-    DictConfig,
+    dict,
     IndexCollection,
     dict[str, list[float]],
     dict[str, list[float]],
     dict[str, dict[str, str | int]],
     torch.Tensor,
 ]:
-    config = DictConfig(
+    config = DotDict(
         {
             "data": {
                 "forcing": ["x"],
@@ -162,7 +162,7 @@ def fake_data_variable_groups() -> tuple[
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(config.data, name_to_index=name_to_index)
+    data_indices = IndexCollection(config["data"], name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     metadata_variables = {
@@ -332,7 +332,7 @@ expected_var_tendency_scaling = torch.Tensor(
     indirect=["fake_data"],
 )
 def test_variable_loss_scaling_vals(
-    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    fake_data: tuple[dict, IndexCollection, torch.Tensor, torch.Tensor],
     expected_scaling: torch.Tensor,
     graph_with_nodes: HeteroData,
 ) -> None:
@@ -342,7 +342,7 @@ def test_variable_loss_scaling_vals(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _ = build_scalers_from_config(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -352,7 +352,7 @@ def test_variable_loss_scaling_vals(
         output_mask=NoOutputMask(),
     )
 
-    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+    loss = build_loss_from_config(config.training.training_loss, scalers=scalers)
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
 
@@ -360,7 +360,7 @@ def test_variable_loss_scaling_vals(
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
-def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
+def test_metric_range(fake_data: tuple[dict, IndexCollection]) -> None:
     config, data_indices, _, _ = fake_data
 
     metadata_extractor = ExtractVariableGroupAndLevel(config.training.variable_groups)
@@ -430,7 +430,7 @@ def test_updating_scalars(mock_updating_scalar: type[BaseUpdatingScaler]) -> Non
 
 
 def test_variable_masking(
-    fake_data_no_param: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    fake_data_no_param: tuple[dict, IndexCollection, torch.Tensor, torch.Tensor],
     graph_with_nodes: HeteroData,
 ) -> None:
     config, data_indices, statistics, statistics_tendencies = fake_data_no_param
@@ -439,7 +439,7 @@ def test_variable_masking(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _ = build_scalers_from_config(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -459,7 +459,7 @@ def test_variable_masking(
     assert not scalers["variable_masking"][1][indices_to_mask].any(), "Expected scalers for masked variables to be zero"
 
     config.training.scalers.builders["variable_masking"].update(invert=True)
-    scalers, _ = create_scalers(
+    scalers, _ = build_scalers_from_config(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -478,7 +478,7 @@ def test_variable_masking(
 
 def test_variable_loss_scaling_val_complex_variable_groups(
     fake_data_variable_groups: tuple[
-        DictConfig,
+        dict,
         IndexCollection,
         dict[str, list[float]],
         dict[str, list[float]],
@@ -496,7 +496,7 @@ def test_variable_loss_scaling_val_complex_variable_groups(
         metadata_variables,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _ = build_scalers_from_config(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -506,7 +506,7 @@ def test_variable_loss_scaling_val_complex_variable_groups(
         output_mask=NoOutputMask(),
     )
 
-    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+    loss = build_loss_from_config(config.training.training_loss, scalers=scalers)
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
 

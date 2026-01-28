@@ -18,34 +18,31 @@ from typing import Any
 
 import pytorch_lightning as pl
 import torch
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.interface import AnemoiModelInterface
-from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.losses import get_loss_function
+from anemoi.training.config_types import to_container
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import grad_scaler
-from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from collections.abc import Iterable
     from collections.abc import Mapping
 
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.training.config_types import Settings
+    from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+    from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,7 +60,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
     - Handles graph data via `torch_geometric.data.HeteroData` format.
     - Supports sharded input batches and reconstruction via `allgather`.
     - Integrates modular loss and metric functions with support for variable scaling.
-    - Enables deferred creation of variable scalers post-model instantiation.
     - Fully compatible with PyTorch Lightning training and validation loops.
 
     Subclass Responsibilities
@@ -73,20 +69,26 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     Parameters
     ----------
-    config : BaseSchema
+    config : Settings
         Configuration object defining all parameters.
     graph_data : HeteroData
         Graph-structured input data containing node and edge features.
-    statistics : dict
-        Dictionary of training statistics (mean, std, etc.) used for normalization.
-    statistics_tendencies : dict
-        Statistics related to tendencies (if used).
     data_indices : IndexCollection
         Maps feature names to index ranges used for training and loss functions.
     metadata : dict
         Dictionary with metadata such as dataset provenance and variable descriptions.
-    supporting_arrays : dict
-        Numpy arrays (e.g., topography, masks) needed during inference and stored in checkpoints.
+    output_masks : dict
+        Output masks keyed by dataset name.
+    grid_indices : dict
+        Grid index helpers keyed by dataset name.
+    scalers : dict
+        Variable-wise scaling functions keyed by dataset name.
+    losses : dict
+        Loss functions keyed by dataset name.
+    metrics : dict
+        Metric functions keyed by dataset name.
+    val_metric_ranges : dict
+        Validation metric ranges keyed by dataset name.
 
     Attributes
     ----------
@@ -100,8 +102,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         Variable-wise scaling functions (e.g., standardization).
     val_metric_ranges : dict
         Mapping of variable groups for which to calculate validation metrics.
-    output_mask : nn.Module
-        Masking module that filters outputs during inference.
+    output_mask : dict[str, nn.Module]
+        Masking modules that filter outputs during inference.
     multi_step : bool
         Flag to enable autoregressive rollouts (used in multi-step forecasting).
     keep_batch_sharded : bool
@@ -124,37 +126,57 @@ class BaseGraphModule(pl.LightningModule, ABC):
     - `BaseLoss`
     - `IndexCollection`
     - `CosineLRScheduler`
-    - `create_scalers`, `grad_scaler`
+    - `grad_scaler`
 
     """
 
     def __init__(
         self,
         *,
-        config: BaseSchema,
+        config: Settings,
         graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: Mapping[str, IndexCollection],
         metadata: dict,
-        supporting_arrays: dict,
+        output_masks: Mapping[str, Any],
+        grid_indices: Mapping[str, Any],
+        scalers: Mapping[str, Mapping[str, TENSOR_SPEC]],
+        updating_scalars: Mapping[str, Mapping[str, BaseUpdatingScaler]],
+        losses: Mapping[str, BaseLoss],
+        metrics: Mapping[str, Mapping[str, BaseLoss]],
+        val_metric_ranges: Mapping[str, Mapping[str, list[int]]],
+        optimizer_builder: Callable[[Iterable[torch.nn.Parameter], float], torch.optim.Optimizer] | None = None,
+        model_interface: AnemoiModelInterface,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
-        config : DictConfig
+        config : Settings
             Job configuration
         graph_data : HeteroData
             Graph object
-        statistics : dict
-            Statistics of the training data
-        data_indices : IndexCollection
-            Indices of the training data,
+        data_indices : Mapping[str, IndexCollection]
+            Indices of the training data.
         metadata : dict
             Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
+        output_masks : Mapping[str, Any]
+            Pre-built output masks keyed by dataset name.
+        grid_indices : Mapping[str, Any]
+            Pre-built grid indices keyed by dataset name.
+        scalers : Mapping[str, Mapping[str, TENSOR_SPEC]]
+            Pre-built scalers keyed by dataset name.
+        updating_scalars : Mapping[str, Mapping[str, BaseUpdatingScaler]]
+            Pre-built updating scalers keyed by dataset name.
+        losses : Mapping[str, BaseLoss]
+            Pre-built losses keyed by dataset name.
+        metrics : Mapping[str, Mapping[str, BaseLoss]]
+            Pre-built metrics keyed by dataset name.
+        val_metric_ranges : Mapping[str, Mapping[str, list[int]]]
+            Pre-computed validation metric ranges keyed by dataset name.
+        optimizer_builder : Callable, optional
+            Callable that builds the optimizer from params and lr.
+        model_interface : AnemoiModelInterface
+            Pre-built model interface.
 
         """
         super().__init__()
@@ -163,15 +185,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         graph_data = {name: data.to(self.device) for name, data in graph_data.items()}
         self.dataset_names = list(graph_data.keys())
 
-        # Create output_mask dictionary for each dataset
-        self.output_mask = {}
-        for name in self.dataset_names:
-            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data[name])
-
-        # Handle supporting_arrays merge with all output masks
-        combined_supporting_arrays = supporting_arrays.copy()
-        for dataset_name, mask in self.output_mask.items():
-            combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
+        self.output_mask = dict(output_masks)
 
         if not hasattr(self.__class__, "task_type"):
             msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
@@ -180,79 +194,30 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         metadata["metadata_inference"]["task"] = self.task_type
 
-        self.model = AnemoiModelInterface(
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=combined_supporting_arrays,
-            graph_data=graph_data,
-            config=config,
-        )
+        model_interface.metadata = metadata
+        model_interface._update_metadata()
+        self.model = model_interface
         self.config = config
 
         self.data_indices = data_indices
 
-        self.save_hyperparameters()
-
-        self.statistics_tendencies = statistics_tendencies
+        self.save_hyperparameters("config", "metadata", "data_indices")
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         # Initialize components for multi-dataset
-        self.latlons_data = {}  # plotting only, dict of tensors
-        self.scalers = {}  # dict of dict of tensors
-        self.updating_scalars = {}  # dict of dict of objects
-        self.val_metric_ranges = {}  # dict of dict of lists
-        self._scaling_values_log = {}  # dict of dict[str, float]
-        self.loss = torch.nn.ModuleDict()
-        self.metrics = torch.nn.ModuleDict()
-
-        dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
-        loss_configs = get_multiple_datasets_config(config.training.training_loss)
-        scalers_configs = get_multiple_datasets_config(config.training.scalers)
-        val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
-        metrics_to_log = get_multiple_datasets_config(config.training.metrics)
+        self.latlons_data = {
+            dataset_name: graph_data[dataset_name][config.graph.data].x for dataset_name in self.dataset_names
+        }
+        self.scalers = dict(scalers)
+        self.updating_scalars = dict(updating_scalars)
+        self.val_metric_ranges = dict(val_metric_ranges)
+        self._scaling_values_log = {}
+        self.loss = torch.nn.ModuleDict(dict(losses))
+        self.metrics = torch.nn.ModuleDict(
+            {dataset_name: torch.nn.ModuleDict(dict(metrics[dataset_name])) for dataset_name in self.dataset_names},
+        )
         for dataset_name in self.dataset_names:
-            self.latlons_data[dataset_name] = graph_data[dataset_name][config.graph.data].x
-
-            # Create dataset-specific metadata extractor
-            metadata_extractor = ExtractVariableGroupAndLevel(
-                variable_groups=dataset_variable_groups[dataset_name],
-                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
-            )
-
-            dataset_scalers, dataset_updating_scalars = create_scalers(
-                scalers_configs[dataset_name],
-                data_indices=data_indices[dataset_name],
-                graph_data=graph_data[dataset_name],
-                statistics=statistics[dataset_name],
-                statistics_tendencies=(
-                    statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
-                ),
-                metadata_extractor=metadata_extractor,
-                output_mask=self.output_mask[dataset_name],
-            )
-            self.scalers[dataset_name] = dataset_scalers
-            self.updating_scalars[dataset_name] = dataset_updating_scalars
-
-            self.val_metric_ranges[dataset_name] = get_metric_ranges(
-                metadata_extractor,
-                output_data_indices=data_indices[dataset_name].model.output,
-                metrics_to_log=metrics_to_log[dataset_name],
-            )
-
-            self.loss[dataset_name] = get_loss_function(
-                loss_configs[dataset_name],
-                dataset_scalers,
-                data_indices[dataset_name],
-            )
-
-            self.metrics[dataset_name] = self._build_metrics_for_dataset(
-                val_metrics_configs[dataset_name],
-                scalers=dataset_scalers,
-                data_indices=data_indices[dataset_name],
-            )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
                 data_indices[dataset_name],
@@ -274,21 +239,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.lr_iterations = config.training.lr.iterations
         self.lr_warmup = config.training.lr.warmup
         self.lr_min = config.training.lr.min
-        self.optimizer_settings = config.training.optimizer
+        self.optimizer_builder = optimizer_builder
 
         self.model_comm_group = None
         self.reader_groups = None
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.grid_indices = {}
-        grid_indices_configs = get_multiple_datasets_config(self.config.dataloader.grid_indices)
-        for dataset_name in self.dataset_names:
-            self.grid_indices[dataset_name] = instantiate(
-                grid_indices_configs[dataset_name],
-                reader_group_size=reader_group_size,
-            )
-            self.grid_indices[dataset_name].setup(graph_data[dataset_name])
+        self.grid_indices = dict(grid_indices)
         self.grid_dim = -2
 
         # check sharding support
@@ -353,19 +311,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 "This may lead to increased memory usage and slower training.",
                 ", ".join(unsupported_metrics),
             )
-
-    def _build_metrics_for_dataset(
-        self,
-        validation_metrics_configs: dict,
-        scalers: dict,
-        data_indices: IndexCollection,
-    ) -> torch.nn.ModuleDict:
-        return torch.nn.ModuleDict(
-            {
-                metric_name: get_loss_function(val_metric_config, scalers=scalers, data_indices=data_indices)
-                for metric_name, val_metric_config in validation_metrics_configs.items()
-            },
-        )
 
     def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
         """Forward method.
@@ -987,20 +932,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         pass
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
-        """Create optimizer and LR scheduler based on Hydra config."""
-        optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
+        """Create optimizer and LR scheduler using the injected optimizer builder."""
+        if self.optimizer_builder is None:
+            msg = "optimizer_builder must be provided to configure optimizers."
+            raise RuntimeError(msg)
+        params = (p for p in self.parameters() if p.requires_grad)
+        optimizer = self.optimizer_builder(params=params, lr=self.lr)
         scheduler = self._create_scheduler(optimizer)
         return [optimizer], [scheduler]
-
-    def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
-        """Instantiate optimizer directly via Hydra config (_target_ style)."""
-        params = filter(lambda p: p.requires_grad, self.parameters())
-
-        # Convert schema to dict if needed
-        if hasattr(opt_cfg, "model_dump"):
-            opt_cfg = opt_cfg.model_dump(by_alias=True)
-
-        return instantiate(opt_cfg, params=params, lr=self.lr)
 
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
         """Helper to create the cosine LR scheduler."""
@@ -1017,7 +956,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # The conditions should be separate, but are combined due to pre-commit hook
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
             # Log hyperparameters on rank 0
-            hyper_params = OmegaConf.to_container(self.config, resolve=True)
+            hyper_params = to_container(self.config)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)

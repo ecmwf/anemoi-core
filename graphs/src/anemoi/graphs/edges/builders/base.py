@@ -12,18 +12,18 @@ import logging
 import time
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
 from importlib.util import find_spec
 
 import numpy as np
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.graphs.builders.components import build_component
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import get_distributed_device
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -99,14 +99,14 @@ class BaseEdgeBuilder(ABC):
         graph[self.name].edge_type = edge_type
         return graph
 
-    def register_attributes(self, graph: HeteroData, config: DotDict) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, config: Mapping[str, object]) -> HeteroData:
         """Register attributes in the edges of the graph specified.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the attributes.
-        config : DotDict
+        config : Mapping[str, object]
             The configuration of the attributes.
 
         Returns
@@ -116,20 +116,20 @@ class BaseEdgeBuilder(ABC):
         """
         for attr_name, attr_config in config.items():
             edge_index = graph[self.name].edge_index
-            edge_attribute_builder = instantiate(attr_config)
+            edge_attribute_builder = build_component(attr_config)
             graph[self.name][attr_name] = edge_attribute_builder(
                 x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
             )
         return graph
 
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attrs_config: Mapping[str, object] | None = None) -> HeteroData:
         """Update the graph with the edges.
 
         Parameters
         ----------
         graph : HeteroData
             The graph.
-        attrs_config : DotDict
+        attrs_config : Mapping[str, object]
             The configuration of the edge attributes.
 
         Returns

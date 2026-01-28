@@ -12,23 +12,22 @@ import datetime
 from pathlib import Path
 
 import torch
-from omegaconf import DictConfig
-from omegaconf import ListConfig
-from omegaconf import OmegaConf
 
 from anemoi.models.data_indices.collection import BaseIndex
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import BaseTensorIndex
+from anemoi.training.config_types import ConfigBase
+from anemoi.training.config_types import to_container
 from anemoi.utils.dates import frequency_to_string
 
 
-def map_config_to_primitives(config: OmegaConf) -> dict:
+def map_config_to_primitives(config: object) -> dict:
     """Ensure that the metadata information is JSON-serializable.
 
     Parameters
     ----------
-    config : OmegaConf
-        config object to be mapped to primitives.
+    config : object
+        Config-like object to be mapped to primitives.
 
     Returns
     -------
@@ -54,8 +53,8 @@ def map_config_to_primitives(config: OmegaConf) -> dict:
         config = [map_config_to_primitives(v) for v in config]
     elif isinstance(config, dict):
         config = {k: map_config_to_primitives(v) for k, v in config.items()}
-    elif isinstance(config, DictConfig | ListConfig):
-        config = map_config_to_primitives(OmegaConf.to_container(config, resolve=True))
+    elif isinstance(config, ConfigBase):
+        config = map_config_to_primitives(to_container(config))
     elif isinstance(config, torch.Tensor):
         config = map_config_to_primitives(config.tolist())
     elif isinstance(config, IndexCollection | BaseTensorIndex | BaseIndex):

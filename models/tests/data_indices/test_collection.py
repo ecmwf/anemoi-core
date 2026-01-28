@@ -10,39 +10,34 @@
 
 import pytest
 import torch
-from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 
 
 @pytest.fixture()
 def data_indices():
-    config = DictConfig(
-        {
-            "data": {
-                "forcing": ["x", "e"],
-                "diagnostic": ["z", "q"],
-            },
+    config = {
+        "data": {
+            "forcing": ["x", "e"],
+            "diagnostic": ["z", "q"],
         },
-    )
+    }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "e": 4, "d": 5, "other": 6}
-    return IndexCollection(config.data, name_to_index=name_to_index)
+    return IndexCollection(config["data"], name_to_index=name_to_index)
 
 
 @pytest.fixture()
 def data_indices_with_target():
     # mimicks example where we try to predict precipitation (tp) by comparing predictions with point measurements (tp_point) and radar data (tp_radar) and using topography (dem) as forcing
-    config = DictConfig(
-        {
-            "data": {
-                "forcing": ["tp_point", "tp_radar", "dem"],
-                "diagnostic": [],
-                "target": ["tp_point", "tp_radar"],
-            },
+    config = {
+        "data": {
+            "forcing": ["tp_point", "tp_radar", "dem"],
+            "diagnostic": [],
+            "target": ["tp_point", "tp_radar"],
         },
-    )
+    }
     name_to_index = {"tp_point": 0, "tp_radar": 1, "tp": 2, "dem": 3}
-    return IndexCollection(config.data, name_to_index=name_to_index)
+    return IndexCollection(config["data"], name_to_index=name_to_index)
 
 
 def test_dataindices_init(data_indices) -> None:

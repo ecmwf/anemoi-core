@@ -12,15 +12,15 @@ import logging
 import time
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
 
 import numpy as np
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.builders.components import build_component
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import get_grid_reference_distance
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,14 +69,14 @@ class BaseNodeBuilder(ABC):
 
         return graph
 
-    def register_attributes(self, graph: HeteroData, config: DotDict | None = None) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, config: Mapping[str, object] | None = None) -> HeteroData:
         """Register attributes in the nodes of the graph specified.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the attributes.
-        config : DotDict
+        config : Mapping[str, object]
             The configuration of the attributes.
 
         Returns
@@ -88,7 +88,7 @@ class BaseNodeBuilder(ABC):
             graph[self.name][f"_{hidden_attr}"] = getattr(self, hidden_attr)
 
         for attr_name, attr_config in config.items():
-            graph[self.name][attr_name] = instantiate(attr_config).compute(graph, self.name)
+            graph[self.name][attr_name] = build_component(attr_config).compute(graph, self.name)
 
         return graph
 
@@ -121,14 +121,14 @@ class BaseNodeBuilder(ABC):
         coords = torch.stack([latitudes, longitudes], axis=-1).reshape((-1, 2))
         return torch.deg2rad(coords)
 
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attrs_config: Mapping[str, object] | None = None) -> HeteroData:
         """Update the graph with new nodes.
 
         Parameters
         ----------
         graph : HeteroData
             Input graph.
-        attrs_config : DotDict
+        attrs_config : Mapping[str, object]
             The configuration of the attributes.
 
         Returns

@@ -8,8 +8,6 @@ defaults:
   - training: default
   - _self_
 
-config_validation: True
-
 # Changes in system
 system:
   input:

@@ -14,20 +14,20 @@
 
 import pytest
 import torch
-from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses import get_loss_function
-from anemoi.training.losses.scalers import create_scalers
+from anemoi.training.builders.losses import build_loss_from_config
+from anemoi.training.builders.scalers import build_scalers_from_config
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.utils.config import DotDict
 
 
 @pytest.fixture
-def fake_data() -> tuple[DictConfig, IndexCollection]:
-    config = DictConfig(
+def fake_data() -> tuple[dict, IndexCollection]:
+    config = DotDict(
         {
             "data": {
                 "forcing": ["x"],
@@ -55,15 +55,15 @@ def fake_data() -> tuple[DictConfig, IndexCollection]:
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config["data"], name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
 
 
 @pytest.fixture
-def fake_data_combined_loss() -> tuple[DictConfig, IndexCollection]:
-    config = DictConfig(
+def fake_data_combined_loss() -> tuple[dict, IndexCollection]:
+    config = DotDict(
         {
             "data": {
                 "forcing": ["x"],
@@ -106,15 +106,15 @@ def fake_data_combined_loss() -> tuple[DictConfig, IndexCollection]:
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config["data"], name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
 
 
 @pytest.fixture
-def fake_data_single_variable() -> tuple[DictConfig, IndexCollection]:
-    config = DictConfig(
+def fake_data_single_variable() -> tuple[dict, IndexCollection]:
+    config = DotDict(
         {
             "data": {
                 "forcing": ["x"],
@@ -142,14 +142,14 @@ def fake_data_single_variable() -> tuple[DictConfig, IndexCollection]:
         },
     )
     name_to_index = {"x": 0, "t_50": 1}
-    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config["data"], name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
 
 
 def test_variable_scaling_multi_variable(
-    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    fake_data: tuple[dict, IndexCollection, torch.Tensor, torch.Tensor],
     graph_with_nodes: HeteroData,
 ) -> None:
     config, data_indices, statistics, statistics_tendencies = fake_data
@@ -158,7 +158,7 @@ def test_variable_scaling_multi_variable(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _ = build_scalers_from_config(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -168,13 +168,13 @@ def test_variable_scaling_multi_variable(
         output_mask=NoOutputMask(),
     )
 
-    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+    loss = build_loss_from_config(config.training.training_loss, scalers=scalers)
 
     print_variable_scaling(loss, data_indices)
 
 
 def test_variable_scaling_single_variable(
-    fake_data_single_variable: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    fake_data_single_variable: tuple[dict, IndexCollection, torch.Tensor, torch.Tensor],
     graph_with_nodes: HeteroData,
 ) -> None:
     config, data_indices, statistics, statistics_tendencies = fake_data_single_variable
@@ -183,7 +183,7 @@ def test_variable_scaling_single_variable(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _ = build_scalers_from_config(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -193,13 +193,13 @@ def test_variable_scaling_single_variable(
         output_mask=NoOutputMask(),
     )
 
-    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+    loss = build_loss_from_config(config.training.training_loss, scalers=scalers)
 
     print_variable_scaling(loss, data_indices)
 
 
 def test_variable_scaling_combined_loss(
-    fake_data_combined_loss: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    fake_data_combined_loss: tuple[dict, IndexCollection, torch.Tensor, torch.Tensor],
     graph_with_nodes: HeteroData,
 ) -> None:
     config, data_indices, statistics, statistics_tendencies = fake_data_combined_loss
@@ -208,7 +208,7 @@ def test_variable_scaling_combined_loss(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _ = build_scalers_from_config(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -218,6 +218,6 @@ def test_variable_scaling_combined_loss(
         output_mask=NoOutputMask(),
     )
 
-    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+    loss = build_loss_from_config(config.training.training_loss, scalers=scalers)
 
     print_variable_scaling(loss, data_indices)

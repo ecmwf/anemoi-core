@@ -10,13 +10,10 @@
 
 import functools
 from collections.abc import Callable
-from typing import Any
 
 import torch
-from omegaconf import DictConfig
 
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 
 
@@ -27,9 +24,12 @@ class CombinedLoss(BaseLoss):
 
     def __init__(
         self,
-        *extra_losses: dict[str, Any] | Callable | BaseLoss,
+        *extra_losses: BaseLoss | Callable[..., BaseLoss] | tuple[BaseLoss | Callable[..., BaseLoss], list[str] | None],
         loss_weights: tuple[int, ...] | None = None,
-        losses: tuple[dict[str, Any] | Callable | BaseLoss] | None = None,
+        losses: (
+            tuple[BaseLoss | Callable[..., BaseLoss] | tuple[BaseLoss | Callable[..., BaseLoss], list[str] | None]]
+            | None
+        ) = None,
         **kwargs,
     ):
         """Combined loss function.
@@ -37,32 +37,22 @@ class CombinedLoss(BaseLoss):
         Allows multiple losses to be combined into a single loss function,
         and the components weighted.
 
-        As the losses are designed for use within the context of the
-        anemoi-training configuration, `losses` work best as a dictionary.
-
-        If `losses` is a `tuple[dict]`, the `scalers` key will be extracted
-        before being passed to `get_loss_function`, and the `scalers` defined
-        in each loss only applied to the respective loss. Thereby `scalers`
-        added to this class will be routed correctly.
-        If `losses` is a `tuple[Callable]`, all `scalers` added to this class
-        will be added to all underlying losses.
-        And if `losses` is a `tuple[BaseLoss]`, no scalers added to
-        this class will be added to the underlying losses, as it is
-        assumed that will be done by the parent function.
+        If `losses` entries are provided as `(loss, scalers)`, the `scalers`
+        list specifies which scalers to apply to that loss when this combined
+        loss receives scalers. If `scalers` is None, all scalers are applied.
+        If `losses` entries are `Callable`, all scalers added to this class
+        will be added to those losses. If `losses` entries are `BaseLoss`,
+        no scalers added to this class will be added to the underlying losses,
+        as it is assumed that will be done externally.
 
         Parameters
         ----------
-        losses: tuple[dict[str, Any] | Callable | BaseLoss],
-            if a `tuple[dict]`:
-                Tuple of losses to initialise with `get_loss_function`.
-                Allows for kwargs to be passed, and weighings controlled.
-                If a loss should only have some of the scalers, set `scalers` in the loss config.
-                If no scalers are set, all scalers added to this class will be included.
-            if a `tuple[Callable]`:
-                Will be called with `kwargs`, and all scalers added to this class added.
-            if a `tuple[BaseLoss]`:
-                Added to the loss function, and no scalers passed through.
-        *extra_losses: dict[str, Any]  | Callable | BaseLoss],
+        losses: tuple[BaseLoss | Callable | tuple[BaseLoss | Callable, list[str] | None]],
+            If a `tuple[(loss, scalers)]`, the scalers list controls which
+            scalers are forwarded to that loss. If a `Callable`, it will be
+            called with `kwargs`, and all scalers will be forwarded.
+            If a `BaseLoss`, no scalers are forwarded.
+        *extra_losses: BaseLoss | Callable | tuple[BaseLoss | Callable, list[str] | None],
             Additional arg form of losses to include in the combined loss.
         loss_weights : optional, tuple[int, ...] | None
             Weights of each loss function in the combined loss.
@@ -75,68 +65,78 @@ class CombinedLoss(BaseLoss):
         Examples
         --------
         >>> CombinedLoss(
-                {"__target__": "anemoi.training.losses.MSELoss"},
+                (anemoi.training.losses.MSELoss, ["*"]),
                 loss_weights=(1.0,),
             )
             CombinedLoss.add_scaler(name = 'scaler_1', ...)
-            # Only added to the `MSELoss` if specified in it's `scalers`.
+            # Only added to the `MSELoss` if specified in the scalers list.
         --------
         >>> CombinedLoss(
                 losses = [anemoi.training.losses.MSELoss],
                 loss_weights=(1.0,),
             )
-        Or from the config,
-
-        ```
-        training_loss:
-            _target_: anemoi.training.losses.combined.CombinedLoss
-            losses:
-                - _target_: anemoi.training.losses.MSELoss
-                - _target_: anemoi.training.losses.MAELoss
-            scalers: ['*']
-            loss_weights: [1.0, 0.6]
-            # All scalers passed to this class will be added to each underlying loss
-        ```
-
-        ```
-        training_loss:
-            _target_: anemoi.training.losses.combined.CombinedLoss
-            losses:
-                - _target_: anemoi.training.losses.MSELoss
-                  scalers: ['variable']
-                - _target_: anemoi.training.losses.MAELoss
-                  scalers: ['loss_weights_mask']
-            scalers: ['*']
-            # Only the specified scalers will be added to each loss
-        ```
         """
         super().__init__()
 
-        self.losses: list[type[BaseLoss]] = []
-        self._loss_scaler_specification: dict[int, list[str]] = {}
+        self.losses: list[BaseLoss] = []
+        self._loss_scaler_specification: dict[int, list[str] | ScaleTensor] = {}
 
         losses = (*(losses or []), *extra_losses)
         if loss_weights is None:
             loss_weights = (1.0,) * len(losses)
 
-        assert len(losses) == len(loss_weights), "Number of losses and weights must match"
-        assert len(losses) > 0, "At least one loss must be provided"
+        if len(losses) != len(loss_weights):
+            msg = "Number of losses and weights must match"
+            raise ValueError(msg)
+        if len(losses) == 0:
+            msg = "At least one loss must be provided"
+            raise ValueError(msg)
 
-        for i, loss in enumerate(losses):
-            if isinstance(loss, DictConfig | dict):
-                self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
-                self.losses.append(get_loss_function(loss, scalers={}, **dict(kwargs)))
-            elif isinstance(loss, type):
-                self._loss_scaler_specification[i] = ["*"]
-                self.losses.append(loss(**kwargs))
-            else:
-                assert isinstance(loss, BaseLoss)
-                self._loss_scaler_specification[i] = loss.scaler
-                self.losses.append(loss)
+        for i, loss_entry in enumerate(losses):
+            loss_obj, scaler_spec = self._resolve_loss_entry(loss_entry, **kwargs)
+            self._loss_scaler_specification[i] = scaler_spec
+            self.losses.append(loss_obj)
 
             self.add_module(str(i), self.losses[-1])  # (self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
         del self.scaler  # Remove scaler property from parent class, as it is not used here
+
+    @staticmethod
+    def _resolve_loss_entry(
+        loss_entry: BaseLoss | Callable[..., BaseLoss] | tuple[BaseLoss | Callable[..., BaseLoss], list[str] | None],
+        **kwargs,
+    ) -> tuple[BaseLoss, list[str] | ScaleTensor]:
+        scaler_spec: list[str] | None = None
+        loss_obj: BaseLoss | Callable[..., BaseLoss] = loss_entry
+
+        if isinstance(loss_entry, tuple | list):
+            if len(loss_entry) != 2:
+                msg = "Loss tuple entries must be of the form (loss, scalers)"
+                raise TypeError(msg)
+            loss_obj, scaler_spec = loss_entry
+            if scaler_spec is None:
+                scaler_spec = ["*"]
+            elif isinstance(scaler_spec, tuple):
+                scaler_spec = list(scaler_spec)
+            elif not isinstance(scaler_spec, list):
+                msg = "Scaler specification must be a list or tuple of strings"
+                raise TypeError(msg)
+
+        if isinstance(loss_obj, BaseLoss):
+            resolved = loss_obj
+            spec = scaler_spec if scaler_spec is not None else loss_obj.scaler
+        elif callable(loss_obj):
+            resolved = loss_obj(**kwargs)
+            spec = scaler_spec if scaler_spec is not None else ["*"]
+        else:
+            msg = f"Invalid loss type provided: {type(loss_obj)}"
+            raise TypeError(msg)
+
+        if not isinstance(resolved, BaseLoss):
+            msg = f"Loss must be a subclass of 'BaseLoss', not {type(resolved)}"
+            raise TypeError(msg)
+
+        return resolved, spec
 
     def forward(
         self,

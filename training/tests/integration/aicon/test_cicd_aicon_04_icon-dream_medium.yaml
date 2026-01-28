@@ -17,7 +17,6 @@
 # ---------------------------------------------------------------
 
 # set to true to switch on config validation
-config_validation: True
 
 
 system:
@@ -351,6 +350,7 @@ diagnostics:
       expand_hyperparams: # Which keys in hyperparams to expand
         - config
       http_max_retries: 35
+      max_params_length: 2000
     interval: 100
   enable_checkpointing: False
   enable_progress_bar: true

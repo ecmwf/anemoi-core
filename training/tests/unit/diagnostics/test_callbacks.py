@@ -17,8 +17,8 @@ import pytest
 import torch
 import yaml
 
+from anemoi.training.builders.callbacks import build_callbacks_from_config
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
-from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
 from anemoi.training.diagnostics.callbacks.plot_ens import EnsemblePlotMixin
 from anemoi.training.diagnostics.callbacks.plot_ens import PlotEnsSample
@@ -47,22 +47,48 @@ diagnostics:
   enable_checkpointing: False
   checkpoint:
 
-  log: {}
+  log:
+    wandb:
+      enabled: False
+      offline: False
+      log_model: False
+      project: 'Anemoi'
+      entity: null
+      gradients: False
+      parameters: False
+    tensorboard:
+      enabled: False
+    mlflow:
+      enabled: False
+      offline: False
+      authentication: False
+      tracking_uri: null
+      experiment_name: 'test'
+      project_name: 'Anemoi'
+      system: False
+      terminal: False
+      run_name: null
+      on_resume_create_child: True
+      expand_hyperparams: []
+      http_max_retries: 1
+      max_params_length: 2000
+      save_dir: null
+    interval: 100
 """
 
 
 def test_no_extra_callbacks_set():
     # No extra callbacks set
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    callbacks = get_callbacks(config)
+    callbacks = build_callbacks_from_config(config)
     assert len(callbacks) == NUM_FIXED_CALLBACKS  # ParentUUIDCallback, CheckVariableOrder, etc
 
 
 def test_add_config_enabled_callback():
     # Add logging callback
     config = omegaconf.OmegaConf.create(default_config)
-    config.diagnostics.callbacks.append({"log": {"mlflow": {"enabled": True}}})
-    callbacks = get_callbacks(config)
+    config.diagnostics.log.mlflow.enabled = True
+    callbacks = build_callbacks_from_config(config)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
@@ -71,7 +97,7 @@ def test_add_callback():
     config.diagnostics.callbacks.append(
         {"_target_": "anemoi.training.diagnostics.callbacks.provenance.ParentUUIDCallback"},
     )
-    callbacks = get_callbacks(config)
+    callbacks = build_callbacks_from_config(config)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
@@ -88,7 +114,7 @@ def test_add_plotting_callback(monkeypatch):
     config = omegaconf.OmegaConf.create(default_config)
     config.diagnostics.plot.enabled = True
     config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
-    callbacks = get_callbacks(config)
+    callbacks = build_callbacks_from_config(config)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
@@ -301,16 +327,12 @@ def test_progress_bar_disabled():
 
 
 def test_progress_bar_default():
-    """Test that default TQDMProgressBar is used when progress_bar config has no _target_."""
-    from pytorch_lightning.callbacks import TQDMProgressBar
-
+    """Test that missing progress_bar config is treated as an error."""
     config = omegaconf.OmegaConf.create(yaml.safe_load(progress_bar_config))
     config.diagnostics.progress_bar = None  # No _target_ specified
 
-    callbacks = _get_progress_bar_callback(config)
-
-    assert len(callbacks) == 1
-    assert isinstance(callbacks[0], TQDMProgressBar)
+    with pytest.raises(TypeError):
+        _get_progress_bar_callback(config)
 
 
 def test_progress_bar_custom():

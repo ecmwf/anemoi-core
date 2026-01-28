@@ -11,15 +11,15 @@
 import numpy as np
 import pytest
 import torch
-from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.utils.config import DotDict
 
 
 @pytest.fixture()
 def input_normalizer():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -42,7 +42,7 @@ def input_normalizer():
 
 @pytest.fixture()
 def remap_normalizer():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {

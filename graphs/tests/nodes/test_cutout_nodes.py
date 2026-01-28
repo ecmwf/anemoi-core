@@ -9,7 +9,6 @@
 
 import pytest
 import torch
-from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
@@ -20,9 +19,7 @@ from anemoi.graphs.nodes.builders import from_file
 def test_init(mocker, mock_anemoi_dataset_cutout):
     """Test AnemoiDatasetNodes initialization with cutout."""
     mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset_cutout)
-    node_builder = from_file.AnemoiDatasetNodes(
-        OmegaConf.create({"cutout": ["lam.zarr", "global.zarr"]}), name="test_nodes"
-    )
+    node_builder = from_file.AnemoiDatasetNodes({"cutout": ["lam.zarr", "global.zarr"]}, name="test_nodes")
 
     assert isinstance(node_builder, from_file.BaseNodeBuilder)
     assert isinstance(node_builder, from_file.AnemoiDatasetNodes)
@@ -32,9 +29,7 @@ def test_register_nodes(mocker, mock_anemoi_dataset_cutout):
     """Test AnemoiDatasetNodes register correctly the nodes with cutout operation."""
     mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset_cutout)
 
-    node_builder = from_file.AnemoiDatasetNodes(
-        OmegaConf.create({"cutout": ["lam.zarr", "global.zarr"]}), name="test_nodes"
-    )
+    node_builder = from_file.AnemoiDatasetNodes({"cutout": ["lam.zarr", "global.zarr"]}, name="test_nodes")
     graph = HeteroData()
 
     graph = node_builder.register_nodes(graph)
@@ -50,9 +45,7 @@ def test_register_attributes(mocker, mock_anemoi_dataset_cutout, graph_with_node
     """Test AnemoiDatasetNodes register correctly the weights with cutout operation."""
     mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset_cutout)
 
-    node_builder = from_file.AnemoiDatasetNodes(
-        OmegaConf.create({"cutout": ["lam.zarr", "global.zarr"]}), name="test_nodes"
-    )
+    node_builder = from_file.AnemoiDatasetNodes({"cutout": ["lam.zarr", "global.zarr"]}, name="test_nodes")
     config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
     graph = node_builder.register_attributes(graph_with_nodes, config)

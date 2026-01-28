@@ -8,8 +8,6 @@ defaults:
 - training: default
 - _self_
 
-config_validation: True
-
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords
 ##  to the correct defaults.

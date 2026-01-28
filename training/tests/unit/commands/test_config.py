@@ -53,7 +53,7 @@ def test_validate_config_uses_package_path(config_generator: ConfigGenerator) ->
     with mock.patch("anemoi.training.commands.config.initialize"), mock.patch(
         "anemoi.training.commands.config.compose",
         return_value=OmegaConf.create({"test": "value"}),
-    ), mock.patch("anemoi.training.commands.config.BaseSchema"):
+    ):
         # Call validate_config - it should succeed
         # The AnemoiSearchPathPlugin will add the package path automatically
         config_generator.validate_config("test-config", mask_env_vars=False)
@@ -66,7 +66,7 @@ def test_validate_config_with_mask_env_vars(config_generator: ConfigGenerator) -
     with mock.patch("anemoi.training.commands.config.initialize"), mock.patch(
         "anemoi.training.commands.config.compose",
         return_value=OmegaConf.create({"test": "value"}),
-    ), mock.patch("anemoi.training.commands.config.BaseSchema"), mock.patch.object(
+    ), mock.patch.object(
         config_generator,
         "_mask_slurm_env_variables",
         return_value=OmegaConf.create({"test": "masked"}),

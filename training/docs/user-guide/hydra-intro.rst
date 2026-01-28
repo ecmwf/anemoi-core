@@ -95,7 +95,7 @@ outputs and plots are built using the root path as base.
  Validation of the Configuration
 *********************************
 
-The configuration is validated using `Pydantic` before a training run
-starts. To turn this off, you can use the `--no-validation` flag in your
-top-level config. For more information on validation, see
+Configuration validation is lightweight (interpolation resolution,
+path expansion, and basic consistency checks) and does not use schemas.
+The adapter always applies these checks. For more information, see
 :ref:`config-validation`.

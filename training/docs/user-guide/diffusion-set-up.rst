@@ -238,8 +238,6 @@ A minimal config file for standard diffusion training:
    training:
      model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
 
-   config_validation: True
-
 For tendency-based diffusion, change the model config and model task:
 
 .. code:: yaml
@@ -259,4 +257,3 @@ For tendency-based diffusion, change the model config and model task:
      model_task: anemoi.training.train.tasks.GraphDiffusionTendForecaster
 
    # Ensure statistics_tendencies are available
-   config_validation: True

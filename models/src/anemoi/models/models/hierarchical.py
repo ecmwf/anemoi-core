@@ -12,10 +12,10 @@ import logging
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.builders import build_component
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
@@ -48,9 +48,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
+            self.encoder[dataset_name] = build_component(
                 model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent[dataset_name],
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
@@ -79,9 +78,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     trainable_size=model_config.model.processor.get("trainable_size", 0),
                 )
 
-                self.down_level_processor[nodes_names] = instantiate(
+                self.down_level_processor[nodes_names] = build_component(
                     model_config.model.processor,
-                    _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.model.level_process_num_layers,
@@ -96,9 +94,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     trainable_size=model_config.model.processor.get("trainable_size", 0),
                 )
 
-                self.up_level_processor[nodes_names] = instantiate(
+                self.up_level_processor[nodes_names] = build_component(
                     model_config.model.processor,
-                    _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.model.level_process_num_layers,
@@ -115,9 +112,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             trainable_size=model_config.model.processor.get("trainable_size", 0),
         )
 
-        self.processor = instantiate(
+        self.processor = build_component(
             model_config.model.processor,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.hidden_dims[self._graph_name_hidden[self.num_hidden - 1]],
             edge_dim=self.processor_graph_provider.edge_dim,
         )
@@ -137,9 +133,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
             )
 
-            self.downscale[src_nodes_name] = instantiate(
+            self.downscale[src_nodes_name] = build_component(
                 model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.node_attributes[first_dataset_name].attr_ndims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[dst_nodes_name],
@@ -161,9 +156,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
-            self.upscale[src_nodes_name] = instantiate(
+            self.upscale[src_nodes_name] = build_component(
                 model_config.model.decoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.hidden_dims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[src_nodes_name],
@@ -183,9 +177,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
+            self.decoder[dataset_name] = build_component(
                 model_config.model.decoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],

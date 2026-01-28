@@ -11,7 +11,6 @@
 import logging
 
 import torch
-from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
@@ -56,7 +55,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
     def __init__(
         self,
         data_indices: IndexCollection,
-        weights: DictConfig,
+        weights: dict[str, float],
         metadata_extractor: ExtractVariableGroupAndLevel,
         norm: str | None = None,
         **kwargs,
@@ -67,7 +66,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         ----------
         data_indices : IndexCollection
             Collection of data indices.
-        weights : DictConfig
+        weights : dict[str, float]
             Configuration for variable loss scaling.
         scale_dim : int
             Dimension to scale

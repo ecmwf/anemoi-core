@@ -23,10 +23,14 @@ if is_triton_available():
 @pytest.fixture(autouse=True)
 def setup_torch():
     """Set up torch defaults for all tests."""
+    prev_device = torch.get_default_device()
+    prev_dtype = torch.get_default_dtype()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.set_default_device(device)
     torch.set_default_dtype(torch.float32)
     yield
+    torch.set_default_device(prev_device)
+    torch.set_default_dtype(prev_dtype)
 
 
 def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:

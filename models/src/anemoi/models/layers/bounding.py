@@ -16,9 +16,9 @@ from typing import Iterable
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import nn
 
+from anemoi.models.builders import build_component
 from anemoi.models.data_indices.tensor import InputTensorIndex
 from anemoi.models.layers.activations import leaky_hardtanh
 
@@ -313,8 +313,8 @@ def _build_dataset_boundings(
 ) -> nn.ModuleList:
     """Build the list of model-output bounding modules from configuration.
 
-    This is a thin factory over Hydra's ``instantiate`` that reads the iterable
-    ``model_config.model.bounding`` and instantiates each entry while injecting
+    This factory reads the iterable ``model_config.model.bounding`` and
+    instantiates each entry while injecting
     the common keyword arguments required by bounding modules:
     ``name_to_index``, ``statistics``, and ``name_to_index_stats``. The result
     is returned as an ``nn.ModuleList`` preserving the order of the config.
@@ -323,7 +323,7 @@ def _build_dataset_boundings(
     ----------
     model_config : Any
         Object with a ``model`` attribute containing an iterable ``bounding``
-        (e.g. a list of Hydra configs). If absent or empty, an empty
+        (e.g. a list of config mappings). If absent or empty, an empty
         ``nn.ModuleList`` is returned.
     data_indices : Any
         Object providing the mappings:
@@ -346,7 +346,7 @@ def _build_dataset_boundings(
 
     return nn.ModuleList(
         [
-            instantiate(
+            build_component(
                 cfg,
                 name_to_index=data_indices.model.output.name_to_index,
                 statistics=statistics,
@@ -372,7 +372,7 @@ def build_boundings(
     ----------
     model_config : Any
         Object with a ``model`` attribute containing an iterable ``bounding``
-        (e.g. a list of Hydra configs). If absent or empty, an empty
+        (e.g. a list of config mappings). If absent or empty, an empty
         ``nn.ModuleDict`` is returned.
     data_indices : Any
         Dictionary mapping dataset names to data indices objects. Each

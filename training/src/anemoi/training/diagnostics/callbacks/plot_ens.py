@@ -28,9 +28,8 @@ if TYPE_CHECKING:
     from typing import Union
 
     import pytorch_lightning as pl
-    from omegaconf import DictConfig
 
-    from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.config_types import Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -73,9 +72,9 @@ class EnsemblePlotMixin:
         # Return batch (normalized data) and structured output like regular forecaster
         return batch, [loss, y_preds]
 
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
+    def _get_output_times(self, config: Settings, pl_module: pl.LightningModule) -> tuple:
         """Return times outputted by the model."""
-        if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
+        if config.training.model_task == "anemoi.training.train.tasks.GraphEnsInterpolator":
             output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
             output_times = (getattr(pl_module, "rollout", 0), "forecast")
@@ -238,7 +237,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
+        config: Settings,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -355,7 +354,7 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
 
     def __init__(
         self,
-        config: DictConfig,
+        config: Settings,
         sample_idx: int,
         parameters: list[str],
         min_delta: float | None = None,
@@ -371,7 +370,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
+        config: Settings,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -403,7 +402,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
 
     def __init__(
         self,
-        config: DictConfig,
+        config: Settings,
         sample_idx: int,
         parameters: list[str],
         precip_and_related_fields: list[str] | None = None,
@@ -429,7 +428,7 @@ class GraphTrainableFeaturesPlot(_GraphTrainableFeaturesPlot):
 
     def __init__(
         self,
-        config: DictConfig,
+        config: Settings,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
     ) -> None:

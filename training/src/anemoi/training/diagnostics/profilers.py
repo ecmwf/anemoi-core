@@ -30,9 +30,9 @@ if TYPE_CHECKING:
     import importlib
 
     import pytorch_lightning as pl
-    from omegaconf import DictConfig
     from pytorch_lightning.utilities.types import STEP_OUTPUT
 
+    from anemoi.training.config_types import Settings
     from anemoi.training.train.tasks.base import BaseGraphModule
 
     if importlib.util.find_spec("ipywidgets") is not None:
@@ -285,7 +285,7 @@ class PatchedProfile(profile):
 class BenchmarkProfiler(Profiler):
     """Custom PyTorch Lightning profiler for benchmarking."""
 
-    def __init__(self, config: DictConfig) -> None:
+    def __init__(self, config: Settings) -> None:
         super().__init__(config)
 
         self.config = config

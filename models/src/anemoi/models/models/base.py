@@ -13,12 +13,12 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.builders import build_component
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -216,7 +216,7 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data[dataset_name])
+            self.residual[dataset_name] = build_component(residual_config, graph=self._graph_data[dataset_name])
 
     @abstractmethod
     def forward(

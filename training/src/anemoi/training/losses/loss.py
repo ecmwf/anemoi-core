@@ -10,10 +10,7 @@
 
 import logging
 from collections import defaultdict
-
-from hydra.utils import instantiate
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from collections.abc import Callable
 
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
@@ -22,39 +19,36 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
-    config: DictConfig,
+    loss: BaseLoss | Callable[..., BaseLoss],
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: dict | None = None,
+    scalers_to_include: list[str] | None = None,
     **kwargs,
 ) -> BaseLoss:
-    """Get loss functions from config.
-
-    Can be ModuleList if multiple losses are specified.
+    """Attach scalers to a loss function or loss factory.
 
     Parameters
     ----------
-    config : DictConfig
-        Loss function configuration, should include `scalers` if scalers are to be added to the loss function.
-    scalers : TENSOR_SPEC, optional,
-        Scalers which can be added to the loss function. Defaults to None., by default None
-        If a scaler is to be added to the loss, ensure it is in `scalers` in the loss config.
-        For instance, if `scalers: ['variable']` is set in the config, and `variable` in `scalers`
-        `variable` will be added to the scaler of the loss function.
+    loss : BaseLoss | Callable[..., BaseLoss]
+        Loss instance or explicit factory returning a BaseLoss.
+    scalers : dict[str, TENSOR_SPEC] | None
+        Scalers which can be added to the loss function.
     data_indices : dict, optional
         Indices of the training data
+    scalers_to_include : list[str] | None
+        Scalers to attach to the loss. Use ["*"] to include all available scalers.
     kwargs : Any
-        Additional arguments to pass to the loss function
+        Additional arguments to pass to the loss factory
 
     Returns
     -------
-    BaseLoss | torch.nn.ModuleDict
-        The loss function, or dict of metrics, to use for training/validation.
+    BaseLoss
+        The loss function to use for training/validation.
 
     Raises
     ------
@@ -63,21 +57,22 @@ def get_loss_function(
     ValueError
         If scaler is not found in valid scalers
     """
-    loss_config = OmegaConf.to_container(config, resolve=True)
-    scalers_to_include = loss_config.pop("scalers", [])
-
-    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
-        per_scale_loss_config = loss_config.pop("per_scale_loss")
-        per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
-        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
-
     if scalers is None:
         scalers = {}
+
+    if scalers_to_include is None:
+        scalers_to_include = []
 
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
+    if isinstance(loss, BaseLoss):
+        loss_function = loss
+    elif callable(loss):
+        loss_function = loss(**kwargs)
+    else:
+        error_msg = f"Loss must be a BaseLoss or a callable factory, not {type(loss)}"
+        raise TypeError(error_msg)
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"

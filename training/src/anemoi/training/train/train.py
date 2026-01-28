@@ -20,24 +20,28 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from hydra.utils import get_class
-from hydra.utils import instantiate
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
 from packaging import version
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
-from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.api import normalize_config
+from anemoi.training.builders.callbacks import build_callbacks_from_config
+from anemoi.training.builders.components import build_component
+from anemoi.training.builders.components import resolve_target
+from anemoi.training.builders.graphs import build_graphs_from_config
+from anemoi.training.builders.grid_indices import build_grid_indices_from_config
+from anemoi.training.builders.model_interface import build_model_interface_from_config
+from anemoi.training.builders.optimizers import build_optimizer_builder_from_config
+from anemoi.training.builders.output_masks import build_output_masks_from_config
+from anemoi.training.builders.training_components import build_training_components_from_config
+from anemoi.training.config_types import Settings
+from anemoi.training.config_types import get_path
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -52,13 +56,29 @@ PL_VERSION = version.parse(pl.__version__)
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
-    def __init__(self, config: DictConfig) -> None:
+    def __init__(
+        self,
+        config: Settings,
+        *,
+        wandb_logger: pl.loggers.WandbLogger | None = None,
+        mlflow_logger: pl.loggers.MLFlowLogger | None = None,
+        tensorboard_logger: pl.loggers.TensorBoardLogger | None = None,
+        callbacks: list[pl.callbacks.Callback] | None = None,
+    ) -> None:
         """Initialize the Anemoi trainer.
 
         Parameters
         ----------
-        config : DictConfig
-            Config object from Hydra.
+        config : Settings
+            Typed Settings config.
+        wandb_logger : pl.loggers.WandbLogger | None
+            Pre-built W&B logger to use.
+        mlflow_logger : pl.loggers.MLFlowLogger | None
+            Pre-built MLflow logger to use.
+        tensorboard_logger : pl.loggers.TensorBoardLogger | None
+            Pre-built TensorBoard logger to use.
+        callbacks : list[pl.callbacks.Callback] | None
+            Pre-built callbacks to use.
 
         """
         # Allow for lower internal precision of float32 matrix multiplications.
@@ -66,16 +86,16 @@ class AnemoiTrainer(ABC):
         torch.set_float32_matmul_precision("high")
         # Resolve the config to avoid shenanigans with lazy loading
 
-        if config.config_validation:
-            OmegaConf.resolve(config)
-            self.config = BaseSchema(**config)
+        if not isinstance(config, Settings):
+            msg = "AnemoiTrainer expects a typed Settings config. Use normalize_config() first."
+            raise TypeError(msg)
+        self.config = config
+        LOGGER.info("Config validated.")
 
-            LOGGER.info("Config validated.")
-        else:
-            config = OmegaConf.to_object(config)
-            self.config = UnvalidatedBaseSchema(**DictConfig(config))
-
-            LOGGER.info("Skipping config validation.")
+        self._wandb_logger = wandb_logger
+        self._mlflow_logger = mlflow_logger
+        self._tensorboard_logger = tensorboard_logger
+        self._callbacks = callbacks
 
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
@@ -105,7 +125,8 @@ class AnemoiTrainer(ABC):
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
+        grid_indices = build_grid_indices_from_config(self.config, graph_data=self.graph_data)
+        datamodule = AnemoiDatasetsDataModule(self.config, self.graph_data, grid_indices)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -141,38 +162,6 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
-        """Create graph for a specific dataset, overriding the dataset path in config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
-
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        graph_config = convert_to_omegaconf(self.config).graph
-
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
-
-        return GraphCreator(config=graph_config).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
-
     @cached_property
     @abstractmethod
     def profiler(self) -> None:
@@ -182,56 +171,108 @@ class AnemoiTrainer(ABC):
     @cached_property
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
+        graphs = build_graphs_from_config(self.config)
+        for dataset_name in graphs:
+            LOGGER.info("Created graph for dataset '%s'", dataset_name)
         return graphs
 
     @cached_property
-    def model(self) -> pl.LightningModule:
+    def model(self) -> pl.LightningModule:  # noqa: C901
         """Provide the model instance."""
+        processor_target = get_path(self.config, "model.processor._target_") or ""
+        encoder_target = get_path(self.config, "model.encoder._target_") or ""
+        decoder_target = get_path(self.config, "model.decoder._target_") or ""
         assert (
             not (
                 "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.processor.target_
+                and ".Transformer" in processor_target
             )
             and not (
                 "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
+                and ".Transformer" in encoder_target
             )
             and not (
                 "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
+                and ".Transformer" in decoder_target
             )
         ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
         "Please use a different activation function."
 
+        graph_data = self.graph_data
+        data_indices = self.data_indices
+        metadata = self.metadata
+        statistics = self.datamodule.statistics
+        statistics_tendencies = self.datamodule.statistics_tendencies
+
+        output_masks = build_output_masks_from_config(self.config, graph_data=graph_data)
+        grid_indices = self.datamodule.grid_indices
+        optimizer_builder = build_optimizer_builder_from_config(self.config)
+
+        combined_supporting_arrays = {name: arrays.copy() for name, arrays in self.supporting_arrays.items()}
+        for dataset_name, mask in output_masks.items():
+            if dataset_name in combined_supporting_arrays:
+                combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
+            else:
+                combined_supporting_arrays[dataset_name] = dict(mask.supporting_arrays)
+
+        model_interface = build_model_interface_from_config(
+            self.config,
+            graph_data=graph_data,
+            statistics=statistics,
+            data_indices=data_indices,
+            metadata=metadata,
+            statistics_tendencies=statistics_tendencies,
+            supporting_arrays=combined_supporting_arrays,
+        )
+
+        scalers, updating_scalars, losses, metrics, val_metric_ranges = build_training_components_from_config(
+            self.config,
+            graph_data=graph_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            data_indices=data_indices,
+            metadata=metadata,
+            output_masks=output_masks,
+        )
+
         kwargs = {
-            "config": convert_to_omegaconf(self.config),
-            "data_indices": self.data_indices,
-            "graph_data": self.graph_data,
-            "metadata": self.metadata,
-            "statistics": self.datamodule.statistics,
-            "statistics_tendencies": self.datamodule.statistics_tendencies,
-            "supporting_arrays": self.supporting_arrays,
+            "config": self.config,
+            "data_indices": data_indices,
+            "graph_data": graph_data,
+            "metadata": metadata,
+            "output_masks": output_masks,
+            "grid_indices": grid_indices,
+            "scalers": scalers,
+            "updating_scalars": updating_scalars,
+            "losses": losses,
+            "metrics": metrics,
+            "val_metric_ranges": val_metric_ranges,
+            "optimizer_builder": optimizer_builder,
+            "model_interface": model_interface,
         }
 
-        model_task = get_class(self.config.training.model_task)
+        model_task = resolve_target(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
+            ckpt_model_name_to_index = None
+            if self.last_checkpoint is not None:
+                checkpoint = torch.load(self.last_checkpoint, weights_only=False, map_location="cpu")
+                ckpt_data_indices = checkpoint.get("hyper_parameters", {}).get("data_indices")
+                if isinstance(ckpt_data_indices, dict):
+                    ckpt_model_name_to_index = {
+                        dataset_name: ckpt_indices.name_to_index
+                        for dataset_name, ckpt_indices in ckpt_data_indices.items()
+                    }
+                elif ckpt_data_indices is not None:
+                    ckpt_model_name_to_index = {"data": ckpt_data_indices.name_to_index}
             # Sanify the checkpoint for transfer learning
             if self.config.training.transfer_learning:
                 LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
                 model = transfer_learning_loading(model, self.last_checkpoint)
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                # pop data_indices so that the data indices on the checkpoint do not get overwritten
-                # by the data indices from the new config
-                kwargs.pop("data_indices")
                 model = model_task.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
@@ -240,6 +281,8 @@ class AnemoiTrainer(ABC):
                 )
 
             model.data_indices = self.data_indices
+            if ckpt_model_name_to_index is not None:
+                model._ckpt_model_name_to_index = ckpt_model_name_to_index
             # check data indices in original checkpoint and current data indices are the same
             for data_indices in self.data_indices.values():
                 data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
@@ -273,7 +316,7 @@ class AnemoiTrainer(ABC):
             return self.config.training.run_id
 
         # When we rely on mlflow to create a new run ID
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.config.diagnostics.log.mlflow.enabled or self._mlflow_logger is not None:
             # if using mlflow with a new run get the run_id from mlflow
             return self._get_mlflow_run_id()
 
@@ -285,16 +328,22 @@ class AnemoiTrainer(ABC):
     @cached_property
     def wandb_logger(self) -> pl.loggers.WandbLogger:
         """WandB logger."""
+        if self._wandb_logger is not None:
+            return self._wandb_logger
         return get_wandb_logger(self.config, self.model)
 
     @cached_property
     def mlflow_logger(self) -> pl.loggers.MLFlowLogger:
         """Mlflow logger."""
+        if self._mlflow_logger is not None:
+            return self._mlflow_logger
         return get_mlflow_logger(self.config)
 
     @cached_property
     def tensorboard_logger(self) -> pl.loggers.TensorBoardLogger:
         """TensorBoard logger."""
+        if self._tensorboard_logger is not None:
+            return self._tensorboard_logger
         return get_tensorboard_logger(self.config)
 
     def _get_warm_start_checkpoint(self) -> Path | None:
@@ -335,7 +384,9 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        return get_callbacks(self.config.model_dump(by_alias=True))
+        if self._callbacks is not None:
+            return self._callbacks
+        return build_callbacks_from_config(self.config)
 
     @cached_property
     def metadata(self) -> dict:
@@ -355,7 +406,7 @@ class AnemoiTrainer(ABC):
 
         md_dict = {
             "version": "2.0",
-            "config": convert_to_omegaconf(self.config),
+            "config": self.config,
             "seed": self.initial_seed,
             "run_id": self.run_id,
             "dataset": None,  # will be populated in DataModule
@@ -375,13 +426,22 @@ class AnemoiTrainer(ABC):
     @cached_property
     def loggers(self) -> list:
         loggers = []
-        if self.config.diagnostics.log.wandb.enabled:
+        if self._wandb_logger is not None:
+            LOGGER.info("W&B logger provided")
+            loggers.append(self.wandb_logger)
+        elif self.config.diagnostics.log.wandb.enabled:
             LOGGER.info("W&B logger enabled")
             loggers.append(self.wandb_logger)
-        if self.config.diagnostics.log.tensorboard.enabled:
+        if self._tensorboard_logger is not None:
+            LOGGER.info("TensorBoard logger provided")
+            loggers.append(self.tensorboard_logger)
+        elif self.config.diagnostics.log.tensorboard.enabled:
             LOGGER.info("TensorBoard logger enabled")
             loggers.append(self.tensorboard_logger)
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self._mlflow_logger is not None:
+            LOGGER.info("MLFlow logger provided")
+            loggers.append(self.mlflow_logger)
+        elif self.config.diagnostics.log.mlflow.enabled:
             LOGGER.info("MLFlow logger enabled")
             loggers.append(self.mlflow_logger)
         return loggers
@@ -428,13 +488,15 @@ class AnemoiTrainer(ABC):
             int(total_number_of_model_instances) * self.config.training.lr.rate,
         )
 
-        if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
+        max_epochs = self.config.training.max_epochs
+        max_steps = self.config.training.max_steps
+        if max_epochs is not None and max_steps not in (None, -1):
             LOGGER.info(
                 "Training limits: max_epochs=%d, max_steps=%d. "
                 "Training will stop when either limit is reached first. "
                 "Learning rate scheduler will run for %d steps.",
-                self.config.training.max_epochs,
-                self.config.training.max_steps,
+                max_epochs,
+                max_steps,
                 self.config.training.lr.iterations,
             )
 
@@ -442,7 +504,7 @@ class AnemoiTrainer(ABC):
         """Get the server2server lineage."""
         self.parent_run_server2server = None
         self.fork_run_server2server = None
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.config.diagnostics.log.mlflow.enabled or self._mlflow_logger is not None:
             self.parent_run_server2server = self.mlflow_logger._parent_run_server2server
             LOGGER.info("Parent run server2server: %s", self.parent_run_server2server)
             self.fork_run_server2server = self.mlflow_logger._fork_run_server2server
@@ -451,21 +513,30 @@ class AnemoiTrainer(ABC):
     def _update_paths(self) -> None:
         """Update the paths in the configuration."""
         self.lineage_run = None
+
+        def _append_run_id(path: Path, run_id: str | None) -> Path:
+            if not run_id:
+                return path
+            return path if path.name == run_id else path / run_id
+
         if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.lineage_run = self.parent_run_server2server or self.run_id
-            self.config.system.output.checkpoints.root = Path(
-                self.config.system.output.checkpoints.root,
+            self.config.system.output.checkpoints.root = _append_run_id(
+                Path(self.config.system.output.checkpoints.root),
                 self.lineage_run,
             )
-            self.config.system.output.plots = Path(self.config.system.output.plots, self.lineage_run)
+            self.config.system.output.plots = _append_run_id(
+                Path(self.config.system.output.plots),
+                self.lineage_run,
+            )
         elif self.config.training.fork_run_id:
             # WHEN USING MANY NODES/GPUS
             self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
-            self.config.system.output.checkpoints.root = Path(
-                self.config.system.output.checkpoints.root,
+            self.config.system.output.checkpoints.root = _append_run_id(
+                Path(self.config.system.output.checkpoints.root),
                 self.lineage_run,
             )
 
@@ -480,7 +551,7 @@ class AnemoiTrainer(ABC):
         This is used to check the run can be restarted from the checkpoint.
         """
         self.dry_run = False
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.config.diagnostics.log.mlflow.enabled or self._mlflow_logger is not None:
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
                 self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints.root).is_dir()
@@ -492,17 +563,18 @@ class AnemoiTrainer(ABC):
 
     def prepare_compilation(self) -> None:
 
-        if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
-        if hasattr(self.config.training, "recompile_limit"):
-            torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
-            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
+        if getattr(self.config.model, "compile", None) is not None:
+            self.model = mark_for_compilation(self.model, self.config.model.compile)
+        recompile_limit = getattr(self.config.training, "recompile_limit", None)
+        if recompile_limit is not None:
+            torch._dynamo.config.cache_size_limit = int(recompile_limit)
+            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(recompile_limit), 256)
             LOGGER.info("Recompile limit set to %d", torch._dynamo.config.cache_size_limit)
 
     @cached_property
     def strategy(self) -> Any:
-        return instantiate(
-            convert_to_omegaconf(self.config).training.strategy,
+        return build_component(
+            self.config.training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
@@ -532,6 +604,7 @@ class AnemoiTrainer(ABC):
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
 
+        max_steps = self.config.training.max_steps
         trainer = pl.Trainer(
             accelerator=self.accelerator,
             callbacks=self.callbacks,
@@ -542,7 +615,7 @@ class AnemoiTrainer(ABC):
             num_nodes=self.config.system.hardware.num_nodes,
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,
-            max_steps=self.config.training.max_steps or -1,
+            max_steps=max_steps if max_steps is not None else -1,
             logger=self.loggers,
             profiler=self.profiler,
             log_every_n_steps=self.config.diagnostics.log.interval,
@@ -573,7 +646,7 @@ class AnemoiTrainer(ABC):
 
 @hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(config: DictConfig) -> None:
-    AnemoiTrainer(config).train()
+    AnemoiTrainer(normalize_config(config)).train()
 
 
 if __name__ == "__main__":

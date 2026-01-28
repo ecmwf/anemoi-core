@@ -13,10 +13,10 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.builders import build_component
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
@@ -45,9 +45,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
+            self.encoder[dataset_name] = build_component(
                 model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
                 hidden_dim=self.num_channels,
@@ -68,9 +67,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             trainable_size=model_config.model.processor.get("trainable_size", 0),
         )
 
-        self.processor = instantiate(
+        self.processor = build_component(
             model_config.model.processor,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
@@ -87,9 +85,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
+            self.decoder[dataset_name] = build_component(
                 model_config.model.decoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,

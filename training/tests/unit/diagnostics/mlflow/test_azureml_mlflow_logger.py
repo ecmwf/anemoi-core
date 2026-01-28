@@ -6,7 +6,6 @@ from mlflow import MlflowClient
 
 from anemoi.training.diagnostics.mlflow.azureml import AnemoiAzureMLflowLogger
 from anemoi.training.diagnostics.mlflow.azureml import AzureIdentity
-from anemoi.training.schemas.diagnostics import AzureMlflowSchema
 
 
 @pytest.fixture(scope="session")
@@ -57,25 +56,3 @@ def test_azure_mlflowlogger_metric_deduplication(default_logger: AnemoiAzureMLfl
     assert len(default_logger._logged_metrics) == 1
     assert next(iter(default_logger._logged_metrics))[0] == "foo"  # key
     assert next(iter(default_logger._logged_metrics))[1] == 5  # step
-
-
-def test_azure_mlflow_schema() -> None:
-    config = {
-        "_target_": "anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger",
-        "enabled": False,
-        "offline": False,
-        "authentication": False,
-        "tracking_uri": None,  # You had ??? — using None as placeholder
-        "experiment_name": "anemoi-debug",
-        "project_name": "Anemoi",
-        "system": False,
-        "terminal": False,
-        "run_name": None,  # If set to null, the run name will be a random UUID
-        "on_resume_create_child": True,
-        "expand_hyperparams": ["config"],  # Which keys in hyperparams to expand
-        "http_max_retries": 35,
-        "max_params_length": 2000,
-    }
-    schema = AzureMlflowSchema(**config)
-
-    assert schema.target_ == "anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger"

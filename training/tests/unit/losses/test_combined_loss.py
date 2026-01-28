@@ -10,29 +10,25 @@
 
 import pytest
 import torch
-from hydra.errors import InstantiationException
-from omegaconf import DictConfig
 
+from anemoi.training.builders.losses import build_loss_from_config
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
-from anemoi.training.losses import get_loss_function
 
 
 def test_combined_loss() -> None:
     """Test the combined loss function."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
-                ],
-                "scalers": ["test"],
-                "loss_weights": [1.0, 0.5],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": "anemoi.training.losses.CombinedLoss",
+            "losses": [
+                {"_target_": "anemoi.training.losses.MSELoss"},
+                {"_target_": "anemoi.training.losses.MAELoss"},
+            ],
+            "scalers": ["test"],
+            "loss_weights": [1.0, 0.5],
+        },
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss.losses[0], MSELoss)
@@ -44,35 +40,31 @@ def test_combined_loss() -> None:
 
 def test_combined_loss_invalid_loss_weights() -> None:
     """Test the combined loss function with invalid loss weights."""
-    with pytest.raises(InstantiationException):
-        get_loss_function(
-            DictConfig(
-                {
-                    "_target_": "anemoi.training.losses.combined.CombinedLoss",
-                    "losses": [
-                        {"_target_": "anemoi.training.losses.MSELoss"},
-                        {"_target_": "anemoi.training.losses.MAELoss"},
-                    ],
-                    "scalers": ["test"],
-                    "loss_weights": [1.0, 0.5, 1],
-                },
-            ),
+    with pytest.raises(ValueError, match="Number of losses and weights must match"):
+        build_loss_from_config(
+            {
+                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "losses": [
+                    {"_target_": "anemoi.training.losses.MSELoss"},
+                    {"_target_": "anemoi.training.losses.MAELoss"},
+                ],
+                "scalers": ["test"],
+                "loss_weights": [1.0, 0.5, 1],
+            },
             scalers={"test": (-1, torch.ones(2))},
         )
 
 
 def test_combined_loss_equal_weighting() -> None:
     """Test equal weighting when not given."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
-                ],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": "anemoi.training.losses.CombinedLoss",
+            "losses": [
+                {"_target_": "anemoi.training.losses.MSELoss"},
+                {"_target_": "anemoi.training.losses.MAELoss"},
+            ],
+        },
         scalers={},
     )
     assert all(weight == 1.0 for weight in loss.loss_weights)
@@ -80,18 +72,16 @@ def test_combined_loss_equal_weighting() -> None:
 
 def test_combined_loss_seperate_scalers() -> None:
     """Test that scalers are passed to the correct loss function."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
-                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
-                ],
-                "scalers": ["test", "test2"],
-                "loss_weights": [1.0, 0.5],
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": "anemoi.training.losses.CombinedLoss",
+            "losses": [
+                {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
+            ],
+            "scalers": ["test", "test2"],
+            "loss_weights": [1.0, 0.5],
+        },
         scalers={"test": (-1, torch.ones(2)), "test2": (-1, torch.ones(2))},
     )
     assert isinstance(loss, CombinedLoss)

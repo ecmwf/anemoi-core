@@ -13,10 +13,8 @@ from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
 
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.api import normalize_config
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -35,46 +33,27 @@ def test_training_cycle_architecture_configs(
 ) -> None:
     cfg, url, _ = architecture_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
-def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str, str]) -> None:
+def test_normalize_config_architecture_configs(architecture_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = architecture_config
-    BaseSchema(**cfg)
+    normalize_config(cfg)
 
 
-def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, str, str]) -> None:
+def test_normalize_config_mlflow_configs(base_global_config: tuple[DictConfig, str, str]) -> None:
     from anemoi.training.diagnostics.logger import get_mlflow_logger
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
     config, _, _ = base_global_config
-    if config.config_validation:
-        OmegaConf.resolve(config)
-        config = BaseSchema(**config)
-        assert config.diagnostics.log.mlflow.target_ == "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
-    else:
-        config = OmegaConf.to_object(config)
-        config = UnvalidatedBaseSchema(**DictConfig(config))
+    config = normalize_config(config)
+    assert config.diagnostics.log.mlflow._target_ == "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
 
     logger = get_mlflow_logger(config)
 
     if config.diagnostics.log.mlflow.enabled:
         assert Path(config.diagnostics.log.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
         assert isinstance(logger, AnemoiMLflowLogger)
-
-
-@skip_if_offline
-@pytest.mark.slow
-def test_training_cycle_without_config_validation(
-    gnn_config: tuple[DictConfig, str],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, url = gnn_config
-    get_test_archive(url)
-
-    cfg.config_validation = False
-    cfg.system.input.graph = "dummpy.pt"  # Mandatory input when running without config validation
-    AnemoiTrainer(cfg).train()
 
 
 @skip_if_offline
@@ -86,12 +65,12 @@ def test_training_cycle_stretched(
     cfg, urls = stretched_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
-def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[str]]) -> None:
+def test_normalize_config_stretched(stretched_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = stretched_config
-    BaseSchema(**cfg)
+    normalize_config(cfg)
 
 
 @skip_if_offline
@@ -103,12 +82,12 @@ def test_training_cycle_multidatasets(
     cfg, urls = multidatasets_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
-def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
+def test_normalize_config_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidatasets_config
-    BaseSchema(**cfg)
+    normalize_config(cfg)
 
 
 @skip_if_offline
@@ -117,7 +96,7 @@ def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_a
     cfg, urls = lam_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
 @skip_if_offline
@@ -129,12 +108,12 @@ def test_training_cycle_lam_with_existing_graph(
     cfg, urls = lam_config_with_graph
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
-def test_config_validation_lam(lam_config: DictConfig) -> None:
+def test_normalize_config_lam(lam_config: DictConfig) -> None:
     cfg, _ = lam_config
-    BaseSchema(**cfg)
+    normalize_config(cfg)
 
 
 @skip_if_offline
@@ -142,12 +121,12 @@ def test_config_validation_lam(lam_config: DictConfig) -> None:
 def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = ensemble_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
-def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
+def test_normalize_config_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
-    BaseSchema(**cfg)
+    normalize_config(cfg)
 
 
 @skip_if_offline
@@ -159,12 +138,12 @@ def test_training_cycle_hierarchical(
     cfg, urls = hierarchical_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
-def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
+def test_normalize_config_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = hierarchical_config
-    BaseSchema(**cfg)
+    normalize_config(cfg)
 
 
 @skip_if_offline
@@ -173,27 +152,22 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     cfg, url = gnn_config
     get_test_archive(url)
 
-    AnemoiTrainer(cfg).train()
-    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    trainer = AnemoiTrainer(normalize_config(cfg))
+    trainer.train()
+    checkpoint_root = Path(trainer.config.system.output.checkpoints.root)
+    run_dir = checkpoint_root
 
-    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+    assert run_dir.exists(), f"Checkpoint directory not found at: {run_dir}"
+    assert len(list(run_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
 
-    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert (
-        len(run_dirs) == 1
-    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
-
-    checkpoint_dir = run_dirs[0]
-    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
-
-    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.run_id = run_dir.name
     cfg.training.max_epochs = 3
-    trainer = AnemoiTrainer(cfg)
+    trainer = AnemoiTrainer(normalize_config(cfg))
     trainer.train()
 
     assert trainer.model.trainer.global_step == 6
 
-    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
+    assert len(list(run_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
 
 @skip_if_offline
@@ -203,7 +177,7 @@ def test_loading_checkpoint(
 ) -> None:
     cfg, url = architecture_config_with_checkpoint
     get_test_archive(url)
-    trainer = AnemoiTrainer(cfg)
+    trainer = AnemoiTrainer(normalize_config(cfg))
     trainer.model
 
 
@@ -215,7 +189,7 @@ def test_restart_from_existing_checkpoint(
 ) -> None:
     cfg, url = architecture_config_with_checkpoint
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
 @skip_if_offline
@@ -227,13 +201,13 @@ def test_training_cycle_interpolator(
     """Full training-cycle smoke-test for the temporal interpolation task."""
     cfg, url = interpolator_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
-def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
-    """Schema-level validation for the temporal interpolation config."""
+def test_normalize_config_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
+    """Adapter-level validation for the temporal interpolation config."""
     cfg, _ = interpolator_config
-    BaseSchema(**cfg)
+    normalize_config(cfg)
 
 
 @skip_if_offline
@@ -241,12 +215,12 @@ def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, s
 def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
     cfg, url = diffusion_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()
 
 
-def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
+def test_normalize_config_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
     cfg, _ = diffusion_config
-    BaseSchema(**cfg)
+    normalize_config(cfg)
 
 
 @skip_if_offline
@@ -270,4 +244,4 @@ def test_training_cycle_mlflow_dry_run(
     get_test_archive(url)
 
     # Run training
-    AnemoiTrainer(cfg).train()
+    AnemoiTrainer(normalize_config(cfg)).train()

@@ -154,6 +154,12 @@ lr:
 # in order to keep a constant global_lr
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
 
+# Rollout config is required by the typed training settings, even for interpolation.
+rollout:
+  start: 1
+  epoch_increment: 1
+  max: 1
+
 submodules_to_freeze: []
 
 # if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.

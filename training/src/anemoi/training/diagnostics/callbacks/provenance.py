@@ -7,13 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-import pytorch_lightning as pl
-import torch
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
+
+if TYPE_CHECKING:
+    import pytorch_lightning as pl
+    import torch
+
+    from anemoi.training.config_types import Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -21,12 +26,12 @@ LOGGER = logging.getLogger(__name__)
 class ParentUUIDCallback(Callback):
     """A callback that retrieves the parent UUID for a model, if it is a child model."""
 
-    def __init__(self, config: OmegaConf) -> None:
+    def __init__(self, config: Settings) -> None:
         """Initialise the ParentUUIDCallback callback.
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
 
         """

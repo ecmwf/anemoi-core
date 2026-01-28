@@ -9,14 +9,11 @@
 
 
 from collections.abc import Callable
-from typing import Any
 
 import torch
-from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.loss import get_loss_function
 
 
 # TODO(Harrison): Consider renaming and reworking to a RemappingLossWrapper or similar, as it remaps variables
@@ -25,7 +22,7 @@ class FilteringLossWrapper(BaseLoss):
 
     def __init__(
         self,
-        loss: dict[str, Any] | Callable | BaseLoss,
+        loss: BaseLoss | Callable[..., BaseLoss],
         predicted_variables: list[str] | None = None,
         target_variables: list[str] | None = None,
         **kwargs,
@@ -34,8 +31,8 @@ class FilteringLossWrapper(BaseLoss):
 
         Parameters
         ----------
-        loss : Type[torch.nn.Module] | dict[str, Any]
-            wrapped loss
+        loss : BaseLoss | Callable[..., BaseLoss]
+            Wrapped loss or loss factory.
         predicted_variables : list[str] | None
             predicted variables to keep, if None, all variables are kept
         target_variables : list[str] | None
@@ -48,21 +45,16 @@ class FilteringLossWrapper(BaseLoss):
 
         super().__init__()
 
-        self._loss_scaler_specification = {}
-        if isinstance(loss, str):
-            self._loss_scaler_specification = ["*"]
-            self.loss = get_loss_function(DictConfig({"_target_": loss}), scalers={}, **dict(kwargs))
-        elif isinstance(loss, DictConfig | dict):
-            self._loss_scaler_specification = loss.pop("scalers", ["*"])
-            self.loss = get_loss_function(loss, scalers={}, **dict(kwargs))
-        elif isinstance(loss, type):
-            self._loss_scaler_specification = ["*"]
-            self.loss = loss(**kwargs)
-        elif isinstance(loss, BaseLoss):
-            self._loss_scaler_specification = loss.scaler
+        if isinstance(loss, BaseLoss):
             self.loss = loss
+        elif callable(loss):
+            self.loss = loss(**kwargs)
         else:
-            msg = f"Invalid loss type provided: {type(loss)}. Expected a str or dict or BaseLoss."
+            msg = f"Invalid loss type provided: {type(loss)}. Expected a BaseLoss or callable factory."
+            raise TypeError(msg)
+
+        if not isinstance(self.loss, BaseLoss):
+            msg = f"Loss must be a subclass of 'BaseLoss', not {type(self.loss)}"
             raise TypeError(msg)
 
         self.predicted_variables = predicted_variables

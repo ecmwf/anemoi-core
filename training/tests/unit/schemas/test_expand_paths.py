@@ -5,7 +5,7 @@ import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.training.schemas.base_schema import expand_paths
+from anemoi.training.utils.config import expand_paths
 
 
 @pytest.fixture

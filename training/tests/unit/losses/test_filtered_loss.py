@@ -8,9 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import torch
-from omegaconf import DictConfig
 
-from anemoi.training.losses import get_loss_function
+from anemoi.training.builders.losses import build_loss_from_config
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.filtering import FilteringLossWrapper
@@ -22,21 +21,19 @@ def test_filtered_loss() -> None:
     """Test that loss function can be instantiated."""
     data_config = {"data": {"forcing": [], "diagnostic": []}}
     name_to_index = {"tp": 0, "other_var": 1}
-    data_indices = IndexCollection(DictConfig(data_config).data, name_to_index)
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
-                "predicted_variables": ["tp"],
-                "target_variables": ["tp"],
-                "loss": {
-                    "_target_": "anemoi.training.losses.spectral.LogFFT2Distance",
-                    "x_dim": 710,
-                    "y_dim": 640,
-                    "scalers": [],
-                },
+    data_indices = IndexCollection(data_config["data"], name_to_index)
+    loss = build_loss_from_config(
+        {
+            "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
+            "predicted_variables": ["tp"],
+            "target_variables": ["tp"],
+            "loss": {
+                "_target_": "anemoi.training.losses.spectral.LogFFT2Distance",
+                "x_dim": 710,
+                "y_dim": 640,
+                "scalers": [],
             },
-        ),
+        },
         data_indices=data_indices,
     )
     assert isinstance(loss, FilteringLossWrapper)
@@ -66,15 +63,13 @@ def test_filtered_loss() -> None:
     ), "Loss output with squash=True should be the value of loss for predicted variables"
 
     # test instantiation with a str loss
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
-                "predicted_variables": ["tp"],
-                "target_variables": ["tp"],
-                "loss": "anemoi.training.losses.MSELoss",
-            },
-        ),
+    loss = build_loss_from_config(
+        {
+            "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
+            "predicted_variables": ["tp"],
+            "target_variables": ["tp"],
+            "loss": {"_target_": "anemoi.training.losses.MSELoss"},
+        },
         data_indices=data_indices,
     )
     loss.set_data_indices(data_indices)

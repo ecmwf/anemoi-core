@@ -9,12 +9,11 @@
 
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
@@ -28,7 +27,7 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
 
     Attributes
     ----------
-    dataset : str | DictConfig
+    dataset : str | Mapping
         The dataset.
 
     Methods
@@ -43,9 +42,9 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, dataset: DictConfig, name: str) -> None:
+    def __init__(self, dataset: Mapping | str, name: str) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
+        self.dataset = dataset if isinstance(dataset, str) else dict(dataset)
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 

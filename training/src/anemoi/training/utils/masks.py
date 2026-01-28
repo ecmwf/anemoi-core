@@ -49,7 +49,7 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
 
     @property
     def supporting_arrays(self) -> dict:
-        return {"output_mask": self.mask.numpy()}
+        return {"output_mask": self.mask.detach().cpu().numpy()}
 
     def broadcast_like(self, x: torch.Tensor, dim: int, grid_shard_slice: slice | None = None) -> torch.Tensor:
         assert x.shape[dim] == len(
@@ -104,7 +104,7 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
             indices = (~mask).nonzero(as_tuple=True)[0].to(x.device)
             return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
 
-        mask = self.broadcast_like(x, dim, grid_shard_slice).cpu()
+        mask = self.broadcast_like(x, dim, grid_shard_slice).to(x.device)
         return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
     def rollout_boundary(

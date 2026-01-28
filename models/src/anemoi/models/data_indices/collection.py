@@ -12,8 +12,8 @@ import logging
 import operator
 
 import yaml
-from omegaconf import OmegaConf
 
+from anemoi.models.config_types import to_container
 from anemoi.models.data_indices.index import BaseIndex
 from anemoi.models.data_indices.index import DataIndex
 from anemoi.models.data_indices.index import ModelIndex
@@ -28,15 +28,11 @@ class IndexCollection:
     """Collection of data and model indices."""
 
     def __init__(self, data_config, name_to_index) -> None:
-        self.config = OmegaConf.to_container(data_config, resolve=True)
+        self.config = to_container(data_config)
         self.name_to_index = dict(sorted(name_to_index.items(), key=operator.itemgetter(1)))
-        self.forcing = [] if data_config.forcing is None else OmegaConf.to_container(data_config.forcing, resolve=True)
-        self.diagnostic = (
-            [] if data_config.diagnostic is None else OmegaConf.to_container(data_config.diagnostic, resolve=True)
-        )
-        self.target = (
-            [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
-        )
+        self.forcing = [] if self.config.get("forcing") is None else self.config.get("forcing", [])
+        self.diagnostic = [] if self.config.get("diagnostic") is None else self.config.get("diagnostic", [])
+        self.target = [] if self.config.get("target") is None else self.config.get("target", [])
         defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
         self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
 

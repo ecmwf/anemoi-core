@@ -19,11 +19,15 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Generator
+    from collections.abc import Iterable
 
-    from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
+
+    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.training.config_types import Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,35 +40,61 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
     def __init__(
         self,
         *,
-        config: DictConfig,
+        config: Settings,
         graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
         data_indices: dict,
         metadata: dict,
-        supporting_arrays: dict,
+        output_masks: dict,
+        grid_indices: dict,
+        scalers: dict,
+        updating_scalars: dict,
+        losses: dict,
+        metrics: dict,
+        val_metric_ranges: dict,
+        optimizer_builder: Callable[[Iterable[torch.nn.Parameter], float], torch.optim.Optimizer] | None = None,
+        model_interface: AnemoiModelInterface,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
-        config : DictConfig
+        config : Settings
             Job configuration
-        statistics : dict
-            Statistics of the training data
         data_indices : dict
             Indices of the training data,
         metadata : dict
             Provenance information
+        output_masks : dict
+            Pre-built output masks keyed by dataset name.
+        grid_indices : dict
+            Pre-built grid indices keyed by dataset name.
+        scalers : dict
+            Pre-built scalers keyed by dataset name.
+        updating_scalars : dict
+            Pre-built updating scalers keyed by dataset name.
+        losses : dict
+            Pre-built losses keyed by dataset name.
+        metrics : dict
+            Pre-built metrics keyed by dataset name.
+        val_metric_ranges : dict
+            Pre-computed validation metric ranges keyed by dataset name.
+        optimizer_builder : Callable, optional
+            Callable that builds the optimizer from params and lr.
         """
         super().__init__(
             config=config,
             graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            output_masks=output_masks,
+            grid_indices=grid_indices,
+            scalers=scalers,
+            updating_scalars=updating_scalars,
+            losses=losses,
+            metrics=metrics,
+            val_metric_ranges=val_metric_ranges,
+            optimizer_builder=optimizer_builder,
+            model_interface=model_interface,
         )
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)

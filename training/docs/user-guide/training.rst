@@ -103,6 +103,29 @@ Make sure you have a GPU available and simply call:
 
    anemoi-training train
 
+*************************
+ Python-first entrypoint
+*************************
+
+If you prefer to drive training directly from Python (without Hydra),
+build a config mapping and call the API:
+
+.. code:: python
+
+   from pathlib import Path
+   import yaml
+
+   from anemoi.training.api import normalize_config, train
+
+   config_path = Path("config.full.yaml")
+   config_dict = yaml.safe_load(config_path.read_text())
+   config = normalize_config(config_dict)
+   train(config)
+
+This expects a fully materialized configuration (single mapping with all
+required sections: ``data``, ``dataloader``, ``diagnostics``, ``system``,
+``graph``, ``model``, ``training``) and no unresolved interpolations.
+
 .. _restart target:
 
 **************

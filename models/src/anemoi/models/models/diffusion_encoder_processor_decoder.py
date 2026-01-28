@@ -16,11 +16,11 @@ from typing import Union
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.builders import build_component
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -63,7 +63,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             graph_data=graph_data,
         )
 
-        self.noise_embedder = instantiate(diffusion_config.noise_embedder)
+        self.noise_embedder = build_component(diffusion_config.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
     def _build_networks(self, model_config: DotDict) -> None:
@@ -81,9 +81,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
+            self.encoder[dataset_name] = build_component(
                 model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
                 hidden_dim=self.num_channels,
@@ -104,9 +103,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             trainable_size=model_config.model.processor.get("trainable_size", 0),
         )
 
-        self.processor = instantiate(
+        self.processor = build_component(
             model_config.model.processor,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
@@ -122,9 +120,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
-            self.decoder[dataset_name] = instantiate(
+            self.decoder[dataset_name] = build_component(
                 model_config.model.decoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,

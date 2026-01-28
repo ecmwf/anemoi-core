@@ -11,9 +11,11 @@ In this example we show how to create an instance of the
 Encoder-Processor-Decoder that uses a Graph Transformer for the encoder
 and decoder and a sliding window transformer [#f1]_ for the processor.
 
-Our implemented models are instantiated by omegaconf [#f2]_ and hydra
-[#f3]_. Commonly used model configurations can be found in
-``configs/models`` (see :doc:`anemoi-training:user-guide/hydra-intro`).
+Our implemented models can now be instantiated directly in Python via
+``anemoi.models.api`` without Hydra. Commonly used model configurations
+are still available in the training configs (see
+:doc:`anemoi-training:user-guide/hydra-intro`) and can be loaded as plain
+mappings.
 
 *********************
  Model Configuration
@@ -69,6 +71,27 @@ create a model.
    from omegaconf import OmegaConf
 
    model_config = OmegaConf.load("transformer.yaml")
+
+*****************
+ Python API
+*****************
+
+The Python-first entrypoint accepts a full training-style config (with
+``model``, ``graph``, and ``training`` sections) and builds the model
+without Hydra:
+
+.. code:: python
+
+   from anemoi.models.api import build_model
+
+   config = OmegaConf.load("training.yaml")
+
+   model = build_model(
+       config,
+       graph_data=graph_data,
+       data_indices=data_indices,
+       statistics=statistics,
+   )
 
 *******************************************************
  Define statistics, data indices and supporting arrays

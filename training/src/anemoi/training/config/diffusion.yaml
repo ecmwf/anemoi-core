@@ -10,4 +10,3 @@ defaults:
 
 
 # set to true to switch on config validation
-config_validation: True

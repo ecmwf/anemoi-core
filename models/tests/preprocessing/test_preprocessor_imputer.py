@@ -11,17 +11,17 @@
 import numpy as np
 import pytest
 import torch
-from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
+from anemoi.utils.config import DotDict
 
 
 @pytest.fixture()
 def non_default_input_imputer():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -50,7 +50,7 @@ def non_default_input_imputer():
 
 @pytest.fixture()
 def default_input_imputer():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -112,7 +112,7 @@ def default_input_data():
 
 @pytest.fixture()
 def non_default_constant_imputer():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -129,7 +129,7 @@ def non_default_constant_imputer():
 
 @pytest.fixture()
 def default_constant_imputer():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
@@ -164,7 +164,7 @@ def non_default_constant_data():
 
 @pytest.fixture()
 def copy_imputer():
-    config = DictConfig(
+    config = DotDict(
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {

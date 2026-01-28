@@ -13,10 +13,10 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.builders import build_component
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
@@ -47,9 +47,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def _build_networks(self, model_config):
         super()._build_networks(model_config)
-        self.noise_injector = instantiate(
+        self.noise_injector = build_component(
             model_config.model.noise_injector,
-            _recursive_=False,
             num_channels=self.num_channels,
         )
 

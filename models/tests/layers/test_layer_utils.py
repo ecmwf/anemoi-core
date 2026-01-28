@@ -10,10 +10,9 @@
 import pytest
 import torch
 import torch.nn as nn
-from hydra.errors import InstantiationException
 from hypothesis import given
+from hypothesis import settings
 from hypothesis import strategies as st
-from omegaconf import OmegaConf
 
 from anemoi.models.layers.utils import CheckpointWrapper
 from anemoi.models.layers.utils import load_layer_kernels
@@ -43,17 +42,15 @@ class TestLayerUtils:
 
     @given(eps=st.floats(min_value=1e-6, max_value=1e-3), elementwise_affine=st.booleans(), bias=st.booleans())
     def test_custom_kernels(self, eps, elementwise_affine, bias):
-        kernels_config = OmegaConf.create(
-            {
-                "LayerNorm": {
-                    "_target_": "torch.nn.LayerNorm",
-                    "eps": eps,
-                    "elementwise_affine": elementwise_affine,
-                },
-                "Linear": {"_target_": "torch.nn.Linear", "bias": bias},
-                "Activation": {"_target_": "torch.nn.ReLU"},
-            }
-        )
+        kernels_config = {
+            "LayerNorm": {
+                "_target_": "torch.nn.LayerNorm",
+                "eps": eps,
+                "elementwise_affine": elementwise_affine,
+            },
+            "Linear": {"_target_": "torch.nn.Linear", "bias": bias},
+            "Activation": {"_target_": "torch.nn.ReLU"},
+        }
 
         custom_kernels = load_layer_kernels(kernels_config)
 
@@ -74,13 +71,11 @@ class TestLayerUtils:
         assert layer_norm.elementwise_affine == elementwise_affine
 
     def test_unavailable_kernel(self):
-        kernels_config = OmegaConf.create(
-            {
-                "LayerNorm": {"_target_": "nonexistent_package.LayerNorm"},
-            }
-        )
+        kernels_config = {
+            "LayerNorm": {"_target_": "nonexistent_package.LayerNorm"},
+        }
 
-        with pytest.raises(InstantiationException):
+        with pytest.raises(ImportError):
             load_layer_kernels(kernels_config)
 
     @given(input_shape=st.lists(st.integers(1, 20), min_size=2, max_size=4))
@@ -116,6 +111,7 @@ class TestCheckpointWrapper:
             return self.linear(x)
 
     @given(batch_size=st.integers(1, 10))
+    @settings(deadline=None)
     def test_checkpoint_wrapper(self, batch_size):
         module = self.SimpleModule()
         wrapped_module = CheckpointWrapper(module)

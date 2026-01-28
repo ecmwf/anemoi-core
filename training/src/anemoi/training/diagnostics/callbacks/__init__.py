@@ -7,58 +7,58 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
 import logging
 from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Mapping
 from datetime import timedelta
+from typing import TYPE_CHECKING
 from typing import Any
 
-from hydra.errors import InstantiationException
-from hydra.utils import instantiate
-from omegaconf import DictConfig
-from pydantic import BaseModel
-from pytorch_lightning.callbacks import Callback
-from pytorch_lightning.callbacks import TQDMProgressBar
-
+from anemoi.training.builders.components import build_component
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.checkpoint import RegisterMigrations
+
+if TYPE_CHECKING:
+    from pytorch_lightning.callbacks import Callback
+
+    from anemoi.training.config_types import Settings
 
 LOGGER = logging.getLogger(__name__)
 
 
-def nestedget(config: DictConfig, key: str, default: Any) -> Any:
-    """Get a nested key from a DictConfig object.
+def nestedget(config: Mapping[str, Any], key: str, default: Any) -> Any:
+    """Get a nested key from a config mapping.
 
     E.g.
     >>> nestedget(config, "diagnostics.log.wandb.enabled", False)
     """
     keys = key.split(".")
     for k in keys:
-        config = getattr(config, k, default)
-        if not isinstance(config, BaseModel | dict | DictConfig):
+        config = config.get(k, default) if isinstance(config, Mapping) else getattr(config, k, default)
+        if not isinstance(config, Mapping):
             break
     return config
 
 
 # Callbacks to add according to flags in the config
 # Can be function to check status from config
-CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bool], type[Callback]]] = [
+CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[Settings], bool], type[Callback]]] = [
     ("training.swa.enabled", StochasticWeightAveraging),
     (
-        lambda config: nestedget(config, "diagnostics.log.wandb.enabled", False)
-        or nestedget(config, "diagnostics.log.mlflow.enabled", False),
+        lambda config: config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled,
         LearningRateMonitor,
     ),
 ]
 
 
-def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
+def _get_checkpoint_callback(config: Settings) -> list[AnemoiCheckpoint]:
     """Get checkpointing callbacks."""
     if not config.diagnostics.enable_checkpointing:
         return []
@@ -77,12 +77,24 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
 
     ckpt_frequency_save_dict = {}
 
-    for key, frequency_dict in config.diagnostics.checkpoint.items():
+    checkpoint_cfg = config.diagnostics.checkpoint
+    if checkpoint_cfg is None:
+        return []
+
+    checkpoint_policies = [
+        ("every_n_minutes", checkpoint_cfg.every_n_minutes),
+        ("every_n_epochs", checkpoint_cfg.every_n_epochs),
+        ("every_n_train_steps", checkpoint_cfg.every_n_train_steps),
+    ]
+
+    for key, frequency_dict in checkpoint_policies:
+        if frequency_dict is None:
+            continue
         frequency = frequency_dict.save_frequency
         n_saved = frequency_dict.num_models_saved
-        if key == "every_n_minutes" and frequency_dict.save_frequency is not None:
+        if key == "every_n_minutes" and frequency is not None:
             target = "train_time_interval"
-            frequency = timedelta(minutes=frequency_dict.save_frequency)
+            frequency = timedelta(minutes=frequency)
         else:
             target = key
         ckpt_frequency_save_dict[target] = (
@@ -120,11 +132,11 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
     return checkpoint_callbacks
 
 
-def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
+def _get_config_enabled_callbacks(config: Settings) -> list[Callback]:
     """Get callbacks that are enabled in the config as according to CONFIG_ENABLED_CALLBACKS."""
     callbacks = []
 
-    def check_key(config: dict, key: str | Iterable[str] | Callable[[DictConfig], bool]) -> bool:
+    def check_key(config: Mapping[str, Any], key: str | Iterable[str] | Callable[[Settings], bool]) -> bool:
         """Check key in config."""
         if isinstance(key, Callable):
             return key(config)
@@ -141,47 +153,20 @@ def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
     return callbacks
 
 
-def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
-    """Get progress bar callback.
-
-    Instantiated from `config.diagnostics.progress_bar`. If not set, defaults to TQDMProgressBar.
-
-    Example config:
-        progress_bar:
-          _target_: pytorch_lightning.callbacks.TQDMProgressBar
-          refresh_rate: 1
-          process_position: 0
-
-    Parameters
-    ----------
-    config : DictConfig
-        Job configuration
-
-    Returns
-    -------
-    list[Callback]
-        List containing the progress bar callback, or empty list if disabled.
-    """
+def _get_progress_bar_callback(config: Settings) -> list[Callback]:
+    """Return progress bar callbacks based on diagnostics configuration."""
     if not config.diagnostics.enable_progress_bar:
-        LOGGER.info("Progress bar disabled.")
         return []
-
-    progress_bar_cfg = nestedget(config, "diagnostics.progress_bar", None)
-    if progress_bar_cfg is not None:
-        try:
-            progress_bar = instantiate(progress_bar_cfg)
-            LOGGER.info("Using progress bar: %s", type(progress_bar))
-        except InstantiationException:
-            LOGGER.warning("Failed to instantiate progress bar callback from config: %s", progress_bar_cfg)
-            progress_bar = TQDMProgressBar(refresh_rate=1, process_position=0)
-    else:
-        LOGGER.info("Using default progress bar: TQDMProgressBar.")
-        progress_bar = TQDMProgressBar(refresh_rate=1, process_position=0)
-
-    return [progress_bar]
+    return [build_component(config.diagnostics.progress_bar)]
 
 
-def get_callbacks(config: DictConfig) -> list[Callback]:
+def get_callbacks(
+    config: Settings,
+    *,
+    callbacks: Iterable[Callback] | None = None,
+    plot_callbacks: Iterable[Callback] | None = None,
+    progress_bar: Callback | None = None,
+) -> list[Callback]:
     """Setup callbacks for PyTorch Lightning trainer.
 
     Set `config.diagnostics.callbacks` to a list of callback configurations
@@ -198,16 +183,23 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     Set `config.diagnostics.plot.callbacks` to a list of plot callback configurations
     will only be added if `config.diagnostics.plot.enabled` is set to True.
 
-    A callback must take a `DictConfig` in its `__init__` method as the first argument,
+    A callback must take the full Settings config in its `__init__` method as the first argument,
     which will be the complete configuration object.
 
     Some callbacks are added by default, depending on the configuration.
     See CONFIG_ENABLED_CALLBACKS for more information.
+    Use `anemoi.training.builders.callbacks.build_callbacks_from_config` to build callbacks from config.
 
     Parameters
     ----------
-    config : DictConfig
+    config : Settings
         Job configuration
+    callbacks : Iterable[Callback] | None
+        Pre-built callbacks to include, typically from diagnostics.callbacks config.
+    plot_callbacks : Iterable[Callback] | None
+        Pre-built plotting callbacks to include.
+    progress_bar : Callback | None
+        Pre-built progress bar callback to include.
 
     Returns
     -------
@@ -221,16 +213,19 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     trainer_callbacks.extend(_get_checkpoint_callback(config))
 
     # Base callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.callbacks)
+    if callbacks:
+        trainer_callbacks.extend(callbacks)
 
     # Plotting callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+    if plot_callbacks:
+        trainer_callbacks.extend(plot_callbacks)
 
     # Extend with config enabled callbacks
     trainer_callbacks.extend(_get_config_enabled_callbacks(config))
 
     # Progress bar callback
-    trainer_callbacks.extend(_get_progress_bar_callback(config))
+    if progress_bar is not None:
+        trainer_callbacks.append(progress_bar)
 
     # Parent UUID callback
     # Check variable order callback
@@ -246,4 +241,4 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     return trainer_callbacks
 
 
-__all__ = ["get_callbacks"]
+__all__ = ["_get_progress_bar_callback", "get_callbacks"]

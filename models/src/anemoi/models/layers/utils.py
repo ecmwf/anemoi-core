@@ -11,11 +11,10 @@
 import logging
 from typing import Optional
 
-from hydra.errors import InstantiationException
-from hydra.utils import instantiate
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.builders import build_component
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -77,12 +76,19 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
     for name, kernel_entry in {**default_kernels, **kernel_config}.items():
         if instance:
             try:
-                layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
-            except InstantiationException:
-                LOGGER.info(
-                    f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
+                layer_kernels[name] = build_component(kernel_entry, partial_override=True)
+            except Exception:
+                target = (
+                    kernel_entry.get("_target_")
+                    if isinstance(kernel_entry, dict)
+                    else getattr(kernel_entry, "_target_", None)
                 )
-                raise InstantiationException
+                if target is None and isinstance(kernel_entry, dict):
+                    target = kernel_entry.get("target_") or kernel_entry.get("target")
+                LOGGER.info(
+                    f"{target} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
+                )
+                raise
             else:
                 LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
         else:

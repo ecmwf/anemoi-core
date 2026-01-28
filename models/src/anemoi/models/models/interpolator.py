@@ -53,7 +53,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
         self.num_target_forcings = {}
         for dataset_name, target_forcing in target_forcing_config.items():
-            self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction
+            self.num_target_forcings[dataset_name] = len(target_forcing["data"]) + target_forcing["time_fraction"]
 
         self.input_times = model_config.training.explicit_times.input
         self.output_times = model_config.training.explicit_times.target

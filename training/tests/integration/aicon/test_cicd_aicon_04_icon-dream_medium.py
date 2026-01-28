@@ -27,7 +27,7 @@ from omegaconf import DictConfig
 from typeguard import typechecked
 
 import anemoi.training
-from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.api import normalize_config
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import GetTestData
@@ -76,7 +76,7 @@ def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data:
 @typechecked
 def trained_aicon(aicon_config_with_grid: DictConfig) -> tuple[AnemoiTrainer, float, float]:
     """Train AICON and return testable objects."""
-    trainer = AnemoiTrainer(aicon_config_with_grid)
+    trainer = AnemoiTrainer(normalize_config(aicon_config_with_grid))
     initial_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
     trainer.train()
     final_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
@@ -102,8 +102,8 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
 
 
 @typechecked
-def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
-    BaseSchema(**aicon_config_with_tmp_dir)
+def test_normalize_config_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
+    normalize_config(aicon_config_with_tmp_dir)
 
 
 @pytest.mark.slow
@@ -114,7 +114,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     The objective of this test is to monitor changes to the metadata structure and ensure compatibility.
     Please update the path to each datum accordingly whenever a revision to the metadata structure is implemented.
     """
-    trainer = AnemoiTrainer(aicon_config_with_grid)
+    trainer = AnemoiTrainer(normalize_config(aicon_config_with_grid))
 
     dataset_name = "data"
     assert_metadatakeys(

@@ -19,6 +19,7 @@ from hydra import initialize
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+from anemoi.training.builders.grid_indices import build_grid_indices_from_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
 pytest_plugins = "anemoi.utils.testing"
@@ -42,7 +43,10 @@ def datamodule() -> AnemoiDatasetsDataModule:
     with initialize(version_base=None, config_path="../src/anemoi/training/config"):
         # config is relative to a module
         cfg = compose(config_name="config")
-    return AnemoiDatasetsDataModule(cfg)
+    graph = HeteroData()
+    graph["data"].num_nodes = 1
+    grid_indices = build_grid_indices_from_config(cfg, graph_data={"data": graph})
+    return AnemoiDatasetsDataModule(cfg, {"data": graph}, grid_indices)
 
 
 @pytest.fixture

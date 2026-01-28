@@ -12,8 +12,6 @@ import logging
 import os
 
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
 
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.normalization import ConditionalLayerNorm
@@ -26,45 +24,39 @@ LOGGER = logging.getLogger(__name__)
 
 
 def graphtransformer_compile_config() -> None:
-    return OmegaConf.create(
-        {
-            "compile": [
-                {
-                    "module": "anemoi.models.layers.conv.GraphTransformerConv",
-                },
-            ],
-        }
-    )
+    return {
+        "compile": [
+            {
+                "module": "anemoi.models.layers.conv.GraphTransformerConv",
+            },
+        ],
+    }
 
 
 def layer_kernel_compile_config() -> None:
-    return OmegaConf.create(
-        {
-            "compile": [
-                {
-                    "module": "torch.nn.Linear",
-                },
-            ],
-        }
-    )
+    return {
+        "compile": [
+            {
+                "module": "torch.nn.Linear",
+            },
+        ],
+    }
 
 
 def graphtransformer_ens_compile_config() -> None:
-    return OmegaConf.create(
-        {
-            "compile": [
-                {
-                    "module": "anemoi.models.layers.conv.GraphTransformerConv",
+    return {
+        "compile": [
+            {
+                "module": "anemoi.models.layers.conv.GraphTransformerConv",
+            },
+            {
+                "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+                "options": {
+                    "dynamic": False,
                 },
-                {
-                    "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
-                    "options": {
-                        "dynamic": False,
-                    },
-                },
-            ],
-        }
-    )
+            },
+        ],
+    }
 
 
 def test_compile_config_no_match() -> None:
@@ -74,7 +66,7 @@ def test_compile_config_no_match() -> None:
     num_channels = 64
     cond_shape = 16
     model = ConditionalLayerNorm(num_channels, condition_shape=cond_shape)
-    result = _get_compile_entry(model, cfg.compile)
+    result = _get_compile_entry(model, cfg["compile"])
 
     assert result is None
 
@@ -86,9 +78,9 @@ def test_compile_config_match() -> None:
     num_channels = 64
     cond_shape = 16
     model = ConditionalLayerNorm(num_channels, condition_shape=cond_shape)
-    result = _get_compile_entry(model, cfg.compile)
+    result = _get_compile_entry(model, cfg["compile"])
 
-    assert type(result) is DictConfig
+    assert isinstance(result, dict)
 
 
 def test_compile() -> None:
@@ -106,7 +98,7 @@ def test_compile() -> None:
     result = ln.forward(x_in, cond)
 
     cfg = graphtransformer_ens_compile_config()
-    ln_compiled = mark_for_compilation(ln, cfg.compile)
+    ln_compiled = mark_for_compilation(ln, cfg["compile"])
 
     result_compiled = ln_compiled.forward(x_in, cond)
 
@@ -135,7 +127,7 @@ def test_compile_layer_kernel() -> None:
         dropout_p=dropout_p,
         attention_implementation="scaled_dot_product_attention",
     )
-    mhsa_compiled = mark_for_compilation(mhsa, cfg.compile)
+    mhsa_compiled = mark_for_compilation(mhsa, cfg["compile"])
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
     shapes = [list(x.shape)]
@@ -161,7 +153,7 @@ def test_compile_save_checkpoint() -> None:
     cond = torch.randn(cond_shape)
 
     cfg = graphtransformer_ens_compile_config()
-    ln_compiled = mark_for_compilation(ln, cfg.compile)
+    ln_compiled = mark_for_compilation(ln, cfg["compile"])
 
     # we dont care about the result, but we need to compute it to trigger compilation
     _ = ln_compiled.forward(x_in, cond)
@@ -192,7 +184,7 @@ def test_compile_load_checkpoint() -> None:
         dropout_p=dropout_p,
         attention_implementation="scaled_dot_product_attention",
     )
-    mhsa_compiled = mark_for_compilation(mhsa, cfg.compile)
+    mhsa_compiled = mark_for_compilation(mhsa, cfg["compile"])
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
     shapes = [list(x.shape)]

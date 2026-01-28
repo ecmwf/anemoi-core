@@ -16,10 +16,10 @@ from pathlib import Path
 import pytorch_lightning as pl
 import torch
 import torchinfo
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.training.config_types import Settings
 from anemoi.training.utils.checkpoint import check_classes
 from anemoi.utils.checkpoints import save_metadata
 
@@ -29,12 +29,12 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiCheckpoint(ModelCheckpoint):
     """A checkpoint callback that saves the model after every validation epoch."""
 
-    def __init__(self, config: OmegaConf, **kwargs: dict) -> None:
+    def __init__(self, config: Settings, **kwargs: dict) -> None:
         """Initialise the AnemoiCheckpoint callback.
 
         Parameters
         ----------
-        config : OmegaConf
+        config : Settings
             Config object
         kwargs : dict
             Additional keyword arguments for Pytorch ModelCheckpoint

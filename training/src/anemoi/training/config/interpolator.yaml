@@ -8,8 +8,6 @@ defaults:
 - training: interpolator
 - _self_
 
-config_validation: True
-
 data:
   frequency: 1h
   resolution: o96

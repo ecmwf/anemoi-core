@@ -8,30 +8,35 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from collections.abc import Mapping
+from collections.abc import Sequence
 from functools import reduce
 from importlib.util import find_spec
 
 import torch
 import torch_geometric
-from hydra.utils import get_class
 from numpy import unique
-from omegaconf import DictConfig
 from torch.nn import Module
+
+from anemoi.models.builders import resolve_target
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _get_compile_entry(module: str, compile_config: DictConfig) -> DictConfig | None:
+def _get_compile_entry(
+    module: Module,
+    compile_config: Sequence[Mapping[str, object]],
+) -> Mapping[str, object] | None:
     """Search the compile config for an entry c module name.
 
-    module: str -> full module name e.g. 'anemoi.models.layers.conv.GraphTransformerConv'
-    compile_config : DictConfig -> The 'compile' entry within the models config
+    module: Module -> module instance to match against configured targets
+    compile_config : Sequence[Mapping[str, object]] -> The 'compile' entry within the models config
 
     returns: None, if 'module' is not listed within 'compile_config'. Otherwise returns the modules entry.
 
     """
     for entry in compile_config:
-        if get_class(entry["module"]) is type(module):
+        if resolve_target(entry["module"]) is type(module):
             return entry
 
     return None
@@ -57,7 +62,7 @@ def _meets_library_versions_for_compile() -> bool:
     return version_req and has_triton
 
 
-def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Module:
+def mark_for_compilation(model: Module, compile_config: Sequence[Mapping[str, object]] | None) -> Module:
     """Marks modules within 'model' for compilation, according to 'compile_config'.
 
     Modules are not compiled here. The compilation will occur
@@ -91,7 +96,7 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
             LOGGER.debug("Replacing %s with a compiled version", str(parts[-1]))
             setattr(parent, parts[-1], module)
 
-            compiled_modules.append(entry.module)
+            compiled_modules.append(entry.get("module"))
 
     LOGGER.info("The following modules will be compiled: %s", str(unique(compiled_modules)))
 
