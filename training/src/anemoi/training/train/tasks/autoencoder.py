@@ -29,6 +29,10 @@ class GraphAutoEncoder(BaseGraphModule):
 
     task_type = "autoencoder"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.rollout = 1 # required for plotting callbacks rollout loops
+
     def _step(
         self,
         batch: torch.Tensor,
@@ -48,8 +52,10 @@ class GraphAutoEncoder(BaseGraphModule):
         y = {}
 
         for dataset_name, dataset_batch in batch.items():
+            print('dataset_batch', dataset_batch.shape)
             y[dataset_name] = dataset_batch[:, 0, ..., self.data_indices[dataset_name].data.output.full]
-
+            print('y_pred',y_pred[dataset_name].shape)
+            print('y',y[dataset_name].shape)
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
@@ -60,7 +66,6 @@ class GraphAutoEncoder(BaseGraphModule):
             validation_mode=validation_mode,
             use_reentrant=False,
         )
-
         return loss, metrics, [y_pred]
 
     def on_train_epoch_end(self) -> None:

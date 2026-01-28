@@ -36,19 +36,39 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
 
 
 class FocusAreaSchema(BaseModel):
-    mask_attr_name: str | None = Field(default=None)
-    "Name of the node attribute to use as masking. eg. cutout_mask"
+    mask_attr_name: str | None = Field(
+        default=None,
+        description="Name of the node attribute to use as masking (e.g. cutout_mask).",
+    )
 
-    latlon_bbox: list[float] | None = Field(default=None, min_items=4, max_items=4)
-    "Latitude and longitude bounds as [lat_min, lon_min, lat_max, lon_max]."
+    latlon_bbox: list[float] | None = Field(
+        default=None,
+        min_items=4,
+        max_items=4,
+        description="Latitude/longitude bounds as [lat_min, lon_min, lat_max, lon_max].",
+    )
 
     @model_validator(mode="after")
     def exactly_one_present(self) -> "FocusAreaSchema":
-        if (self.mask_attr_name is None) == (self.latlon_bbox is None):
-            msg = "Provide exactly one of 'mask_attr_name' or 'latlon_bbox' (not both)."
-            raise ValueError(msg)
+        if self.mask_attr_name is None and self.latlon_bbox is None:
+            raise ValueError(
+                "One of 'mask_attr_name' or 'latlon_bbox' must be provided."
+            )
+        if self.mask_attr_name is not None and self.latlon_bbox is not None:
+            raise ValueError(
+                "Only one of 'mask_attr_name' or 'latlon_bbox' may be provided."
+            )
         return self
 
+    @model_validator(mode="after")
+    def validate_bbox(self) -> "FocusAreaSchema":
+        if self.latlon_bbox:
+            lat_min, lon_min, lat_max, lon_max = self.latlon_bbox
+            if not (-90 <= lat_min < lat_max <= 90):
+                raise ValueError("Invalid latitude bounds in latlon_bbox.")
+            if not (-180 <= lon_min <= 180 and -180 <= lon_max <= 180):
+                raise ValueError("Longitude must be in [-180, 180].")
+        return self
 
 class PlotLossSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
@@ -59,7 +79,7 @@ class PlotLossSchema(BaseModel):
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
-    focus_areas: FocusAreaSchema | None = Field(default=None)
+    focus_areas: list[FocusAreaSchema] | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
@@ -123,7 +143,7 @@ class LongRolloutPlotsSchema(BaseModel):
     "Delay between frames in the animation in milliseconds, by default 400."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-    focus_areas: FocusAreaSchema | None = Field(default=None)
+    focus_areas: list[FocusAreaSchema] | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
@@ -148,7 +168,7 @@ class PlotSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-    focus_areas: FocusAreaSchema | None = Field(default=None)
+    focus_areas: list[FocusAreaSchema] | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
@@ -163,7 +183,7 @@ class PlotSpectrumSchema(BaseModel):
     "List of parameters to plot."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
-    focus_areas: FocusAreaSchema | None = Field(default=None)
+    focus_areas: list[FocusAreaSchema] | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 

@@ -34,6 +34,8 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.focus_area import build_spatial_mask
+from anemoi.training.diagnostics.focus_area  import NoOpSpatialMask
+from anemoi.training.diagnostics.focus_area  import SpatialMask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -152,7 +154,6 @@ class BasePlotCallback(Callback, ABC):
             if self.config.diagnostics.log.mlflow.enabled:
                 run_id = logger.run_id
                 logger.experiment.log_artifact(run_id, str(save_path))
-
         plt.close(fig)  # cleanup
 
     @rank_zero_only
@@ -623,6 +624,7 @@ class LongRolloutPlots(BasePlotCallback):
         # predicted output tensor
         output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
 
+
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
             self.per_sample,
@@ -1062,21 +1064,21 @@ class PlotLoss(BasePerBatchPlotCallback):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 y_true = batch[dataset_name][
                     :,
-                    pl_module.multi_step + rollout_step,
+                    0,#pl_module.multi_step + rollout_step, # !TODO
                     ...,
                     data_indices.data.output.full,
                 ]
+                if self.latlons is None:
+                    self.latlons = pl_module.model.model._graph_data[dataset_name][pl_module.model.model._graph_name_data].x.detach()
+                    self.latlons = {dataset_name:np.rad2deg(self.latlons.cpu().numpy())}
 
-                if focus_mask is not None:
-                    _, y_hat, y_true = focus_mask.apply(
-                        pl_module.model.model._graph_data,
-                        self.latlons[dataset_name],
-                        y_hat,
-                        y_true,
-                    )
-                    tag = focus_mask.tag
-                else:
-                    tag = ""
+                _, y_hat, y_true = focus_mask.apply(
+                    pl_module.model.model._graph_data,
+                    self.latlons[dataset_name],
+                    y_hat,
+                    y_true,
+                )
+                tag = focus_mask.tag
 
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
@@ -1138,6 +1140,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
         output_times: tuple,
+        focus_mask: SpatialMask | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
 
         if self.latlons is None:
@@ -1173,7 +1176,17 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
-        return data, output_tensor
+        focus_mask = focus_mask or NoOpSpatialMask()
+        # Apply spatial mask
+
+        latlons, data, output_tensor = focus_mask.apply(
+            pl_module.model.model._graph_data,
+            self.latlons[dataset_name],
+            data,
+            output_tensor,
+        )
+
+        return data, output_tensor, latlons
 
 
 class PlotSample(BasePlotAdditionalMetrics):
@@ -1261,35 +1274,24 @@ class PlotSample(BasePlotAdditionalMetrics):
                 )
                 for name in self.parameters
             }
-
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
-
+            data, output_tensor, latlons = self.process(pl_module, dataset_name, outputs, batch, output_times, focus_mask)
+            tag = focus_mask.tag
             local_rank = pl_module.local_rank
 
-            # Apply spatial mask
-            if focus_mask is not None:
-                latlons, data, output_tensor = focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
-                tag = focus_mask.tag
-
-            else:
-                latlons = self.latlons[dataset_name]
-                tag = ""
 
             for rollout_step in range(output_times[0]):
                 init_step = self._get_init_step(rollout_step, output_times[1])
 
+                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim==2 else None
+                per_sample = self.per_sample if data.ndim ==2 else 3
+
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
-                    self.per_sample,
+                    per_sample,
                     latlons,
                     self.accumulation_levels_plot,
                     data[init_step, ...].squeeze(),
-                    data[rollout_step + 1, ...].squeeze(),
+                    y_true,
                     output_tensor[rollout_step, ...],
                     datashader=self.datashader_plotting,
                     precip_and_related_fields=self.precip_and_related_fields,
@@ -1303,7 +1305,6 @@ class PlotSample(BasePlotAdditionalMetrics):
                     tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
                     exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{tag}",
                 )
-
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
     """Plots TP related metric comparing target and prediction.
@@ -1361,21 +1362,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
         local_rank = pl_module.local_rank
         for dataset_name, focus_mask in zip(dataset_names, self.focus_masks, strict=True):
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
-
-            # Apply spatial mask
-            if focus_mask is not None:
-                latlons, data, output_tensor = focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
-                tag = focus_mask.tag
-
-            else:
-                latlons = self.latlons[dataset_name]
-                tag = ""
+            data, output_tensor, latlons = self.process(pl_module, dataset_name, outputs, batch, output_times,focus_mask)
+            tag = focus_mask.tag
 
             for rollout_step in range(output_times[0]):
                 # Build dictionary of inidicies and parameters to be plotted
@@ -1393,13 +1381,14 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 }
 
                 init_step = self._get_init_step(rollout_step, output_times[1])
+                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim==2 else None
 
                 fig = plot_power_spectrum(
-                    plot_parameters_dict_spectrum,
-                    latlons,
-                    data[init_step, ...].squeeze(),
-                    data[rollout_step + 1, ...].squeeze(),
-                    output_tensor[rollout_step, ...],
+                    parameters=plot_parameters_dict_spectrum,
+                    latlons=latlons,
+                    x=data[init_step, ...].squeeze(),
+                    y_true=y_true,
+                    y_pred=output_tensor[rollout_step, ...].squeeze(),
                     min_delta=self.min_delta,
                 )
 
@@ -1476,20 +1465,9 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
 
         for dataset_name, focus_mask in zip(dataset_names, self.focus_masks, strict=True):
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor, _ = self.process(pl_module, dataset_name, outputs, batch, output_times, focus_mask)
+            tag = focus_mask.tag
 
-            # Apply spatial mask
-            if focus_mask is not None:
-                _, data, output_tensor = focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
-                tag = focus_mask.tag
-
-            else:
-                tag = ""
 
             for rollout_step in range(output_times[0]):
 
@@ -1509,11 +1487,12 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 }
 
                 init_step = self._get_init_step(rollout_step, output_times[1])
+                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim==2 else None
 
                 fig = plot_histogram(
                     plot_parameters_dict_histogram,
                     data[init_step, ...].squeeze(),
-                    data[rollout_step + 1, ...].squeeze(),
+                    y_true,
                     output_tensor[rollout_step, ...],
                     self.precip_and_related_fields,
                     self.log_scale,
