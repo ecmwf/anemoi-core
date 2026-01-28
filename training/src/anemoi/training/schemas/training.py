@@ -474,15 +474,23 @@ class AutoencoderSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
     "Training objective."
 
+    
+class InterpolationMultiSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
+    "Training objective."
+    explicit_times: ExplicitTimes
+    "Time indices for input and output."
+    target_forcing: None
+    "Forcing parameters not applied for multi-outputs."
+
 
 TrainingSchema = Annotated[
-    (
-        ForecasterSchema
-        | ForecasterEnsSchema
-        | InterpolationSchema
-        | DiffusionForecasterSchema
-        | DiffusionTendForecasterSchema
-        | AutoencoderSchema
-    ),
+    ForecasterSchema
+    | ForecasterEnsSchema
+    | InterpolationSchema
+    | InterpolationMultiSchema
+    | DiffusionForecasterSchema
+    | DiffusionTendForecasterSchema,
+    |  AutoencoderSchema
     Discriminator("model_task"),
 ]
