@@ -310,9 +310,9 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
 @pytest.mark.parametrize(
     ("multi_step", "multi_out", "expected"),
     [
-        (2, 3, [2.0, 3.0]),
-        (2, 2, [1.0, 2.0]),
-        (3, 2, [-1.0, 1.0, 2.0]),
+        (2, 3, [4.0, 5.0]),
+        (2, 2, [3.0, 4.0]),
+        (3, 2, [3.0, 4.0, 5.0]),
     ],
 )
 def test_rollout_advance_input_keeps_latest_steps(
@@ -332,9 +332,14 @@ def test_rollout_advance_input_keeps_latest_steps(
     forecaster.grid_shard_slice = {"data": None}
 
     b, e, g, v = 1, 1, 2, len(name_to_index)
-    x = torch.full((b, forecaster.multi_step, e, g, v), -1.0, dtype=torch.float32)
+    x = torch.zeros((b, forecaster.multi_step, e, g, v), dtype=torch.float32)
+    for step in range(forecaster.multi_step):
+        x[:, step] = float(step + 1)
     y_pred = torch.stack(
-        [torch.full((b, e, g, v), float(step), dtype=torch.float32) for step in range(1, forecaster.multi_out + 1)],
+        [
+            torch.full((b, e, g, v), float(forecaster.multi_step + step), dtype=torch.float32)
+            for step in range(1, forecaster.multi_out + 1)
+        ],
         dim=1,
     )
     batch = torch.zeros((b, forecaster.multi_step + forecaster.multi_out, e, g, v), dtype=torch.float32)
@@ -345,6 +350,12 @@ def test_rollout_advance_input_keeps_latest_steps(
         batch,
         rollout_step=0,
         dataset_name="data",
+    )
+    kept_steps = updated[0, :, 0, 0, 0].tolist()
+    expected_next_input = expected
+    assert kept_steps == expected_next_input, (
+        "Next input steps (used for the next forecast) "
+        f"(multi_step={multi_step}, multi_out={multi_out}) should be {expected_next_input}, got {kept_steps}."
     )
     for idx, value in enumerate(expected):
         assert torch.all(updated[:, idx] == value)
