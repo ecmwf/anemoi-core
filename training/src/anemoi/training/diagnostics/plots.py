@@ -25,8 +25,6 @@ from matplotlib.colors import Colormap
 from matplotlib.colors import Normalize
 from matplotlib.colors import TwoSlopeNorm
 from matplotlib.figure import Figure
-from pyshtools.expand import SHGLQ
-from pyshtools.expand import SHExpandGLQ
 from scipy.interpolate import griddata
 from torch import Tensor
 
@@ -286,6 +284,16 @@ def compute_spectra(field: np.ndarray) -> np.ndarray:
         spectra of field by wavenumber
 
     """
+    try:
+        from pyshtools.expand import SHGLQ
+        from pyshtools.expand import SHExpandGLQ
+    except ImportError as e:
+        error_msg = (
+            "pyshtools is required to compute spherical harmonic power spectra. "
+            "It can be installed with the `plotting` dependency. `pip install anemoi-training[plotting]`.",
+        )
+        raise ImportError(error_msg) from e
+
     field = np.array(field)
 
     # compute real and imaginary parts of power spectra of field
@@ -942,8 +950,6 @@ def plot_predicted_ensemble(
             Latitudes and longitudes
         clevels : float
             Accumulation levels used for precipitation related plots
-        cmap_precip: str
-            Colours used for each precipitation accumulation level
         y_true : np.ndarray
             True values
         y_pred : np.ndarray
