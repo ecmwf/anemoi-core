@@ -69,12 +69,13 @@ When a focus area is applied, the plot filenames and experiment log tags will au
 
 .. code:: yaml
 
-   # Example: Focusing on a specific geographic region
-   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
-     sample_idx: ${diagnostics.plot.sample_idx}
-     parameters: ${diagnostics.plot.parameters}
-     focus_area:
-       latlon_bbox: [30.0, -20.0, 60.0, 40.0]
+   # Example: Focusing on multiple specific geographic region
+   focus_areas:
+      datasets:
+         data:
+            - latlon_bbox: [30.0, -20.0, 60.0, 40.0]
+            - latlon_bbox: [10.0, -2.0, 30.5, 40.0]
+            - mask_attr_name: "cutout_mask"
 
 **Rendering Methods**
 

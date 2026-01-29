@@ -79,3 +79,14 @@ class BoundingBoxSpatialMask(SpatialMask):
         (lat_min, lon_min, lat_max, lon_max) = self.bbox
         lat, lon = latlons[:, 0], latlons[:, 1]
         self.focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
+
+
+def build_spatial_mask(
+    node_attribute_name: str | None = None,
+    latlon_bbox: tuple[float, float, float, float] | None = None,
+) -> Any:
+    if node_attribute_name is not None:
+        return NodeAttributeSpatialMask(node_attribute_name)
+    if latlon_bbox is not None:
+        return BoundingBoxSpatialMask(latlon_bbox)
+    return NoOpSpatialMask()

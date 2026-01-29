@@ -32,6 +32,10 @@ colormaps:
 
 datasets_to_plot: ["data"] # Default dataset names to use in the plot callbacks
 
+focus_areas:
+  datasets:
+    data: null
+
 callbacks:
   # Add plot callbacks here
   - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot

@@ -21,6 +21,7 @@ from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
@@ -59,8 +60,6 @@ class PlotLossSchema(BaseModel):
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -123,8 +122,6 @@ class LongRolloutPlotsSchema(BaseModel):
     "Delay between frames in the animation in milliseconds, by default 400."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotSampleSchema(BaseModel):
@@ -148,8 +145,6 @@ class PlotSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotSpectrumSchema(BaseModel):
@@ -163,8 +158,6 @@ class PlotSpectrumSchema(BaseModel):
     "List of parameters to plot."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'."
 
 
 class PlotHistogramSchema(BaseModel):
@@ -299,6 +292,9 @@ class PlotSchema(BaseModel):
     "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
+    focus_areas: DatasetDict[list[FocusAreaSchema]]
+    "List of regions of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox',"
+    " for each specific dataset."
 
 
 class TimeLimitSchema(BaseModel):
