@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
+    from anemoi.training.utils.dataset_context import DatasetContext
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -129,10 +131,11 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        step: int | None = None,
-        dataset_name: str | None = None,
+        dataset_ctx: DatasetContext,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+        step = kwargs.get("step")
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=1,
@@ -143,10 +146,9 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         loss = self._compute_loss(
             y_pred_ens,
             y,
-            grid_shard_slice=self.grid_shard_slice[dataset_name],
             grid_dim=self.grid_dim,
             grid_shard_shape=self.grid_shard_shapes,
-            dataset_name=dataset_name,
+            dataset_ctx=dataset_ctx,
         )
 
         # Compute metrics if in validation mode
@@ -156,15 +158,14 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 y_pred_ens,
                 y,
                 step=step,
-                dataset_name=dataset_name,
-                grid_shard_slice=self.grid_shard_slice[dataset_name],
+                dataset_ctx=dataset_ctx,
             )
 
         return loss, metrics_next, y_pred_ens
 
     def _rollout_step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         rollout: int | None = None,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
@@ -172,7 +173,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed)
         rollout : int, optional
             Number of times to rollout for, by default None
@@ -193,13 +194,16 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         """
         # Stack the analysis nens_per_device times along an ensemble dimension
         # start rollout of preprocessed batch
+        dataset_contexts = self._build_dataset_contexts()  # static only used here
         x = {}
-        for dataset_name, dataset_batch in batch.items():
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
+            dataset_batch = batch[dataset_name]
             x[dataset_name] = dataset_batch[
                 :,
                 0 : self.multi_step,
                 ...,
-                self.data_indices[dataset_name].data.input.full,
+                dataset_ctx.static.data_indices.data.input.full,
             ]  # (bs, multi_step, latlon, nvar)
             msg = (
                 f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
@@ -207,7 +211,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             )
             assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
 
-        for dataset_name in self.dataset_names:
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
             x[dataset_name] = torch.cat(
                 [x[dataset_name]] * self.nens_per_device,
                 dim=2,
@@ -230,13 +235,15 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             y_pred = self(x, fcstep=rollout_step)
 
             y = {}
-            for dataset_name, dataset_batch in batch.items():
+            for dataset_ctx in dataset_contexts.values():
+                dataset_name = dataset_ctx.static.name
+                dataset_batch = batch[dataset_name]
                 y[dataset_name] = dataset_batch[
                     :,
                     self.multi_step + rollout_step,
                     0,
                     :,
-                    self.data_indices[dataset_name].data.output.full,
+                    dataset_ctx.static.data_indices.data.output.full,
                 ]
                 LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
 
@@ -251,6 +258,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 use_reentrant=False,
             )
 
-            x = self._advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step, dataset_contexts)
 
             yield loss, metrics_next, y_pred_ens_group
