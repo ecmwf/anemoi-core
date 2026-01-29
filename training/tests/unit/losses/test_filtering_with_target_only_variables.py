@@ -115,7 +115,9 @@ class TestScalerFilteringWithTargetOnlyVariables:
         torch.testing.assert_close(pressure_scaler, torch.tensor([0.6]))
 
     def test_scaler_filtering_preserves_variable_order(
-        self, data_indices_with_target_only, scalers_with_distinct_values,
+        self,
+        data_indices_with_target_only,
+        scalers_with_distinct_values,
     ):
         """Test that filtering preserves the order specified in predicted_variables."""
         # Specify variables in reverse order
@@ -320,7 +322,7 @@ class TestFilteringLossWrapperSetDataIndices:
     @pytest.fixture
     def data_indices_with_target_only(self):
         """Create IndexCollection with target-only variable and forcing gaps.
-        
+
         Layout:
         - var_0, var_1: prognostic (indices 0, 1)
         - f_0, f_1: forcing (indices 2, 3) - excluded from data.output
@@ -328,7 +330,7 @@ class TestFilteringLossWrapperSetDataIndices:
         - f_2, f_3: forcing (indices 6, 7) - excluded from data.output
         - var_4: prognostic (index 8)
         - imerg: target-only (index 9)
-        
+
         data.output.full = [0, 1, 4, 5, 8, 9] (forcings excluded)
         Positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
         """
@@ -353,7 +355,7 @@ class TestFilteringLossWrapperSetDataIndices:
 
     def test_set_data_indices_target_only_variable(self, data_indices_with_target_only):
         """Test that set_data_indices correctly handles target-only variables.
-        
+
         Fixture layout:
         - data.output.full = [0, 1, 4, 5, 8, 9] (forcings at 2,3,6,7 excluded)
         - Reindexed positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
@@ -428,7 +430,7 @@ class TestFilteringLossWrapperSetDataIndices:
 
     def test_set_data_indices_same_predicted_and_target(self, data_indices_with_target_only):
         """Test set_data_indices when predicted and target variables are the same.
-        
+
         Fixture layout:
         - model.output.name_to_index: var_0=0, var_1=1, var_2=2, var_3=3, var_4=4
         - data.output.full = [0, 1, 4, 5, 8, 9]
@@ -453,11 +455,11 @@ class TestFilteringLossWrapperSetDataIndices:
 
     def test_set_data_indices_all_variables(self, data_indices_with_target_only):
         """Test set_data_indices when no variables are specified (use all).
-        
+
         NOTE: In practice, get_loss_function does NOT wrap the loss when both
         predicted_variables and target_variables are None. This test exercises
         the wrapper's behavior when directly instantiated with None values.
-        
+
         When both are None, set_data_indices defaults to model.output.full for both
         (to ensure same length for loss computation).
         """
@@ -470,7 +472,7 @@ class TestFilteringLossWrapperSetDataIndices:
             target_variables=None,
         )
         wrapper.set_data_indices(data_indices_with_target_only)
-        
+
         # Both default to model.output.full (5 prognostic variables)
         # They must have the same length for loss computation
         assert len(wrapper.predicted_indices) == 5
@@ -483,7 +485,7 @@ class TestFilteringLossWrapperForward:
     @pytest.fixture
     def data_indices_with_target_only(self):
         """Create IndexCollection with target-only variable and forcing gaps.
-        
+
         Layout:
         - var_0, var_1: prognostic (indices 0, 1)
         - f_0, f_1: forcing (indices 2, 3) - excluded from data.output
@@ -491,7 +493,7 @@ class TestFilteringLossWrapperForward:
         - f_2, f_3: forcing (indices 6, 7) - excluded from data.output
         - var_4: prognostic (index 8)
         - imerg: target-only (index 9)
-        
+
         data.output.full = [0, 1, 4, 5, 8, 9] (forcings excluded)
         Positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
         Total tensor size: 6 variables in data.output
@@ -517,7 +519,7 @@ class TestFilteringLossWrapperForward:
 
     def test_forward_filters_correctly(self, data_indices_with_target_only):
         """Test that forward correctly filters predictions and targets.
-        
+
         Fixture layout:
         - data.output.full = [0, 1, 4, 5, 8, 9] (tensor size 6)
         - Reindexed positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
@@ -555,7 +557,7 @@ class TestFilteringLossWrapperForward:
 
     def test_forward_multiple_vars_and_target_only(self, data_indices_with_target_only):
         """Test CombinedLoss with prognostic vars in first loss and target-only in second.
-        
+
         Fixture layout:
         - data.output.full = [0, 1, 4, 5, 8, 9] (tensor size 6)
         - model.output prognostic vars: var_0=0, var_1=1, var_2=2, var_3=3, var_4=4
@@ -564,7 +566,7 @@ class TestFilteringLossWrapperForward:
         # First loss: MSE on prognostic vars
         # Second loss: MSE on var_0 predicted vs imerg target
         prognostic_vars = ["var_0", "var_1", "var_2", "var_3", "var_4"]
-        
+
         loss = get_loss_function(
             DictConfig(
                 {
