@@ -139,6 +139,14 @@ which is recommended for interactive terminals and
       # Precipitation and related fields
       precip_and_related_fields: [tp, cp]
 
+      datasets_to_plot: ["data"]
+
+      focus_areas:
+         datasets:
+            data:
+            - latlon_bbox: [30.0, -20.0, 60.0, 40.0]
+            - null # This is to plot the full domain
+
       callbacks:
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
             dataset_names: ["your_dataset_name"]
@@ -147,10 +155,6 @@ which is recommended for interactive terminals and
             parameter_groups:
                moisture: [tp, cp, tcw]
                sfc_wind: [10u, 10v]
-
-            # Example focusing loss on a predefined mask
-            focus_area:
-               mask_attr_name: "cutout_mask"
 
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
             dataset_names: ["your_dataset_name"]
