@@ -51,13 +51,9 @@ class FocusAreaSchema(BaseModel):
     @model_validator(mode="after")
     def exactly_one_present(self) -> "FocusAreaSchema":
         if self.mask_attr_name is None and self.latlon_bbox is None:
-            raise ValueError(
-                "One of 'mask_attr_name' or 'latlon_bbox' must be provided."
-            )
+            raise ValueError("One of 'mask_attr_name' or 'latlon_bbox' must be provided.")
         if self.mask_attr_name is not None and self.latlon_bbox is not None:
-            raise ValueError(
-                "Only one of 'mask_attr_name' or 'latlon_bbox' may be provided."
-            )
+            raise ValueError("Only one of 'mask_attr_name' or 'latlon_bbox' may be provided.")
         return self
 
     @model_validator(mode="after")
@@ -69,6 +65,7 @@ class FocusAreaSchema(BaseModel):
             if not (-180 <= lon_min <= 180 and -180 <= lon_max <= 180):
                 raise ValueError("Longitude must be in [-180, 180].")
         return self
+
 
 class PlotLossSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
@@ -135,8 +132,6 @@ class LongRolloutPlotsSchema(BaseModel):
     "Accumulation levels to plot, by default None."
     cmap_accumulation: list[str] | None = Field(default=None)
     "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
-    per_sample: int | None = Field(default=None)
-    "Number of plots per sample, by default 6."
     every_n_epochs: int = Field(example=1)
     "Epoch frequency to plot at, by default 1."
     animation_interval: int | None = Field(default=None)
@@ -162,8 +157,6 @@ class PlotSampleSchema(BaseModel):
     "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
-    per_sample: int = Field(example=6)
-    "Number of plots per sample, by default 6."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
@@ -217,8 +210,6 @@ class PlotEnsSampleSchema(BaseModel):
     "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
-    per_sample: int = Field(example=6)
-    "Number of plots per sample, by default 6."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)

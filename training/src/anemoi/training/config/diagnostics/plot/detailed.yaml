@@ -58,7 +58,6 @@ callbacks:
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
     dataset_names: ${diagnostics.plot.datasets_to_plot} #TODO can make this a default in pydantic and remove here
     sample_idx: ${diagnostics.plot.sample_idx}
-    per_sample : 6
     parameters: ${diagnostics.plot.parameters}
     every_n_batches: ${diagnostics.plot.frequency.batch}
     #Defining the accumulation levels for precipitation related fields and the colormap

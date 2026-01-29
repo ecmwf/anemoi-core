@@ -18,6 +18,7 @@ from abc import ABC
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.training.diagnostics.callbacks.plot_specs import TaskSpec
 from anemoi.training.diagnostics.callbacks.plot_specs import _get_task_spec
 from anemoi.training.diagnostics.focus_area import NoOpSpatialMask
 from anemoi.training.diagnostics.focus_area import SpatialMask
@@ -114,13 +116,9 @@ class BasePlotCallback(Callback, ABC):
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
-    def _get_init_step(self, rollout_step: int, pl_module: pl.LightningModule) -> int:
-        spec = _get_task_spec(pl_module)
-        return spec.get_init_step(rollout_step)
-
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple[int, str]:
-        spec = _get_task_spec(pl_module)
-        return spec.get_output_times(config, pl_module)
+    @cached_property
+    def task_spec(pl_module: pl.LightningModule) -> TaskSpec:
+        return _get_task_spec(pl_module)
 
     @rank_zero_only
     def _output_figure(
@@ -331,7 +329,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
-            output_times = self._get_output_times(self.config, pl_module)
+            output_times = self.task_spec(pl_module).get_output_times(self.config, pl_module)
 
             self.plot(
                 trainer,
@@ -378,7 +376,7 @@ class BasePerEpochPlotCallback(BasePlotCallback):
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
 
-            output_times = self._get_output_times(self.config, pl_module)
+            output_times = self.task_spec(pl_module).get_output_times(self.config, pl_module)
 
             self.plot(
                 trainer,
@@ -425,7 +423,6 @@ class LongRolloutPlots(BasePlotCallback):
         video_rollout: int = 0,
         accumulation_levels_plot: list[float] | None = None,
         colormaps: dict[str, Colormap] | None = None,
-        per_sample: int = 6,
         every_n_epochs: int = 1,
         animation_interval: int = 400,
     ) -> None:
@@ -447,8 +444,6 @@ class LongRolloutPlots(BasePlotCallback):
             Accumulation levels to plot, by default None
         colormaps : dict[str, Colormap] | None
             Dictionary of colormaps, by default None
-        per_sample : int, optional
-            Number of plots per sample, by default 6
         every_n_epochs : int, optional
             Epoch frequency to plot at, by default 1
         animation_interval : int, optional
@@ -476,7 +471,6 @@ class LongRolloutPlots(BasePlotCallback):
         self.sample_idx = sample_idx
         self.accumulation_levels_plot = accumulation_levels_plot
         self.colormaps = colormaps
-        self.per_sample = per_sample
         self.parameters = parameters
         self.animation_interval = animation_interval
 
@@ -622,7 +616,7 @@ class LongRolloutPlots(BasePlotCallback):
 
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
-            self.per_sample,
+            self.get_task_spec(pl_module).n_plots_sample,
             self.latlons,
             self.accumulation_levels_plot,
             data_0.squeeze(),
@@ -1057,7 +1051,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             for rollout_step in range(output_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
-                t_index = pl_module.multi_step + rollout_step if batch[dataset_name].ndim == 2 else 0
+                t_index = self.task_spec(pl_module).get_t_index(rollout_step, pl_module.multi_step)
                 y_true = batch[dataset_name][
                     :,
                     t_index,
@@ -1198,7 +1192,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         accumulation_levels_plot: list[float],
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str, Colormap] | None = None,
-        per_sample: int = 6,
         every_n_batches: int | None = None,
         focus_areas: list[dict] | None = None,
         dataset_names: list[str] | None = None,
@@ -1220,8 +1213,6 @@ class PlotSample(BasePlotAdditionalMetrics):
             Precip variable names, by default None
         colormaps : dict[str, Colormap] | None, optional
             Dictionary of colormaps, by default None
-        per_sample : int, optional
-            Number of plots per sample, by default 6
         every_n_batches : int, optional
             Batch frequency to plot at, by default None
         focus_areas : list[dict] | None, optional
@@ -1236,7 +1227,6 @@ class PlotSample(BasePlotAdditionalMetrics):
 
         self.precip_and_related_fields = precip_and_related_fields
         self.accumulation_levels_plot = accumulation_levels_plot
-        self.per_sample = per_sample
         self.colormaps = colormaps
 
         LOGGER.info(
@@ -1284,10 +1274,10 @@ class PlotSample(BasePlotAdditionalMetrics):
             local_rank = pl_module.local_rank
 
             for rollout_step in range(output_times):
-                init_step = self._get_init_step(rollout_step, pl_module)
+                init_step = self.task_spec(pl_module).get_init_step(rollout_step)
 
-                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim == 2 else None
-                per_sample = self.per_sample if data.ndim == 2 else 3
+                y_true = self.task_spec(pl_module).get_y_true(data, rollout_step)
+                per_sample = self.task_spec(pl_module).n_plots_sample
 
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
@@ -1392,8 +1382,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     for name in self.parameters
                 }
 
-                init_step = self._get_init_step(rollout_step, pl_module)
-                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim == 2 else None
+                init_step = self.task_spec(pl_module).get_init_step(rollout_step)
+                y_true = self.task_spec(pl_module).get_y_true(data, rollout_step)
 
                 fig = plot_power_spectrum(
                     parameters=plot_parameters_dict_spectrum,
@@ -1497,8 +1487,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     for name in self.parameters
                 }
 
-                init_step = self._get_init_step(rollout_step, pl_module)
-                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim == 2 else None
+                init_step = self.task_spec(pl_module).get_init_step(rollout_step)
+                y_true = self.task_spec(pl_module).get_y_true(data, rollout_step)
 
                 fig = plot_histogram(
                     plot_parameters_dict_histogram,
