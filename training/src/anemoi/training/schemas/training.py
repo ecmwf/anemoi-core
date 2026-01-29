@@ -55,11 +55,11 @@ class SWA(BaseModel):
 class Rollout(BaseModel):
     """Rollout configuration."""
 
-    start: PositiveInt = Field(example=1)
+    start: NonNegativeInt = Field(example=1)
     "Number of rollouts to start with."
     epoch_increment: NonNegativeInt = Field(example=0)
     "Number of epochs to increment the rollout."
-    max: PositiveInt = Field(example=1)
+    max: NonNegativeInt = Field(example=1)
     "Maximum number of rollouts."
 
 
@@ -349,6 +349,7 @@ VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str 
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
+    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
@@ -437,11 +438,19 @@ class InterpolationSchema(BaseTrainingSchema):
     "Forcing parameters for target output times."
 
 
+class AutoencoderSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
+    "Training objective."
+
+
 TrainingSchema = Annotated[
-    ForecasterSchema
-    | ForecasterEnsSchema
-    | InterpolationSchema
-    | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema,
+    (
+        ForecasterSchema
+        | ForecasterEnsSchema
+        | InterpolationSchema
+        | DiffusionForecasterSchema
+        | DiffusionTendForecasterSchema
+        | AutoencoderSchema
+    ),
     Discriminator("model_task"),
 ]
