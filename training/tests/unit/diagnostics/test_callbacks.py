@@ -39,7 +39,7 @@ diagnostics:
     enabled: False
     focus_areas:
         datasets:
-            data: null
+            data: []
     callbacks: []
 
   debug:
@@ -222,7 +222,7 @@ def test_ensemble_plot_callbacks_instantiation():
             "diagnostics": {
                 "plot": {
                     "parameters": ["temperature", "pressure"],
-                    "focus_areas": {"datasets": {"data": None}},
+                    "focus_areas": {"datasets": {"data": []}},
                     "datashader": False,
                     "asynchronous": False,
                     "frequency": {"batch": 1},

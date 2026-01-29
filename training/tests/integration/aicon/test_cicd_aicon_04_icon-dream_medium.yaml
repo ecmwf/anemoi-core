@@ -311,7 +311,7 @@ diagnostics:
     datasets_to_plot: ["data"]
     focus_areas:
       datasets:
-        data: null
+        data: []
     callbacks: []
 
   debug:

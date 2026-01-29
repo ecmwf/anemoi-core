@@ -44,8 +44,8 @@ datasets_to_plot: ["era5", "cerra"] # Default dataset names to use in the plot c
 
 focus_areas:
   datasets:
-    era5: null
-    cerra: null
+    era5: []
+    cerra: []
 
 callbacks:
   # Add plot callbacks here

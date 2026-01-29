@@ -55,10 +55,6 @@ diagnostics:
   plot:
     parameters: ["tp"]
     datasets_to_plot: ["era5", "cerra"] # Default dataset names to use in the plot callbacks
-    focus_areas:
-      datasets:
-        era5: null
-        cerra: null
     callbacks:
       - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
         dataset_names: ${diagnostics.plot.datasets_to_plot}

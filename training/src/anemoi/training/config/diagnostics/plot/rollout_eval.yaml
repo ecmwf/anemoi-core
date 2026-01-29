@@ -34,7 +34,7 @@ datasets_to_plot: ["data"] # Default dataset names to use in the plot callbacks
 
 focus_areas:
   datasets:
-    data: null
+    data: []
 
 callbacks:
   # Add plot callbacks here
