@@ -29,43 +29,6 @@ def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarra
     return xlg, wlg
 
 
-def clenshaw_curtiss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
-    r"""Computation of the Clenshaw-Curtis quadrature nodes and weights.
-
-    This implementation follows
-    [1] Joerg Waldvogel, Fast Construction of the Fejer and Clenshaw-Curtis Quadrature Rules; BIT Numerical Mathematics, Vol. 43, No. 1, pp. 001-018.
-    """
-
-    assert n > 1
-
-    tcc = np.cos(np.linspace(np.pi, 0, n))
-
-    if n == 2:
-        wcc = np.array([1.0, 1.0])
-    else:
-
-        n1 = n - 1
-        N = np.arange(1, n1, 2)
-        num_odd = len(N)
-        m = n1 - num_odd
-
-        v = np.concatenate([2 / N / (N - 2), 1 / N[-1:], np.zeros(m)])
-        v = 0 - v[:-1] - v[-1:0:-1]
-
-        g0 = (-1) * np.ones(n1)
-        g0[num_odd] = g0[num_odd] + n1
-        g0[m] = g0[m] + n1
-        g = g0 / (n1**2 - 1 + (n1 % 2))
-        wcc = np.fft.ifft(v + g).real
-        wcc = np.concatenate((wcc, wcc[:1]))
-
-    # Rescale
-    tcc = (b - a) * 0.5 * tcc + (b + a) * 0.5
-    wcc = wcc * (b - a) * 0.5
-
-    return tcc, wcc
-
-
 def legpoly(
     mmax: int,
     lmax: int,
@@ -141,92 +104,6 @@ def precompute_legpoly(
 
     return legpoly(mmax, lmax, np.cos(t), norm=norm, inverse=inverse, csphase=csphase)
 
-
-class CartesianRealSHT(Module):
-
-    def __init__(self, nlat: int, nlon: int, grid: str) -> None:
-
-        super().__init__()
-
-        self.nlat = nlat
-        self.nlon = nlon
-
-        self.lmax = self.nlat
-        self.mmax = min(self.lmax, self.nlon // 2 + 1)
-
-        if grid == "legendre-gauss":
-            cost, w = legendre_gauss_weights(nlat, -1, 1)
-        elif grid == "equiangular":
-            cost, w = clenshaw_curtiss_weights(nlat, -1, 1)
-        else:
-            raise NotImplementedError(f"Unknown grid {grid}.")
-
-        tq = np.flip(np.arccos(cost))
-
-        pct = precompute_legpoly(self.mmax, self.lmax, tq)
-        pct = torch.from_numpy(pct)
-
-        weights = torch.from_numpy(w)
-        weights = torch.einsum("mlk, k -> mlk", pct, weights)
-
-        self.register_buffer("weights", weights, persistent=False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-
-        x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
-
-        x = torch.view_as_real(x)
-
-        out_shape = list(x.size())
-        out_shape[-3] = self.lmax
-        out_shape[-2] = self.mmax
-        xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
-
-        xout[..., 0] = torch.einsum("...km, mlk -> ...lm", x[..., : self.mmax, 0], self.weights.to(x.dtype))
-        xout[..., 1] = torch.einsum("...km, mlk -> ...lm", x[..., : self.mmax, 1], self.weights.to(x.dtype))
-        x = torch.view_as_complex(xout)
-
-        return x
-
-
-class CartesianInverseRealSHT(Module):
-
-    def __init__(self, nlat: int, nlon: int, lmax: int, grid: str) -> None:
-
-        super().__init__()
-
-        self.nlat = nlat
-        self.nlon = nlon
-
-        self.lmax = self.mmax = lmax
-
-        if grid == "legendre-gauss":
-            cost, _ = legendre_gauss_weights(nlat, -1, 1)
-        elif grid == "equiangular":
-            cost, _ = clenshaw_curtiss_weights(nlat, -1, 1)
-        else:
-            raise NotImplementedError(f"Unknown grid {grid}.")
-
-        t = np.flip(np.arccos(cost))
-
-        pct = precompute_legpoly(self.mmax, self.lmax, t, inverse=True)
-        pct = torch.from_numpy(pct)
-
-        self.register_buffer("pct", pct, persistent=False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-
-        x = torch.view_as_real(x)
-        x = torch.einsum("...lmr, mlk -> ...kmr", x, self.pct.to(x.dtype)).to(x.dtype)
-        x = torch.view_as_complex(x.contiguous())
-
-        x[..., 0].imag = 0.0
-        if (self.nlon % 2 == 0) and (self.nlon // 2 < self.mmax):
-            x[..., self.nlon // 2].imag = 0.0
-
-        x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
-
-        return x
 
 
 class OctahedralRealSHT(Module):
