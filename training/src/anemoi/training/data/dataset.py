@@ -113,6 +113,21 @@ class BaseAnemoiReader:
         """Return dataset resolution."""
         return self.data.resolution
 
+    @cached_property
+    def cutout_mask(self) -> np.ndarray:
+        """Return cutout mask."""
+        cutout_mask = np.zeros(self.grid_size, dtype=bool)
+        if len(self.data.grids) <= 1:
+            err_msg = "Dataset `cutout_mask` property requires a cutout grid but does not have one."
+            raise ValueError(err_msg)
+        cutout_mask[: self.data.grids[0]] = True
+        return cutout_mask
+
+    @cached_property
+    def boundary_mask(self) -> np.ndarray:
+        """Return boundary mask."""
+        return ~self.cutout_mask
+
     @property
     @abstractmethod
     def has_trajectories(self) -> bool:
@@ -180,13 +195,6 @@ class MaskedGridDataset(BaseAnemoiReader):
         super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
         self.mask_radius = mask_lam_radius_km / 6371.0
 
-    @property
-    def cutout_mask(self) -> np.ndarray:
-        """Return cutout mask."""
-        cutout_mask = np.zeros(self.grid_size, dtype=bool)
-        cutout_mask[: self.data.grids[0]] = True
-        return cutout_mask
-
     @cached_property
     def grid_indices(self) -> np.ndarray:
         """Return grid indices inside the mask."""
@@ -196,7 +204,7 @@ class MaskedGridDataset(BaseAnemoiReader):
 
         # Check which points are within the radius of any LAM point
         tree = cKDTree(coords[self.cutout_mask])
-        dists, _ = tree.query(coords[self.data.grids[0] :], k=1, distance_upper_bound=self.mask_radius)
+        dists, _ = tree.query(coords[self.boundary_mask], k=1, distance_upper_bound=self.mask_radius)
 
         grid_mask = np.concatenate([self.cutout_mask, np.isfinite(dists)])
         return np.where(grid_mask)[0].astype(np.int64)
