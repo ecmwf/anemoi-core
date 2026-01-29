@@ -110,7 +110,7 @@ class SphericalHarmonicTransform(Module):
     def __init__(
         self,
         nlat: int,
-        nlon: list[int],
+        lons_per_lat: list[int],
         lmax: int | None = None,
         mmax: int | None = None
     ) -> None:
@@ -121,10 +121,12 @@ class SphericalHarmonicTransform(Module):
         self.mmax = mmax or nlat
 
         self.nlat = nlat
-        self.nlon = nlon
+        self.lons_per_lat = lons_per_lat
 
-        self.slon = [0] + list(np.cumsum(self.nlon))[:-1]
-        self.rlon = [nlat + 8 - nlon // 2 for nlon in self.nlon]
+        self.n_grid_points = sum(self.lons_per_lat)
+
+        self.slon = [0] + list(np.cumsum(self.lons_per_lat))[:-1]
+        self.rlon = [nlat + 8 - nlon // 2 for nlon in self.lons_per_lat]
 
         theta, weight = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
@@ -143,7 +145,7 @@ class SphericalHarmonicTransform(Module):
 
     def rfft_rings(self, x: Tensor) -> Tensor:
 
-        rfft = [self.rfft(x[..., slon : slon + nlon]) for slon, nlon in zip(self.slon, self.nlon)]
+        rfft = [self.rfft(x[..., slon : slon + nlon]) for slon, nlon in zip(self.slon, self.lons_per_lat)]
 
         rfft = [
             torch.cat([x, torch.zeros((*x.shape[:-1], rlon), device=x.device)], dim=-1)
@@ -174,7 +176,7 @@ class InverseSphericalHarmonicTransform(Module):
     def __init__(
         self,
         nlat: int,
-        nlon: list[int],
+        lons_per_lat: list[int],
         lmax: int | None = None,
         mmax: int | None = None
     ) -> None:
@@ -185,7 +187,7 @@ class InverseSphericalHarmonicTransform(Module):
         self.mmax = mmax or nlat
 
         self.nlat = nlat
-        self.nlon = nlon
+        self.lons_per_lat = lons_per_lat
 
         theta, _ = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
@@ -205,7 +207,7 @@ class InverseSphericalHarmonicTransform(Module):
 
     def irfft_rings(self, x: Tensor) -> Tensor:
 
-        irfft = [self.irfft(x[..., t, :], nlon) for t, nlon in enumerate(self.nlon)]
+        irfft = [self.irfft(x[..., t, :], nlon) for t, nlon in enumerate(self.lons_per_lat)]
 
         return torch.cat(
             tensors=irfft,
