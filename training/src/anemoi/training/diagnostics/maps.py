@@ -1,3 +1,12 @@
+# (C) Copyright 2024 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import copy
 import json
 import logging
@@ -56,15 +65,18 @@ class Coastlines:
     """Class to plot coastlines from a GeoJSON file."""
 
     def __init__(self, projection: EquirectangularProjection | None = None) -> None:
-        """Initialize coastline data and projection.
+        """Initialise the Coastlines object.
 
-        Args:
-            projection (EquirectangularProjection | None): Projection to use.
-                Defaults to a new EquirectangularProjection instance.
+        Parameters
+        ----------
+        projection : Any, optional
+            Projection Object, by default None
 
         Raises
         ------
-            ModuleNotFoundError: If importlib_resources is missing on Python <= 3.8.
+        ModuleNotFoundError
+            Whether the importlib_resources or importlib.resources module is not found.
+
         """
         try:
             # this requires python 3.9 or newer
@@ -84,7 +96,6 @@ class Coastlines:
         self.process_data()
 
     def process_data(self) -> None:
-        """Transform GeoJSON geometry into a Matplotlib LineCollection."""
         lines = []
         for feature in self.data["features"]:
             coords = feature["geometry"]["coordinates"]
@@ -93,23 +104,21 @@ class Coastlines:
         self.lines = LineCollection(lines, linewidth=0.5, color="black")
 
     def plot_continents(self, ax: plt.Axes) -> None:
-        """Add the coastline LineCollection to the provided axis.
-
-        Args:
-            ax (plt.Axes): The Matplotlib axes to plot onto.
-        """
+        # Add the lines to the axis as a collection
+        # Note that we have to provide a copy of the lines, because of Matplotlib
         ax.add_collection(copy.copy(self.lines))
 
 
 class Borders:
-    """Class to plot country borders from a local GeoJSON file, following Coastlines logic."""
+    """Class to plot country borders from a local GeoJSON file."""
 
     def __init__(self, projection: EquirectangularProjection | None = None) -> None:
         """Initialize border data and projection.
 
-        Args:
-            projection (EquirectangularProjection | None): Projection to use.
-                Defaults to a new EquirectangularProjection instance.
+        Parameters
+        ----------
+        projection : EquirectangularProjection | None
+            Projection to use. Defaults to a new EquirectangularProjection instance.
         """
         try:
             # this requires python 3.9 or newer
@@ -130,7 +139,6 @@ class Borders:
         self.process_data()
 
     def process_data(self) -> None:
-        """Transform GeoJSON geometry into a Matplotlib LineCollection."""
         lines = []
         for feature in self.data["features"]:
             geometry = feature["geometry"]
@@ -152,11 +160,8 @@ class Borders:
         self.lines = LineCollection(lines, linewidth=0.5, color="black", linestyle=":")
 
     def plot_borders(self, ax: plt.Axes) -> None:
-        """Add the border LineCollection to the provided axis.
-
-        Args:
-            ax (plt.Axes): The Matplotlib axes to plot onto.
-        """
+        # Add the lines to the axis as a collection
+        # Note that we have to provide a copy of the lines, because of Matplotlib
         ax.add_collection(copy.copy(self.lines))
 
 
@@ -170,19 +175,18 @@ class MapFeatures:
     ) -> None:
         """Initialize the map features container.
 
-        Args:
-            continents (Coastlines | None): Coastline plotting object.
-            borders (Borders | None): Border plotting object.
+        Parameters
+        ----------
+        continents: Coastlines | None
+            Coastline plotting object.
+        borders: Borders | None
+            Border plotting object.
         """
         self.continents = continents
         self.borders = borders
 
     def plot(self, ax: plt.Axes) -> None:
-        """Plot all enabled map features on the given axis.
 
-        Args:
-            ax (plt.Axes): The Matplotlib or GeoAxes to plot onto.
-        """
         if self.continents:
             try:
                 self.continents.plot_continents(ax)
@@ -196,12 +200,7 @@ class MapFeatures:
 
 
 def _build_map_features() -> MapFeatures:
-    """Factory function to create a MapFeatures instance with available components.
-
-    Returns
-    -------
-        MapFeatures: An object containing initialized Coastlines and (if available) Borders.
-    """
+    """Factory function to create a MapFeatures instance with available components."""
     continents = Coastlines()
     borders = Borders()
 
