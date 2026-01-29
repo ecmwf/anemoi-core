@@ -817,11 +817,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=bse)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group)[
+        x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group, multi_out=self.multi_out)[
             ..., self._internal_input_idx[dataset_name]
         ]
-        assert x_skip.ndim == 4, "Residual must be (batch, ensemble, grid, vars)."
-        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
         x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
 
         # Shard node attributes if grid sharding is enabled
@@ -1088,9 +1087,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_skips = {}
 
         for dataset_name, in_x in x.items():
-            x_skip = self.residual[dataset_name](in_x, grid_shard_shapes[dataset_name], model_comm_group)
-            assert x_skip.ndim == 4, "Residual must be (batch, ensemble, grid, vars)."
-            x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+            x_skip = self.residual[dataset_name](
+                in_x, grid_shard_shapes[dataset_name], model_comm_group, multi_out=self.multi_out
+            )
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             # x_skip.shape: (bs, time, ens, latlon, nvar)
             x_skips[dataset_name] = x_skip[..., self.data_indices[dataset_name].model.input.prognostic]
 

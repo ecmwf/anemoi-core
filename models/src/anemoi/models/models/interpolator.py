@@ -90,7 +90,12 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+            multi_out=self.multi_out,
+        )
 
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -131,8 +136,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
         # residual connection (just for the prognostic variables)
         if x_skip is not None:
-            assert x_skip.ndim == 4, "Residual must be (batch, ensemble, grid, vars)."
-            x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             assert (
                 x_skip.shape[1] == x_out.shape[1]
             ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
@@ -337,7 +341,12 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDecInterpolato
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+            multi_out=self.multi_out,
+        )
 
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
