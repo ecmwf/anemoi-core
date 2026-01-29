@@ -156,6 +156,48 @@ class BaseImputer(BasePreprocessor, ABC):
 
         return nan_locations[..., idx_src].expand(-1, *x.shape[1:-2], -1)
 
+    def _assert_nan_locations_batch(self, x: torch.Tensor) -> None:
+        assert x.shape[0] == self.nan_locations.shape[0], (
+            f"Batch dimension of input tensor ({x.shape[0]}) does not match the batch dimension of "
+            f"nan locations ({self.nan_locations.shape[0]}). Are you using the postprocessors without running "
+            "the preprocessor first?"
+        )
+
+    def _apply_nan_locations(
+        self,
+        x: torch.Tensor,
+        src_index: list[int | None],
+        dst_index: list[int | None] | dict[int, int],
+    ) -> None:
+        if isinstance(dst_index, dict):
+            for idx_src in src_index:
+                if idx_src is not None:
+                    idx_dst = dst_index.get(idx_src)
+                    if idx_dst is not None:
+                        x[..., idx_dst][self._expand_subset_mask(x, idx_src, self.nan_locations)] = torch.nan
+        else:
+            for idx_src, idx_dst in zip(src_index, dst_index):
+                if idx_src is not None and idx_dst is not None:
+                    x[..., idx_dst][self._expand_subset_mask(x, idx_src, self.nan_locations)] = torch.nan
+
+    def _subset_index_map(self, data_index: object, full_index: list[int]) -> dict[int, int] | None:
+        data_index_list = data_index.tolist() if torch.is_tensor(data_index) else list(data_index)
+        data_index_set = set(data_index_list)
+        if not data_index_set.issubset(set(full_index)):
+            return None
+        return {full_idx: pos for pos, full_idx in enumerate(data_index_list)}
+
+    def _inverse_indices_for_shape(self, x: torch.Tensor) -> tuple[list[int | None], list[int | None]] | None:
+        if x.shape[-1] == self.num_training_output_vars:
+            return self.index_inference_input, self.index_training_output
+        if x.shape[-1] == self.num_inference_output_vars:
+            return self.index_inference_input, self.index_inference_output
+        if x.shape[-1] == self.num_training_input_vars:
+            return self.index_training_input, self.index_training_input
+        if x.shape[-1] == self.num_inference_input_vars:
+            return self.index_inference_input, self.index_inference_input
+        return None
+
     def fill_with_value(
         self, x: torch.Tensor, index_x: list[int], nan_locations: torch.Tensor, index_nl: list[int]
     ) -> torch.Tensor:
@@ -241,25 +283,43 @@ class BaseImputer(BasePreprocessor, ABC):
         if not in_place:
             x = x.clone()
 
-        # Replace original nans with nan again
-        if x.shape[-1] == self.num_training_output_vars:
-            index = self.index_training_output
-        elif x.shape[-1] == self.num_inference_output_vars:
-            index = self.index_inference_output
-        else:
+        data_index = _kwargs.get("data_index")
+        if data_index is not None and self._inverse_indices_for_shape(x) is None:
+            data_index_list = data_index.tolist() if torch.is_tensor(data_index) else list(data_index)
+            train_input_full = self.data_indices.data.input.full.tolist()
+            infer_input_full = self.data_indices.model.input.full.tolist()
+            diag_output = self.data_indices.data.output.diagnostic.tolist()
+
+            if set(data_index_list).issubset(set(diag_output)):
+                return x
+
+            dst_index_map = None
+            src_index = None
+
+            if set(data_index_list).issubset(set(train_input_full)):
+                full_pos = {full_idx: pos for pos, full_idx in enumerate(train_input_full)}
+                dst_index_map = {full_pos[idx]: pos for pos, idx in enumerate(data_index_list)}
+                src_index = [full_pos[idx] if idx in full_pos else None for idx in self.index_training_input]
+            elif set(data_index_list).issubset(set(infer_input_full)):
+                full_pos = {full_idx: pos for pos, full_idx in enumerate(infer_input_full)}
+                dst_index_map = {full_pos[idx]: pos for pos, idx in enumerate(data_index_list)}
+                src_index = [full_pos[idx] if idx in full_pos else None for idx in self.index_inference_input]
+
+            if src_index is not None and dst_index_map is not None:
+                self._assert_nan_locations_batch(x)
+                self._apply_nan_locations(x, src_index, dst_index_map)
+                return x
+
+        indices = self._inverse_indices_for_shape(x)
+        if indices is None:
             raise ValueError(
                 f"Input tensor ({x.shape[-1]}) does not match the training "
                 f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
             )
 
-        assert (
-            x.shape[0] == self.nan_locations.shape[0]
-        ), f"Batch dimension of input tensor ({x.shape[0]}) does not match the batch dimension of nan locations ({self.nan_locations.shape[0]}). Are you using the postprocessors without running the preprocessor first?"
-
-        # Replace values
-        for idx_src, idx_dst in zip(self.index_inference_input, index):
-            if idx_src is not None and idx_dst is not None:
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src, self.nan_locations)] = torch.nan
+        src_index, dst_index = indices
+        self._assert_nan_locations_batch(x)
+        self._apply_nan_locations(x, src_index, dst_index)
         return x
 
 

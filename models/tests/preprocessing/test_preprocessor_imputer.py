@@ -267,6 +267,123 @@ def test_transform_with_nan_inference(imputer_fixture, data_fixture, request):
     ), "Inverse transform does not restore NaNs correctly in inference."
 
 
+def test_inverse_transform_with_subset_data_index(non_default_input_imputer, non_default_input_data) -> None:
+    """Check that inverse_transform handles prognostic-only subsets using data_index."""
+    x, expected, _ = non_default_input_data
+    imputer = non_default_input_imputer
+
+    # Prime nan_locations using full training input
+    imputer.transform(x, in_place=False)
+
+    prog_index = imputer.data_indices.data.input.prognostic
+    expected_prog = expected[..., prog_index]
+
+    restored = imputer.inverse_transform(expected_prog, in_place=False, data_index=prog_index)
+
+    expected_restored = expected_prog.clone()
+    prog_index_list = prog_index.tolist() if torch.is_tensor(prog_index) else list(prog_index)
+    full_input_list = imputer.data_indices.data.input.full.tolist()
+    full_input_map = {full_idx: pos for pos, full_idx in enumerate(full_input_list)}
+    for idx_dst, idx_src in enumerate(prog_index_list):
+        idx_src_pos = full_input_map[idx_src]
+        nan_mask = imputer.nan_locations[..., idx_src_pos]
+        for _ in expected_prog.shape[1:-2]:
+            nan_mask = nan_mask.unsqueeze(1)
+        nan_mask = nan_mask.expand(-1, *expected_prog.shape[1:-2], -1)
+        expected_restored[..., idx_dst][nan_mask] = torch.nan
+
+    assert torch.allclose(
+        restored, expected_restored, equal_nan=True
+    ), "Inverse transform does not restore NaNs correctly for prognostic subset."
+
+
+def test_inverse_transform_with_subset_non_contiguous_indices() -> None:
+    """Expose mis-indexing when data.input.full has gaps (diagnostics interleaved)."""
+    config = DictConfig(
+        {
+            "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
+            "data": {
+                "imputer": {"default": "none", "mean": ["p0", "p1"]},
+                "forcing": ["force"],
+                "diagnostic": ["diag"],
+            },
+        },
+    )
+    statistics = {
+        "mean": np.array([1.0, 2.0, 3.0, 4.0]),
+        "stdev": np.array([0.5, 0.5, 0.5, 0.5]),
+        "minimum": np.array([0.0, 0.0, 0.0, 0.0]),
+        "maximum": np.array([10.0, 10.0, 10.0, 10.0]),
+    }
+    name_to_index = {"p0": 0, "diag": 1, "p1": 2, "force": 3}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    imputer = InputImputer(config=config.data.imputer, data_indices=data_indices, statistics=statistics)
+
+    x = torch.tensor(
+        [[[[1.0, 10.0, float("nan"), 4.0], [2.0, 11.0, 12.0, 5.0]]]],
+        dtype=torch.float32,
+    )
+    x_imputed = imputer.transform(x, in_place=False)
+
+    prog_index = data_indices.data.input.prognostic
+    expected_prog = x_imputed[..., prog_index]
+    restored = imputer.inverse_transform(expected_prog, in_place=False, data_index=prog_index)
+
+    expected_restored = expected_prog.clone()
+    full_input_list = data_indices.data.input.full.tolist()
+    full_input_map = {full_idx: pos for pos, full_idx in enumerate(full_input_list)}
+    prog_index_list = prog_index.tolist()
+    for idx_dst, idx_src in enumerate(prog_index_list):
+        idx_src_pos = full_input_map[idx_src]
+        nan_mask = imputer.nan_locations[..., idx_src_pos]
+        for _ in expected_prog.shape[1:-2]:
+            nan_mask = nan_mask.unsqueeze(1)
+        nan_mask = nan_mask.expand(-1, *expected_prog.shape[1:-2], -1)
+        expected_restored[..., idx_dst][nan_mask] = torch.nan
+
+    assert torch.allclose(
+        restored, expected_restored, equal_nan=True
+    ), "Subset inverse_transform should map NaNs via data.input.full positions."
+
+
+def test_inverse_transform_diagnostic_subset_noop() -> None:
+    """Diagnostic-only subsets should not be treated as model-input indices."""
+    config = DictConfig(
+        {
+            "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
+            "data": {
+                "imputer": {"default": "none", "mean": ["p0"]},
+                "forcing": ["force"],
+                "diagnostic": ["diag"],
+            },
+        },
+    )
+    statistics = {
+        "mean": np.array([1.0, 2.0, 3.0, 4.0]),
+        "stdev": np.array([0.5, 0.5, 0.5, 0.5]),
+        "minimum": np.array([0.0, 0.0, 0.0, 0.0]),
+        "maximum": np.array([10.0, 10.0, 10.0, 10.0]),
+    }
+    # Diagnostic index overlaps model-input index space here (diag=0)
+    name_to_index = {"diag": 0, "p0": 1, "p1": 2, "force": 3}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    imputer = InputImputer(config=config.data.imputer, data_indices=data_indices, statistics=statistics)
+
+    x = torch.tensor(
+        [[[[10.0, float("nan"), 12.0, 4.0], [11.0, 2.0, 13.0, 5.0]]]],
+        dtype=torch.float32,
+    )
+    _ = imputer.transform(x, in_place=False)
+
+    diag_index = data_indices.data.output.diagnostic
+    diag_subset = torch.tensor([[[[9.0], [10.0]]]], dtype=torch.float32)
+    restored = imputer.inverse_transform(diag_subset, in_place=False, data_index=diag_index)
+
+    assert torch.allclose(
+        restored, diag_subset, equal_nan=True
+    ), "Diagnostic-only subsets should be left unchanged by inverse_transform."
+
+
 @pytest.mark.parametrize(
     ("imputer_fixture", "data_fixture"),
     fixture_combinations,

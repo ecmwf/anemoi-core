@@ -321,6 +321,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     ) -> dict[str, torch.Tensor]:
         tendencies: dict[str, torch.Tensor] = {}
         for dataset_name, y_dataset in y.items():
+            # y is normalized data.output.full; x_ref is normalized model.input.prognostic (subset)
             pre_tend = self._tendency_pre_processors[dataset_name]
             tendency_steps = []
             for step, pre_proc in enumerate(pre_tend):
@@ -344,6 +345,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     ) -> dict[str, torch.Tensor]:
         states: dict[str, torch.Tensor] = {}
         for dataset_name, tendency_dataset in tendency.items():
+            # x_ref is normalized model.input.prognostic; tendency is normalized model.output.* space
             post_tend = self._tendency_post_processors[dataset_name]
             state_steps = []
             for step, post_proc in enumerate(post_tend):
@@ -431,6 +433,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             requires_grad=False,
         )
 
+        # batch is already normalized in BaseGraphModule._normalize_batch
+        # x: data.input.full (normalized), y: data.output.full (normalized)
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
 
@@ -447,6 +451,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             self.grid_shard_shapes,
             self.model_comm_group,
         )
+        # x_ref is normalized model.input.prognostic (subset), aligned to output steps
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
         tendency_target = self._compute_tendency_target(y, x_ref)
