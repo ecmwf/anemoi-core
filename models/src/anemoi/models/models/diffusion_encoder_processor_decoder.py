@@ -903,12 +903,14 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] - x_t0[dataset_name],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.prognostic,
+                skip_imputation=True,
             )
             # diagnostic variables are taken from x_t1, normalised as full fields:
             tendency[..., self.data_indices[dataset_name].model.output.diagnostic] = pre_processors_state[dataset_name](
                 x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.diagnostic,
+                skip_imputation=True,
             )
             tendencies[dataset_name] = tendency
 
@@ -948,7 +950,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name in tendency.keys():
             state_outp[dataset_name] = post_processors_tendencies[dataset_name](
-                tendency[dataset_name], in_place=False, data_index=self.data_indices[dataset_name].data.output.full
+                tendency[dataset_name],
+                in_place=False,
+                data_index=self.data_indices[dataset_name].data.output.full,
+                skip_imputation=True,
             )
 
             state_outp[dataset_name][
@@ -957,6 +962,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 tendency[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.diagnostic,
+                skip_imputation=True,
             )
 
             state_outp[dataset_name][
@@ -965,6 +971,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 state_inp[dataset_name],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.input.prognostic,
+                skip_imputation=True,
             )
 
             if output_pre_processor[dataset_name] is not None:
@@ -972,6 +979,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                     state_outp[dataset_name],
                     in_place=False,
                     data_index=self.data_indices[dataset_name].data.output.full,
+                    skip_imputation=True,
                 )
 
         return state_outp

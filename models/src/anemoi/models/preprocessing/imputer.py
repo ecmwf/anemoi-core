@@ -26,6 +26,8 @@ LOGGER = logging.getLogger(__name__)
 class BaseImputer(BasePreprocessor, ABC):
     """Base class for Imputers."""
 
+    supports_skip_imputation = True
+
     def __init__(
         self,
         config=None,
@@ -225,10 +227,32 @@ class BaseImputer(BasePreprocessor, ABC):
                 x[..., idx_dst][nan_locations[..., idx_src]] = value
         return x
 
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Impute missing values in the input tensor.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+        in_place : bool
+            Whether to process the tensor in place.
+        skip_imputation : bool, optional
+            When True, do not replace NaNs or update the stored NaN mask.
+        """
         if not in_place:
             x = x.clone()
+
+        if skip_imputation:
+            # Subset tensors (e.g., prognostic-only) are not safe to impute here because
+            # imputation indices and masks are defined in full-input space. This path is
+            # used during diffusion tendency computation where subset tensors are expected.
+            return x
 
         # recalculate NaN locations every forward pass and save for backward pass
         nan_locations = self.get_nans(x)
@@ -278,10 +302,29 @@ class BaseImputer(BasePreprocessor, ABC):
         # Replace values
         return self.fill_with_value(x, index, nan_locations, index)
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Impute missing values in the input tensor.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+        in_place : bool
+            Whether to process the tensor in place.
+        skip_imputation : bool, optional
+            When True, do not re-insert NaNs or use the stored NaN mask.
+        """
         if not in_place:
             x = x.clone()
+
+        if skip_imputation:
+            return x
 
         data_index = _kwargs.get("data_index")
         if data_index is not None and self._inverse_indices_for_shape(x) is None:
@@ -477,10 +520,19 @@ class DynamicMixin:
                 x[..., idx][nan_locations[..., idx]] = value
         return x
 
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         if not in_place:
             x = x.clone()
+
+        if skip_imputation:
+            return x
 
         # Initilialize mask every time
         nan_locations = self.get_nans(x)
@@ -573,9 +625,15 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
                 x[..., idx][nan_locations[..., idx]] = x[..., indices[value]][nan_locations[..., idx]]
         return x
 
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Impute missing values in the input tensor."""
-        return DynamicMixin.transform(self, x, in_place)
+        return DynamicMixin.transform(self, x, in_place, skip_imputation=skip_imputation)
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
         """Impute missing values in the input tensor."""

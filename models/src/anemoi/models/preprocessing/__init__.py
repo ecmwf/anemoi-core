@@ -126,6 +126,8 @@ class BasePreprocessor(nn.Module):
         torch.Tensor
             Processed tensor
         """
+        if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
+            kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
         if inverse:
             return self.inverse_transform(x, in_place=in_place, **kwargs)
         return self.transform(x, in_place=in_place, **kwargs)
