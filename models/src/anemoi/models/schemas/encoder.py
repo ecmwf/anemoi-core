@@ -17,7 +17,13 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import InterpolationModelComponent
 from .common_components import TransformerModelComponent
+
+
+class InterpolationEncoderSchema(InterpolationModelComponent):
+    target_: Literal["anemoi.models.layers.mapper.GraphInterpolationForwardMapper"] = Field(..., alias="_target_")
+    "Interpolation encoder object from anemoi.models.layers.mapper."
 
 
 class GNNEncoderSchema(GNNModelComponent):
