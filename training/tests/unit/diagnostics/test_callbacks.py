@@ -37,7 +37,7 @@ diagnostics:
 
   plot:
     enabled: False
-    focus_areas: 
+    focus_areas:
         datasets:
             data: null
     callbacks: []
