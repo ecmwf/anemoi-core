@@ -162,11 +162,35 @@ def plot_loss(
     return fig
 
 
+def select_and_flatten(arr, idx):
+    if arr is None:
+        return None
+    return (arr if arr.ndim == 1 else arr[..., idx]).reshape(-1)
+
+
+def interpolate_field(values, xt, method, pc_lon, pc_lat, grid_pc_lon, grid_pc_lat):
+    if values is None:
+        return None
+    data_to_interp = values - xt if xt is not None else values
+    return griddata((pc_lon, pc_lat), data_to_interp, (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
+
+
+def mask_from_truth(truth_field, *fields):
+    if truth_field is None:
+        return fields
+
+    mask = np.isnan(truth_field)
+    if not mask.any():
+        return fields
+
+    return tuple(np.where(mask, 0.0, f) for f in fields)
+
+
 def plot_power_spectrum(
     parameters: dict[str, int],
     latlons: np.ndarray,
     x: np.ndarray,
-    y_true: np.ndarray,
+    y_true: np.ndarray | None,
     y_pred: np.ndarray,
     min_delta: float | None = None,
 ) -> Figure:
@@ -228,45 +252,38 @@ def plot_power_spectrum(
     grid_pc_lon, grid_pc_lat = np.meshgrid(regular_pc_lon, regular_pc_lat)
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
-        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
+        yt = select_and_flatten(y_true, variable_idx)
+        yp = select_and_flatten(y_pred, variable_idx)
+        xt = select_and_flatten(x, variable_idx) if output_only else None
 
-        # check for any nan in yt
-        nan_flag = np.isnan(yt).any()
-
+        nan_flag = yt is not None and np.isnan(yt).any()
         method = "linear" if nan_flag else "cubic"
-        if output_only:
-            xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1)
-            yt_i = griddata((pc_lon, pc_lat), (yt - xt), (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
-            yp_i = griddata((pc_lon, pc_lat), (yp - xt), (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
-        else:
-            yt_i = griddata((pc_lon, pc_lat), yt, (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
-            yp_i = griddata((pc_lon, pc_lat), yp, (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
 
-        # Masking NaN values
-        if nan_flag:
-            mask = np.isnan(yt_i)
-            if mask.any():
-                yt_i = np.where(mask, 0.0, yt_i)
-                yp_i = np.where(mask, 0.0, yp_i)
+        yp_i = interpolate_field(yp, xt, method, pc_lon, pc_lat, grid_pc_lon, grid_pc_lat)
 
-        amplitude_t = np.array(compute_spectra(yt_i))
+        yt_i = interpolate_field(yt, xt, method, pc_lon, pc_lat, grid_pc_lon, grid_pc_lat) if yt is not None else None
+
+        # mask NaNs safely
+        if yt_i is not None:
+            yt_i, yp_i = mask_from_truth(yt_i, yt_i, yp_i)
+        print(yt_i, yp_i.shape)
         amplitude_p = np.array(compute_spectra(yp_i))
-
-        ax[plot_idx].loglog(
-            np.arange(1, amplitude_t.shape[0]),
-            amplitude_t[1 : (amplitude_t.shape[0])],
-            label="Truth (data)",
-        )
         ax[plot_idx].loglog(
             np.arange(1, amplitude_p.shape[0]),
-            amplitude_p[1 : (amplitude_p.shape[0])],
+            amplitude_p[1:],
             label="Predicted",
         )
 
+        if yt_i is not None:
+            amplitude_t = np.array(compute_spectra(yt_i))
+            ax[plot_idx].loglog(
+                np.arange(1, amplitude_t.shape[0]),
+                amplitude_t[1:],
+                label="Truth (data)",
+            )
+
         ax[plot_idx].legend()
         ax[plot_idx].set_title(variable_name)
-
         ax[plot_idx].set_xlabel("$k$")
         ax[plot_idx].set_ylabel("$P(k)$")
         ax[plot_idx].set_aspect("auto", adjustable=None)
@@ -301,10 +318,39 @@ def compute_spectra(field: np.ndarray) -> np.ndarray:
     return np.sum(coeff_amp, axis=0)
 
 
+def maybe_increment(values, x, idx, output_only):
+    if not output_only:
+        return values
+
+    xt = select_and_flatten(x, idx) * int(output_only)
+    return values - xt
+
+
+def matched_histogram(a, b, bins=100):
+    """Compute two histograms with identical binning.
+    `a` may be None.
+    """
+    if a is None:
+        b_clean = b[~np.isnan(b)]
+        hist_b, bins_b = np.histogram(b_clean, bins=bins, density=True)
+        return None, hist_b, bins_b
+
+    a_clean = a[~np.isnan(a)]
+    b_clean = b[~np.isnan(b)]
+
+    bin_min = min(np.nanmin(a_clean), np.nanmin(b_clean))
+    bin_max = max(np.nanmax(a_clean), np.nanmax(b_clean))
+
+    hist_a, bins = np.histogram(a_clean, bins=bins, density=True, range=[bin_min, bin_max])
+    hist_b, _ = np.histogram(b_clean, bins=bins, density=True, range=[bin_min, bin_max])
+
+    return hist_a, hist_b, bins
+
+
 def plot_histogram(
     parameters: dict[str, int],
     x: np.ndarray,
-    y_true: np.ndarray,
+    y_true: np.ndarray | None,
     y_pred: np.ndarray,
     precip_and_related_fields: list | None = None,
     log_scale: bool = False,
@@ -345,42 +391,45 @@ def plot_histogram(
         ax = [ax]
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
-        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
-        # postprocessed outputs so we need to handle possible NaNs
 
-        # Calculate the histogram and handle NaNs
-        if output_only:
-            # histogram of true increment and predicted increment
-            xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
-            yt_xt = yt - xt
-            yp_xt = yp - xt
-            # enforce the same binning for both histograms
-            bin_min = min(np.nanmin(yt_xt), np.nanmin(yp_xt))
-            bin_max = max(np.nanmax(yt_xt), np.nanmax(yp_xt))
-            hist_yt, bins_yt = np.histogram(yt_xt[~np.isnan(yt_xt)], bins=100, density=True, range=[bin_min, bin_max])
-            hist_yp, bins_yp = np.histogram(yp_xt[~np.isnan(yp_xt)], bins=100, density=True, range=[bin_min, bin_max])
-        else:
-            # enforce the same binning for both histograms
-            bin_min = min(np.nanmin(yt), np.nanmin(yp))
-            bin_max = max(np.nanmax(yt), np.nanmax(yp))
-            hist_yt, bins_yt = np.histogram(yt[~np.isnan(yt)], bins=100, density=True, range=[bin_min, bin_max])
-            hist_yp, bins_yp = np.histogram(yp[~np.isnan(yp)], bins=100, density=True, range=[bin_min, bin_max])
+        yt = select_and_flatten(y_true, variable_idx)
+        yp = select_and_flatten(y_pred, variable_idx)
 
-        # Visualization trick for tp
+        yt = maybe_increment(yt, x, variable_idx, output_only) if yt is not None else None
+        yp = maybe_increment(yp, x, variable_idx, output_only)
+
+        hist_yt, hist_yp, bins = matched_histogram(yt, yp)
+
+        # Visualization trick for precipitation-like fields
         if variable_name in precip_and_related_fields:
-            # in-place multiplication does not work here because variables are different numpy types
-            hist_yt = hist_yt * bins_yt[:-1]
-            hist_yp = hist_yp * bins_yp[:-1]
-        # Plot the modified histogram
-        ax[plot_idx].bar(bins_yt[:-1], hist_yt, width=np.diff(bins_yt), color="blue", alpha=0.7, label="Truth (data)")
-        ax[plot_idx].bar(bins_yp[:-1], hist_yp, width=np.diff(bins_yp), color="red", alpha=0.7, label="Predicted")
+            if hist_yt is not None:
+                hist_yt = hist_yt * bins[:-1]
+            hist_yp = hist_yp * bins[:-1]
+
+        if hist_yt is not None:
+            ax[plot_idx].bar(
+                bins[:-1],
+                hist_yt,
+                width=np.diff(bins),
+                alpha=0.7,
+                label="Truth (data)",
+            )
+
+        ax[plot_idx].bar(
+            bins[:-1],
+            hist_yp,
+            width=np.diff(bins),
+            alpha=0.7,
+            label="Predicted",
+        )
 
         ax[plot_idx].set_title(variable_name)
         ax[plot_idx].set_xlabel(variable_name)
         ax[plot_idx].set_ylabel("Density")
+
         if log_scale:
             ax[plot_idx].set_yscale("log")
+
         ax[plot_idx].legend()
         ax[plot_idx].set_aspect("auto", adjustable=None)
 
@@ -393,7 +442,7 @@ def plot_predicted_multilevel_flat_sample(
     latlons: np.ndarray,
     clevels: float,
     x: np.ndarray,
-    y_true: np.ndarray,
+    y_true: np.ndarray | None,
     y_pred: np.ndarray,
     datashader: bool = False,
     precip_and_related_fields: list | None = None,
@@ -416,7 +465,7 @@ def plot_predicted_multilevel_flat_sample(
         Accumulation levels used for precipitation related plots
     x : np.ndarray
         Input data of shape (lat*lon, nvar*level)
-    y_true : np.ndarray
+    y_true : np.ndarray | None
         Expected data of shape (lat*lon, nvar*level)
     y_pred : np.ndarray
         Predicted data of shape (lat*lon, nvar*level)
@@ -437,14 +486,17 @@ def plot_predicted_multilevel_flat_sample(
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
     fig, axs = plt.subplots(n_plots_x, n_plots_y, figsize=figsize, layout=LAYOUT)
-
     pc_lat, pc_lon = equirectangular_projection(latlons)
     if colormaps is None:
         colormaps = {}
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
         xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
-        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
+        yt = (
+            (y_true if y_true is not None and y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
+            if y_true is not None
+            else None
+        )
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
         # get the colormap for the variable as defined in config file
@@ -479,7 +531,7 @@ def plot_flat_sample(
     lon: np.ndarray,
     lat: np.ndarray,
     input_: np.ndarray,
-    truth: np.ndarray,
+    truth: np.ndarray | None,
     pred: np.ndarray,
     vname: str,
     clevels: float,
@@ -504,7 +556,7 @@ def plot_flat_sample(
         latitude coordinates array, shape (lat,)
     input_ : np.ndarray
         Input data of shape (lat*lon,)
-    truth : np.ndarray
+    truth : np.ndarray | None
         Expected data of shape (lat*lon,)
     pred : np.ndarray
         Predicted data of shape (lat*lon,)
@@ -528,80 +580,66 @@ def plot_flat_sample(
     precip_and_related_fields = precip_and_related_fields or []
     if vname in precip_and_related_fields:
         # converting to mm from m
-        truth *= 1000.0
+        if truth is not None:
+            truth *= 1000.0
         pred *= 1000.0
         if np.nansum(input_) != 0:
             input_ *= 1000.0
-    data = [None for _ in range(6)]
-    # truth, prediction and prediction error always plotted
-    data[1:4] = [truth, pred, truth - pred]
-    # default titles for 6 plots
-    titles = [
-        f"{vname} input",
-        f"{vname} target",
-        f"{vname} pred",
-        f"{vname} pred err",
-        f"{vname} increment [pred - input]",
-        f"{vname} persist err",
-    ]
-    # colormaps
-    cmaps = [cmap] * 3 + [error_cmap] * 3
-    # normalizations for significant colormaps
-    norms = [None for _ in range(6)]
-    norms[3:6] = [TwoSlopeNorm(vcenter=0.0)] * 3  # center the error colormaps at 0
+
+    data = []
+    titles = []
+    cmaps = []
+    norm_groups = []  # "main" or "error"
+
+    def add_plot(values, title, cmap, norm_group):
+        data.append(values)
+        titles.append(title)
+        cmaps.append(cmap)
+        norm_groups.append(norm_group)
+
+    add_plot(input_, f"{vname} input", cmap, "main")
+    add_plot(pred, f"{vname} pred", cmap, "main")
+    add_plot(pred - input_, f"{vname} increment [pred - input]", error_cmap, "error")
+
+    # truth-dependent plots
+    if truth is not None:
+        add_plot(truth, f"{vname} target", cmap, "main")
+        add_plot(truth - pred, f"{vname} pred err", error_cmap, "error")
+        add_plot(truth - input_, f"{vname} persist err", error_cmap, "error")
 
     if vname in precip_and_related_fields:
-        # Defining the actual precipitation accumulation levels in mm
-        cummulation_lvls = clevels
-        norm = BoundaryNorm(cummulation_lvls, len(cummulation_lvls) + 1)
-
-        norms[1] = norm
-        norms[2] = norm
-
+        norm_main = BoundaryNorm(clevels, len(clevels) + 1)
     else:
-        combined_data = np.concatenate((input_, truth, pred))
-        # For 'errors', only persistence and increments need identical colorbar-limits
-
-        norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
-
-        norms[1] = norm
-        norms[2] = norm
-
-    if np.nansum(input_) != 0:
-        # prognostic fields: plot input and increment as well
-        data[0] = input_
-        data[4] = pred - input_
-        data[5] = truth - input_
-        combined_error = np.concatenate(((pred - input_), (truth - input_)))
-        # ensure vcenter is between minimum and maximum error
-        norm_error = TwoSlopeNorm(
-            vmin=min(-0.00001, np.nanmin(combined_error)),
-            vcenter=0.0,
-            vmax=max(0.00001, np.nanmax(combined_error)),
+        combined_main = np.concatenate([d for d, g in zip(data, norm_groups, strict=True) if g == "main"])
+        norm_main = Normalize(
+            vmin=np.nanmin(combined_main),
+            vmax=np.nanmax(combined_main),
         )
-        norms[0] = norm
-        norms[4] = norm_error
-        norms[5] = norm_error
 
-    else:
-        # diagnostic fields: omit input and increment plots
-        ax[0].axis("off")
-        ax[4].axis("off")
-        ax[5].axis("off")
+    combined_error = np.concatenate([d for d, g in zip(data, norm_groups, strict=True) if g == "error"])
 
-    for ii in range(6):
-        if data[ii] is not None:
-            single_plot(
-                fig,
-                ax[ii],
-                lon,
-                lat,
-                data[ii],
-                cmap=cmaps[ii],
-                norm=norms[ii],
-                title=titles[ii],
-                datashader=datashader,
-            )
+    norm_error = TwoSlopeNorm(
+        vmin=min(-1e-5, np.nanmin(combined_error)),
+        vcenter=0.0,
+        vmax=max(1e-5, np.nanmax(combined_error)),
+    )
+
+    norms = {
+        "main": norm_main,
+        "error": norm_error,
+    }
+    for ax_i, d, title, cmap_i, group in zip(ax, data, titles, cmaps, norm_groups, strict=True):
+        single_plot(
+            fig,
+            ax_i,
+            lon,
+            lat,
+            d,
+            cmap=cmap_i,
+            norm=norms[group],
+            title=title,
+            datashader=datashader,
+        )
 
 
 def single_plot(

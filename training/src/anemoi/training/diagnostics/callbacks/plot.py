@@ -33,9 +33,10 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.training.diagnostics.callbacks.plot_specs import _get_task_spec
+from anemoi.training.diagnostics.focus_area import NoOpSpatialMask
+from anemoi.training.diagnostics.focus_area import SpatialMask
 from anemoi.training.diagnostics.focus_area import build_spatial_mask
-from anemoi.training.diagnostics.focus_area  import NoOpSpatialMask
-from anemoi.training.diagnostics.focus_area  import SpatialMask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -48,7 +49,6 @@ from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sam
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.train.tasks import GraphInterpolator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -114,17 +114,13 @@ class BasePlotCallback(Callback, ABC):
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
-    def _get_init_step(self, rollout_step: int, mode: tuple) -> int:
-        """Return index of initial step for plotting."""
-        return rollout_step if mode == "time_interp" else 0
+    def _get_init_step(self, rollout_step: int, pl_module: pl.LightningModule) -> int:
+        spec = _get_task_spec(pl_module)
+        return spec.get_init_step(rollout_step)
 
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
-        """Return times outputted by the model."""
-        if isinstance(pl_module, GraphInterpolator):
-            output_times = (len(config.training.explicit_times.target), "time_interp")
-        else:
-            output_times = (getattr(pl_module, "rollout", 0), "forecast")
-        return output_times
+    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple[int, str]:
+        spec = _get_task_spec(pl_module)
+        return spec.get_output_times(config, pl_module)
 
     @rank_zero_only
     def _output_figure(
@@ -624,7 +620,6 @@ class LongRolloutPlots(BasePlotCallback):
         # predicted output tensor
         output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
 
-
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
             self.per_sample,
@@ -1060,17 +1055,20 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            for rollout_step in range(output_times[0]):
+            for rollout_step in range(output_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
+                t_index = pl_module.multi_step + rollout_step if batch[dataset_name].ndim == 2 else 0
                 y_true = batch[dataset_name][
                     :,
-                    0,#pl_module.multi_step + rollout_step, # !TODO
+                    t_index,
                     ...,
                     data_indices.data.output.full,
                 ]
                 if self.latlons is None:
-                    self.latlons = pl_module.model.model._graph_data[dataset_name][pl_module.model.model._graph_name_data].x.detach()
-                    self.latlons = {dataset_name:np.rad2deg(self.latlons.cpu().numpy())}
+                    self.latlons = pl_module.model.model._graph_data[dataset_name][
+                        pl_module.model.model._graph_name_data
+                    ].x.detach()
+                    self.latlons = {dataset_name: np.rad2deg(self.latlons.cpu().numpy())}
 
                 _, y_hat, y_true = focus_mask.apply(
                     pl_module.model.model._graph_data,
@@ -1156,7 +1154,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         input_tensor = (
             batch[dataset_name][
                 :,
-                pl_module.multi_step - 1 : pl_module.multi_step + output_times[0] + 1,
+                pl_module.multi_step - 1 : pl_module.multi_step + output_times + 1,
                 ...,
                 pl_module.data_indices[dataset_name].data.output.full,
             ]
@@ -1274,16 +1272,22 @@ class PlotSample(BasePlotAdditionalMetrics):
                 )
                 for name in self.parameters
             }
-            data, output_tensor, latlons = self.process(pl_module, dataset_name, outputs, batch, output_times, focus_mask)
+            data, output_tensor, latlons = self.process(
+                pl_module,
+                dataset_name,
+                outputs,
+                batch,
+                output_times,
+                focus_mask,
+            )
             tag = focus_mask.tag
             local_rank = pl_module.local_rank
 
+            for rollout_step in range(output_times):
+                init_step = self._get_init_step(rollout_step, pl_module)
 
-            for rollout_step in range(output_times[0]):
-                init_step = self._get_init_step(rollout_step, output_times[1])
-
-                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim==2 else None
-                per_sample = self.per_sample if data.ndim ==2 else 3
+                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim == 2 else None
+                per_sample = self.per_sample if data.ndim == 2 else 3
 
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
@@ -1305,6 +1309,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                     tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
                     exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{tag}",
                 )
+
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
     """Plots TP related metric comparing target and prediction.
@@ -1362,10 +1367,17 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
         local_rank = pl_module.local_rank
         for dataset_name, focus_mask in zip(dataset_names, self.focus_masks, strict=True):
-            data, output_tensor, latlons = self.process(pl_module, dataset_name, outputs, batch, output_times,focus_mask)
+            data, output_tensor, latlons = self.process(
+                pl_module,
+                dataset_name,
+                outputs,
+                batch,
+                output_times,
+                focus_mask,
+            )
             tag = focus_mask.tag
 
-            for rollout_step in range(output_times[0]):
+            for rollout_step in range(output_times):
                 # Build dictionary of inidicies and parameters to be plotted
                 diagnostics = (
                     []
@@ -1380,8 +1392,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     for name in self.parameters
                 }
 
-                init_step = self._get_init_step(rollout_step, output_times[1])
-                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim==2 else None
+                init_step = self._get_init_step(rollout_step, pl_module)
+                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim == 2 else None
 
                 fig = plot_power_spectrum(
                     parameters=plot_parameters_dict_spectrum,
@@ -1468,8 +1480,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             data, output_tensor, _ = self.process(pl_module, dataset_name, outputs, batch, output_times, focus_mask)
             tag = focus_mask.tag
 
-
-            for rollout_step in range(output_times[0]):
+            for rollout_step in range(output_times):
 
                 # Build dictionary of inidicies and parameters to be plotted
                 diagnostics = (
@@ -1486,8 +1497,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     for name in self.parameters
                 }
 
-                init_step = self._get_init_step(rollout_step, output_times[1])
-                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim==2 else None
+                init_step = self._get_init_step(rollout_step, pl_module)
+                y_true = data[rollout_step + 1, ...].squeeze() if data.ndim == 2 else None
 
                 fig = plot_histogram(
                     plot_parameters_dict_histogram,
