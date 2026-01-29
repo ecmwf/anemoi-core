@@ -15,9 +15,7 @@ import numpy as np
 import torch
 import torch.fft
 
-from anemoi.models.layers.spectral_helpers import CartesianRealSHT
-from anemoi.models.layers.spectral_helpers import EcTransOctahedralSHTModule
-from anemoi.models.layers.spectral_helpers import OctahedralRealSHT
+from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
@@ -147,30 +145,63 @@ class DCT2D(SpectralTransform):
         )
 
 
-class CartesianSHT(SpectralTransform):
-    """SHT on a regular (y_dim=nlat, x_dim=nlon) grid."""
+class RegularSHT(SpectralTransform):
+    """SHT on a regular lon-lat grid."""
 
     def __init__(
         self,
-        x_dim: int,  # nlon
-        y_dim: int,  # nlat
-        grid: str = "legendre-gauss",
+        nlat: int,
+        nlon: int,
         **kwargs,
     ) -> None:
         super().__init__()
-        self.x_dim = x_dim
-        self.y_dim = y_dim
-        self.grid = grid
-        self._sht = CartesianRealSHT(nlat=self.y_dim, nlon=self.x_dim, grid=self.grid)
+        self.nlat = nlat
+        self.nlon = nlon
+        self.lons_per_lat = [nlon] * nlat
+        self._sht = SphericalHarmonicTransform(nlat=self.nlat, lons_per_lat=self.lons_per_lat,
+                                               lmax=self.nlat // 2, mmax=self.nlat // 2)
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
         assert (
-            p == self.x_dim * self.y_dim
-        ), f"Input points={p} does not match expected y_dim*x_dim={self.y_dim*self.x_dim}"
-        x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.y_dim, x=self.x_dim)
+            p == self.n_grid_points
+        ), f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.nlat, x=self.nlon)
+        coeffs = self._sht(x)
+
+        # -> [b,e,L,M,v] == [b,e,y_freq,x_freq,v]
+        return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+
+
+class ReducedSHT(SpectralTransform):
+    """SHT on a reduced Gaussian grid."""
+
+    def __init__(
+        self,
+        grid: str,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+
+        # TODO implement logic for deriving nlat and lons_per_lat from given reduced grid spec
+        # e.g. N320
+        # self.nlat = nlat
+        # self.lons_per_lat = [nlon] * nlat
+        raise NotImplementedError("ReducedSHT is not yet implemented.")
+
+        self._sht = SphericalHarmonicTransform(nlat=self.nlat, lons_per_lat=self.lons_per_lat,
+                                               lmax=self.nlat // 2, mmax=self.nlat // 2)
+        self.y_freq = self._sht.lmax
+        self.x_freq = self._sht.mmax
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        b, e, p, v = data.shape
+        assert (
+            p == self.n_grid_points
+        ), f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.nlat, x=self.nlon)
         coeffs = self._sht(x)
 
         # -> [b,e,L,M,v] == [b,e,y_freq,x_freq,v]
@@ -183,54 +214,24 @@ class OctahedralSHT(SpectralTransform):
     def __init__(
         self,
         nlat: int,
-        lmax: int | None = None,
-        mmax: int | None = None,
-        folding: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         self.nlat = nlat
-        self.lmax = lmax
-        self.mmax = mmax
-        self.folding = folding
-        self._sht = OctahedralRealSHT(nlat=self.nlat, lmax=self.lmax, mmax=self.mmax, folding=folding)
-        self._nlon = self._sht.nlon
-        self._expected_points = int(np.sum(self._nlon))
+        self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
+        self.lons_per_lat += list(reversed(self.lons_per_lat))
+        self._sht = SphericalHarmonicTransform(nlat=self.nlat, lons_per_lat=self.lons_per_lat,
+                                               lmax=self.nlat // 2, mmax=self.nlat // 2)
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
         assert (
-            p == self._expected_points
-        ), f"Input points={p} does not match expected octahedral flattened rings={self._expected_points}"
+            p == self.n_grid_points
+        ), f"Input points={p} does not match expected octahedral flattened rings={self.n_grid_points}"
 
         # expects [..., points] where points is flattened spatial dim
         x = einops.rearrange(data, "b e p v -> (b e v) p")
         coeffs = self._sht(x)  # complex: (b*e*v, L, M)
-        tmp = einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
-        return tmp
-
-
-class EcTransOctahedralSHT(SpectralTransform):
-    def __init__(
-        self,
-        truncation: int,
-        dtype: torch.dtype = torch.float32,
-        filepath: str | None = None,
-        **kwargs,
-    ) -> None:
-        super().__init__()
-        self.truncation = int(truncation)
-        self.dtype = dtype
-
-        self._sht = EcTransOctahedralSHTModule(truncation=self.truncation, dtype=self.dtype, filepath=filepath)
-        self._expected_points = int(self._sht.n_grid_points)
-
-    def forward(self, data: torch.Tensor) -> torch.Tensor:
-        _, _, points, _ = data.shape
-        assert points == self._expected_points, (
-            f"Input data spatial dimension {points} does not match expected "
-            f"size {self._expected_points} for truncation={self.truncation}."
-        )
-        return self._sht(data)
+        return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
