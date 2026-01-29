@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import time
 from pathlib import Path
@@ -57,7 +56,7 @@ class TestDownloadWithRetry:
             assert dest_path.exists()
             assert dest_path.stat().st_size > 0
 
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, aiohttp.ClientError) as e:
             pytest.skip(f"Network request failed: {e}")
 
     @pytest.mark.unit
@@ -930,5 +929,5 @@ class TestUtilsIntegration:
             file_stat = dest_path.stat()
             assert file_stat.st_size > 0
 
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, aiohttp.ClientError) as e:
             pytest.skip(f"Network request failed: {e}")
