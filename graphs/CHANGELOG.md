@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.4](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.3...graphs-0.8.4) (2026-01-28)
+
+
+### Features
+
+* Drop python 3.10 ([#795](https://github.com/ecmwf/anemoi-core/issues/795)) ([ebea6d0](https://github.com/ecmwf/anemoi-core/commit/ebea6d09b4f7ea834865134670d0f2e187140ae1))
+* **graphs:** Introduce a new multiscale edgebuilding strategy optimizing 1-hop edges  ([#694](https://github.com/ecmwf/anemoi-core/issues/694)) ([2385b9d](https://github.com/ecmwf/anemoi-core/commit/2385b9debbd5f38673309574aa3870e2531f9f39))
+
+
+### Bug Fixes
+
+* **graphs:** Typo in LimitedAreaNPZNodes ([#823](https://github.com/ecmwf/anemoi-core/issues/823)) ([b267f42](https://github.com/ecmwf/anemoi-core/commit/b267f426a0bbdebb25b01a3401928d583df56d4a))
+* System level tests ([#812](https://github.com/ecmwf/anemoi-core/issues/812)) ([a402373](https://github.com/ecmwf/anemoi-core/commit/a4023731a636bf96a74ddb258c02b8a879be85d0))
+
+
+### Documentation
+
+* Update tri_nodes.csv - refinement lvl 9 ([#807](https://github.com/ecmwf/anemoi-core/issues/807)) ([2b626ca](https://github.com/ecmwf/anemoi-core/commit/2b626ca5345da91577bb959fd10b06d8858d9365))
+
 ## [0.8.3](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.2...graphs-0.8.3) (2026-01-14)
 
 
