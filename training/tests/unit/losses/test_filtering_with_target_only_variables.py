@@ -319,20 +319,45 @@ class TestFilteringLossWrapperSetDataIndices:
 
     @pytest.fixture
     def data_indices_with_target_only(self):
-        """Create IndexCollection with target-only variable."""
+        """Create IndexCollection with target-only variable and forcing gaps.
+        
+        Layout:
+        - var_0, var_1: prognostic (indices 0, 1)
+        - f_0, f_1: forcing (indices 2, 3) - excluded from data.output
+        - var_2, var_3: prognostic (indices 4, 5)
+        - f_2, f_3: forcing (indices 6, 7) - excluded from data.output
+        - var_4: prognostic (index 8)
+        - imerg: target-only (index 9)
+        
+        data.output.full = [0, 1, 4, 5, 8, 9] (forcings excluded)
+        Positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
+        """
         data_config = {
-            "data": {
-                "forcing": [],
-                "diagnostic": [],
-                "target": ["imerg"],
-            },
+            "forcing": ["f_0", "f_1", "f_2", "f_3"],
+            "diagnostic": [],
+            "target": ["imerg"],
         }
-        name_to_index = {f"var_{i}": i for i in range(10)}
-        name_to_index["imerg"] = 10
+        name_to_index = {
+            "var_0": 0,
+            "var_1": 1,
+            "f_0": 2,
+            "f_1": 3,
+            "var_2": 4,
+            "var_3": 5,
+            "f_2": 6,
+            "f_3": 7,
+            "var_4": 8,
+            "imerg": 9,
+        }
         return IndexCollection(DictConfig(data_config), name_to_index)
 
     def test_set_data_indices_target_only_variable(self, data_indices_with_target_only):
-        """Test that set_data_indices correctly handles target-only variables."""
+        """Test that set_data_indices correctly handles target-only variables.
+        
+        Fixture layout:
+        - data.output.full = [0, 1, 4, 5, 8, 9] (forcings at 2,3,6,7 excluded)
+        - Reindexed positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
+        """
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
@@ -346,8 +371,9 @@ class TestFilteringLossWrapperSetDataIndices:
         # predicted_indices should be from model.output
         assert wrapper.predicted_indices == [0]  # var_0 index in model.output
 
-        # target_indices should be reindexed position of imerg in data.output
-        assert wrapper.target_indices == [10]  # imerg is at position 10 in data.output
+        # target_indices: imerg has name_to_index=9, but its position in
+        # data.output.full=[0,1,4,5,8,9] is index 5 (sixth element)
+        assert wrapper.target_indices == [5]
 
     def test_set_data_indices_with_forcing_gaps(self):
         """Reindexing when forcing variables create gaps in data.output.
@@ -401,7 +427,13 @@ class TestFilteringLossWrapperSetDataIndices:
         ], f"Expected imerg at position 2 in data.output tensor, got {wrapper.target_indices}"
 
     def test_set_data_indices_same_predicted_and_target(self, data_indices_with_target_only):
-        """Test set_data_indices when predicted and target variables are the same."""
+        """Test set_data_indices when predicted and target variables are the same.
+        
+        Fixture layout:
+        - model.output.name_to_index: var_0=0, var_1=1, var_2=2, var_3=3, var_4=4
+        - data.output.full = [0, 1, 4, 5, 8, 9]
+        - Reindexed positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4
+        """
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
@@ -415,28 +447,34 @@ class TestFilteringLossWrapperSetDataIndices:
         # predicted_indices come from model.output.name_to_index
         assert wrapper.predicted_indices == [0, 1, 2]
         # target_indices come from reindexed positions in data.output
-        # With nested config fixture, indices are the same
+        # var_0, var_1 are at positions 0, 1 in data.output.full
+        # var_2 has name_to_index=4, position 2 in data.output.full
         assert wrapper.target_indices == [0, 1, 2]
 
     def test_set_data_indices_all_variables(self, data_indices_with_target_only):
         """Test set_data_indices when no variables are specified (use all).
         
-        Note: The fixture uses nested config {"data": {...}} which IndexCollection
-        doesn't parse for forcing/diagnostic/target, so all 11 vars are in model.output.
+        NOTE: In practice, get_loss_function does NOT wrap the loss when both
+        predicted_variables and target_variables are None. This test exercises
+        the wrapper's behavior when directly instantiated with None values.
+        
+        When both are None, set_data_indices defaults to model.output.full for both
+        (to ensure same length for loss computation).
         """
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
         wrapper = FilteringLossWrapper(
             loss=base_loss,
-            predicted_variables=None,  # Use all model.output variables
-            target_variables=None,  # Use all data.output variables
+            predicted_variables=None,
+            target_variables=None,
         )
         wrapper.set_data_indices(data_indices_with_target_only)
         
-        # With nested config, all 11 variables are treated as prognostic
-        assert len(wrapper.predicted_indices) == 11
-        assert len(wrapper.target_indices) == 11
+        # Both default to model.output.full (5 prognostic variables)
+        # They must have the same length for loss computation
+        assert len(wrapper.predicted_indices) == 5
+        assert len(wrapper.target_indices) == 5
 
 
 class TestFilteringLossWrapperForward:
@@ -444,20 +482,46 @@ class TestFilteringLossWrapperForward:
 
     @pytest.fixture
     def data_indices_with_target_only(self):
-        """Create IndexCollection with target-only variable."""
+        """Create IndexCollection with target-only variable and forcing gaps.
+        
+        Layout:
+        - var_0, var_1: prognostic (indices 0, 1)
+        - f_0, f_1: forcing (indices 2, 3) - excluded from data.output
+        - var_2, var_3: prognostic (indices 4, 5)
+        - f_2, f_3: forcing (indices 6, 7) - excluded from data.output
+        - var_4: prognostic (index 8)
+        - imerg: target-only (index 9)
+        
+        data.output.full = [0, 1, 4, 5, 8, 9] (forcings excluded)
+        Positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
+        Total tensor size: 6 variables in data.output
+        """
         data_config = {
-            "data": {
-                "forcing": [],
-                "diagnostic": [],
-                "target": ["imerg"],
-            },
+            "forcing": ["f_0", "f_1", "f_2", "f_3"],
+            "diagnostic": [],
+            "target": ["imerg"],
         }
-        name_to_index = {f"var_{i}": i for i in range(5)}
-        name_to_index["imerg"] = 5
+        name_to_index = {
+            "var_0": 0,
+            "var_1": 1,
+            "f_0": 2,
+            "f_1": 3,
+            "var_2": 4,
+            "var_3": 5,
+            "f_2": 6,
+            "f_3": 7,
+            "var_4": 8,
+            "imerg": 9,
+        }
         return IndexCollection(DictConfig(data_config), name_to_index)
 
     def test_forward_filters_correctly(self, data_indices_with_target_only):
-        """Test that forward correctly filters predictions and targets."""
+        """Test that forward correctly filters predictions and targets.
+        
+        Fixture layout:
+        - data.output.full = [0, 1, 4, 5, 8, 9] (tensor size 6)
+        - Reindexed positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
+        """
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
@@ -469,13 +533,13 @@ class TestFilteringLossWrapperForward:
         wrapper.set_data_indices(data_indices_with_target_only)
 
         # Create tensors with zeros, then set specific values
-        # Shape: (batch=2, ensemble=1, grid=10, vars=6)
+        # Shape: (batch=2, ensemble=1, grid=8, vars=6) - 6 vars in data.output
         pred = torch.zeros(2, 1, 8, 6)
         target = torch.zeros(2, 1, 8, 6)
 
         # Set values only in the variables we expect to be used
-        pred[..., 0] = 1.0  # var_0 in predictions
-        target[..., 5] = 2.0  # imerg in targets
+        pred[..., 0] = 1.0  # var_0 in predictions (position 0)
+        target[..., 5] = 2.0  # imerg in targets (position 5 after reindexing)
 
         # Set different values in other positions to verify they're not used
         pred[..., 1:] = 100.0
@@ -490,9 +554,19 @@ class TestFilteringLossWrapperForward:
         torch.testing.assert_close(loss, torch.tensor(8.0))
 
     def test_forward_multiple_vars_and_target_only(self, data_indices_with_target_only):
-        """Test CombinedLoss with multiple vars in first loss and target-only in second."""
-        # First loss: MSE on var_0, var_1, var_2
+        """Test CombinedLoss with all prognostic vars in first loss and target-only in second.
+        
+        Fixture layout:
+        - data.output.full = [0, 1, 4, 5, 8, 9] (tensor size 6)
+        - model.output prognostic vars: var_0=0, var_1=1, var_2=2, var_3=3, var_4=4
+        - Reindexed target positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
+        
+        First loss uses ALL 5 prognostic variables, second loss compares var_0 vs imerg.
+        """
+        # First loss: MSE on ALL prognostic vars (var_0 through var_4)
         # Second loss: MSE on var_0 predicted vs imerg target
+        all_prognostic_vars = ["var_0", "var_1", "var_2", "var_3", "var_4"]
+        
         loss = get_loss_function(
             DictConfig(
                 {
@@ -500,8 +574,8 @@ class TestFilteringLossWrapperForward:
                     "losses": [
                         {
                             "_target_": "anemoi.training.losses.MSELoss",
-                            "predicted_variables": ["var_0", "var_1", "var_2"],
-                            "target_variables": ["var_0", "var_1", "var_2"],
+                            "predicted_variables": all_prognostic_vars,
+                            "target_variables": all_prognostic_vars,
                         },
                         {
                             "_target_": "anemoi.training.losses.MSELoss",
@@ -520,37 +594,44 @@ class TestFilteringLossWrapperForward:
         assert isinstance(loss.losses[0], FilteringLossWrapper)
         assert isinstance(loss.losses[1], FilteringLossWrapper)
 
-        # Verify indices for first loss
-        assert loss.losses[0].predicted_indices == [0, 1, 2]
-        assert loss.losses[0].target_indices == [0, 1, 2]
+        # Verify first loss uses ALL 5 prognostic variables
+        assert loss.losses[0].predicted_indices == [0, 1, 2, 3, 4]
+        assert loss.losses[0].target_indices == [0, 1, 2, 3, 4]
+        assert len(loss.losses[0].predicted_indices) == len(all_prognostic_vars)
 
         # Verify indices for second loss
         assert loss.losses[1].predicted_indices == [0]
-        assert loss.losses[1].target_indices == [5]  # imerg position in data.output
+        assert loss.losses[1].target_indices == [5]  # imerg at position 5 in data.output
 
         # Create tensors with controlled values
+        # Shape: (batch=2, ensemble=1, grid=4, vars=6) - 6 vars in data.output
         pred = torch.zeros(2, 1, 4, 6)
         target = torch.zeros(2, 1, 4, 6)
 
-        # Set prediction values
+        # Set prediction values for ALL 5 prognostic vars (model.output positions)
         pred[..., 0] = 1.0  # var_0
         pred[..., 1] = 2.0  # var_1
         pred[..., 2] = 3.0  # var_2
+        pred[..., 3] = 4.0  # var_3
+        pred[..., 4] = 5.0  # var_4
 
-        # Set target values for first loss (same vars)
+        # Set target values for first loss - ALL 5 prognostic vars (reindexed positions)
         target[..., 0] = 2.0  # var_0 target
         target[..., 1] = 2.0  # var_1 target
         target[..., 2] = 2.0  # var_2 target
+        target[..., 3] = 2.0  # var_3 target
+        target[..., 4] = 2.0  # var_4 target
 
         # Set imerg target for second loss
-        target[..., 5] = 5.0  # imerg target
+        target[..., 5] = 5.0  # imerg target (position 5)
 
         # Compute combined loss
         loss_value = loss(pred, target, squash_mode="sum")
 
-        # First loss: MSE on var_0, var_1, var_2
-        # (1-2)² + (2-2)² + (3-2)² = 1 + 0 + 1 = 2 per grid point, summed = 2 * 4 = 8
+        # First loss: MSE on ALL 5 prognostic vars (var_0 through var_4)
+        # (1-2)² + (2-2)² + (3-2)² + (4-2)² + (5-2)² = 1 + 0 + 1 + 4 + 9 = 15 per grid point
+        # summed over grid = 15 * 4 = 60
         # Second loss: MSE on var_0 vs imerg
         # (1-5)² = 16 per grid point, summed = 16 * 4 = 64
-        # Combined (weight 1.0 each): 8 + 64 = 72
-        torch.testing.assert_close(loss_value, torch.tensor(72.0))
+        # Combined (weight 1.0 each): 60 + 64 = 124
+        torch.testing.assert_close(loss_value, torch.tensor(124.0))
