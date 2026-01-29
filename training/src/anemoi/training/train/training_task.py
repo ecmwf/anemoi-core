@@ -37,11 +37,15 @@ class BaseTask(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_inputs(self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection]) -> dict[str, torch.Tensor]:
+    def get_inputs(
+        self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection]
+    ) -> dict[str, torch.Tensor]:
         pass
 
     @abstractmethod
-    def get_targets(self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection]) -> dict[str, torch.Tensor]:
+    def get_targets(
+        self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection]
+    ) -> dict[str, torch.Tensor]:
         pass
 
 
@@ -99,9 +103,50 @@ class ForecastingTask(BaseTask):
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
-    def advance_input(self, batch):
-        pass
+    def _advance_dataset_input(
+        self,
+        x: torch.Tensor,
+        y_pred: torch.Tensor,
+        batch: torch.Tensor,
+        rollout_step: int = 0,
+        data_indices: IndexCollection | None = None,
+    ) -> torch.Tensor:
+        x = x.roll(-1, dims=1)
 
+        # Get prognostic variables
+        x[:, -1, :, :, data_indices.model.input.prognostic] = y_pred[
+            ...,
+            data_indices.model.output.prognostic,
+        ]
+
+        #x[:, -1] = self.output_mask[dataset_name].rollout_boundary(
+        #    x[:, -1],
+        #    batch[:, self.multi_step + rollout_step],
+        #    data_indices[dataset_name],
+        #    grid_shard_slice=self.grid_shard_slice[dataset_name],
+        #)
+
+        # get new "constants" needed for time-varying fields
+        x[:, -1, :, :, data_indices.model.input.forcing] = batch[
+            :,
+            self.multi_step + rollout_step,
+            :,
+            :,
+            data_indices.data.input.forcing,
+        ]
+        return x
+
+    def advance_input(self, x, y_pred, batch, rollout_step=None, data_indices=None):
+        """Advance the input state for the next rollout step."""
+        for dataset_name in x:
+            x[dataset_name] = self._advance_dataset_input(
+                x[dataset_name],
+                y_pred[dataset_name],
+                batch[dataset_name],
+                rollout_step=rollout_step,
+                data_indices=data_indices[dataset_name],
+            )
+        return x
 
 class BaseExplicitIndicesTask(BaseTask):
     """Base class for tasks with explicit time indices."""

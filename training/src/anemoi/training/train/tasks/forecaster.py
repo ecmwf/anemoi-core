@@ -72,6 +72,6 @@ class GraphForecaster(BaseRolloutGraphModule):
             )
 
             # Advance input state for each dataset
-            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
+            x = self.task.advance_input(x, y_pred, batch, rollout_step=rollout_step)
 
             yield loss, metrics_next, y_pred

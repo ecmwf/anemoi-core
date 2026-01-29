@@ -150,7 +150,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             relative_date_indices=relative_date_indices,
             timestep=self.config.data.timestep,
             shuffle=shuffle,
-            grid_indices=self.grid_indices,
             label=label,
         )
 
