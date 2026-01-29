@@ -29,13 +29,11 @@ from scipy.interpolate import griddata
 from torch import Tensor
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
+from anemoi.training.diagnostics.maps import map_features
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
-
-continents = Coastlines()
 LAYOUT = "tight"
 
 
@@ -623,6 +621,7 @@ def single_plot(
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
+    transform: object | None = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -649,6 +648,8 @@ def single_plot(
         Title for plot, by default None
     datashader: bool, optional
         Scatter plot, by default False
+    transform:
+        Projection for the plot, by default None
 
     Returns
     -------
@@ -666,7 +667,9 @@ def single_plot(
             alpha=1.0,
             norm=norm,
             rasterized=False,
+            transform=transform,
         )
+
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
         # Adjust binning to match the resolution of the data
@@ -685,12 +688,16 @@ def single_plot(
             ax=ax,
         )
 
-    xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
-    ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
-    ax.set_xlim((xmin - 0.1, xmax + 0.1))
-    ax.set_ylim((ymin - 0.1, ymax + 0.1))
+    if transform is not None:
+        ax.set_extent([lon.min() - 0.1, lon.max() + 0.1, lat.min() - 0.1, lat.max() + 0.1], crs=transform)
+    else:
+        xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
+        ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
+        ax.set_xlim((xmin - 0.1, xmax + 0.1))
+        ax.set_ylim((ymin - 0.1, ymax + 0.1))
 
-    continents.plot_continents(ax)
+    # Add map features
+    map_features.plot(ax)
 
     if title is not None:
         ax.set_title(title)
@@ -724,7 +731,9 @@ def get_scatter_frame(
     )
     ax.set_xlim((-np.pi, np.pi))
     ax.set_ylim((-np.pi / 2, np.pi / 2))
-    continents.plot_continents(ax)
+
+    map_features.plot(ax)
+
     ax.set_aspect("auto", adjustable=None)
     _hide_axes_ticks(ax)
     return ax, scatter_frame
@@ -769,7 +778,7 @@ def edge_plot(
     ax.set_xlim((xmin - 0.1, xmax + 0.1))
     ax.set_ylim((ymin - 0.1, ymax + 0.1))
 
-    continents.plot_continents(ax)
+    map_features.plot(ax)
 
     if title is not None:
         ax.set_title(title)
@@ -822,6 +831,7 @@ def plot_graph_node_features(
                 data=node_features[..., i],
                 title=f"{mesh} trainable feature #{i + 1}",
                 datashader=datashader,
+                transform=None,
             )
 
     return fig

@@ -21,6 +21,7 @@ from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
@@ -33,6 +34,21 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
     "List of dataset names to plot."
     every_n_epochs: int | None
     "Epoch frequency to plot at."
+
+
+class FocusAreaSchema(BaseModel):
+    mask_attr_name: str | None = Field(default=None)
+    "Name of the node attribute to use as masking. eg. cutout_mask"
+
+    latlon_bbox: list[float] | None = Field(default=None, min_items=4, max_items=4)
+    "Latitude and longitude bounds as [lat_min, lon_min, lat_max, lon_max]."
+
+    @model_validator(mode="after")
+    def exactly_one_present(self) -> "FocusAreaSchema":
+        if (self.mask_attr_name is None) == (self.latlon_bbox is None):
+            msg = "Provide exactly one of 'mask_attr_name' or 'latlon_bbox' (not both)."
+            raise ValueError(msg)
+        return self
 
 
 class PlotLossSchema(BaseModel):
@@ -276,6 +292,9 @@ class PlotSchema(BaseModel):
     "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
+    focus_areas: DatasetDict[list[FocusAreaSchema]]
+    "List of regions of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox',"
+    " for each specific dataset."
 
 
 class TimeLimitSchema(BaseModel):
