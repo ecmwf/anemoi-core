@@ -105,15 +105,14 @@ def precompute_legpoly(
     return legpoly(mmax, lmax, np.cos(t), norm=norm, inverse=inverse, csphase=csphase)
 
 
-
-class OctahedralRealSHT(Module):
+class SphericalHarmonicTransform(Module):
 
     def __init__(
         self,
         nlat: int,
+        nlon: list[int],
         lmax: int | None = None,
-        mmax: int | None = None,
-        folding: bool = False,
+        mmax: int | None = None
     ) -> None:
 
         super().__init__()
@@ -122,13 +121,10 @@ class OctahedralRealSHT(Module):
         self.mmax = mmax or nlat
 
         self.nlat = nlat
-        self.nlon = [4 * (i + 1) + 16 for i in range(nlat // 2)]
-        self.nlon = self.nlon + self.nlon[::-1]
+        self.nlon = nlon
 
         self.slon = [0] + list(np.cumsum(self.nlon))[:-1]
         self.rlon = [nlat + 8 - nlon // 2 for nlon in self.nlon]
-
-        self.folding = self.spectral_folding if folding else self.no_spectral_folding
 
         theta, weight = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
@@ -141,20 +137,9 @@ class OctahedralRealSHT(Module):
 
         self.register_buffer("weight", weight, persistent=False)
 
-    def spectral_folding(self, x: Tensor) -> Tensor:
-
-        raise NotImplementedError
-
-    def no_spectral_folding(self, x: Tensor) -> Tensor:
-
-        return x
-
     def rfft(self, x: Tensor) -> Tensor:
 
-        return torch.fft.rfft(
-            input=self.folding(x),
-            norm="forward",
-        )
+        return torch.fft.rfft(input=x, norm="forward")
 
     def rfft_rings(self, x: Tensor) -> Tensor:
 
@@ -184,14 +169,14 @@ class OctahedralRealSHT(Module):
         return x
 
 
-class OctahedralInverseRealSHT(Module):
+class InverseSphericalHarmonicTransform(Module):
 
     def __init__(
         self,
         nlat: int,
+        nlon: list[int],
         lmax: int | None = None,
-        mmax: int | None = None,
-        folding: bool = False,
+        mmax: int | None = None
     ) -> None:
 
         super().__init__()
@@ -200,10 +185,7 @@ class OctahedralInverseRealSHT(Module):
         self.mmax = mmax or nlat
 
         self.nlat = nlat
-        self.nlon = [4 * (i + 1) + 16 for i in range(nlat // 2)]
-        self.nlon = self.nlon + self.nlon[::-1]
-
-        self.folding = self.spectral_folding if folding else self.no_spectral_folding
+        self.nlon = nlon
 
         theta, _ = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
@@ -213,18 +195,10 @@ class OctahedralInverseRealSHT(Module):
 
         self.register_buffer("pct", pct, persistent=False)
 
-    def spectral_folding(self, x: Tensor, nlon: int) -> Tensor:
-
-        raise NotImplementedError
-
-    def no_spectral_folding(self, x: Tensor, nlon: int) -> Tensor:
-
-        return x
-
     def irfft(self, x: Tensor, nlon: int) -> Tensor:
 
         return torch.fft.irfft(
-            input=self.folding(x, nlon),
+            input=x,
             n=nlon,
             norm="forward",
         )
