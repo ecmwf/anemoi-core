@@ -20,6 +20,12 @@ precision: bf16-mixed
 # Deepmind use k = 2 in their model
 multistep_input: 2
 
+# multistep output
+# 1 = single step output scheme, single model forward predicts X(t)
+# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
+# Deepmind use l = 1 in their model
+multistep_output: 1
+
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
@@ -70,7 +76,7 @@ training_loss:
       # A selection of available scalers are listed in training/scalers.
       # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
       # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-      scalers: ['pressure_level', 'general_variable', 'node_weights']
+      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
       ignore_nans: False
 
 # Validation metrics calculation,
@@ -89,7 +95,7 @@ validation_metrics:
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
         # Use the `scale_validation_metrics` section to variable scale.
-        scalers: ["node_weights"]
+        scalers: ["node_weights", "time_steps"]
         # other kwargs
         ignore_nans: True
 

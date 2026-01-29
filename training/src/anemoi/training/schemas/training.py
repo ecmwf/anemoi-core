@@ -189,7 +189,13 @@ class TimeStepScalerSchema(BaseModel):
     norm: Literal["unit-max", "unit-sum"] | None = Field(default="unit-sum", example="unit-sum")
     "Normalisation method applied to the weights."
     weights: list[float] = Field(example=[1.0, 1.0])
-    "Weights for each time step"
+    "Weights for each time step."
+
+
+class UniformTimeStepScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.UniformTimeStepScaler"] = Field(..., alias="_target_")
+    multistep_output: PositiveInt = Field(example=5)
+    "Number of output time steps."
 
 
 class LeadTimeDecayScalerSchema(BaseModel):
@@ -234,6 +240,7 @@ ScalerSchema = (
     | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
+    | UniformTimeStepScalerSchema
     | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
 )

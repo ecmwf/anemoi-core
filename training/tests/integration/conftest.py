@@ -234,10 +234,8 @@ def multidatasets_config(
 def multi_out_multidatasets_config(multidatasets_config: tuple[DictConfig, list[str]]) -> tuple[DictConfig, list[str]]:
     cfg, urls = multidatasets_config
 
-    OmegaConf.set_struct(cfg.training, False)
-
     cfg.training.multistep_input = 3
-    cfg.training["multistep_output"] = 2
+    cfg.training.multistep_output = 2
 
     return cfg, urls
 
@@ -305,9 +303,8 @@ def multi_out_multidatasets_diffusion_config(
     use_case_modifications.system.input.dataset_b = str(Path(tmp_dir, dataset_b))
 
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
-    OmegaConf.set_struct(cfg.training, False)
     cfg.training.multistep_input = 3
-    cfg.training["multistep_output"] = multistep_output
+    cfg.training.multistep_output = multistep_output
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls
@@ -404,10 +401,8 @@ def multi_out_ens_config(ensemble_config: tuple[DictConfig, str]) -> tuple[DictC
 
     cfg, url = ensemble_config
 
-    OmegaConf.set_struct(cfg.training, False)
-
     cfg.training.multistep_input = 3
-    cfg.training["multistep_output"] = 2
+    cfg.training.multistep_output = 2
 
     return cfg, url
 
@@ -454,10 +449,8 @@ def multi_out_autoencoder_config(autoencoder_config: tuple[OmegaConf, list[str]]
 
     cfg, url = autoencoder_config
 
-    OmegaConf.set_struct(cfg.training, False)
-
     cfg.training.multistep_input = 2
-    cfg.training["multistep_output"] = 2
+    cfg.training.multistep_output = 2
 
     return cfg, url
 
@@ -484,7 +477,7 @@ def multi_out_config(gnn_config: tuple[DictConfig, str]) -> tuple[DictConfig, st
     cfg, url = gnn_config
 
     cfg.training.multistep_input = 3
-    cfg.training["multistep_output"] = 2
+    cfg.training.multistep_output = 2
 
     OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
     cfg.training.scalers.datasets.data["output_steps"] = {
@@ -718,9 +711,7 @@ def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str
 def multi_out_diffusion_config(diffusion_config: tuple[OmegaConf, str]) -> tuple[OmegaConf, str]:
     cfg, url = diffusion_config
 
-    OmegaConf.set_struct(cfg.training, False)
-
     cfg.training.multistep_input = 3
-    cfg.training["multistep_output"] = 2
+    cfg.training.multistep_output = 2
 
     return cfg, url

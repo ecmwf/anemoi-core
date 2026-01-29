@@ -24,7 +24,7 @@ class TimeStepScaler(BaseScaler):
 
     def __init__(
         self,
-        weights: torch.Tensor,
+        weights: torch.Tensor | None = None,
         norm: str | None = None,
         **kwargs,
     ) -> None:
@@ -39,10 +39,34 @@ class TimeStepScaler(BaseScaler):
         """
         super().__init__(norm=norm)
         del kwargs
+        if weights is None:
+            weights = [1.0]
         self.weights = weights
 
     def get_scaling_values(self) -> torch.Tensor:
         return torch.tensor(self.weights, dtype=torch.float32)
+
+
+class UniformTimeStepScaler(TimeStepScaler):
+    """Class to apply uniform weights to all time steps."""
+
+    scale_dims = TensorDim.TIME
+
+    def __init__(
+        self,
+        multistep_output: int,
+        **kwargs,
+    ) -> None:
+        """Initialise Scaler.
+
+        Parameters
+        ----------
+        multistep_out : int
+            Number of time steps to apply uniform weights to.
+        """
+        del kwargs
+        weights = [1.0] * multistep_output
+        super().__init__(weights=weights, norm="unit-sum")
 
 
 class LeadTimeDecayScaler(TimeStepScaler):

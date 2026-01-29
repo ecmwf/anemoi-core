@@ -14,6 +14,7 @@ from .node_attributes import ReweightedGraphNodeAttributeScaler
 from .scalers import create_scalers
 from .time_step import LeadTimeDecayScaler
 from .time_step import TimeStepScaler
+from .time_step import UniformTimeStepScaler
 from .variable import GeneralVariableLossScaler
 from .variable_level import LinearVariableLevelScaler
 from .variable_level import NoVariableLevelScaler
@@ -38,6 +39,7 @@ __all__ = [
     "StdevTendencyScaler",
     "TensorDim",
     "TimeStepScaler",
+    "UniformTimeStepScaler",
     "VarTendencyScaler",
     "VariableMaskingLossScaler",
     "create_scalers",

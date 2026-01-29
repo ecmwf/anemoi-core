@@ -106,7 +106,7 @@ training_loss:
       # A selection of available scalers are listed in training/scalers.
       # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
       # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-      scalers: ['pressure_level', 'general_variable', 'node_weights']
+      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
       ignore_nans: False
 
 # Validation metrics calculation,
@@ -125,7 +125,7 @@ validation_metrics:
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
         # Use the `scale_validation_metrics` section to variable scale.
-        scalers: ["node_weights"]
+        scalers: ["node_weights", "time_steps"]
         # other kwargs
         ignore_nans: True
 
