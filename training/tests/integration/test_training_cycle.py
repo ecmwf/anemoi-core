@@ -349,3 +349,15 @@ def test_training_cycle_multi_out_diffusion(
     cfg, url = multi_out_diffusion_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_out_multidatasets_diffusion(
+    multi_out_multidatasets_diffusion_config: tuple[DictConfig, list[str]],
+    get_test_archive: callable,
+) -> None:
+    cfg, urls = multi_out_multidatasets_diffusion_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()

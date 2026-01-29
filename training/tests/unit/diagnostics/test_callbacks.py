@@ -20,6 +20,7 @@ import yaml
 
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
+from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
 from anemoi.training.diagnostics.callbacks.plot_ens import EnsemblePlotMixin
 from anemoi.training.diagnostics.callbacks.plot_ens import PlotEnsSample
@@ -204,6 +205,35 @@ def test_rollout_eval_ens_eval():
 
     # Mock batch (bs, ms, nens_per_device, latlon, nvar)
     batch = {"data": torch.randn(2, 4, 4, 10, 5)}
+
+    with patch.object(callback, "_log") as mock_log:
+        callback._eval(pl_module, batch)
+
+        #  Check for output
+        mock_log.assert_called_once()
+        args = mock_log.call_args[0]
+        assert args[1].item() == pytest.approx(0.125)  # (0.1 + 0.15) / 2
+        assert args[2]["metric1"].item() == pytest.approx(0.25)  # Last metric value
+        assert args[3] == 2  # batch size
+
+
+def test_rollout_eval_handles_dict_batch():
+    """Test RolloutEval._eval with a dict batch (multi-dataset style)."""
+    config = omegaconf.OmegaConf.create({})
+    callback = RolloutEval(config, rollout=2, every_n_batches=1)
+
+    # Mock pl_module
+    pl_module = MagicMock()
+    pl_module.device = torch.device("cpu")
+    pl_module.multi_step = 1
+    pl_module.multi_out = 1
+    pl_module._rollout_step.return_value = [
+        (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None),
+        (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None),
+    ]
+
+    # Mock batch (bs, ms, ens, latlon, nvar)
+    batch = {"data": torch.randn(2, 4, 1, 10, 5)}
 
     with patch.object(callback, "_log") as mock_log:
         callback._eval(pl_module, batch)

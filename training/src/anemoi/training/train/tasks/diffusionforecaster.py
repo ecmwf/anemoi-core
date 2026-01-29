@@ -153,12 +153,32 @@ class BaseDiffusionForecaster(BaseGraphModule):
         device: torch.device,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         sigma, weight = {}, {}
+        dataset_names = list(shape.keys())
+        ref_shape = shape[dataset_names[0]]
+        # Expected shape: (batch, time, ensemble, grid, vars)
+        assert len(ref_shape) == 5, "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for diffusion noise."
+        batch_size = ref_shape[0]
+        ensemble_size = ref_shape[2]
         for dataset_name, shape_x in shape.items():
-            rnd_uniform = torch.rand(shape_x, device=device)
-            sigma[dataset_name] = (
-                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
-            ) ** rho
-            weight[dataset_name] = (sigma[dataset_name] ** 2 + sigma_data**2) / (sigma[dataset_name] * sigma_data) ** 2
+            assert (
+                len(shape_x) == 5
+            ), f"Expected 5D tensor shape (batch, time, ensemble, grid, vars) for dataset '{dataset_name}'."
+            assert (
+                shape_x[0] == batch_size and shape_x[2] == ensemble_size
+            ), "Batch or ensemble dimension mismatch across datasets when sampling diffusion noise."
+
+        base_shape = (batch_size, ensemble_size)
+        rnd_uniform = torch.rand(base_shape, device=device)
+        sigma_base = (
+            sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+        ) ** rho
+        weight_base = (sigma_base**2 + sigma_data**2) / (sigma_base * sigma_data) ** 2
+        sigma_base = sigma_base[:, None, :, None, None]
+        weight_base = weight_base[:, None, :, None, None]
+
+        for dataset_name in shape:
+            sigma[dataset_name] = sigma_base
+            weight[dataset_name] = weight_base
         return sigma, weight
 
 
@@ -187,13 +207,18 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict, torch.Tensor]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(
+            1,
+            dtype=next(iter(batch.values())).dtype,
+            device=self.device,
+            requires_grad=False,
+        )
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
 
         # get noise level and associated loss weights
-        shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 1) for k, x_ in x.items()}
+        shapes = {k: y_.shape for k, y_ in y.items()}
         sigma, noise_weights = self._get_noise_level(
             shape=shapes,
             sigma_max=self.model.model.sigma_max,
@@ -399,7 +424,12 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list]:
         """Step for the tendency-based diffusion forecaster."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(
+            1,
+            dtype=next(iter(batch.values())).dtype,
+            device=self.device,
+            requires_grad=False,
+        )
 
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
@@ -422,7 +452,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         tendency_target = self._compute_tendency_target(y, x_ref)
 
         # get noise level and associated loss weights
-        shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 1) for k, x_ in x.items()}
+        shapes = {k: target.shape for k, target in tendency_target.items()}
         sigma, noise_weights = self._get_noise_level(
             shape=shapes,
             sigma_max=self.model.model.sigma_max,

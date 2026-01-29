@@ -305,3 +305,46 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
     assert isinstance(preds, dict)
     assert preds["data"].ndim == 5
     assert preds["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
+
+
+@pytest.mark.parametrize(
+    ("multi_step", "multi_out", "expected"),
+    [
+        (2, 3, [2.0, 3.0]),
+        (2, 2, [1.0, 2.0]),
+        (3, 2, [-1.0, 1.0, 2.0]),
+    ],
+)
+def test_rollout_advance_input_keeps_latest_steps(
+    multi_step: int,
+    multi_out: int,
+    expected: list[float],
+) -> None:
+    name_to_index = {"A": 0, "B": 1}
+    data_indices = _make_minimal_index_collection(name_to_index)
+
+    forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
+    pl.LightningModule.__init__(forecaster)
+    forecaster.multi_step = multi_step
+    forecaster.multi_out = multi_out
+    forecaster.output_mask = {"data": NoOutputMask()}
+    forecaster.data_indices = {"data": data_indices}
+    forecaster.grid_shard_slice = {"data": None}
+
+    b, e, g, v = 1, 1, 2, len(name_to_index)
+    x = torch.full((b, forecaster.multi_step, e, g, v), -1.0, dtype=torch.float32)
+    y_pred = torch.stack(
+        [torch.full((b, e, g, v), float(step), dtype=torch.float32) for step in range(1, forecaster.multi_out + 1)],
+        dim=1,
+    )
+    batch = torch.zeros((b, forecaster.multi_step + forecaster.multi_out, e, g, v), dtype=torch.float32)
+
+    updated = forecaster._advance_dataset_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        dataset_name="data",
+    )
+    for idx, value in enumerate(expected):
+        assert torch.all(updated[:, idx] == value)

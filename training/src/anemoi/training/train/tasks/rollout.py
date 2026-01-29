@@ -95,10 +95,12 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         Supports model outputs shaped like:
         - (B, T, E, G, V)
         """
-        x = x.roll(-self.multi_out, dims=1)
+        keep_steps = min(self.multi_out, self.multi_step)
+
+        x = x.roll(-keep_steps, dims=1)
 
         # TODO(dieter): see if we can replace for loop with tensor operations
-        for i in range(self.multi_out):
+        for i in range(keep_steps):
             # Get prognostic variables
             x[:, -(i + 1), ..., self.data_indices[dataset_name].model.input.prognostic] = y_pred[
                 :,

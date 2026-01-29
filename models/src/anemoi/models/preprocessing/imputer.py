@@ -236,7 +236,7 @@ class BaseImputer(BasePreprocessor, ABC):
         # Replace values
         return self.fill_with_value(x, index, nan_locations, index)
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         if not in_place:
             x = x.clone()
@@ -442,7 +442,7 @@ class DynamicMixin:
 
         return self.fill_with_value(x, index, nan_locations)
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         return x
 
@@ -517,6 +517,6 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
         """Impute missing values in the input tensor."""
         return DynamicMixin.transform(self, x, in_place)
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         return DynamicMixin.inverse_transform(self, x, in_place)

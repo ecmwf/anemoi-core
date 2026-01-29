@@ -274,6 +274,8 @@ class PlotSchema(BaseModel):
     "List of precipitation related fields from the parameters list."
     colormaps: dict[str, ColormapSchema] = Field(default_factory=dict)
     "List of colormaps to use."
+    output_steps: PositiveInt | None = Field(default=None, example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
 

@@ -194,11 +194,30 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         out = einops.rearrange(out, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
         return out
 
+    def _embed_noise_conditioning(self, sigma: torch.Tensor) -> torch.Tensor:
+        return self.noise_cond_mlp(self.noise_embedder(sigma))
+
+    def _assert_sigma_shapes(self, sigma: dict[str, torch.Tensor]) -> tuple[int, int]:
+        dataset_names = list(sigma)
+        sigma_ref = sigma[dataset_names[0]]
+        assert sigma_ref.ndim == 5, "Expected sigma to have 5 dimensions (batch, time, ensemble, grid, vars)."
+        batch_size, _, ensemble_size = sigma_ref.shape[:3]
+        for dataset_name in dataset_names:
+            sigma_shape = sigma[dataset_name].shape
+            assert (
+                len(sigma_shape) == 5
+            ), f"Expected sigma to have 5 dimensions (batch, time, ensemble, grid, vars) for '{dataset_name}'."
+            assert (
+                sigma_shape[0] == batch_size and sigma_shape[2] == ensemble_size
+            ), "Batch or ensemble dimension mismatch across datasets for diffusion sigma."
+        return batch_size, ensemble_size
+
     def _generate_noise_conditioning(
-        self, sigma: torch.Tensor, dataset_name: str, edge_conditioning: bool = False
+        self,
+        noise_cond: torch.Tensor,
+        dataset_name: str,
+        edge_conditioning: bool = False,
     ) -> torch.Tensor:
-        noise_cond = self.noise_embedder(sigma)
-        noise_cond = self.noise_cond_mlp(noise_cond)
 
         c_data = self._make_noise_emb(
             noise_cond,
@@ -234,6 +253,59 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         return c_data, c_hidden, c_data_to_hidden, c_hidden_to_data, c_hidden_to_hidden
 
+    def _build_conditioning_kwargs(
+        self,
+        x: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
+        batch_size, ensemble_size = self._assert_sigma_shapes(sigma)
+        dataset_names = list(x.keys())
+        sigma_ref = sigma[dataset_names[0]]
+
+        sigma_base = sigma_ref[:, 0, :, 0, 0].unsqueeze(-1)
+        noise_cond_base = self._embed_noise_conditioning(sigma_base)
+        cond_dim = noise_cond_base.shape[-1]
+
+        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = {}, {}, {}
+        for dataset_name in x:
+            time_size = sigma[dataset_name].shape[1]
+            noise_cond = noise_cond_base[:, None, :, None, :].expand(batch_size, time_size, ensemble_size, 1, cond_dim)
+            c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
+                noise_cond, dataset_name=dataset_name, edge_conditioning=False
+            )
+            c_data_shapes = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
+            c_hidden_shapes = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
+            c_data = shard_tensor(c_data, 0, c_data_shapes, model_comm_group)
+            c_hidden = shard_tensor(c_hidden, 0, c_hidden_shapes, model_comm_group)
+
+            fwd_mapper_kwargs[dataset_name] = {"cond": (c_data, c_hidden)}
+            processor_kwargs[dataset_name] = {"cond": c_hidden}
+            bwd_mapper_kwargs[dataset_name] = {"cond": (c_hidden, c_data)}
+
+        return fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs
+
+    def _processor_kwargs_equal(self, left, right) -> bool:
+        if isinstance(left, torch.Tensor) and isinstance(right, torch.Tensor):
+            return torch.equal(left, right)
+        if isinstance(left, (tuple, list)) and isinstance(right, (tuple, list)):
+            if len(left) != len(right):
+                return False
+            return all(self._processor_kwargs_equal(a, b) for a, b in zip(left, right))
+        if isinstance(left, dict) and isinstance(right, dict):
+            if left.keys() != right.keys():
+                return False
+            return all(self._processor_kwargs_equal(left[key], right[key]) for key in left)
+        return left == right
+
+    def _assert_same_processor_kwargs(self, processor_kwargs: dict[str, dict]) -> dict:
+        dataset_names = list(processor_kwargs)
+        base_kwargs = processor_kwargs[dataset_names[0]]
+        for dataset_name in dataset_names[1:]:
+            if not self._processor_kwargs_equal(base_kwargs, processor_kwargs[dataset_name]):
+                raise AssertionError("All datasets must have the same processor kwargs.")
+        return base_kwargs
+
     def forward(
         self,
         x: dict[str, torch.Tensor],
@@ -255,25 +327,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # prepare noise conditionings
-        c_data, c_hidden, shape_c_data, shape_c_hidden = {}, {}, {}, {}
-        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = {}, {}, {}
-        for dataset_name in x:
-            c_data[dataset_name], c_hidden[dataset_name], _, _, _ = self._generate_noise_conditioning(
-                sigma[dataset_name], dataset_name=dataset_name, edge_conditioning=False
-            )
-            shape_c_data[dataset_name] = get_shard_shapes(c_data[dataset_name], 0, model_comm_group=model_comm_group)
-            shape_c_hidden[dataset_name] = get_shard_shapes(
-                c_hidden[dataset_name], 0, model_comm_group=model_comm_group
-            )
-
-            c_data[dataset_name] = shard_tensor(c_data[dataset_name], 0, shape_c_data[dataset_name], model_comm_group)
-            c_hidden[dataset_name] = shard_tensor(
-                c_hidden[dataset_name], 0, shape_c_hidden[dataset_name], model_comm_group
-            )
-
-            fwd_mapper_kwargs[dataset_name] = {"cond": (c_data[dataset_name], c_hidden[dataset_name])}
-            processor_kwargs[dataset_name] = {"cond": c_hidden[dataset_name]}
-            bwd_mapper_kwargs[dataset_name] = {"cond": (c_hidden[dataset_name], c_data[dataset_name])}
+        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
+            x, sigma, model_comm_group=model_comm_group
+        )
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
@@ -322,10 +378,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         assert all(
             shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
         ), "All datasets must have the same shard shapes for the hidden graph."
-        proc_kwargs = processor_kwargs[dataset_names[0]]
-        assert all(
-            proc_kwargs == processor_kwargs[dataset_name] for dataset_name in dataset_names
-        ), "All datasets must have the same processor kwargs."
+        proc_kwargs = self._assert_same_processor_kwargs(processor_kwargs)
 
         processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
             batch_size=bse,
@@ -402,12 +455,24 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self, sigma: dict[str, torch.Tensor], sigma_data: torch.Tensor
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """Compute preconditioning factors."""
+        batch_size, ensemble_size = self._assert_sigma_shapes(sigma)
+        dataset_names = list(sigma)
+        sigma_ref = sigma[dataset_names[0]]
+
+        sigma_base = sigma_ref[:, 0, :, 0, 0]
+        c_skip_base = sigma_data**2 / (sigma_base**2 + sigma_data**2)
+        c_out_base = sigma_base * sigma_data / (sigma_base**2 + sigma_data**2) ** 0.5
+        c_in_base = 1.0 / (sigma_data**2 + sigma_base**2) ** 0.5
+        c_noise_base = sigma_base.log() / 4.0
+        base_view = (batch_size, 1, ensemble_size, 1, 1)
+
         c_skip, c_out, c_in, c_noise = {}, {}, {}, {}
-        for dataset_name, sigma_i in sigma.items():
-            c_skip[dataset_name] = sigma_data**2 / (sigma_i**2 + sigma_data**2)
-            c_out[dataset_name] = sigma_i * sigma_data / (sigma_i**2 + sigma_data**2) ** 0.5
-            c_in[dataset_name] = 1.0 / (sigma_data**2 + sigma_i**2) ** 0.5
-            c_noise[dataset_name] = sigma_i.log() / 4.0
+        for dataset_name in dataset_names:
+            shape_x = sigma[dataset_name].shape
+            c_skip[dataset_name] = c_skip_base.view(base_view).expand(shape_x)
+            c_out[dataset_name] = c_out_base.view(base_view).expand(shape_x)
+            c_in[dataset_name] = c_in_base.view(base_view).expand(shape_x)
+            c_noise[dataset_name] = c_noise_base.view(base_view).expand(shape_x)
 
         return c_skip, c_out, c_in, c_noise
 
@@ -828,7 +893,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 x_t0[dataset_name] = input_post_processor[dataset_name](
                     x_t0[dataset_name],
                     in_place=False,
-                    data_index=self.data_indices[dataset_name].data.output.prognostic,
+                    data_index=self.data_indices[dataset_name].data.input.prognostic,  # TODO SL
                 )
 
             tendency = x_t1[dataset_name].clone()
