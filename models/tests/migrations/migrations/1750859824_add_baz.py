@@ -23,9 +23,3 @@ def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint"""
     ckpt["baz"] = "baz"
     return ckpt
-
-
-def rollback(ckpt: CkptType) -> CkptType:
-    """Rollback the migration"""
-    del ckpt["baz"]
-    return ckpt

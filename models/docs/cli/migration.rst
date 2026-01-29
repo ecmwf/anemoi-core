@@ -11,11 +11,6 @@
 anemoi-models provides a way for users to migrate old checkpoints so that they can be
 used with recent versions of anemoi-models.
 
-.. caution::
-
-    Migrating your checkpoint is not secure. Only migrate a checkpoint that you trust.
-    Migrating a checkpoint may run rollback functions which can run arbitrary code.
-
 
 ********
  Inspect
@@ -91,9 +86,3 @@ Update your anemoi-models to the desired version and call ``anemoi-models migrat
 
 Note that this should work when updating to a newer version, as well as downgrading to an older
 version, as long as your checkpoint is not too old.
-
-*********
- Rollback
-*********
-If you update to an older version, the checkpoint will be rollbacked to be compatible with this
-older version.
