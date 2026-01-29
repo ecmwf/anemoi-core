@@ -98,7 +98,7 @@ async def download_with_retry(
             result = await _attempt_download(url, dest, timeout, chunk_size, attempt + 1, max_retries)
             if result:
                 return result
-        except asyncio.TimeoutError as e:
+        except (TimeoutError, asyncio.TimeoutError) as e:  # noqa: UP041 (Python 3.10 compatibility)
             _handle_timeout_error(e, attempt, max_retries, url, timeout)
         except aiohttp.ClientError as e:
             _handle_client_error(e, attempt, max_retries, url)
