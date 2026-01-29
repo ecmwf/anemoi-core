@@ -173,7 +173,7 @@ class TestCombinedLossWithTargetOnlyVariables:
 
     @pytest.fixture
     def data_indices_with_imerg(self):
-        """IndexCollection multiple variables and imerg (obs) as target-only."""
+        """IndexCollection with multiple variables and imerg as target-only."""
         data_config = {
             "data": {
                 "forcing": [],
@@ -194,7 +194,7 @@ class TestCombinedLossWithTargetOnlyVariables:
 
     @pytest.fixture
     def scalers_custom(self):
-        """Create scalers for weather variables."""
+        """Create scalers with custom values per variable."""
         n_vars = 6
         return {
             "pressure_level": (3, torch.ones(n_vars) * 2.0),
@@ -238,7 +238,7 @@ class TestCombinedLossWithTargetOnlyVariables:
         assert isinstance(loss.losses[0], FilteringLossWrapper)
         assert isinstance(loss.losses[1], FilteringLossWrapper)
 
-        # First loss: 5 weather variables
+        # First loss: 5 variables
         first_loss_scaler = loss.losses[0].loss.scaler.tensors["pressure_level"][1]
         assert first_loss_scaler.shape[0] == 5
 
@@ -554,18 +554,16 @@ class TestFilteringLossWrapperForward:
         torch.testing.assert_close(loss, torch.tensor(8.0))
 
     def test_forward_multiple_vars_and_target_only(self, data_indices_with_target_only):
-        """Test CombinedLoss with all prognostic vars in first loss and target-only in second.
+        """Test CombinedLoss with prognostic vars in first loss and target-only in second.
         
         Fixture layout:
         - data.output.full = [0, 1, 4, 5, 8, 9] (tensor size 6)
         - model.output prognostic vars: var_0=0, var_1=1, var_2=2, var_3=3, var_4=4
         - Reindexed target positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
-        
-        First loss uses ALL 5 prognostic variables, second loss compares var_0 vs imerg.
         """
-        # First loss: MSE on ALL prognostic vars (var_0 through var_4)
+        # First loss: MSE on prognostic vars
         # Second loss: MSE on var_0 predicted vs imerg target
-        all_prognostic_vars = ["var_0", "var_1", "var_2", "var_3", "var_4"]
+        prognostic_vars = ["var_0", "var_1", "var_2", "var_3", "var_4"]
         
         loss = get_loss_function(
             DictConfig(
@@ -574,8 +572,8 @@ class TestFilteringLossWrapperForward:
                     "losses": [
                         {
                             "_target_": "anemoi.training.losses.MSELoss",
-                            "predicted_variables": all_prognostic_vars,
-                            "target_variables": all_prognostic_vars,
+                            "predicted_variables": prognostic_vars,
+                            "target_variables": prognostic_vars,
                         },
                         {
                             "_target_": "anemoi.training.losses.MSELoss",
@@ -594,10 +592,10 @@ class TestFilteringLossWrapperForward:
         assert isinstance(loss.losses[0], FilteringLossWrapper)
         assert isinstance(loss.losses[1], FilteringLossWrapper)
 
-        # Verify first loss uses ALL 5 prognostic variables
+        # Verify first loss uses 5 prognostic variables
         assert loss.losses[0].predicted_indices == [0, 1, 2, 3, 4]
         assert loss.losses[0].target_indices == [0, 1, 2, 3, 4]
-        assert len(loss.losses[0].predicted_indices) == len(all_prognostic_vars)
+        assert len(loss.losses[0].predicted_indices) == len(prognostic_vars)
 
         # Verify indices for second loss
         assert loss.losses[1].predicted_indices == [0]
@@ -608,14 +606,14 @@ class TestFilteringLossWrapperForward:
         pred = torch.zeros(2, 1, 4, 6)
         target = torch.zeros(2, 1, 4, 6)
 
-        # Set prediction values for ALL 5 prognostic vars (model.output positions)
+        # Set prediction values for prognostic vars
         pred[..., 0] = 1.0  # var_0
         pred[..., 1] = 2.0  # var_1
         pred[..., 2] = 3.0  # var_2
         pred[..., 3] = 4.0  # var_3
         pred[..., 4] = 5.0  # var_4
 
-        # Set target values for first loss - ALL 5 prognostic vars (reindexed positions)
+        # Set target values for first loss
         target[..., 0] = 2.0  # var_0 target
         target[..., 1] = 2.0  # var_1 target
         target[..., 2] = 2.0  # var_2 target
@@ -628,7 +626,7 @@ class TestFilteringLossWrapperForward:
         # Compute combined loss
         loss_value = loss(pred, target, squash_mode="sum")
 
-        # First loss: MSE on ALL 5 prognostic vars (var_0 through var_4)
+        # First loss: MSE on prognostic vars
         # (1-2)² + (2-2)² + (3-2)² + (4-2)² + (5-2)² = 1 + 0 + 1 + 4 + 9 = 15 per grid point
         # summed over grid = 15 * 4 = 60
         # Second loss: MSE on var_0 vs imerg
