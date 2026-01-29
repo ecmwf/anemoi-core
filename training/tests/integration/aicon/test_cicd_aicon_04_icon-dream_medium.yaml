@@ -309,6 +309,9 @@ diagnostics:
     # Precipitation and related fields
     precip_and_related_fields: [tp, cp]
     datasets_to_plot: ["data"]
+    focus_areas:
+      datasets:
+        data: null
     callbacks: []
 
   debug:
