@@ -172,8 +172,8 @@ class TestCombinedLossWithTargetOnlyVariables:
     """Tests for CombinedLoss with target-only variables."""
 
     @pytest.fixture
-    def data_indices_weather_with_imerg(self):
-        """IndexCollection with weather variables and imerg as target-only."""
+    def data_indices_with_imerg(self):
+        """IndexCollection multiple variables and imerg (obs) as target-only."""
         data_config = {
             "data": {
                 "forcing": [],
@@ -181,7 +181,7 @@ class TestCombinedLossWithTargetOnlyVariables:
                 "target": ["imerg"],
             },
         }
-        # Simplified: 5 weather variables + imerg
+        # Simplified: 5 variables + imerg
         name_to_index = {
             "tp": 0,  # total precipitation (predicted)
             "t2m": 1,  # 2m temperature
@@ -193,7 +193,7 @@ class TestCombinedLossWithTargetOnlyVariables:
         return IndexCollection(DictConfig(data_config), name_to_index)
 
     @pytest.fixture
-    def weather_scalers(self):
+    def scalers_custom(self):
         """Create scalers for weather variables."""
         n_vars = 6
         return {
@@ -201,9 +201,9 @@ class TestCombinedLossWithTargetOnlyVariables:
             "general_variable": (3, torch.tensor([1.0, 0.5, 0.5, 0.5, 0.8, 10.0])),
         }
 
-    def test_combined_loss_with_target_only_variable(self, data_indices_weather_with_imerg, weather_scalers):
+    def test_combined_loss_with_target_only_variable(self, data_indices_with_imerg, scalers_custom):
         """CombinedLoss with one subloss using a target-only variable."""
-        weather_vars = ["tp", "t2m", "u10", "v10", "msl"]
+        vars = ["tp", "t2m", "u10", "v10", "msl"]
 
         loss = get_loss_function(
             DictConfig(
@@ -212,8 +212,8 @@ class TestCombinedLossWithTargetOnlyVariables:
                     "losses": [
                         {
                             "_target_": "anemoi.training.losses.MSELoss",
-                            "predicted_variables": weather_vars,
-                            "target_variables": weather_vars,
+                            "predicted_variables": vars,
+                            "target_variables": vars,
                             "scalers": ["pressure_level", "general_variable"],
                         },
                         {
@@ -227,8 +227,8 @@ class TestCombinedLossWithTargetOnlyVariables:
                     "scalers": ["*"],
                 },
             ),
-            scalers=weather_scalers,
-            data_indices=data_indices_weather_with_imerg,
+            scalers=scalers_custom,
+            data_indices=data_indices_with_imerg,
         )
 
         assert isinstance(loss, CombinedLoss)
@@ -246,9 +246,9 @@ class TestCombinedLossWithTargetOnlyVariables:
         second_loss_scaler = loss.losses[1].loss.scaler.tensors["pressure_level"][1]
         assert second_loss_scaler.shape[0] == 1
 
-    def test_combined_loss_forward_pass(self, data_indices_weather_with_imerg, weather_scalers):
+    def test_combined_loss_forward_pass(self, data_indices_with_imerg, scalers_custom):
         """Test that forward pass works with correct tensor shapes."""
-        weather_vars = ["tp", "t2m", "u10", "v10", "msl"]
+        vars = ["tp", "t2m", "u10", "v10", "msl"]
 
         loss = get_loss_function(
             DictConfig(
@@ -257,8 +257,8 @@ class TestCombinedLossWithTargetOnlyVariables:
                     "losses": [
                         {
                             "_target_": "anemoi.training.losses.MSELoss",
-                            "predicted_variables": weather_vars,
-                            "target_variables": weather_vars,
+                            "predicted_variables": vars,
+                            "target_variables": vars,
                             "scalers": ["pressure_level"],
                         },
                         {
@@ -271,8 +271,8 @@ class TestCombinedLossWithTargetOnlyVariables:
                     "scalers": ["*"],
                 },
             ),
-            scalers=weather_scalers,
-            data_indices=data_indices_weather_with_imerg,
+            scalers=scalers_custom,
+            data_indices=data_indices_with_imerg,
         )
 
         # Create test tensors: batch=2, ensemble=1, grid=100, vars=6
@@ -412,8 +412,11 @@ class TestFilteringLossWrapperSetDataIndices:
         )
         wrapper.set_data_indices(data_indices_with_target_only)
 
-        # Both should have same length
-        assert len(wrapper.predicted_indices) == len(wrapper.target_indices) == 3
+        # predicted_indices come from model.output.name_to_index
+        assert wrapper.predicted_indices == [0, 1, 2]
+        # target_indices come from reindexed positions in data.output
+        # With nested config fixture, indices are the same
+        assert wrapper.target_indices == [0, 1, 2]
 
     def test_set_data_indices_all_variables(self, data_indices_with_target_only):
         """Test set_data_indices when no variables are specified (use all).
@@ -480,37 +483,74 @@ class TestFilteringLossWrapperForward:
 
         # Forward should compare pred[..., 0]=1.0 with target[..., 5]=2.0
         # MSE per element = (1.0 - 2.0)² = 1.0
-        # Loss reduction: sum over grid (10 points), avg over batch/ensemble
-        # Expected: 1.0 * 10 = 10.0
+        # Loss reduction: sum over grid (8 points), avg over batch/ensemble
+        # Expected: 1.0 * 8 = 8.0
         loss = wrapper(pred, target)
 
         torch.testing.assert_close(loss, torch.tensor(8.0))
 
-    def test_forward_squash_false_returns_per_variable_loss(self, data_indices_with_target_only):
-        """Test that forward with squash=False returns per-variable loss."""
-        from anemoi.training.losses.mse import MSELoss
-
-        base_loss = MSELoss()
-        wrapper = FilteringLossWrapper(
-            loss=base_loss,
-            predicted_variables=["var_0", "var_1"],
-            target_variables=["var_0", "var_1"],
+    def test_forward_multiple_vars_and_target_only(self, data_indices_with_target_only):
+        """Test CombinedLoss with multiple vars in first loss and target-only in second."""
+        # First loss: MSE on var_0, var_1, var_2
+        # Second loss: MSE on var_0 predicted vs imerg target
+        loss = get_loss_function(
+            DictConfig(
+                {
+                    "_target_": "anemoi.training.losses.CombinedLoss",
+                    "losses": [
+                        {
+                            "_target_": "anemoi.training.losses.MSELoss",
+                            "predicted_variables": ["var_0", "var_1", "var_2"],
+                            "target_variables": ["var_0", "var_1", "var_2"],
+                        },
+                        {
+                            "_target_": "anemoi.training.losses.MSELoss",
+                            "predicted_variables": ["var_0"],
+                            "target_variables": ["imerg"],
+                        },
+                    ],
+                    "loss_weights": [1.0, 1.0],
+                },
+            ),
+            data_indices=data_indices_with_target_only,
         )
-        wrapper.set_data_indices(data_indices_with_target_only)
 
-        pred = torch.randn(2, 1, 10, 6)
-        target = torch.randn(2, 1, 10, 6)
+        assert isinstance(loss, CombinedLoss)
+        assert len(loss.losses) == 2
+        assert isinstance(loss.losses[0], FilteringLossWrapper)
+        assert isinstance(loss.losses[1], FilteringLossWrapper)
 
-        # With squash=False, should return tensor of shape [n_model_output_vars]
-        loss = wrapper(pred, target, squash=False)
+        # Verify indices for first loss
+        assert loss.losses[0].predicted_indices == [0, 1, 2]
+        assert loss.losses[0].target_indices == [0, 1, 2]
 
-        # Loss should have shape matching model output size
-        assert loss.shape[0] == pred.shape[-1]  # 6 variables
-        # Only positions 0 and 1 should have non-zero loss
-        assert loss[0] != 0
-        assert loss[1] != 0
-        # Other positions should be zero
-        assert loss[2] == 0
-        assert loss[3] == 0
-        assert loss[4] == 0
-        assert loss[5] == 0
+        # Verify indices for second loss
+        assert loss.losses[1].predicted_indices == [0]
+        assert loss.losses[1].target_indices == [5]  # imerg position in data.output
+
+        # Create tensors with controlled values
+        pred = torch.zeros(2, 1, 4, 6)
+        target = torch.zeros(2, 1, 4, 6)
+
+        # Set prediction values
+        pred[..., 0] = 1.0  # var_0
+        pred[..., 1] = 2.0  # var_1
+        pred[..., 2] = 3.0  # var_2
+
+        # Set target values for first loss (same vars)
+        target[..., 0] = 2.0  # var_0 target
+        target[..., 1] = 2.0  # var_1 target
+        target[..., 2] = 2.0  # var_2 target
+
+        # Set imerg target for second loss
+        target[..., 5] = 5.0  # imerg target
+
+        # Compute combined loss
+        loss_value = loss(pred, target, squash_mode="sum")
+
+        # First loss: MSE on var_0, var_1, var_2
+        # (1-2)² + (2-2)² + (3-2)² = 1 + 0 + 1 = 2 per grid point, summed = 2 * 4 = 8
+        # Second loss: MSE on var_0 vs imerg
+        # (1-5)² = 16 per grid point, summed = 16 * 4 = 64
+        # Combined (weight 1.0 each): 8 + 64 = 72
+        torch.testing.assert_close(loss_value, torch.tensor(72.0))
