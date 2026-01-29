@@ -89,8 +89,8 @@ optional-dependencies.profile = [
   "tabulate>=0.9",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",      # required to load the gnn checkpoint as part of the tests
-  "anemoi-training[azure]",  # required to test the AzureMlflowLogger
+  "anemoi-graphs[tri]",              # required to load the gnn checkpoint as part of the tests
+  "anemoi-training[azure,plotting]", # required to test the AzureMlflowLogger & plotting callbacks
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",
