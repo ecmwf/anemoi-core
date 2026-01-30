@@ -92,19 +92,11 @@ dataloader:
         drop: [boundary_mask]
 
 diagnostics:
-  plot:
-    callbacks:
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
-        dataset_names: [data]
-        sample_idx: ${diagnostics.plot.sample_idx}
-        per_sample: 6
-        parameters: ${diagnostics.plot.parameters}
-        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
-        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
-        colormaps: ${diagnostics.plot.colormaps}
-    frequency:
-      batch: 100000
-      epoch: 1
+  plot: null
+  export_predictions:
+    enabled: true
+    format: netcdf
+    every_n_batches: 1
     sample_idx: 0
     parameters:
       - height_500
@@ -113,16 +105,6 @@ diagnostics:
       - vgrd_850
       - pres_0g
       - swdown
-    precip_and_related_fields: []
-    colormaps:
-      precip:
-        variables: []
-  export_predictions:
-    enabled: true
-    format: netcdf
-    every_n_batches: 1
-    sample_idx: ${diagnostics.plot.sample_idx}
-    parameters: ${diagnostics.plot.parameters}
     output_dir: ${system.output.root}/predictions
     start: ${dataloader.training.datasets.data.start}
     frequency: ${data.frequency}
