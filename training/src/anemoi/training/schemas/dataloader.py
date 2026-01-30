@@ -11,7 +11,6 @@
 import datetime
 from pathlib import Path
 from typing import Any
-from typing import Literal
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
@@ -72,6 +71,7 @@ class NativeDatasetSchema(PydanticBaseModel):
     lam_mask_radius_km: int | None = Field(default=None)
     "Radius in kilometers for LAM mask."
 
+
 class TrajectorySchema(PydanticBaseModel):
     """Trajectory configuration schema."""
 
@@ -122,4 +122,3 @@ class DataLoaderSchema(PydanticBaseModel):
     # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
-
