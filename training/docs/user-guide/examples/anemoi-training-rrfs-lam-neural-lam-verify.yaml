@@ -61,6 +61,7 @@ dataloader:
     training: 1
     validation: null
     test: null
+  validation_rollout: 2
   grid_indices:
     datasets:
       data:
@@ -127,6 +128,11 @@ diagnostics:
     frequency: ${data.frequency}
 
 training:
+  multistep_input: 2
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 2
   load_weights_only: True
   max_epochs: 1
   max_steps: 1
