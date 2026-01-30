@@ -804,6 +804,20 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.multi_out
         return input_dim
 
+    @staticmethod
+    def _apply_imputer_inverse(
+        post_processors: dict[str, nn.Module],
+        dataset_name: str,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        processors = post_processors[dataset_name]
+        if not hasattr(processors, "processors"):
+            return x
+        for processor in processors.processors.values():
+            if getattr(processor, "supports_skip_imputation", False):
+                x = processor(x, in_place=False, inverse=True, skip_imputation=False)
+        return x
+
     def _assemble_input(
         self,
         x: torch.Tensor,
@@ -857,6 +871,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         pre_processors_state: dict[str, Callable],
         pre_processors_tendencies: dict[str, Callable],
         input_post_processor: Optional[Callable] = None,
+        skip_imputation: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Compute the tendency from two states.
 
@@ -874,6 +889,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to post-process the input state variables. If provided,
             the input states will be post-processed before computing the tendency.
             If None, the input states are used directly. Default is None.
+        skip_imputation : bool, optional
+            When True, skip imputation in the state/tendency processors and input_post_processor.
+            Defaults to False.
 
         Returns
         -------
@@ -887,12 +905,16 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         for dataset_name in x_t1.keys():
             if input_post_processor[dataset_name] is not None:
                 x_t1[dataset_name] = input_post_processor[dataset_name](
-                    x_t1[dataset_name], in_place=False, data_index=self.data_indices[dataset_name].data.output.full
+                    x_t1[dataset_name],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.output.full,
+                    skip_imputation=skip_imputation,
                 )
                 x_t0[dataset_name] = input_post_processor[dataset_name](
                     x_t0[dataset_name],
                     in_place=False,
-                    data_index=self.data_indices[dataset_name].data.input.prognostic,  # TODO SL
+                    data_index=self.data_indices[dataset_name].data.input.prognostic,
+                    skip_imputation=skip_imputation,
                 )
 
             tendency = x_t1[dataset_name].clone()
@@ -902,14 +924,14 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] - x_t0[dataset_name],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.prognostic,
-                skip_imputation=True,
+                skip_imputation=skip_imputation,
             )
             # diagnostic variables are taken from x_t1, normalised as full fields:
             tendency[..., self.data_indices[dataset_name].model.output.diagnostic] = pre_processors_state[dataset_name](
                 x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.diagnostic,
-                skip_imputation=True,
+                skip_imputation=skip_imputation,
             )
             tendencies[dataset_name] = tendency
 
@@ -922,6 +944,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         post_processors_state: dict[str, Callable],
         post_processors_tendencies: dict[str, Callable],
         output_pre_processor: dict[str, Optional[Callable]] = None,
+        skip_imputation: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Add the tendency to the state.
 
@@ -939,6 +962,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to pre-process the output state. If provided,
             the output state will be pre-processed before returning.
             If None, the output state is returned directly. Default is None.
+        skip_imputation : bool, optional
+            When True, skip imputation in the state/tendency processors.
+            Defaults to False.
 
         Returns
         -------
@@ -952,7 +978,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 tendency[dataset_name],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.full,
-                skip_imputation=True,
+                skip_imputation=skip_imputation,
             )
 
             state_outp[dataset_name][
@@ -961,7 +987,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 tendency[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.output.diagnostic,
-                skip_imputation=True,
+                skip_imputation=skip_imputation,
             )
 
             state_outp[dataset_name][
@@ -970,7 +996,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 state_inp[dataset_name],
                 in_place=False,
                 data_index=self.data_indices[dataset_name].data.input.prognostic,
-                skip_imputation=True,
+                skip_imputation=skip_imputation,
             )
 
             if output_pre_processor[dataset_name] is not None:
@@ -978,7 +1004,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                     state_outp[dataset_name],
                     in_place=False,
                     data_index=self.data_indices[dataset_name].data.output.full,
-                    skip_imputation=True,
+                    skip_imputation=skip_imputation,
                 )
 
         return state_outp
@@ -1054,10 +1080,12 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                     {dataset_name: out_step},
                     {dataset_name: post_processors[dataset_name]},
                     {dataset_name: post_proc},
+                    skip_imputation=True,
                 )[dataset_name]
                 states.append(state_step)
 
             out_dataset = torch.cat(states, dim=1)
+            out_dataset = self._apply_imputer_inverse(post_processors, dataset_name, out_dataset)
             if gather_out and model_comm_group is not None:
                 out_dataset = gather_tensor(
                     out_dataset,

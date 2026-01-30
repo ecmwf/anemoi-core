@@ -111,6 +111,7 @@ def test_compute_tendency_uses_expected_indices() -> None:
         {"data": state_proc},
         {"data": tend_proc},
         {"data": input_post},
+        skip_imputation=True,
     )
 
     assert input_post.calls == 2
@@ -140,6 +141,7 @@ def test_add_tendency_to_state_uses_expected_indices() -> None:
         {"data": post_state},
         {"data": post_tend},
         {"data": None},
+        skip_imputation=True,
     )
 
     expected = tendency + 1.0
@@ -151,7 +153,7 @@ def test_add_tendency_to_state_uses_expected_indices() -> None:
     assert torch.allclose(out["data"], expected)
 
 
-def test_tendency_roundtrip_with_imputer_subset() -> None:
+def test_tendency_roundtrip_skips_imputation() -> None:
     imputer, data_indices = _make_imputer_settings()
     model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
     model.data_indices = {"data": data_indices}
@@ -181,25 +183,11 @@ def test_tendency_roundtrip_with_imputer_subset() -> None:
         {"data": identity},
         {"data": identity},
         {"data": input_post},
+        skip_imputation=True,
     )["data"]
 
-    full_input_list = indices.data.input.full.tolist()
-    full_input_map = {full_idx: pos for pos, full_idx in enumerate(full_input_list)}
-    prog_index_list = indices.data.input.prognostic.tolist()
-
-    x_t0_with_nans = x_t0.clone()
-    for idx_dst, idx_src in enumerate(prog_index_list):
-        idx_src_pos = full_input_map[idx_src]
-        nan_mask = imputer.nan_locations[..., idx_src_pos]
-        for _ in x_t0.shape[1:-2]:
-            nan_mask = nan_mask.unsqueeze(1)
-        nan_mask = nan_mask.expand(-1, *x_t0.shape[1:-2], -1)
-        x_t0_with_nans[..., idx_dst][nan_mask] = torch.nan
-
     expected_tendency = x_t1.clone()
-    expected_tendency[..., indices.model.output.prognostic] = (
-        x_t1[..., indices.model.output.prognostic] - x_t0_with_nans
-    )
+    expected_tendency[..., indices.model.output.prognostic] = x_t1[..., indices.model.output.prognostic] - x_t0
     expected_tendency[..., indices.model.output.diagnostic] = x_t1[..., indices.model.output.diagnostic]
 
     assert torch.allclose(tendency, expected_tendency, equal_nan=True)
@@ -210,8 +198,79 @@ def test_tendency_roundtrip_with_imputer_subset() -> None:
         {"data": identity},
         {"data": identity},
         {"data": None},
+        skip_imputation=True,
     )["data"]
 
-    expected_x_t1 = input_post(x_t1, in_place=False, data_index=indices.data.output.full)
+    assert torch.allclose(state, x_t1, equal_nan=True)
 
-    assert torch.allclose(state, expected_x_t1, equal_nan=True)
+
+def test_apply_imputer_inverse_reinserts_nans() -> None:
+    imputer, data_indices = _make_imputer_settings()
+
+    x_full = torch.tensor(
+        [
+            [
+                [
+                    [float("nan"), 1.0, 2.0, 3.0, 4.0, 5.0],
+                    [6.0, float("nan"), 8.0, 9.0, 10.0, 11.0],
+                ]
+            ]
+        ]
+    )
+    imputer.transform(x_full, in_place=False)
+
+    post_processors = torch.nn.ModuleDict({"data": Processors([["imputer", imputer]], inverse=True)})
+
+    out = torch.ones((1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)
+    expected = imputer.inverse_transform(out, in_place=False)
+
+    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+    result = model._apply_imputer_inverse(post_processors, "data", out)
+
+    assert torch.allclose(result, expected, equal_nan=True)
+
+
+def test_after_sampling_reinserts_nans() -> None:
+    imputer, data_indices = _make_imputer_settings()
+
+    x_full = torch.tensor(
+        [
+            [
+                [
+                    [float("nan"), 1.0, 2.0, 3.0, 4.0, 5.0],
+                    [6.0, float("nan"), 8.0, 9.0, 10.0, 11.0],
+                ]
+            ]
+        ]
+    )
+    imputer.transform(x_full, in_place=False)
+
+    post_processors = torch.nn.ModuleDict({"data": Processors([["imputer", imputer]], inverse=True)})
+
+    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+
+    def _identity_ref(x, *_args, **_kwargs):
+        return x
+
+    def _passthrough_add_tendency(_state_inp, tendency, *_args, **_kwargs):
+        return tendency
+
+    model.apply_reference_state_truncation = _identity_ref
+    model.add_tendency_to_state = _passthrough_add_tendency
+
+    out = {"data": torch.ones((1, 1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)}
+    before_sampling_data = ({}, {"data": torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32)})
+
+    result = model._after_sampling(
+        out,
+        post_processors,
+        before_sampling_data,
+        model_comm_group=None,
+        grid_shard_shapes={"data": None},
+        gather_out=False,
+        post_processors_tendencies={"data": [Processors([["imputer", imputer]], inverse=True)]},
+    )["data"]
+
+    expected = imputer.inverse_transform(out["data"], in_place=False)
+
+    assert torch.allclose(result, expected, equal_nan=True)

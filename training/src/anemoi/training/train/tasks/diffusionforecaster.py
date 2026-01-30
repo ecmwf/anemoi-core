@@ -333,6 +333,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                     {dataset_name: self.model.pre_processors[dataset_name]},
                     {dataset_name: pre_proc},
                     input_post_processor={dataset_name: self.model.post_processors[dataset_name]},
+                    skip_imputation=True,
                 )[dataset_name]
                 tendency_steps.append(tendency_step)
             tendencies[dataset_name] = torch.cat(tendency_steps, dim=1)
@@ -357,9 +358,12 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                     {dataset_name: self.model.post_processors[dataset_name]},
                     {dataset_name: post_proc},
                     output_pre_processor={dataset_name: self.model.pre_processors[dataset_name]},
+                    skip_imputation=True,
                 )[dataset_name]
                 state_steps.append(state_step)
-            states[dataset_name] = torch.cat(state_steps, dim=1)
+            out_dataset = torch.cat(state_steps, dim=1)
+            out_dataset = self.model.model._apply_imputer_inverse(self.model.post_processors, dataset_name, out_dataset)
+            states[dataset_name] = out_dataset
         return states
 
     def compute_dataset_loss_metrics(
