@@ -267,7 +267,8 @@ class AnemoiTrainer(ABC):
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
             for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+                ckpt_name_to_index = getattr(model, "_ckpt_model_name_to_index", None)
+                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
