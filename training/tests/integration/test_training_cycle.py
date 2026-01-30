@@ -56,9 +56,13 @@ def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, 
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
 
+    from anemoi.training.schemas.base_schema import convert_to_omegaconf
+
+    config = convert_to_omegaconf(config)
+
     # Minimal inputs required by get_mlflow_logger
-    run_id = "test-run-id"
-    fork_run_id = "test-fork-run-id"
+    run_id = None
+    fork_run_id = None
     paths = config.system.output
     logger_config = config.diagnostics.log
 

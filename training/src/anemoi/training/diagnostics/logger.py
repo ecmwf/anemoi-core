@@ -32,7 +32,7 @@ def get_mlflow_logger(
         return None
 
     mlflow_config = OmegaConf.to_container(mlflow_config)
-    del logger_config["enabled"]
+    del mlflow_config["enabled"]
 
     # backward compatibility to not break configs
     mlflow_config["_target_"] = mlflow_config.get(

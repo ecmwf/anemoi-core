@@ -17,7 +17,6 @@ diagnostics:
   log:
     mlflow:
       authentication: True
-      enabled: True
       experiment_name: 'ci_hpc_mlflow'
   #! adding section here to overwrite plotting settings - deactivate PlotSpectrum callback until fix for
   plot:
