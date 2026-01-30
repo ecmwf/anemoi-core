@@ -381,9 +381,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
+        data_indices = checkpoint["hyper_parameters"]["data_indices"]
+        # Support both legacy dict {dataset_name: IndexCollection} and single IndexCollection
+        if hasattr(data_indices, "name_to_index"):
+            data_indices = {"data": data_indices}
+
         self._ckpt_model_name_to_index = {
-            dataset_name: data_indices.name_to_index
-            for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
+            dataset_name: dataset_indices.name_to_index
+            for dataset_name, dataset_indices in data_indices.items()
         }
 
     def _update_scaler_for_dataset(
