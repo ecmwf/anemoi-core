@@ -19,6 +19,8 @@ START="$2"
 END="$3"
 FREQ="$4"
 
+export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-12345}"
+
 anemoi-training train \
   --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
   --config-name anemoi-training-rrfs-lam-neural-lam-verify \
