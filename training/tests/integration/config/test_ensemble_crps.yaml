@@ -50,11 +50,12 @@ diagnostics:
           moisture: [tp, cp, tcw]
           sfc_wind: [10u, 10v]
         every_n_batches: ${diagnostics.plot.frequency.batch}
-      - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum
-        dataset_names: ["data"]
-        sample_idx: ${diagnostics.plot.sample_idx}
-        parameters: ${diagnostics.plot.parameters}
-        every_n_batches: ${diagnostics.plot.frequency.batch}
+        #! DEACTIVATING UNTIL PYSHTOOLS FIX FOR 3.13
+      # - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum
+      #   dataset_names: ["data"]
+      #   sample_idx: ${diagnostics.plot.sample_idx}
+      #   parameters: ${diagnostics.plot.parameters}
+      #   every_n_batches: ${diagnostics.plot.frequency.batch}
       - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram
         dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}

@@ -435,7 +435,7 @@ def autoencoder_config(
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_autoencoder"):
         template = compose(config_name="autoencoder")
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_autoencoder.yaml")
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
     use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
