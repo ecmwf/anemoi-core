@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.base import BaseGraphModule
@@ -19,6 +18,7 @@ from anemoi.training.train.tasks.base import BaseGraphModule
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    import torch
     from omegaconf import DictConfig
     from torch_geometric.data import HeteroData
 
@@ -101,8 +101,7 @@ class GraphAutoEncoder(BaseGraphModule):
         y = {}
 
         for dataset_name, dataset_batch in batch.items():
-            time_idx = torch.arange(self.multi_out, device=dataset_batch.device)
-            y_time = dataset_batch.index_select(1, time_idx)
+            y_time = dataset_batch.narrow(1, 0, self.multi_out)
             var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
             y[dataset_name] = y_time.index_select(-1, var_idx)
 

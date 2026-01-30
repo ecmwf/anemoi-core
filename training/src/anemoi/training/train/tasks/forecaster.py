@@ -11,13 +11,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    import torch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -71,11 +72,10 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         for rollout_step in range(rollout_steps):
             y_pred = self(x)
-            fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
             y = {}
             for dataset_name, dataset_batch in batch.items():
-                time_idx = torch.tensor(fc_times, device=dataset_batch.device)
-                y_time = dataset_batch.index_select(1, time_idx)
+                start = self.multi_step + rollout_step * self.multi_out
+                y_time = dataset_batch.narrow(1, start, self.multi_out)
                 var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
                 y[dataset_name] = y_time.index_select(-1, var_idx)
             # y includes the auxiliary variables, so we must leave those out when computing the loss

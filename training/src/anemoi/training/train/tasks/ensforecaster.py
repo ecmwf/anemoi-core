@@ -232,11 +232,10 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         for rollout_step in range(rollout_steps):
             # prediction at rollout step rollout_step, shape = (bs, multi_out, ens_size, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
-            fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
             y = {}
             for dataset_name, dataset_batch in batch.items():
-                time_idx = torch.tensor(fc_times, device=dataset_batch.device)
-                y_time = dataset_batch.index_select(1, time_idx)[:, :, 0, :, :]
+                start = self.multi_step + rollout_step * self.multi_out
+                y_time = dataset_batch.narrow(1, start, self.multi_out)[:, :, 0, :, :]
                 var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
                 y[dataset_name] = y_time.index_select(-1, var_idx)
                 LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))

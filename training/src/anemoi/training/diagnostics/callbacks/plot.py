@@ -1022,11 +1022,8 @@ class PlotLoss(BasePerBatchPlotCallback):
             
             for rollout_step in range(output_times[0]):
                 y_hat = outputs[1][rollout_step][dataset_name]
-                fc_times = [
-                    pl_module.multi_step + rollout_step * pl_module.multi_out + i for i in range(pl_module.multi_out)
-                ]
-                time_idx = torch.tensor(fc_times, device=batch[dataset_name].device)
-                y_time = batch[dataset_name].index_select(1, time_idx)
+                start = pl_module.multi_step + rollout_step * pl_module.multi_out
+                y_time = batch[dataset_name].narrow(1, start, pl_module.multi_out)
                 var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
                 y_true = y_time.index_select(-1, var_idx)
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())

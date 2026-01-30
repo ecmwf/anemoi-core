@@ -76,11 +76,10 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
     def get_target(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get target tensor shape for diffusion model."""
-        fc_times = [self.multi_step + i for i in range(self.multi_out)]
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            time_idx = torch.tensor(fc_times, device=dataset_batch.device)
-            y_time = dataset_batch.index_select(1, time_idx)
+            start = self.multi_step
+            y_time = dataset_batch.narrow(1, start, self.multi_out)
             var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
             y[dataset_name] = y_time.index_select(-1, var_idx)  # (bs, multi_out, ens, latlon, nvar)
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
