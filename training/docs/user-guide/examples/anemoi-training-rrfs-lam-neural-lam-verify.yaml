@@ -88,6 +88,15 @@ diagnostics:
     colormaps:
       precip:
         variables: []
+  export_predictions:
+    enabled: true
+    format: netcdf
+    every_n_batches: 1
+    sample_idx: ${diagnostics.plot.sample_idx}
+    parameters: ${diagnostics.plot.parameters}
+    output_dir: ${system.output.root}/predictions
+    start: ${sample.start}
+    frequency: ${sample.frequency}
 
 training:
   load_weights_only: True

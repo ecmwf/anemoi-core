@@ -22,6 +22,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
+from anemoi.training.diagnostics.callbacks.export_predictions import ExportPredictions
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
@@ -55,6 +56,7 @@ CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bo
         or nestedget(config, "diagnostics.log.mlflow.enabled", False),
         LearningRateMonitor,
     ),
+    (lambda config: nestedget(config, "diagnostics.export_predictions.enabled", False), ExportPredictions),
 ]
 
 

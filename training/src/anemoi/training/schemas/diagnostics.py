@@ -203,6 +203,25 @@ class PlotEnsHistogramSchema(BaseModel):
     "Batch frequency to plot at, by default None."
 
 
+class ExportPredictionsSchema(BaseModel):
+    enabled: bool = Field(default=False)
+    "Enable export of denormalized predictions/targets."
+    format: Literal["netcdf", "zarr"] = Field(default="netcdf")
+    "Output format for exported data."
+    every_n_batches: PositiveInt = Field(default=1)
+    "Batch frequency to export at."
+    sample_idx: NonNegativeInt = Field(default=0)
+    "Sample index to export from the batch."
+    parameters: list[str] | None = Field(default=None)
+    "Optional list of variables to export. Defaults to all output variables."
+    output_dir: str | None = Field(default=None)
+    "Output directory. Defaults to {system.output.plots}/exports."
+    start: str | None = Field(default=None)
+    "Optional start time for time coordinate."
+    frequency: str | None = Field(default=None)
+    "Optional frequency string for time coordinate, e.g. '1h'."
+
+
 class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot"] = Field(
         alias="_target_",
@@ -475,6 +494,8 @@ class DiagnosticsSchema(BaseModel):
     "Plot schema."
     callbacks: list = Field(default_factory=list, example=[])
     "Callbacks schema."
+    export_predictions: ExportPredictionsSchema = Field(default_factory=ExportPredictionsSchema)
+    "Export predictions/targets schema."
     benchmark_profiler: BenchmarkProfilerSchema
     "Benchmark profiler schema for `profile` command."
     debug: Debug
