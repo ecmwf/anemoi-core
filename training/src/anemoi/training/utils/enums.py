@@ -13,5 +13,5 @@ from enum import IntEnum
 class TensorDim(IntEnum):
     BATCH_SIZE = 0
     ENSEMBLE_DIM = 1
-    GRID = 2
-    VARIABLE = 3
+    GRID = -2
+    VARIABLE = -1
