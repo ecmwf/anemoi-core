@@ -82,7 +82,6 @@ optional-dependencies.docs = [
 # Optional Dependencies
 optional-dependencies.mlflow = [
   "anemoi-utils[mlflow]>=0.4.37",
-  "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import.git",
   "mlflow-skinny>=2.11.1",
 ]
 
