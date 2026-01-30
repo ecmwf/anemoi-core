@@ -237,6 +237,9 @@ class AnemoiTrainer(ABC):
                 if isinstance(raw_ckpt, torch.nn.Module):
                     # Inference checkpoints may store the model object directly.
                     model.load_state_dict(raw_ckpt.state_dict(), strict=False)
+                elif isinstance(raw_ckpt, dict) and "state_dict" in raw_ckpt:
+                    # Non-PL or stripped checkpoints may only contain a state_dict.
+                    model.load_state_dict(raw_ckpt["state_dict"], strict=False)
                 else:
                     model = model_task.load_from_checkpoint(
                         self.last_checkpoint,
