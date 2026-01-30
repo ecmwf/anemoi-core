@@ -74,7 +74,7 @@ def default_input_imputer():
 @pytest.fixture()
 def non_default_input_data():
     # one sample, two time steps, two grid points, 6 variables
-    base = torch.Tensor(
+    base = torch.tensor(
         [
             [
                 [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]],
@@ -82,7 +82,7 @@ def non_default_input_data():
             ]
         ]
     )
-    expected = torch.Tensor(
+    expected = torch.tensor(
         [
             [
                 [[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 2.0, 8.0, 9.0, 3.0, 1.0]],
@@ -90,7 +90,7 @@ def non_default_input_data():
             ]
         ]
     )
-    restored = torch.Tensor(
+    restored = torch.tensor(
         [
             [
                 [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]],
@@ -104,9 +104,9 @@ def non_default_input_data():
 @pytest.fixture()
 def default_input_data():
     # one sample, one time step, two grid points, 6 variables
-    base = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
-    expected = torch.Tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, 1.0, 1.0]]]])
-    restored = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 1.0, 1.0]]]])
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, 1.0, 1.0]]]])
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 1.0, 1.0]]]])
     return base, expected, restored
 
 
@@ -147,18 +147,18 @@ def default_constant_imputer():
 @pytest.fixture()
 def default_constant_data():
     # one sample, one time step, two grid points, 6 variables
-    base = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
-    expected = torch.Tensor([[[[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]]]])
-    restored = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 22.7, 1.0]]]])
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]]]])
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 22.7, 1.0]]]])
     return base, expected, restored
 
 
 @pytest.fixture()
 def non_default_constant_data():
     # one sample, one time step, two grid points, 6 variables
-    base = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
-    expected = torch.Tensor([[[[1.0, 2.0, 3.0, 10.0, 5.0, 1.0], [6.0, 3.0, 8.0, 9.0, 3.0, 1.0]]]])
-    restored = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]]]])
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 10.0, 5.0, 1.0], [6.0, 3.0, 8.0, 9.0, 3.0, 1.0]]]])
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]]]])
     return base, expected, restored
 
 
@@ -182,9 +182,9 @@ def copy_imputer():
 @pytest.fixture()
 def copy_data():
     # one sample, one time step, two grid points, 6 variables
-    base = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
-    expected = torch.Tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 6.0, 8.0, 9.0, 6.0, 1.0]]]])
-    restored = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 6.0, 1.0]]]])
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 6.0, 8.0, 9.0, 6.0, 1.0]]]])
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 6.0, 1.0]]]])
     return base, expected, restored
 
 

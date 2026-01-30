@@ -247,20 +247,39 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     "Deactivate autocast for the kernel CRPS calculation"
 
 
+class LossGraphSpecSchema(BaseModel):
+    graph_config: dict[str, Any]
+    edges_name: list[str]
+    edge_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
     per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
     weights: list[float]
     keep_batch_sharded: bool
-    loss_matrices_path: str
-    loss_matrices: list[str | None]
+    loss_matrices_path: str | None = None
+    loss_matrices: list[str | None] | None = None
+    loss_graphs: list[LossGraphSpecSchema | None] | None = None
 
     @field_validator("weights")
     @classmethod
     def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
-        if "loss_matrices" in info.data:
-            assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
+        loss_graphs = info.data.get("loss_graphs")
+        loss_matrices = info.data.get("loss_matrices")
+        if loss_graphs is not None:
+            assert len(v) == len(loss_graphs), "weights must have same length as loss_graphs"
+        elif loss_matrices is not None:
+            assert len(v) == len(loss_matrices), "weights must have same length as loss_matrices"
         return v
+
+    @model_validator(mode="after")
+    def validate_loss_sources(self) -> Self:
+        if self.loss_graphs is not None and self.loss_matrices is not None:
+            message = "loss_graphs and loss_matrices are mutually exclusive."
+            raise ValueError(message)
+        return self
 
 
 class HuberLossSchema(BaseLossSchema):

@@ -9,7 +9,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
-      dataset: ${dataloader.dataset}
+      dataset: ${dataloader.training.datasets.data.dataset}
     attributes:
       area_weight:
         _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights # options: Area, Uniform
