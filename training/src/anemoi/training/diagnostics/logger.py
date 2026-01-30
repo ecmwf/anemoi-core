@@ -105,6 +105,9 @@ def get_wandb_logger(
         msg = "To activate W&B logging, please install `wandb` as an optional dependency."
         raise ImportError(msg) from err
 
+    # backward compatibility to not break configs
+    interval = getattr(wandb_config, "interval", 100)
+
     if wandb_config.gradients or wandb_config.parameters:
         if wandb_config.gradients and wandb_config.parameters:
             log_ = "all"
@@ -112,6 +115,6 @@ def get_wandb_logger(
             log_ = "gradients"
         else:
             log_ = "parameters"
-        logger.watch(model, log=log_, log_freq=wandb_config.interval, log_graph=False)
+        logger.watch(model, log=log_, log_freq=interval, log_graph=False)
 
     return logger

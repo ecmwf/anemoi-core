@@ -344,7 +344,7 @@ class WandbSchema(BaseModel):
     "Whether to log the hyper parameters."
     entity: str | None = None
     "Username or team name where to send runs. This entity must exist before you can send runs there."
-    interval: PositiveInt
+    interval: PositiveInt | None = Field(default=100)
     "Logging frequency in batches."
 
     @root_validator(pre=True)

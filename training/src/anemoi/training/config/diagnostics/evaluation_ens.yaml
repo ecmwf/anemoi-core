@@ -86,7 +86,7 @@ log:
     # logger options (these probably come with some overhead)
     gradients: False
     parameters: False
-    interval: ${log.interval}
+    interval: ${diagnosticslog.interval}
   mlflow:
     _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
     enabled: False

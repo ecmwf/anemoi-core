@@ -325,6 +325,7 @@ diagnostics:
   log:
     wandb:
       enabled: False
+      _target_: anemoi.training.diagnostics.wandb.logger.WandbLogger
       offline: False
       log_model: False
       project: 'Anemoi'
@@ -332,6 +333,7 @@ diagnostics:
       # logger options (these probably come with some overhead)
       gradients: False
       parameters: False
+      internval: 100
     mlflow:
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
