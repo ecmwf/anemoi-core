@@ -2,7 +2,7 @@
 defaults:
   - scalers: global
 
-# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
+# resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
@@ -15,7 +15,9 @@ deterministic: False
 precision: 16-mixed
 
 # multistep input
-# 1 = single step scheme, X(t-1) used to predict X(t)
+# Number of timesteps to be loaded as model input
+# k = 1: single step scheme, uses only [X(t-1)] to predict X(t).
+# k = 1, is also necessary for autoencoder training as X(t) is used to predict X^(t)
 # k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
 # Deepmind use k = 2 in their model
 multistep_input: 2
@@ -37,11 +39,40 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# Optimizer settings
+# =====================================================================
+# Optimizer configuration
+# =====================================================================
 optimizer:
-  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
-  kwargs:
-    betas: [0.9, 0.95]
+  # ---------------------------------------------------------------
+  # Choose optimizer type (_target_ approach)
+  # ---------------------------------------------------------------
+  # Default optimizer: AdamW
+  _target_: torch.optim.AdamW
+
+  # ---------------------------------------------------------------
+  # Common optimizer parameters
+  # ---------------------------------------------------------------
+  # Learning rate is defined elsewhere
+  #kwargs:
+  betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
+
+  # ---------------------------------------------------------------
+  # Optional: configuration for AdEMAMix (custom optimizer)
+  # Uncomment the lines below to enable it
+  # ---------------------------------------------------------------
+  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
+  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
+  # alpha: 8.0                   # Mixing factor controlling EMA fusion
+  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
+  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
+  # weight_decay: 0.01
+
+  # Optional: configuration for ZeroRedundancyOptimizer
+  # _target_: torch.distributed.optim.ZeroRedundancyOptimizer
+  # optimizer_class:
+  #   _target_: torch.optim.AdamW
+  #   _partial_: true
+  # betas: [0.9, 0.95]
 
 # select model
 model_task: anemoi.training.train.tasks.GraphForecaster
@@ -49,7 +80,7 @@ model_task: anemoi.training.train.tasks.GraphForecaster
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
 # loss functions
@@ -61,14 +92,16 @@ loss_gradient_scaling: False
 
 # loss function for the model
 training_loss:
-  # loss class to initialise
-  _target_: anemoi.training.losses.MSELoss
-  # Scalers to include in loss calculation
-  # A selection of available scalers are listed in training/scalers.
-  # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-  # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-  scalers: ['pressure_level', 'general_variable', 'node_weights']
-  ignore_nans: False
+  datasets:
+    data: # user-defined key in data
+      # loss class to initialise
+      _target_: anemoi.training.losses.MSELoss
+      # Scalers to include in loss calculation
+      # A selection of available scalers are listed in training/scalers.
+      # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
+      # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+      scalers: ['pressure_level', 'general_variable', 'node_weights']
+      ignore_nans: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
@@ -76,17 +109,19 @@ training_loss:
 # These metrics are calculated in the output model space, and thus
 # have undergone postprocessing.
 validation_metrics:
-  # loss class to initialise
-  mse:
-    _target_: anemoi.training.losses.MSELoss
-    # Scalers to include in loss calculation
-    # Cannot scale over the variable dimension due to possible remappings.
-    # Available scalers include:
-    # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
-    # Use the `scale_validation_metrics` section to variable scale.
-    scalers: ['node_weights']
-    # other kwargs
-    ignore_nans: True
+  datasets:
+    data: # user-defined key in data
+      # loss class to initialise
+      mse:
+        _target_: anemoi.training.losses.MSELoss
+        # Scalers to include in loss calculation
+        # Cannot scale over the variable dimension due to possible remappings.
+        # Available scalers include:
+        # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
+        # Use the `scale_validation_metrics` section to variable scale.
+        scalers: ["node_weights"]
+        # other kwargs
+        ignore_nans: True
 
 # Variable groups definition for scaling
 # The variable level scaling methods are defined under training/scalers
@@ -112,15 +147,19 @@ validation_metrics:
 # param is an alias for the variable name in the case of no metadata.
 
 variable_groups:
-  default: sfc
-  pl:
-     param: [q, t, u, v, w, z]
+  datasets:
+    data: # user-defined key in data
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
 
 metrics:
-- z_500
-- t_850
-- u_850
-- v_850
+  datasets:
+    data: # user-defined key in data
+      - z_500
+      - t_850
+      - u_850
+      - v_850
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
@@ -145,3 +184,7 @@ lr:
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
 
 submodules_to_freeze: []
+
+# if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
+# A higher limit can result in better performance but will increase compilation time and disk space
+recompile_limit: 32

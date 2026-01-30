@@ -11,8 +11,6 @@
 import importlib
 import logging
 
-import networkx as nx
-import numpy as np
 import torch
 from torch_geometric.data.storage import NodeStorage
 
@@ -36,7 +34,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
         them with an edge.
     scale_resolutions : int, list[int], optional
         Defines the refinement levels at which edges are computed. If an integer is provided, edges are computed for all
-        levels up to and including that level. For instance, `scale_resolutions=4` includes edges at levels 1 through 4,
+        levels up to and including that level. For instance, `scale_resolutions=4` includes edges at levels 0 through 4,
         whereas `scale_resolutions=[4]` only includes edges at level 4.
 
     Methods
@@ -67,12 +65,12 @@ class MultiScaleEdges(BaseEdgeBuilder):
         assert x_hops > 0, "Number of x_hops must be positive"
         self.x_hops = x_hops
         if isinstance(scale_resolutions, int):
-            assert scale_resolutions > 0, "The scale_resolutions argument only supports positive integers."
+            assert scale_resolutions >= 0, "The scale_resolutions argument only supports non-negative integers."
             scale_resolutions = list(range(1, scale_resolutions + 1))
         assert not isinstance(scale_resolutions, str), "The scale_resolutions argument is not valid."
         assert (
-            scale_resolutions is None or min(scale_resolutions) > 0
-        ), "The scale_resolutions argument only supports positive integers."
+            scale_resolutions is None or min(scale_resolutions) >= 0
+        ), "The scale_resolutions argument only supports non-negative integers."
         self.scale_resolutions = scale_resolutions
 
     @staticmethod
@@ -102,10 +100,10 @@ class MultiScaleEdges(BaseEdgeBuilder):
             )
 
         # Add edges
-        source_nodes = edge_builder_cls().add_edges(source_nodes, self.x_hops, scale_resolutions=scale_resolutions)
-        adjmat = nx.to_scipy_sparse_array(source_nodes["_nx_graph"], format="coo")
-
-        # Get source & target indices of the edges
-        edge_index = np.stack([adjmat.col, adjmat.row], axis=0)
+        edge_index = edge_builder_cls().get_edges(
+            source_nodes,
+            self.x_hops,
+            scale_resolutions=scale_resolutions,
+        )
 
         return torch.from_numpy(edge_index).to(torch.int32)

@@ -8,6 +8,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.12.0](https://github.com/ecmwf/anemoi-core/compare/models-0.11.3...models-0.12.0) (2026-01-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models,training:** multi dataset integration
+
+### Features
+
+* Drop python 3.10 ([#795](https://github.com/ecmwf/anemoi-core/issues/795)) ([ebea6d0](https://github.com/ecmwf/anemoi-core/commit/ebea6d09b4f7ea834865134670d0f2e187140ae1))
+* **models, training:** Expose row_normalize kwarg to TruncatedConnectionSchema ([#805](https://github.com/ecmwf/anemoi-core/issues/805)) ([20b2da6](https://github.com/ecmwf/anemoi-core/commit/20b2da6fc89c40de67d22eb33b7d29735299fac5))
+* **models,training:** Multi dataset integration ([f537d7f](https://github.com/ecmwf/anemoi-core/commit/f537d7f209092215a94b9e7c613acc781ca4966b))
+* **training:** Autoencoder 🗜️ ([#252](https://github.com/ecmwf/anemoi-core/issues/252)) ([50e497b](https://github.com/ecmwf/anemoi-core/commit/50e497bd3c815a78638185081e9d008e6d828aa2))
+
+## [0.11.3](https://github.com/ecmwf/anemoi-core/compare/models-0.11.2...models-0.11.3) (2026-01-14)
+
+
+### Features
+
+* Introduce spectral losses module ([#678](https://github.com/ecmwf/anemoi-core/issues/678)) ([9745b46](https://github.com/ecmwf/anemoi-core/commit/9745b4688482986f62c0590b53a2bf4d551e077d))
+* **models:** Mapper refactor ([#574](https://github.com/ecmwf/anemoi-core/issues/574)) ([83820c8](https://github.com/ecmwf/anemoi-core/commit/83820c8ad049d8dfd4ed4b737b5e4f597b9f2b1f))
+
+
+### Bug Fixes
+
+* **models:** Fix TruncatedConnection schema and initialization ([#787](https://github.com/ecmwf/anemoi-core/issues/787)) ([c24c195](https://github.com/ecmwf/anemoi-core/commit/c24c1955f7a5f291dae12dcae98e83617a67b681))
+* **training:** Dataloader worker ranges ([#764](https://github.com/ecmwf/anemoi-core/issues/764)) ([3ce36ae](https://github.com/ecmwf/anemoi-core/commit/3ce36ae54cbfe4181434dbb9fb35c613d5aa541c))
+
+## [0.11.2](https://github.com/ecmwf/anemoi-core/compare/models-0.11.1...models-0.11.2) (2025-12-18)
+
+
+### Features
+
+* **models:** Triton gt more shapes ([#752](https://github.com/ecmwf/anemoi-core/issues/752)) ([0608acf](https://github.com/ecmwf/anemoi-core/commit/0608acf0f66498e33c54f1cf45e297b082bf34a4))
+
+
+### Bug Fixes
+
+* Correct for dimensions of skipped connection in conditioning ([4551e51](https://github.com/ecmwf/anemoi-core/commit/4551e5169354373340d006ea8a9f4ec7065aa2e2))
+* Fix-pytest-triton-error ([#740](https://github.com/ecmwf/anemoi-core/issues/740)) ([00b38c9](https://github.com/ecmwf/anemoi-core/commit/00b38c9fd721b7e22aa4603c325f0e69b48cc713))
+* **residual:** Fix conditioning on skipped connection ([#742](https://github.com/ecmwf/anemoi-core/issues/742)) ([4551e51](https://github.com/ecmwf/anemoi-core/commit/4551e5169354373340d006ea8a9f4ec7065aa2e2))
+
+## [0.11.1](https://github.com/ecmwf/anemoi-core/compare/models-0.11.0...models-0.11.1) (2025-12-08)
+
+
+### Features
+
+* Edge pre mlp for gt conv ([#695](https://github.com/ecmwf/anemoi-core/issues/695)) ([c72a789](https://github.com/ecmwf/anemoi-core/commit/c72a789217f3ec13575a2f339cfe331732648cd9))
+* Noise injector refactor ([#724](https://github.com/ecmwf/anemoi-core/issues/724)) ([e1000af](https://github.com/ecmwf/anemoi-core/commit/e1000af21525632555d1b7065fb6e808bcdf32cc))
+
+## [0.11.0](https://github.com/ecmwf/anemoi-core/compare/models-0.10.0...models-0.11.0) (2025-12-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** Refactor configuration by introducing system schema with hardware, paths, and files subschemas ([#598](https://github.com/ecmwf/anemoi-core/issues/598))
+* cond layer norm ([#658](https://github.com/ecmwf/anemoi-core/issues/658))
+
+### Features
+
+* Compile transformer gnn ([#181](https://github.com/ecmwf/anemoi-core/issues/181)) ([24d162c](https://github.com/ecmwf/anemoi-core/commit/24d162c8dc5e47f14439ee2d2623abd916b6f129))
+* **models:** Add configurable residual connections in enc-proc-dec ([#670](https://github.com/ecmwf/anemoi-core/issues/670)) ([aeaf00b](https://github.com/ecmwf/anemoi-core/commit/aeaf00b1b42c7a6f98547fc6289e99660a9b5630))
+* **models:** Multibackend all_to_all wrapper ([#95](https://github.com/ecmwf/anemoi-core/issues/95)) ([6819be1](https://github.com/ecmwf/anemoi-core/commit/6819be1506411a6760eb0a3749ef46a0dd465a8c))
+* **models:** Triton GraphTransformer ([#631](https://github.com/ecmwf/anemoi-core/issues/631)) ([b40b6c6](https://github.com/ecmwf/anemoi-core/commit/b40b6c610af47d15e8bb087c7bee79e692f7f2d7))
+
+
+### Bug Fixes
+
+* Compile pickle error ([#708](https://github.com/ecmwf/anemoi-core/issues/708)) ([f4fc4ab](https://github.com/ecmwf/anemoi-core/commit/f4fc4ab380cb1007f6abe43319cc517dd79f9e31))
+* Cond layer norm ([#658](https://github.com/ecmwf/anemoi-core/issues/658)) ([7315e3a](https://github.com/ecmwf/anemoi-core/commit/7315e3a4144a0b40322ff5bfef26accb91676232))
+* **models:** Processor chunking ([#629](https://github.com/ecmwf/anemoi-core/issues/629)) ([06e5533](https://github.com/ecmwf/anemoi-core/commit/06e5533f3e8da37c44d887c42b67440b40286cb3))
+* Predict_step shard shapes ([#692](https://github.com/ecmwf/anemoi-core/issues/692)) ([be9ff8b](https://github.com/ecmwf/anemoi-core/commit/be9ff8b4e085d69babdef156aee7755e326b5434))
+* Remove import of anemoi training in compile ([#705](https://github.com/ecmwf/anemoi-core/issues/705)) ([f7d5ae4](https://github.com/ecmwf/anemoi-core/commit/f7d5ae4f0547bae0f5010d7d7a72c42e244f7761))
+* Small pytorch boxcox inefficiency ([#683](https://github.com/ecmwf/anemoi-core/issues/683)) ([66b40e0](https://github.com/ecmwf/anemoi-core/commit/66b40e0822460616735e10f197aa46e1c3d733d9))
+* **training:** Refactor configuration by introducing system schema with hardware, paths, and files subschemas ([#598](https://github.com/ecmwf/anemoi-core/issues/598)) ([da02fe7](https://github.com/ecmwf/anemoi-core/commit/da02fe7bac8c6a69f1ac967f3b243d716abf5910))
+
 ## [0.10.0](https://github.com/ecmwf/anemoi-core/compare/models-0.9.7...models-0.10.0) (2025-11-17)
 
 

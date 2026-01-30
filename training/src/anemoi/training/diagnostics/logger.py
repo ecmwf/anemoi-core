@@ -9,10 +9,10 @@
 
 
 import logging
-from typing import Any
 
 import pytorch_lightning as pl
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -21,11 +21,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 def get_mlflow_logger(
-    diagnostics_config: Any,
-    run_id: Any,
-    fork_run_id: Any,
-    paths: Any,
-    config: Any,
+    diagnostics_config: DictConfig,
+    run_id: str,
+    fork_run_id: str,
+    paths: DictConfig,
+    logger_config: DictConfig,
     **kwargs,
 ) -> None:
     del kwargs
@@ -33,23 +33,21 @@ def get_mlflow_logger(
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
-    logger_config = OmegaConf.to_container(convert_to_omegaconf(config).diagnostics.log.mlflow)
+    logger_config = OmegaConf.to_container(convert_to_omegaconf(logger_config.mlflow))
     del logger_config["enabled"]
 
     # backward compatibility to not break configs
-    logger_config["_target_"] = getattr(
-        logger_config,
-        "_target",
+    logger_config["_target_"] = logger_config.get(
+        "_target_",
         "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
-    logger_config["save_dir"] = getattr(logger_config, "save_dir", str(paths.logs.mlflow))
+    logger_config["save_dir"] = logger_config.get("save_dir", str(paths.logs.mlflow))
 
     logger = instantiate(
         logger_config,
         run_id=run_id,
-        fork_run_id=fork_run_id,
+        ork_run_id=fork_run_id,
     )
-
     if logger.log_terminal:
         logger.log_terminal_output(artifact_save_dir=paths.plots)
     if logger.log_system:
@@ -59,10 +57,11 @@ def get_mlflow_logger(
 
 
 def get_wandb_logger(
-    diagnostics_config: Any,
-    run_id: Any,
-    paths: Any,
+    diagnostics_config: DictConfig,
+    run_id: str,
+    paths: DictConfig,
     model: pl.LightningModule,
+    logger_config: DictConfig,
     **kwargs,
 ) -> pl.loggers.WandbLogger | None:
     """Setup Weights & Biases experiment logger.
@@ -92,22 +91,19 @@ def get_wandb_logger(
         return None
 
     save_dir = paths.logs.wandb
+    logger_config = OmegaConf.to_container(convert_to_omegaconf(logger_config.wandb))
 
     try:
-        from pytorch_lightning.loggers.wandb import WandbLogger
+        logger = instantiate(
+            logger_config,
+            id=run_id,
+            save_dir=save_dir,
+            resume=run_id is not None,
+        )
     except ImportError as err:
         msg = "To activate W&B logging, please install `wandb` as an optional dependency."
         raise ImportError(msg) from err
 
-    logger = WandbLogger(
-        project=diagnostics_config.log.wandb.project,
-        entity=diagnostics_config.log.wandb.entity,
-        id=run_id,
-        save_dir=save_dir,
-        offline=diagnostics_config.log.wandb.offline,
-        log_model=diagnostics_config.log.wandb.log_model,
-        resume=run_id is not None,
-    )
     if diagnostics_config.log.wandb.gradients or diagnostics_config.log.wandb.parameters:
         if diagnostics_config.log.wandb.gradients and diagnostics_config.log.wandb.parameters:
             log_ = "all"

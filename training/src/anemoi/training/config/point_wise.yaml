@@ -2,7 +2,7 @@ defaults:
 - data: zarr
 - dataloader: native_grid
 - diagnostics: evaluation
-- hardware: example
+- system: example
 - graph: point_wise
 - model: point_wise
 - training: default

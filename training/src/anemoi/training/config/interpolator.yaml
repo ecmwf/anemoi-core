@@ -2,7 +2,7 @@ defaults:
 - data: zarr
 - dataloader: native_grid
 - diagnostics: evaluation
-- hardware: example
+- system: example
 - graph: multi_scale
 - model: graphtransformer
 - training: interpolator
@@ -17,23 +17,27 @@ data:
   diagnostics: [] # Default behaviour is to interpolate between observed fields, not predict unseen fields
 
 #dataloader:
-  # model_run_info: #Add for non-analysis training
-  #  start: 2020-02-05T12:00:00
-  #  length: 18 #in number of dates (* frequency for actual time)
+# model_run_info: #Add for non-analysis training
+#  start: 2020-02-05T12:00:00
+#  length: 18 #in number of dates (* frequency for actual time)
 
 model:
   model:
     _target_: anemoi.models.models.AnemoiModelEncProcDecInterpolator
+  residual:
+    _target_: anemoi.models.layers.residual.SkipConnection
+    step: 0 # use the previous step as skip connection
   latent_skip: False # True/False for skip connection on latent mesh
-  grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
 
 training:
   # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
-    input: [0,6]
-    target: [1,2,3,4,5]
+    input: [0, 6]
+    target: [1, 2, 3, 4, 5]
 
   target_forcing: #forcing parameters for the target time to include as input
-    data: #of which come from the dataset
-      - "insolation"
-    time_fraction: True
+    datasets:
+      data: # dataset name
+        data: #of which come from the dataset
+          - "insolation"
+        time_fraction: True

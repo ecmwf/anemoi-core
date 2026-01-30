@@ -134,7 +134,7 @@ def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:
         Cleaned up params ready for MlFlow.
     """
     prefixes_to_remove = [
-        "hardware",
+        "system",
         "data",
         "dataloader",
         "model",
@@ -143,9 +143,7 @@ def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:
         "graph",
         "metadata.config",
         "config.dataset.sourcesmetadata.dataset.variables_metadata",
-        "metadata.dataset.sources",
-        "metadata.dataset.specific",
-        "metadata.dataset.variables_metadata",
+        "metadata.dataset.",
     ]
 
     keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
