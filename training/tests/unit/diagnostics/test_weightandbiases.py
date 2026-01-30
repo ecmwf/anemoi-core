@@ -1,10 +1,10 @@
 from typing import Union
 
 import pytest
+from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import ListConfig
 from omegaconf import OmegaConf
-from pytorch_lightning.loggers.wandb import WandbLogger
 
 from anemoi.training.schemas.diagnostics import WandbSchema
 
@@ -17,6 +17,7 @@ def config(tmp_path: str) -> Union[DictConfig, ListConfig]:
             "diagnostics": {
                 "log": {
                     "wandb": {
+                        "_target_": "anemoi.training.diagnostics.wandb.logger.WandbLogger",
                         "project": "pytest_project",
                         "entity": "localtest",
                         "offline": True,
@@ -28,7 +29,7 @@ def config(tmp_path: str) -> Union[DictConfig, ListConfig]:
                 },
             },
             "training": {"run_id": None},
-            "hardware": {"paths": {"logs": {"wandb": str(tmp_path / "wandb_logs")}}},
+            "system": {"output": {"logs": {"wandb": str(tmp_path / "wandb_logs")}}},
         },
     )
 
@@ -38,16 +39,17 @@ def test_wandb_logger_offline(tmp_path: str, config: DictConfig) -> None:
 
     This will create local wandb logs inside a temporary pytest directory.
     """
-    # Initialize the logger
-    logger = WandbLogger(
-        project=config.diagnostics.log.wandb.project,
-        entity=config.diagnostics.log.wandb.entity,
-        save_dir=config.hardware.paths.logs.wandb,
-        offline=config.diagnostics.log.wandb.offline,
-        log_model=config.diagnostics.log.wandb.log_model,
-        resume=False,
-    )
+    logger_config = config.diagnostics.log.wandb
+    save_dir = config.system.output.logs.wandb
+    run_id = config.training.run_id
 
+    # Initialize the logger
+    logger = instantiate(
+        logger_config,
+        run_id=run_id,
+        save_dir=save_dir,
+        resume=run_id is not None,
+    )
     # Log hyperparameters
     logger.log_hyperparams(OmegaConf.to_container(config, resolve=True))
 
@@ -58,7 +60,7 @@ def test_wandb_logger_offline(tmp_path: str, config: DictConfig) -> None:
     assert any(f.name.startswith("wandb") for f in files), "No W&B log files were generated"
 
 
-def test_weights_and_biases_schema() -> None:
+def test_weights_and_biases_schema_backward_compatibility() -> None:
     config = {
         "enabled": False,
         "offline": False,
