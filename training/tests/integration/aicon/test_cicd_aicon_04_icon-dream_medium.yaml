@@ -325,7 +325,7 @@ diagnostics:
   log:
     wandb:
       enabled: False
-      _target_: anemoi.training.diagnostics.wandb.logger.WandbLogger
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
       offline: False
       log_model: False
       project: 'Anemoi'

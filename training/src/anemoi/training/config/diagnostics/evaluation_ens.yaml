@@ -78,7 +78,7 @@ checkpoint:
 log:
   wandb:
     enabled: False
-    _target_: anemoi.training.diagnostics.wandb.logger.WandbLogger
+    _target_: pytorch_lightning.loggers.wandb.WandbLogger
     offline: False
     log_model: False
     project: 'Anemoi'
@@ -86,7 +86,7 @@ log:
     # logger options (these probably come with some overhead)
     gradients: False
     parameters: False
-    interval: ${diagnosticslog.interval}
+    interval: ${diagnostics.log.interval}
   mlflow:
     _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
     enabled: False

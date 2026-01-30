@@ -59,7 +59,7 @@ def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, 
     # Minimal inputs required by get_mlflow_logger
     run_id = "test-run-id"
     fork_run_id = "test-fork-run-id"
-    paths = config.paths
+    paths = config.system.output
     logger_config = config.diagnostics.log
 
     logger = get_mlflow_logger(

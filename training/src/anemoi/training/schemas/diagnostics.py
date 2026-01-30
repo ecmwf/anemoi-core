@@ -325,8 +325,8 @@ class CheckpointSchema(BaseModel):
 
 
 class WandbSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.wandb.logger.WandbLogger"] = Field(
-        default="anemoi.training.diagnostics.wandb.logger.WandbLogger",
+    target_: Literal["pytorch_lightning.loggers.wandb.WandbLogger"] = Field(
+        default="pytorch_lightning.loggers.wandb.WandbLogger",
         alias="_target_",
     )
     enabled: bool
@@ -445,11 +445,24 @@ class LoggingSchema(BaseModel):
     "Logging frequency in batches."
 
     @model_validator(mode="before")
-    def inject_default_target(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
-        mlflow_cfg = OmegaConf.to_container(values.get("mlflow"), resolve=True)
-        if mlflow_cfg is not None and isinstance(mlflow_cfg, dict) and "_target_" not in mlflow_cfg:
-            mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
-            values["mlflow"] = mlflow_cfg
+    def inject_default_targets(cls, values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+
+        # ---- MLflow ----
+        mlflow_val = values.get("mlflow")
+        if mlflow_val is not None:
+            mlflow_cfg = OmegaConf.to_container(mlflow_val, resolve=True)
+            if isinstance(mlflow_cfg, dict) and "_target_" not in mlflow_cfg:
+                mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
+                values["mlflow"] = mlflow_cfg
+
+        # ---- W&B ----
+        wandb_val = values.get("wandb")
+        if wandb_val is not None:
+            wandb_cfg = OmegaConf.to_container(wandb_val, resolve=True)
+            if isinstance(wandb_cfg, dict) and "_target_" not in wandb_cfg:
+                wandb_cfg["_target_"] = "anemoi.training.diagnostics.wandb.logger.AnemoiWandbLogger"
+                values["wandb"] = wandb_cfg
+
         return values
 
 

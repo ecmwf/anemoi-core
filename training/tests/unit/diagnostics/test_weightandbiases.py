@@ -1,11 +1,11 @@
 from typing import Union
 
 import pytest
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
+from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.diagnostics import WandbSchema
 
 
@@ -17,7 +17,8 @@ def config(tmp_path: str) -> Union[DictConfig, ListConfig]:
             "diagnostics": {
                 "log": {
                     "wandb": {
-                        "_target_": "anemoi.training.diagnostics.wandb.logger.WandbLogger",
+                        "_target_": "pytorch_lightning.loggers.wandb.WandbLogger",
+                        "enabled": True,
                         "project": "pytest_project",
                         "entity": "localtest",
                         "offline": True,
@@ -39,17 +40,12 @@ def test_wandb_logger_offline(tmp_path: str, config: DictConfig) -> None:
 
     This will create local wandb logs inside a temporary pytest directory.
     """
-    logger_config = config.diagnostics.log.wandb
-    save_dir = config.system.output.logs.wandb
+    logger_config = config.diagnostics.log
     run_id = config.training.run_id
+    import torch
 
-    # Initialize the logger
-    logger = instantiate(
-        logger_config,
-        run_id=run_id,
-        save_dir=save_dir,
-        resume=run_id is not None,
-    )
+    model = torch.nn.Linear(10, 1)
+    logger = get_wandb_logger(run_id, config.system.output, model, logger_config)
     # Log hyperparameters
     logger.log_hyperparams(OmegaConf.to_container(config, resolve=True))
 

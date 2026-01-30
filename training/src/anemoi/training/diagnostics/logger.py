@@ -15,8 +15,6 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -33,18 +31,17 @@ def get_mlflow_logger(
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
-    logger_config = OmegaConf.to_container(convert_to_omegaconf(mlflow_config))
+    mlflow_config = OmegaConf.to_container(mlflow_config)
     del logger_config["enabled"]
 
     # backward compatibility to not break configs
-    logger_config["_target_"] = logger_config.get(
+    mlflow_config["_target_"] = mlflow_config.get(
         "_target_",
         "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
-    logger_config["save_dir"] = logger_config.get("save_dir", str(paths.logs.mlflow))
-
+    mlflow_config["save_dir"] = mlflow_config.get("save_dir", str(paths.logs.mlflow))
     logger = instantiate(
-        logger_config,
+        mlflow_config,
         run_id=run_id,
         fork_run_id=fork_run_id,
     )
@@ -87,16 +84,25 @@ def get_wandb_logger(
 
     save_dir = paths.logs.wandb
     wandb_config = logger_config.wandb
+    gradients = wandb_config.gradients
+    parameters = wandb_config.parameters
+
+    # backward compatibility to not break configs
+    interval = getattr(wandb_config, "interval", 100)
 
     if not wandb_config.enabled:
         LOGGER.debug("Weights & Biases logging is disabled.")
         return None
 
-    logger_config = OmegaConf.to_container(convert_to_omegaconf(wandb_config))
+    wandb_config = OmegaConf.to_container(wandb_config)
+    del wandb_config["gradients"]
+    del wandb_config["parameters"]
+    del wandb_config["enabled"]
+    del wandb_config["interval"]
 
     try:
         logger = instantiate(
-            logger_config,
+            wandb_config,
             id=run_id,
             save_dir=save_dir,
             resume=run_id is not None,
@@ -105,13 +111,10 @@ def get_wandb_logger(
         msg = "To activate W&B logging, please install `wandb` as an optional dependency."
         raise ImportError(msg) from err
 
-    # backward compatibility to not break configs
-    interval = getattr(wandb_config, "interval", 100)
-
-    if wandb_config.gradients or wandb_config.parameters:
-        if wandb_config.gradients and wandb_config.parameters:
+    if gradients or parameters:
+        if gradients and parameters:
             log_ = "all"
-        elif wandb_config.gradients:
+        elif gradients:
             log_ = "gradients"
         else:
             log_ = "parameters"
