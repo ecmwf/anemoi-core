@@ -92,7 +92,24 @@ dataloader:
         drop: [boundary_mask]
 
 diagnostics:
-  plot: null
+  plot:
+    asynchronous: false
+    datashader: false
+    datasets_to_plot: [data]
+    frequency:
+      batch: 100000
+      epoch: 1
+    sample_idx: 0
+    parameters:
+      - height_500
+      - temp_850
+      - ugrd_850
+      - vgrd_850
+      - pres_0g
+      - swdown
+    precip_and_related_fields: []
+    colormaps: {}
+    callbacks: []
   export_predictions:
     enabled: true
     format: netcdf
