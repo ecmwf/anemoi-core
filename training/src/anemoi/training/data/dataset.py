@@ -10,6 +10,7 @@
 import datetime
 import logging
 from abc import abstractmethod
+from functools import cached_property
 
 import numpy as np
 import torch
@@ -19,6 +20,9 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
+from anemoi.training.data.grid_indices import BaseIndices
+from anemoi.training.data.grid_indices import FullGrid
+from anemoi.training.data.grid_indices import MaskedGrid
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
@@ -34,13 +38,40 @@ class BaseAnemoiReader:
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
+        lam_mask_radius_km: int | None = None,
     ):
-        self.data = open_dataset(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        """Initialize Anemoi data reader."""
+        ds_kwargs = {}
+        if drop is not None:
+            ds_kwargs["drop"] = drop
+
+        if frequency is not None:
+            ds_kwargs["frequency"] = frequency
+
+        self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
+        self.lam_mask_radius_km = lam_mask_radius_km
+
+    @cached_property
+    def grid_indices(self) -> BaseIndices:
+        if self.lam_mask_radius_km is None:
+            return FullGrid()
+
+        return MaskedGrid(
+            latitudes=self.data.latitudes,
+            longitudes=self.data.longitudes,
+            mask=self.cutout_mask,
+            mask_radius_km=self.lam_mask_radius_km,
+        )
 
     @property
     def dates(self) -> list[datetime.datetime]:
         """Return dataset dates."""
         return self.data.dates
+
+    @property
+    def grid_size(self) -> int:
+        """Return dataset grid size."""
+        return sum(self.data.grids)
 
     @property
     def statistics(self) -> dict:
@@ -77,7 +108,7 @@ class BaseAnemoiReader:
     @property
     def supporting_arrays(self) -> dict:
         """Return dataset supporting_arrays."""
-        return self.data.supporting_arrays()
+        return self.data.supporting_arrays() | self.grid_indices.supporting_arrays
 
     @property
     def name_to_index(self) -> dict[str, int]:
@@ -88,6 +119,21 @@ class BaseAnemoiReader:
     def resolution(self) -> str:
         """Return dataset resolution."""
         return self.data.resolution
+
+    @cached_property
+    def cutout_mask(self) -> np.ndarray:
+        """Return cutout mask."""
+        cutout_mask = np.zeros(self.grid_size, dtype=bool)
+        if len(self.data.grids) <= 1:
+            err_msg = "Dataset `cutout_mask` property requires a cutout grid but does not have one."
+            raise ValueError(err_msg)
+        cutout_mask[: self.data.grids[0]] = True
+        return cutout_mask
+
+    @cached_property
+    def boundary_mask(self) -> np.ndarray:
+        """Return boundary mask."""
+        return ~self.cutout_mask
 
     @property
     @abstractmethod
@@ -100,6 +146,7 @@ class BaseAnemoiReader:
         grid_shard_indices: np.ndarray | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
+        grid_shard_indices = self.grid_indices.get_shard_indices(grid_shard_indices)
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory
             x = self.data[time_indices, :, :, grid_shard_indices]
@@ -150,8 +197,16 @@ class TrajectoryDataset(BaseAnemoiReader):
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
+        lam_mask_radius_km: int | None = None,
     ):
-        super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        super().__init__(
+            dataset,
+            start=start,
+            end=end,
+            frequency=frequency,
+            drop=drop,
+            lam_mask_radius_km=lam_mask_radius_km,
+        )
         self.trajectory_start = trajectory_start
         self.trajectory_length = trajectory_length
 
@@ -176,6 +231,7 @@ def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     if isinstance(dataset_config, DictConfig):
         dataset_config = dict(dataset_config)
+
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
         LOGGER.info("Creating TrajectoryDataset...")

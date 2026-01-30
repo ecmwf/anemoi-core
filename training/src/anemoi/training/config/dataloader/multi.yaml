@@ -35,17 +35,6 @@ limit_batches:
   validation: null
   test: 20
 
-# Dataset-specific grid indices configurations
-# If not specified, all datasets will use the default grid_indices above
-grid_indices:
-  datasets:
-    era5:
-      _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: ${graph.data}
-    cerra:
-      _target_: anemoi.training.data.grid_indices.FullGrid  # Could be different
-      nodes_name: ${graph.data}
-
 # ============
 # Multi-Dataset Configuration
 # Define multiple datasets that will be synchronized during training
@@ -61,6 +50,7 @@ training:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
+      lam_mask_radius_km: null
     cerra:
       dataset: ${system.input.dataset_b}  # Using same dataset as duplicate for testing
       start: 1985
@@ -68,6 +58,7 @@ training:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
+      lam_mask_radius_km: null
 
 validation_rollout: 1 # number of rollouts to use for validation
 
@@ -81,6 +72,7 @@ validation:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
+      lam_mask_radius_km: null
     cerra:
       dataset: ${system.input.dataset_b}
       start: 2021
@@ -88,6 +80,7 @@ validation:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
+      lam_mask_radius_km: null
 
 # Multi-dataset test with same datasets, different time period
 test:
@@ -99,6 +92,7 @@ test:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
+      lam_mask_radius_km: null
     cerra:
       dataset: ${system.input.dataset_b}
       start: 2022
@@ -106,3 +100,4 @@ test:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
+      lam_mask_radius_km: null

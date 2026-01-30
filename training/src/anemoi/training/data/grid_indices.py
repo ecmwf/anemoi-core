@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -15,83 +14,81 @@ from collections.abc import Sequence
 from functools import cached_property
 
 import numpy as np
-from torch_geometric.data import HeteroData
-
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.balanced_partition import get_partition_range
 
 LOGGER = logging.getLogger(__name__)
 
-ArrayIndex = slice | int | Sequence[int]
+ArrayIndex = slice | int | Sequence[int] | None
 
 
-class BaseGridIndices(ABC):
-    """Base class for custom grid indices."""
+class BaseIndices(ABC):
+    """Base class for custom indices."""
 
-    def __init__(self, nodes_name: str, reader_group_size: int) -> None:
-        self.nodes_name = nodes_name
-        self.reader_group_size = reader_group_size
+    @property
+    @abstractmethod
+    def supporting_arrays(self) -> dict:
+        raise NotImplementedError
 
-    def setup(self, graph: HeteroData) -> None:
-        self.grid_size = self.compute_grid_size(graph)
+    @abstractmethod
+    def get_shard_indices(self, grid_shard_indices: np.ndarray | None = None) -> ArrayIndex:
+        """Get shard indices."""
+        raise NotImplementedError
 
-    def get_shard_slice(self, reader_group_rank: int) -> slice:
-        """Get the grid shard slice according to the reader rank."""
-        start, end = get_partition_range(
-            partition_sizes=self.shard_shapes,
-            partition_id=reader_group_rank,
-        )
 
-        return slice(start, end)
-
-    @cached_property
-    def shard_shapes(self) -> list:
-        return get_balanced_partition_sizes(self.grid_size, self.reader_group_size)
+class FullGrid(BaseIndices):
+    """Class for full indices."""
 
     @property
     def supporting_arrays(self) -> dict:
         return {}
 
-    @abstractmethod
-    def compute_grid_size(self, graph: HeteroData) -> int: ...
-
-    @abstractmethod
-    def get_shard_indices(self, reader_group_rank: int) -> ArrayIndex: ...
+    def get_shard_indices(self, grid_shard_indices: np.ndarray | None = None) -> ArrayIndex:
+        """Get shard indices."""
+        return grid_shard_indices
 
 
-class FullGrid(BaseGridIndices):
-    """The full grid is loaded."""
+class MaskedGrid(BaseIndices):
+    """Class for masked indices."""
 
-    def compute_grid_size(self, graph: HeteroData) -> int:
-        return graph[self.nodes_name].num_nodes
+    def __init__(
+        self,
+        latitudes: np.ndarray,
+        longitudes: np.ndarray,
+        mask: np.ndarray,
+        mask_radius_km: float,
+    ):
+        self.mask_radius = mask_radius_km / 6371.0
+        self.latitudes = latitudes
+        self.longitudes = longitudes
+        self.mask = mask
 
-    def get_shard_indices(self, reader_group_rank: int) -> slice:
-        return self.get_shard_slice(reader_group_rank)
+    @cached_property
+    def coords_3d(self) -> np.ndarray:
+        """3D coordinates on a unit sphere."""
+        lat_rad = np.radians(self.latitudes)
+        lon_rad = np.radians(self.longitudes)
 
+        x = np.cos(lat_rad) * np.cos(lon_rad)
+        y = np.cos(lat_rad) * np.sin(lon_rad)
+        z = np.sin(lat_rad)
 
-class MaskedGrid(BaseGridIndices):
-    """Grid is masked based on a node attribute."""
+        return np.vstack((x, y, z)).T
 
-    def __init__(self, nodes_name: str, reader_group_size: int, node_attribute_name: str):
-        super().__init__(nodes_name, reader_group_size)
-        self.node_attribute_name = node_attribute_name
+    @cached_property
+    def grid_indices(self) -> np.ndarray:
+        from scipy.spatial import cKDTree
 
-    def setup(self, graph: HeteroData) -> None:
-        LOGGER.info(
-            "The graph attribute %s of the %s nodes will be used to masking the spatial dimension.",
-            self.node_attribute_name,
-            self.nodes_name,
-        )
-        self.grid_indices = graph[self.nodes_name][self.node_attribute_name].squeeze().tolist()
-        super().setup(graph)
+        # Check which points are within the radius of any mask point
+        tree = cKDTree(self.coords_3d[self.mask])
+        dists, _ = tree.query(self.coords_3d[~self.mask], k=1, distance_upper_bound=self.mask_radius)
+
+        grid_mask = self.mask.copy()  # points inside the mask are always included
+        grid_mask[~self.mask] = np.isfinite(dists)
+        return np.where(grid_mask)[0].astype(np.int64)
 
     @property
     def supporting_arrays(self) -> dict:
-        return {"grid_indices": np.array(self.grid_indices, dtype=np.int64)}
+        return {"grid_indices": self.grid_indices}
 
-    def compute_grid_size(self, _graph: HeteroData) -> int:
-        return len(self.grid_indices)
-
-    def get_shard_indices(self, reader_group_rank: int) -> ArrayIndex:
-        sequence_indices = self.get_shard_slice(reader_group_rank)
-        return self.grid_indices[sequence_indices]
+    def get_shard_indices(self, grid_shard_indices: np.ndarray | None = None) -> ArrayIndex:
+        """Get shard indices."""
+        return self.grid_indices[grid_shard_indices]
