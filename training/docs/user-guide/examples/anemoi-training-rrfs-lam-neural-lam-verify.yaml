@@ -127,6 +127,6 @@ diagnostics:
     frequency: ${data.frequency}
 
 training:
-  load_weights_only: False
+  load_weights_only: True
   max_epochs: 1
   max_steps: 1
