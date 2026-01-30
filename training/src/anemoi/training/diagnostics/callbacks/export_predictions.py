@@ -93,6 +93,17 @@ class ExportPredictions(pl.Callback):
         except TypeError:
             return post_processor(tensor)
 
+    def _ensure_3d(self, arr: np.ndarray, name: str) -> np.ndarray:
+        # Expected dims: (time, node, variable). Squeeze singleton dims if needed.
+        while arr.ndim > 3 and arr.shape[0] == 1:
+            arr = arr[0]
+        if arr.ndim == 4:
+            # Fallback: drop leading dimension (e.g., ensemble/member)
+            arr = arr[0]
+        if arr.ndim != 3:
+            raise ValueError(f"{name} has unexpected shape {arr.shape}, expected 3D (time,node,variable).")
+        return arr
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -151,6 +162,8 @@ class ExportPredictions(pl.Callback):
         var_names, var_idx = self._select_variables(pl_module)
         data = data[:, :, var_idx].numpy()
         preds = preds[:, :, var_idx].numpy()
+        data = self._ensure_3d(data, "data")
+        preds = self._ensure_3d(preds, "preds")
 
         time_coord = self._build_time_coord(rollout)
         ds = xr.Dataset(
