@@ -1024,4 +1024,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
-            self.logger.log_hyperparams(hyper_params)
+            self.logger.log_hyperparams(
+                hyper_params,
+            )

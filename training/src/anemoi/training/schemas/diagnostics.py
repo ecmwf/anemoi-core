@@ -325,6 +325,10 @@ class CheckpointSchema(BaseModel):
 
 
 class WandbSchema(BaseModel):
+    target_: Literal["pytorch_lightning.loggers.wandb.WandbLogger"] = Field(
+        default="pytorch_lightning.loggers.wandb.WandbLogger",
+        alias="_target_",
+    )
     enabled: bool
     "Use Weights & Biases logger."
     offline: bool
@@ -340,12 +344,29 @@ class WandbSchema(BaseModel):
     "Whether to log the hyper parameters."
     entity: str | None = None
     "Username or team name where to send runs. This entity must exist before you can send runs there."
+    interval: PositiveInt | None = Field(default=100)
+    "Logging frequency in batches."
 
     @root_validator(pre=True)
     def clean_entity(cls: type["WandbSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["entity"] = None
         return values
+
+    @model_validator(mode="after")
+    def check_valid_extras(self) -> Any:
+        # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
+        allowed_extras = {"interval": int}
+        extras = getattr(self, "__pydantic_extra__", {}) or {}
+        for extra_field, value in extras.items():
+            if extra_field not in allowed_extras:
+                msg = f"Extra field '{extra_field}' is not allowed. Allowed fields are: {list(allowed_extras.keys())}."
+                raise ValueError(msg)
+            if not isinstance(value, allowed_extras[extra_field]):
+                msg = f"Extra field '{extra_field}' must be of type {allowed_extras[extra_field].__name__}."
+                raise TypeError(msg)
+
+        return self
 
 
 class MlflowSchema(BaseModel):
@@ -415,27 +436,33 @@ class AzureMlflowSchema(MlflowSchema):
     "Log level for all azure packages (azure-identity, azure-core, etc)"
 
 
-class TensorboardSchema(BaseModel):
-    enabled: bool
-    "Use TensorBoard logger."
-
-
 class LoggingSchema(BaseModel):
     wandb: WandbSchema
     "W&B logging schema."
-    tensorboard: TensorboardSchema
-    "TensorBorad logging schema."
     mlflow: Annotated[MlflowSchema | AzureMlflowSchema, Field(discriminator="target_")]
     "MLflow logging schema."
     interval: PositiveInt
     "Logging frequency in batches."
 
     @model_validator(mode="before")
-    def inject_default_target(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
-        mlflow_cfg = OmegaConf.to_container(values.get("mlflow"), resolve=True)
-        if mlflow_cfg is not None and isinstance(mlflow_cfg, dict) and "_target_" not in mlflow_cfg:
-            mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
-            values["mlflow"] = mlflow_cfg
+    def inject_default_targets(cls, values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+
+        # ---- MLflow ----
+        mlflow_val = values.get("mlflow")
+        if mlflow_val is not None:
+            mlflow_cfg = OmegaConf.to_container(mlflow_val, resolve=True)
+            if isinstance(mlflow_cfg, dict) and "_target_" not in mlflow_cfg:
+                mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
+                values["mlflow"] = mlflow_cfg
+
+        # ---- W&B ----
+        wandb_val = values.get("wandb")
+        if wandb_val is not None:
+            wandb_cfg = OmegaConf.to_container(wandb_val, resolve=True)
+            if isinstance(wandb_cfg, dict) and "_target_" not in wandb_cfg:
+                wandb_cfg["_target_"] = "anemoi.training.diagnostics.wandb.logger.AnemoiWandbLogger"
+                values["wandb"] = wandb_cfg
+
         return values
 
 

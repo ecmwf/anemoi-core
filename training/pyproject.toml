@@ -69,6 +69,7 @@ optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
   "pre-commit>=3.3.3",
 ]
+
 optional-dependencies.docs = [
   "autodoc-pydantic",
   "nbsphinx",
@@ -78,6 +79,12 @@ optional-dependencies.docs = [
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]
+# Optional Dependencies
+optional-dependencies.mlflow = [
+  "anemoi-utils[mlflow]>=0.4.37",
+  "mlflow-skinny>=2.11.1",
+]
+
 optional-dependencies.plotting = [
   "distinctipy>=1",
   "pyshtools>=4.13",
@@ -89,14 +96,18 @@ optional-dependencies.profile = [
   "tabulate>=0.9",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",      # required to load the gnn checkpoint as part of the tests
-  "anemoi-training[azure]",  # required to test the AzureMlflowLogger
+  "anemoi-graphs[tri]",                  # required to load the gnn checkpoint as part of the tests
+  "anemoi-training[azure,mlflow,wandb]",
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",
 ]
+optional-dependencies.wandb = [
+  "wandb>=0.22.2",
+]
+
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"

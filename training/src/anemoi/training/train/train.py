@@ -33,7 +33,6 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
-from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -77,6 +76,8 @@ class AnemoiTrainer(ABC):
 
             LOGGER.info("Skipping config validation.")
 
+        self.config = convert_to_omegaconf(self.config)
+
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
@@ -105,7 +106,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
+        datamodule = AnemoiDatasetsDataModule(self.config, self.graph_data)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -162,7 +163,7 @@ class AnemoiTrainer(ABC):
         # Create new graph
         from anemoi.graphs.create import GraphCreator
 
-        graph_config = convert_to_omegaconf(self.config).graph
+        graph_config = self.config.graph
 
         # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
         if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
@@ -183,7 +184,7 @@ class AnemoiTrainer(ABC):
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
         graphs = {}
-        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
+        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
         for dataset_name, dataset_config in dataset_configs.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
             graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
@@ -209,7 +210,7 @@ class AnemoiTrainer(ABC):
         "Please use a different activation function."
 
         kwargs = {
-            "config": convert_to_omegaconf(self.config),
+            "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
@@ -255,7 +256,18 @@ class AnemoiTrainer(ABC):
 
     @rank_zero_only
     def _get_mlflow_run_id(self) -> str:
-        run_id = self.mlflow_logger.run_id
+        from anemoi.utils.mlflow.client import AnemoiMlflowClient
+
+        client = AnemoiMlflowClient(self.config.diagnostics.log.mlflow.tracking_uri, authentication=True)
+        experiment = client.get_experiment_by_name(self.config.diagnostics.log.mlflow.experiment_name)
+        experiment_id = (
+            experiment.experiment_id
+            if experiment is not None
+            else client.create_experiment(self.config.diagnostics.log.mlflow.experiment_name)
+        )
+        run_name = self.config.diagnostics.log.mlflow.run_name if self.config.diagnostics.log.mlflow.run_name else None
+        run = client.create_run(experiment_id, run_name=run_name)
+        run_id = run.info.run_id
         # for resumed runs or offline runs logging this can be useful
         LOGGER.info("Mlflow Run id: %s", run_id)
         return run_id
@@ -281,21 +293,6 @@ class AnemoiTrainer(ABC):
         import uuid
 
         return str(uuid.uuid4())
-
-    @cached_property
-    def wandb_logger(self) -> pl.loggers.WandbLogger:
-        """WandB logger."""
-        return get_wandb_logger(self.config, self.model)
-
-    @cached_property
-    def mlflow_logger(self) -> pl.loggers.MLFlowLogger:
-        """Mlflow logger."""
-        return get_mlflow_logger(self.config)
-
-    @cached_property
-    def tensorboard_logger(self) -> pl.loggers.TensorBoardLogger:
-        """TensorBoard logger."""
-        return get_tensorboard_logger(self.config)
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
@@ -355,7 +352,7 @@ class AnemoiTrainer(ABC):
 
         md_dict = {
             "version": "2.0",
-            "config": convert_to_omegaconf(self.config),
+            "config": self.config,
             "seed": self.initial_seed,
             "run_id": self.run_id,
             "dataset": None,  # will be populated in DataModule
@@ -373,17 +370,42 @@ class AnemoiTrainer(ABC):
         return self.datamodule.supporting_arrays
 
     @cached_property
+    def _logger_kwargs(self) -> dict:
+        """Shared keyword arguments for all loggers."""
+        return {
+            "run_id": self.run_id,
+            "fork_run_id": self.config.training.fork_run_id,
+            "paths": self.config.system.output,
+            "model": self.model,
+            "logger_config": self.config.diagnostics.log,
+        }
+
+    @cached_property
+    def mlflow_logger(self) -> None:
+        """Lazily initialize and cache the MLflow logger."""
+        LOGGER.info("Initializing MLflow logger lazily...")
+        return get_mlflow_logger(**self._logger_kwargs)
+
+    @cached_property
+    def wandb_logger(self) -> None:
+        """Lazily initialize and cache the W&B logger."""
+        LOGGER.info("Initializing W&B logger lazily...")
+        return get_wandb_logger(**self._logger_kwargs)
+
+    @cached_property
     def loggers(self) -> list:
+        """Lazily build all enabled loggers."""
+        diagnostics_config = self.config.diagnostics
         loggers = []
-        if self.config.diagnostics.log.wandb.enabled:
+
+        if diagnostics_config.log.wandb.enabled:
             LOGGER.info("W&B logger enabled")
             loggers.append(self.wandb_logger)
-        if self.config.diagnostics.log.tensorboard.enabled:
-            LOGGER.info("TensorBoard logger enabled")
-            loggers.append(self.tensorboard_logger)
-        if self.config.diagnostics.log.mlflow.enabled:
+
+        if self.mlflow_logger:
             LOGGER.info("MLFlow logger enabled")
             loggers.append(self.mlflow_logger)
+
         return loggers
 
     @cached_property
@@ -502,7 +524,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def strategy(self) -> Any:
         return instantiate(
-            convert_to_omegaconf(self.config).training.strategy,
+            self.config.training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
