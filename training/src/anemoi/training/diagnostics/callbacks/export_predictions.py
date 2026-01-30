@@ -106,8 +106,16 @@ class ExportPredictions(pl.Callback):
         # Prepare denormalized inputs/targets
         with torch.no_grad():
             data_indices = self._get_dataset_indices(pl_module)
+            data_batch = batch
+            if isinstance(batch, dict):
+                if "data" in batch:
+                    data_batch = batch["data"]
+                elif len(batch) == 1:
+                    data_batch = next(iter(batch.values()))
+                else:
+                    raise KeyError("Multiple datasets present in batch but no 'data' dataset found.")
             input_tensor = (
-                batch[
+                data_batch[
                     :,
                     pl_module.multi_step - 1 : pl_module.multi_step + rollout + 1,
                     ...,
