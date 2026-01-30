@@ -23,10 +23,10 @@ anemoi-training train \
   --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
   --config-name anemoi-training-rrfs-lam-neural-lam-verify \
   system.input.warm_start="$CHECKPOINT_PATH" \
-  dataloader.training.start="$START" \
-  dataloader.training.end="$END" \
-  dataloader.validation.start="$START" \
-  dataloader.validation.end="$END" \
-  dataloader.test.start="$START" \
-  dataloader.test.end="$END" \
+  dataloader.training.datasets.data.start="$START" \
+  dataloader.training.datasets.data.end="$END" \
+  dataloader.validation.datasets.data.start="$START" \
+  dataloader.validation.datasets.data.end="$END" \
+  dataloader.test.datasets.data.start="$START" \
+  dataloader.test.datasets.data.end="$END" \
   data.frequency="$FREQ"
