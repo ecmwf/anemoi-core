@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/training-0.9.0...training-0.9.1) (2026-01-30)
+
+
+### Features
+
+* **training:** Make activation checkpoints configurable ([#797](https://github.com/ecmwf/anemoi-core/issues/797)) ([b06b450](https://github.com/ecmwf/anemoi-core/commit/b06b450509dfc2ff36a4a20f161676917ed976ae))
+
+
+### Bug Fixes
+
+* Deactivate PlotSprectrum from testing pipelines ([#846](https://github.com/ecmwf/anemoi-core/issues/846)) ([6c778e4](https://github.com/ecmwf/anemoi-core/commit/6c778e442e26e71a589813fee644707d26be1583))
+* **training:** Follow-up to multiple datasets ([#844](https://github.com/ecmwf/anemoi-core/issues/844)) ([3a25674](https://github.com/ecmwf/anemoi-core/commit/3a25674d56fea996dfb31cffe48734321ddecf8b))
+
 ## [0.9.0](https://github.com/ecmwf/anemoi-core/compare/training-0.8.4...training-0.9.0) (2026-01-28)
 
 
