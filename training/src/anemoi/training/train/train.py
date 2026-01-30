@@ -240,12 +240,19 @@ class AnemoiTrainer(ABC):
                 elif isinstance(raw_ckpt, dict) and "state_dict" in raw_ckpt:
                     # Non-PL or stripped checkpoints may only contain a state_dict.
                     model.load_state_dict(raw_ckpt["state_dict"], strict=False)
-                else:
+                elif isinstance(raw_ckpt, dict) and "model" in raw_ckpt and isinstance(raw_ckpt["model"], torch.nn.Module):
+                    model.load_state_dict(raw_ckpt["model"].state_dict(), strict=False)
+                elif isinstance(raw_ckpt, dict) and "pytorch-lightning_version" in raw_ckpt:
                     model = model_task.load_from_checkpoint(
                         self.last_checkpoint,
                         **kwargs,
                         strict=False,
                         weights_only=False,  # required for Pytorch Lightning 2.6
+                    )
+                else:
+                    raise TypeError(
+                        "Unsupported warm_start checkpoint format. Expected a PL checkpoint dict, "
+                        "a dict with 'state_dict', or a torch.nn.Module."
                     )
 
             model.data_indices = self.data_indices
