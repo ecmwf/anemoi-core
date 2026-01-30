@@ -233,8 +233,17 @@ class AnemoiTrainer(ABC):
                     raw_ckpt = torch.load(self.last_checkpoint, map_location="cpu")
                 except Exception:
                     raw_ckpt = None
+                if raw_ckpt is not None:
+                    try:
+                        ckpt_type = type(raw_ckpt).__name__
+                        ckpt_keys = list(raw_ckpt.keys()) if isinstance(raw_ckpt, dict) else None
+                        LOGGER.info("Warm start ckpt type: %s", ckpt_type)
+                        if ckpt_keys is not None:
+                            LOGGER.info("Warm start ckpt keys (first 20): %s", ckpt_keys[:20])
+                    except Exception:
+                        LOGGER.info("Warm start ckpt debug: unable to introspect object.")
 
-                if isinstance(raw_ckpt, torch.nn.Module):
+                if hasattr(raw_ckpt, "state_dict"):
                     # Inference checkpoints may store the model object directly.
                     model.load_state_dict(raw_ckpt.state_dict(), strict=False)
                 elif isinstance(raw_ckpt, dict) and "state_dict" in raw_ckpt:
