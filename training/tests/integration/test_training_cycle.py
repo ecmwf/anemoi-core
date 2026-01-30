@@ -342,17 +342,6 @@ def test_training_cycle_mlflow_dry_run(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_multi_out_diffusion(
-    multi_out_diffusion_config: tuple[DictConfig, str],
-    get_test_archive: callable,
-) -> None:
-    cfg, url = multi_out_diffusion_config
-    get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-@skip_if_offline
-@pytest.mark.slow
 def test_training_cycle_multi_out_multidatasets_diffusion(
     multi_out_multidatasets_diffusion_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,

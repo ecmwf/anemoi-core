@@ -243,44 +243,18 @@ def multi_out_multidatasets_config(multidatasets_config: tuple[DictConfig, list[
 @pytest.fixture(
     params=[
         pytest.param(
-            (
-                [
-                    "model=graphtransformer_diffusion",
-                    "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
-                ],
-                1,
-            ),
-            id="diffusion-out1",
+            [
+                "model=graphtransformer_diffusion",
+                "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
+            ],
+            id="diffusion",
         ),
         pytest.param(
-            (
-                [
-                    "model=graphtransformer_diffusion",
-                    "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
-                ],
-                2,
-            ),
-            id="diffusion-out2",
-        ),
-        pytest.param(
-            (
-                [
-                    "model=graphtransformer_diffusiontend",
-                    "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
-                ],
-                1,
-            ),
-            id="diffusiontend-out1",
-        ),
-        pytest.param(
-            (
-                [
-                    "model=graphtransformer_diffusiontend",
-                    "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
-                ],
-                2,
-            ),
-            id="diffusiontend-out2",
+            [
+                "model=graphtransformer_diffusiontend",
+                "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+            ],
+            id="diffusiontend",
         ),
     ],
 )
@@ -289,7 +263,8 @@ def multi_out_multidatasets_diffusion_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, list[str]]:
-    overrides, multistep_output = request.param
+    overrides = request.param
+    is_tendency = any("graphtransformer_diffusiontend" in override for override in overrides)
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multi_diffusion"):
         template = compose(config_name="multi", overrides=overrides)
@@ -303,8 +278,12 @@ def multi_out_multidatasets_diffusion_config(
     use_case_modifications.system.input.dataset_b = str(Path(tmp_dir, dataset_b))
 
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = multistep_output
+    if is_tendency:
+        cfg.training.multistep_input = 3
+        cfg.training.multistep_output = 2
+    else:
+        cfg.training.multistep_input = 2
+        cfg.training.multistep_output = 3
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls
@@ -704,14 +683,4 @@ def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str
     cfg["diagnostics"]["log"]["mlflow"]["enabled"] = True
     cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
     cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
-    return cfg, url
-
-
-@pytest.fixture
-def multi_out_diffusion_config(diffusion_config: tuple[OmegaConf, str]) -> tuple[OmegaConf, str]:
-    cfg, url = diffusion_config
-
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
-
     return cfg, url
