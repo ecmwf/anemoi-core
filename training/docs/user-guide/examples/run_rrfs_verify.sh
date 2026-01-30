@@ -20,7 +20,7 @@ END="$3"
 FREQ="$4"
 
 anemoi-training train \
-  --config-path training/docs/user-guide/examples \
+  --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
   --config-name anemoi-training-rrfs-lam-neural-lam-verify \
   checkpoint_path="$CHECKPOINT_PATH" \
   sample.start="$START" \
