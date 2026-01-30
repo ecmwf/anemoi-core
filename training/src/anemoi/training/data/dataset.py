@@ -20,19 +20,12 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
+from anemoi.training.data.grid_indices import BaseIndices
+from anemoi.training.data.grid_indices import FullGrid
+from anemoi.training.data.grid_indices import MaskedGrid
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
-
-
-def latlon_to_3d(lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
-    """Convert lat/lon (in degrees) to 3D coordinates on unit sphere."""
-    lat_rad = np.radians(lats)
-    lon_rad = np.radians(lons)
-    x = np.cos(lat_rad) * np.cos(lon_rad)
-    y = np.cos(lat_rad) * np.sin(lon_rad)
-    z = np.sin(lat_rad)
-    return np.vstack((x, y, z)).T
 
 
 class BaseAnemoiReader:
@@ -45,6 +38,7 @@ class BaseAnemoiReader:
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
+        lam_mask_radius_km: int | None = None,
     ):
         """Initialize Anemoi data reader."""
         ds_kwargs = {}
@@ -55,6 +49,19 @@ class BaseAnemoiReader:
             ds_kwargs["frequency"] = frequency
 
         self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
+        self.lam_mask_radius_km = lam_mask_radius_km
+
+    @cached_property
+    def grid_indices(self) -> BaseIndices:
+        if self.lam_mask_radius_km is None:
+            return FullGrid()
+
+        return MaskedGrid(
+            latitudes=self.data.latitudes,
+            longitudes=self.data.longitudes,
+            mask=self.cutout_mask,
+            mask_radius_km=self.lam_mask_radius_km,
+        )
 
     @property
     def dates(self) -> list[datetime.datetime]:
@@ -101,7 +108,7 @@ class BaseAnemoiReader:
     @property
     def supporting_arrays(self) -> dict:
         """Return dataset supporting_arrays."""
-        return self.data.supporting_arrays()
+        return self.data.supporting_arrays() | self.grid_indices.supporting_arrays
 
     @property
     def name_to_index(self) -> dict[str, int]:
@@ -139,6 +146,7 @@ class BaseAnemoiReader:
         grid_shard_indices: np.ndarray | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
+        grid_shard_indices = self.grid_indices.get_shard_indices(grid_shard_indices)
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory
             x = self.data[time_indices, :, :, grid_shard_indices]
@@ -177,51 +185,6 @@ class NativeGridDataset(BaseAnemoiReader):
         return False
 
 
-class MaskedGridDataset(BaseAnemoiReader):
-    """Masked grid dataset."""
-
-    def __init__(
-        self,
-        dataset: str | dict,
-        start: datetime.datetime | int | None = None,
-        end: datetime.datetime | int | None = None,
-        frequency: str | None = None,
-        drop: list[str] | None = None,
-        mask_lam_radius_km: int | None = None,
-    ):
-        assert (
-            "cutout" in dataset
-        ), "MaskedGridDataset requires a limited area in the dataset configuration (e.g., 'cutout' keyword)."
-        super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
-        self.mask_radius = mask_lam_radius_km / 6371.0
-
-    @cached_property
-    def grid_indices(self) -> np.ndarray:
-        """Return grid indices inside the mask."""
-        from scipy.spatial import cKDTree
-
-        coords = latlon_to_3d(self.data.latitudes, self.data.longitudes)
-
-        # Check which points are within the radius of any LAM point
-        tree = cKDTree(coords[self.cutout_mask])
-        dists, _ = tree.query(coords[self.boundary_mask], k=1, distance_upper_bound=self.mask_radius)
-
-        grid_mask = np.concatenate([self.cutout_mask, np.isfinite(dists)])
-        return np.where(grid_mask)[0].astype(np.int64)
-
-    def supporting_arrays(self) -> dict:
-        return super().supporting_arrays | {"grid_indices": self.grid_indices}
-
-    def get_sample(
-        self,
-        time_indices: slice | int | list[int],
-        grid_shard_indices: np.ndarray | None = None,
-    ) -> torch.Tensor:
-        """Get a sample from the dataset."""
-        masked_grid_shard_indices = self.grid_indices[grid_shard_indices]
-        return super().get_sample(time_indices, masked_grid_shard_indices)
-
-
 class TrajectoryDataset(BaseAnemoiReader):
     """Trajectory dataset."""
 
@@ -234,8 +197,16 @@ class TrajectoryDataset(BaseAnemoiReader):
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
+        lam_mask_radius_km: int | None = None,
     ):
-        super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        super().__init__(
+            dataset,
+            start=start,
+            end=end,
+            frequency=frequency,
+            drop=drop,
+            lam_mask_radius_km=lam_mask_radius_km,
+        )
         self.trajectory_start = trajectory_start
         self.trajectory_length = trajectory_length
 
@@ -260,11 +231,6 @@ def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     if isinstance(dataset_config, DictConfig):
         dataset_config = dict(dataset_config)
-
-    mask_config = dataset_config.pop("mask", None)
-    if mask_config is not None and len(mask_config) > 0:
-        LOGGER.info("Creating MaskedGridDataset...")
-        return MaskedGridDataset(**dataset_config, mask=mask_config)
 
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):

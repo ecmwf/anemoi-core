@@ -65,6 +65,7 @@ training:
       frequency: ${data.frequency}
       drop: []
       trajectory: ${dataloader.model_run_info}
+      lam_mask_radius_km: null
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
 
@@ -77,6 +78,7 @@ validation:
       frequency: ${data.frequency}
       drop: []
       trajectory: ${dataloader.model_run_info}
+      lam_mask_radius_km: null
 
 test:
   datasets:
@@ -87,3 +89,4 @@ test:
       frequency: ${data.frequency}
       drop: []
       trajectory: ${dataloader.model_run_info}
+      lam_mask_radius_km: null
