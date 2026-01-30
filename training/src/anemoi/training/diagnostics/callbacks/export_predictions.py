@@ -55,8 +55,19 @@ class ExportPredictions(pl.Callback):
             return times
         return np.arange(rollout + 1, dtype="int64")
 
+    def _get_dataset_indices(self, pl_module: pl.LightningModule):
+        data_indices = pl_module.data_indices
+        if isinstance(data_indices, dict):
+            if "data" in data_indices:
+                return data_indices["data"]
+            if len(data_indices) == 1:
+                return next(iter(data_indices.values()))
+            raise KeyError("Multiple datasets present but no 'data' dataset found in data_indices.")
+        return data_indices
+
     def _select_variables(self, pl_module: pl.LightningModule) -> tuple[list[str], list[int]]:
-        name_to_index = pl_module.data_indices.model.output.name_to_index
+        data_indices = self._get_dataset_indices(pl_module)
+        name_to_index = data_indices.model.output.name_to_index
         if self.parameters:
             names = [n for n in self.parameters if n in name_to_index]
         else:
@@ -94,12 +105,13 @@ class ExportPredictions(pl.Callback):
 
         # Prepare denormalized inputs/targets
         with torch.no_grad():
+            data_indices = self._get_dataset_indices(pl_module)
             input_tensor = (
                 batch[
                     :,
                     pl_module.multi_step - 1 : pl_module.multi_step + rollout + 1,
                     ...,
-                    pl_module.data_indices.data.output.full,
+                    data_indices.data.output.full,
                 ]
                 .detach()
                 .cpu()
