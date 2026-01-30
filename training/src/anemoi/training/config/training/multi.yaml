@@ -17,13 +17,11 @@ precision: 16-mixed
 # multistep input
 # 1 = single step scheme, X(t-1) used to predict X(t)
 # k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-# Deepmind use k = 2 in their model
 multistep_input: 2
 
 # multistep output
 # 1 = single step output scheme, single model forward predicts X(t)
 # l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
-# Deepmind use l = 1 in their model
 multistep_output: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)

@@ -1225,7 +1225,7 @@ class PlotSample(BasePlotAdditionalMetrics):
 
             local_rank = pl_module.local_rank
 
-            if output_times[1] == "forecast" and pl_module.multi_out > 1:
+            if output_times[1] == "forecast":
                 max_out_steps = pl_module.multi_out
                 output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
                 if output_steps_limit is not None:
@@ -1355,7 +1355,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if output_times[1] == "forecast" and pl_module.multi_out > 1:
+            if output_times[1] == "forecast":
                 max_out_steps = pl_module.multi_out
                 output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
                 if output_steps_limit is not None:
@@ -1486,7 +1486,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if output_times[1] == "forecast" and pl_module.multi_out > 1:
+            if output_times[1] == "forecast":
                 max_out_steps = pl_module.multi_out
                 output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
                 if output_steps_limit is not None:
