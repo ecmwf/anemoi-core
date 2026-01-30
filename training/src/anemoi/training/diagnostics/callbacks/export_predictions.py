@@ -139,7 +139,10 @@ class ExportPredictions(pl.Callback):
 
             preds = torch.cat(
                 tuple(
-                    self._post_process(pl_module, x.detach().cpu())[self.sample_idx : self.sample_idx + 1]
+                    self._post_process(
+                        pl_module,
+                        (x["data"] if isinstance(x, dict) else x).detach().cpu(),
+                    )[self.sample_idx : self.sample_idx + 1]
                     for x in outputs[1]
                 ),
                 dim=0,
