@@ -408,7 +408,11 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
             y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
                 y_pred_state[dataset_name],
-                y_state[dataset_name],
+                self.model.model._apply_imputer_inverse(
+                    self.model.post_processors,
+                    dataset_name,
+                    y_state[dataset_name],
+                ),
                 validation_mode=validation_mode,
                 dataset_name=dataset_name,
             )
