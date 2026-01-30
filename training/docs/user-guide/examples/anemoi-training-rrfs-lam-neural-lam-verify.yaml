@@ -2,11 +2,11 @@ defaults:
   - data: zarr
   - dataloader: rrfs_native_no_frequency
   - diagnostics: evaluation
-  - override /diagnostics/plot: rollout_eval
   - system: example
   - graph: existing_graph
   - model: graphtransformer
   - training: lam
+  - override /diagnostics/plot: rollout_eval
   - _self_
 
 config_validation: True
