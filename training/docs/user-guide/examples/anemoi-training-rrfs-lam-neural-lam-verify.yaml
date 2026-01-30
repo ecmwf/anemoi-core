@@ -12,11 +12,8 @@ defaults:
 config_validation: True
 
 # Required inputs (override on CLI)
-checkpoint_path: ???
-sample:
-  start: "2024-05-05T00:00:00"
-  end: "2024-05-05T23:00:00"
-  frequency: 1h
+# system.input.warm_start
+# dataloader.*.start / dataloader.*.end
 
 data:
   resolution: 3p0km
@@ -49,7 +46,7 @@ system:
   input:
     dataset: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/test-20km-bcmask-time-s.zarr
     graph: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-20km.pt
-    warm_start: ${checkpoint_path}
+    warm_start: ???
   output:
     root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/
 
@@ -59,16 +56,16 @@ dataloader:
     validation: null
     test: null
   training:
-    start: ${sample.start}
-    end: ${sample.end}
+    start: "2024-05-05T00:00:00"
+    end: "2024-05-05T23:00:00"
     drop: [boundary_mask]
   validation:
-    start: ${sample.start}
-    end: ${sample.end}
+    start: "2024-05-05T00:00:00"
+    end: "2024-05-05T23:00:00"
     drop: [boundary_mask]
   test:
-    start: ${sample.start}
-    end: ${sample.end}
+    start: "2024-05-05T00:00:00"
+    end: "2024-05-05T23:00:00"
     drop: [boundary_mask]
 
 diagnostics:
@@ -95,8 +92,8 @@ diagnostics:
     sample_idx: ${diagnostics.plot.sample_idx}
     parameters: ${diagnostics.plot.parameters}
     output_dir: ${system.output.root}/predictions
-    start: ${sample.start}
-    frequency: ${sample.frequency}
+    start: ${dataloader.training.start}
+    frequency: ${data.frequency}
 
 training:
   load_weights_only: True

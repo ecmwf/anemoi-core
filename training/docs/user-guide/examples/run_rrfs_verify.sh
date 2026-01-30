@@ -22,7 +22,11 @@ FREQ="$4"
 anemoi-training train \
   --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
   --config-name anemoi-training-rrfs-lam-neural-lam-verify \
-  checkpoint_path="$CHECKPOINT_PATH" \
-  sample.start="$START" \
-  sample.end="$END" \
-  sample.frequency="$FREQ"
+  system.input.warm_start="$CHECKPOINT_PATH" \
+  dataloader.training.start="$START" \
+  dataloader.training.end="$END" \
+  dataloader.validation.start="$START" \
+  dataloader.validation.end="$END" \
+  dataloader.test.start="$START" \
+  dataloader.test.end="$END" \
+  data.frequency="$FREQ"
