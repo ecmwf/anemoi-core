@@ -1017,6 +1017,9 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
+            if output_times[1] != "forecast":
+                output_times = [1]
+            
             for rollout_step in range(output_times[0]):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 fc_times = [
@@ -1040,7 +1043,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                     epoch=epoch,
                     tag=f"loss_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
                     exp_log_tag=f"loss_sample_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
-                )
+                )                    
 
     def on_validation_batch_end(
         self,
@@ -1261,6 +1264,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                         )
             else:
                 for rollout_step in range(output_times[0]):
+                    interp_step = rollout_step + 1
                     init_step = self._get_init_step(rollout_step, output_times[1])
                     fig = plot_predicted_multilevel_flat_sample(
                         plot_parameters_dict,
@@ -1279,8 +1283,8 @@ class PlotSample(BasePlotAdditionalMetrics):
                         logger,
                         fig,
                         epoch=epoch,
-                        tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                        exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}",
+                        tag=f"pred_val_sample_{dataset_name}_istep{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                        exp_log_tag=f"val_pred_sample_{dataset_name}_istep{interp_step:02d}_rank{local_rank:01d}",
                     )
 
 
@@ -1387,7 +1391,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             else:
                 for rollout_step in range(output_times[0]):
                     init_step = self._get_init_step(rollout_step, output_times[1])
-
+                    interp_step = rollout_step + 1
                     fig = plot_power_spectrum(
                         plot_parameters_dict_spectrum,
                         self.latlons[dataset_name],
@@ -1401,8 +1405,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                         logger,
                         fig,
                         epoch=epoch,
-                        tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                        exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                        tag=f"pred_val_spec_{dataset_name}_istep_{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                        exp_log_tag=f"pred_val_spec_{dataset_name}_istep_{interp_step:02d}_rank{local_rank:01d}",
                     )
 
 
@@ -1518,7 +1522,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             else:
                 for rollout_step in range(output_times[0]):
                     init_step = self._get_init_step(rollout_step, output_times[1])
-
+                    interp_step = rollout_step + 1
                     fig = plot_histogram(
                         plot_parameters_dict_histogram,
                         data[init_step, ...].squeeze(),
@@ -1532,6 +1536,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                         logger,
                         fig,
                         epoch=epoch,
-                        tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                        exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                        tag=f"pred_val_histo_{dataset_name}_istep_{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                        exp_log_tag=f"pred_val_histo_{dataset_name}_istep_{interp_step:02d}_rank{local_rank:01d}",
                     )
