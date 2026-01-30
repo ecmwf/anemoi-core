@@ -10,10 +10,11 @@
 
 from typing import Optional
 
-import torch
 import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
+
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 
 
 def get_shard_shapes(tensor: Tensor, dim: int, model_comm_group: Optional[ProcessGroup] = None) -> list[list[int]]:
@@ -21,7 +22,8 @@ def get_shard_shapes(tensor: Tensor, dim: int, model_comm_group: Optional[Proces
     assert dim < tensor.dim(), f"Error, tensor dimension is {tensor.dim()} which cannot be split along {dim}"
 
     comm_size = 1 if not model_comm_group else dist.get_world_size(group=model_comm_group)
-    return [list(x.shape) for x in torch.tensor_split(tensor, comm_size, dim=dim)]
+    shard_shapes_dim = get_balanced_partition_sizes(tensor.shape[dim], comm_size)
+    return apply_shard_shapes(tensor, dim, shard_shapes_dim)
 
 
 def change_channels_in_shape(shape_list: list[list[int]], channels: int) -> list[list[int]]:

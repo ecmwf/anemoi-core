@@ -11,8 +11,6 @@
 import importlib
 import logging
 
-import networkx as nx
-import numpy as np
 import torch
 from torch_geometric.data.storage import NodeStorage
 
@@ -102,10 +100,10 @@ class MultiScaleEdges(BaseEdgeBuilder):
             )
 
         # Add edges
-        source_nodes = edge_builder_cls().add_edges(source_nodes, self.x_hops, scale_resolutions=scale_resolutions)
-        adjmat = nx.to_scipy_sparse_array(source_nodes["_nx_graph"], format="coo")
-
-        # Get source & target indices of the edges
-        edge_index = np.stack([adjmat.col, adjmat.row], axis=0)
+        edge_index = edge_builder_cls().get_edges(
+            source_nodes,
+            self.x_hops,
+            scale_resolutions=scale_resolutions,
+        )
 
         return torch.from_numpy(edge_index).to(torch.int32)

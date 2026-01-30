@@ -18,8 +18,8 @@ import tarfile
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Callable
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -625,7 +625,7 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
 
     # get metadata
     commit = get_git_revision_hash()
-    yyyy_mm_dd = datetime.now(tz=timezone.utc).date()
+    yyyy_mm_dd = datetime.now(tz=UTC).date()
 
     # create Benchmark value objects
     local_benchmark_results = []

@@ -15,50 +15,27 @@ on:
       - labeled
       - unlabeled
       - synchronize
-  merge_group:
 
 permissions:
   pull-requests: read
 
 jobs:
   check:
-    name: Check ATS labels on PR
     runs-on: ubuntu-latest
-
     steps:
       - name: Get PR details
         uses: actions/github-script@v7
         id: check-pr
         with:
           script: |
-            // If triggered by merge_group, extract PR number from head_ref
-            if (context.eventName === 'merge_group') {
-              // merge_group head_ref format: refs/heads/gh-readonly-queue/{base_branch}/pr-{number}-{sha}
-              const match = context.payload.merge_group.head_ref.match(/\/pr-(\d+)-/);
-              if (!match) {
-                core.setFailed('Could not extract PR number from merge group head_ref');
-                return;
-              }
-              const prNumber = parseInt(match[1], 10);
-              const pr = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-              });
-              const labels = pr.data.labels.map(label => label.name);
-              core.setOutput('labels', JSON.stringify(labels));
-              core.setOutput('author', pr.data.user.login);
-            } else {
-              // Regular pull_request event
-              const pr = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.payload.pull_request.number,
-              });
-              const labels = pr.data.labels.map(label => label.name);
-              core.setOutput('labels', JSON.stringify(labels));
-              core.setOutput('author', context.payload.pull_request.user.login);
-            }
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+            const labels = pr.data.labels.map(label => label.name);
+            core.setOutput('labels', JSON.stringify(labels));
+            core.setOutput('author', context.payload.pull_request.user.login);
 
       - name: Evaluate ATS labels
         run: |

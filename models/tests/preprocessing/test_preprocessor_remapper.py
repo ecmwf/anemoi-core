@@ -34,7 +34,7 @@ def input_remapper_1d():
     )
     statistics = {}
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "d": 4, "other": 5}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return Remapper(config=config.data.remapper, data_indices=data_indices, statistics=statistics)
 
 
@@ -89,7 +89,7 @@ def test_unsupported_remapper():
     )
     statistics = {}
     name_to_index = {"x": 0, "y": 1, "q": 2, "d": 3}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
 
     with pytest.raises(KeyError):
         Remapper(

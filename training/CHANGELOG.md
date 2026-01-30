@@ -8,6 +8,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.0](https://github.com/ecmwf/anemoi-core/compare/training-0.8.4...training-0.9.0) (2026-01-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models,training:** multi dataset integration
+
+### Features
+
+* Drop python 3.10 ([#795](https://github.com/ecmwf/anemoi-core/issues/795)) ([ebea6d0](https://github.com/ecmwf/anemoi-core/commit/ebea6d09b4f7ea834865134670d0f2e187140ae1))
+* **models,training:** Multi dataset integration ([f537d7f](https://github.com/ecmwf/anemoi-core/commit/f537d7f209092215a94b9e7c613acc781ca4966b))
+* **training:** Autoencoder 🗜️ ([#252](https://github.com/ecmwf/anemoi-core/issues/252)) ([50e497b](https://github.com/ecmwf/anemoi-core/commit/50e497bd3c815a78638185081e9d008e6d828aa2))
+
+
+### Bug Fixes
+
+* **deps:** Workaround for failing uv dependency resolution ([#828](https://github.com/ecmwf/anemoi-core/issues/828)) ([bc64bac](https://github.com/ecmwf/anemoi-core/commit/bc64bac8df31f8ffb9951de4f7d02bf4f442a4be))
+* Set min version for azureml-mlflow ([#842](https://github.com/ecmwf/anemoi-core/issues/842)) ([0f721a5](https://github.com/ecmwf/anemoi-core/commit/0f721a56fc5bb59b7a405f2fe81fa34d027ff1b1))
+
+## [0.8.4](https://github.com/ecmwf/anemoi-core/compare/training-0.8.3...training-0.8.4) (2026-01-14)
+
+
+### Features
+
+* Introduce spectral losses module ([#678](https://github.com/ecmwf/anemoi-core/issues/678)) ([9745b46](https://github.com/ecmwf/anemoi-core/commit/9745b4688482986f62c0590b53a2bf4d551e077d))
+* **models:** Mapper refactor ([#574](https://github.com/ecmwf/anemoi-core/issues/574)) ([83820c8](https://github.com/ecmwf/anemoi-core/commit/83820c8ad049d8dfd4ed4b737b5e4f597b9f2b1f))
+
+
+### Bug Fixes
+
+* **graphs,aicon:** Integration test ([#794](https://github.com/ecmwf/anemoi-core/issues/794)) ([1d8770c](https://github.com/ecmwf/anemoi-core/commit/1d8770c649a08ac319dd9132a41485afb88ab78e))
+* Remove limit on numpy version ([#688](https://github.com/ecmwf/anemoi-core/issues/688)) ([bc6c6cb](https://github.com/ecmwf/anemoi-core/commit/bc6c6cbaacb0968c3bb10bbaa5cb71f09b49ce28))
+* **training:** Dataloader worker ranges ([#764](https://github.com/ecmwf/anemoi-core/issues/764)) ([3ce36ae](https://github.com/ecmwf/anemoi-core/commit/3ce36ae54cbfe4181434dbb9fb35c613d5aa541c))
+
+## [0.8.3](https://github.com/ecmwf/anemoi-core/compare/training-0.8.2...training-0.8.3) (2026-01-05)
+
+
+### Bug Fixes
+
+* **ensemble training:** Training is broken when ensemble is sharded across gpus ([#774](https://github.com/ecmwf/anemoi-core/issues/774)) ([ca08316](https://github.com/ecmwf/anemoi-core/commit/ca08316c20e854e1d1f9708facba0bc695a3269c))
+* Reverting change to include dependency of mlflow-export-import to unblock pypi releases ([#775](https://github.com/ecmwf/anemoi-core/issues/775)) ([f7d2acc](https://github.com/ecmwf/anemoi-core/commit/f7d2accd527c8e3729f91685e534873a2f3b4136))
+* **tests:** Expand losses test suite ([#754](https://github.com/ecmwf/anemoi-core/issues/754)) ([e6b7dbb](https://github.com/ecmwf/anemoi-core/commit/e6b7dbb3b200a4117fd51de02b201e6669414317))
+* **training:** Convert warm_start_path to pathlib.Path object ([#751](https://github.com/ecmwf/anemoi-core/issues/751)) ([59f033c](https://github.com/ecmwf/anemoi-core/commit/59f033c7d87006004b58ecfd50308ccaca695127))
+
 ## [0.8.2](https://github.com/ecmwf/anemoi-core/compare/training-0.8.1...training-0.8.2) (2025-12-18)
 
 

@@ -90,6 +90,7 @@ class BaseTensorIndex:
             "forcing": self.forcing,
             "target": self.target,
             "full": self.full,
+            "name_to_index": self.name_to_index,
         }
 
     @staticmethod

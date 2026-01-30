@@ -73,7 +73,7 @@ try:
 except ImportError:
     msg = (
         "The 'mlflow-export-import' package is not installed."
-        "You can install it doing pip install anemoi-training[mlflowsync]"
+        "Please install it from https://github.com/mlflow/mlflow-export-import"
     )
     raise ImportError(msg) from None
 

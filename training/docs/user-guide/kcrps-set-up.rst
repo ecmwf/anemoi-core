@@ -26,7 +26,7 @@ training:
       -  :class:`DDPEnsGroupStrategy`
 
    -  -  Training loss
-      -  :class:`WeightedMSELoss`
+      -  :class:`MSELoss`
       -  :class:`AlmostFairKernelCRPS`
 
    -  -  Model
@@ -35,7 +35,7 @@ training:
 
    -  -  Datamodule
       -  :class:`AnemoiDatasetsDataModule`
-      -  :class:`AnemoiEnsDatasetsDataModule`
+      -  :class:`AnemoiDatasetsDataModule`
 
 **************************
  Changes in System config
@@ -110,8 +110,8 @@ the processor grid using a sparse projection matrix. This is configured
 via the ``noise_matrix`` parameter, which should point to a ``.npz``
 file created with ``anemoi-graphs export_to_sparse`` (see
 :ref:`usage-create_sparse_matrices`). Additional options
-``transpose_noise_matrix``, ``row_normalize_noise_matrix``, and
-``autocast`` control how the projection matrix is applied.
+``row_normalize_noise_matrix`` and ``autocast`` control how the
+projection matrix is applied.
 
 .. code:: yaml
 

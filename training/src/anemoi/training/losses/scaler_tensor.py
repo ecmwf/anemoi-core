@@ -12,10 +12,10 @@ import logging
 import uuid
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import Self
 
 import torch
 from torch import nn
-from typing_extensions import Self
 
 from anemoi.training.utils.enums import TensorDim
 

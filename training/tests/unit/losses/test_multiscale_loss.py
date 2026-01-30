@@ -10,12 +10,13 @@
 import pytest
 import torch
 from pytest_mock import MockerFixture
+from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
-from anemoi.training.losses.multiscale import SparseProjector
 
 
 @pytest.fixture
@@ -59,17 +60,22 @@ def test_multi_scale(
     mocker: MockerFixture,
 ) -> None:
     """Test multiscale loss with different per-scale losses and weights."""
-    smoothing_matrix = SparseProjector(
-        torch.tensor([[0, 0, 1, 1, 2, 2, 3, 3], [0, 1, 1, 2, 2, 3, 3, 0]]),
-        torch.ones(8) / 2,
-        src_size=4,
-        dst_size=4,
+    graph = HeteroData()
+    graph["src"].num_nodes = 4
+    graph["dst"].num_nodes = 4
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 0, 1, 1, 2, 2, 3, 3], [0, 1, 1, 2, 2, 3, 3, 0]])
+    graph[("src", "to", "dst")].edge_weight = torch.ones(8) / 2
+
+    smoothing_provider = ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="edge_weight",
         row_normalize=False,
-        transpose=False,
     )
+
     mocker.patch(
         "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
-        return_value=[None, smoothing_matrix],
+        return_value=[None, smoothing_provider],
     )
 
     multiscale_loss = MultiscaleLossWrapper(

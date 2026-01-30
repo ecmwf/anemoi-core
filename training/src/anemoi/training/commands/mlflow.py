@@ -12,11 +12,81 @@ import argparse
 import getpass
 import json
 import logging
+from datetime import UTC
 from pathlib import Path
 
 from anemoi.training.commands import Command
 
 LOGGER = logging.getLogger(__name__)
+
+
+def prepare_mlflow_run_id(
+    config: dict,
+    owner: str = getpass.getuser(),
+    run_name: str | None = None,
+) -> None:
+    """Prepare MLflow run metadata.
+
+    Parameters
+    ----------
+    config : dict
+        Training configuration.
+    owner : str
+        Owner of the training run.
+    run_name : str or None
+        MLflow run name.
+
+    Returns
+    -------
+    run_id : str
+        The MLflow run ID.
+    experiment_id : str
+        The MLflow experiment ID.
+    """
+    import mlflow
+
+    from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
+    from anemoi.utils.mlflow.client import AnemoiMlflowClient
+
+    # Create MLflow client and get experiment
+    client = AnemoiMlflowClient(config.diagnostics.log.mlflow.tracking_uri, authentication=True)
+    experiment = client.get_experiment_by_name(config.diagnostics.log.mlflow.experiment_name)
+    experiment_id = (
+        experiment.experiment_id
+        if experiment is not None
+        else client.create_experiment(config.diagnostics.log.mlflow.experiment_name)
+    )
+
+    # Parse configuration
+    if config.training.run_id is not None:  # Existing run_id
+        LOGGER.info("Existing run_id: %s", config.training.run_id)
+        try:
+            client.get_run(config.training.run_id)
+        except ValueError as e:
+            msg = "Invalid run_id provided."
+            raise ValueError(msg) from e
+        return None
+
+    # Create a new run attached to the experiment
+    run_name = run_name if run_name is not None else config.diagnostics.log.mlflow.run_name
+    run = client.create_run(experiment_id, run_name=run_name)
+    run_id = run.info.run_id
+    LOGGER.info("Creating new run_id: %s", run_id)
+
+    # Log metadata to MLflow server
+    mlflow.set_tracking_uri(config.diagnostics.log.mlflow.tracking_uri)
+    client.set_tag(run_id, "mlflow.user", owner)
+    client.set_tag(run_id, "dry_run", True)
+    client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
+    AnemoiMLflowLogger.log_hyperparams_in_mlflow(
+        client,
+        run_id,
+        config,
+        expand_keys=config.diagnostics.log.mlflow.expand_hyperparams,
+        clean_params=False,
+    )
+
+    return run_id, experiment_id
 
 
 class MlFlow(Command):
@@ -140,17 +210,11 @@ class MlFlow(Command):
             type=Path,
             help="Output file path.",
         )
-        prepare.add_argument(
-            "--verbose",
-            "-v",
-            action="store_true",
-        )
 
     @staticmethod
     def run(args: argparse.Namespace) -> None:  # noqa: C901
         if args.subcommand == "login":
             from datetime import datetime
-            from datetime import timezone
 
             from anemoi.utils.mlflow.auth import TokenAuth
 
@@ -161,8 +225,8 @@ class MlFlow(Command):
                     return
                 LOGGER.info("Known servers:")
                 for url, refresh_expires in servers:
-                    expires = datetime.fromtimestamp(refresh_expires, tz=timezone.utc)
-                    if expires < datetime.now(tz=timezone.utc):
+                    expires = datetime.fromtimestamp(refresh_expires, tz=UTC)
+                    if expires < datetime.now(tz=UTC):
                         LOGGER.info(" - %s (expired, login required)", url)
                         continue
                     LOGGER.info(" - %s (expires: %s UTC)", url, expires.strftime("%Y-%m-%d %H:%M:%S"))
@@ -209,53 +273,17 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "prepare":
-            import mlflow
             from hydra import compose
             from hydra import initialize
-
-            from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
-            from anemoi.utils.mlflow.client import AnemoiMlflowClient
 
             # Load configuration and resolve schema
             with initialize(version_base=None, config_path="./"):
                 config = compose(config_name=args.config_name)
 
-            # Create MLflow client and get experiment
-            client = AnemoiMlflowClient(config.diagnostics.log.mlflow.tracking_uri, authentication=True)
-            experiment = client.get_experiment_by_name(config.diagnostics.log.mlflow.experiment_name)
-            experiment_id = (
-                experiment.experiment_id
-                if experiment is not None
-                else client.create_experiment(config.diagnostics.log.mlflow.experiment_name)
-            )
-
-            # Parse configuration
-            if config.training.run_id is not None:  # Existing run_id
-                LOGGER.info("Existing run_id: %s", config.training.run_id)
-                try:
-                    client.get_run(config.training.run_id)
-                except ValueError as e:
-                    msg = "Invalid run_id provided."
-                    raise ValueError(msg) from e
-                return
-
-            # Create a new run attached to the experiment
-            run_name = args.run_name if args.run_name is not None else config.diagnostics.log.mlflow.run_name
-            run = client.create_run(experiment_id, run_name=run_name)
-            run_id = run.info.run_id
-            LOGGER.info("Creating new run_id: %s", run_id)
-
-            # Log metadata to MLflow server
-            mlflow.set_tracking_uri(config.diagnostics.log.mlflow.tracking_uri)
-            client.set_tag(run_id, "mlflow.user", args.owner)
-            client.set_tag(run_id, "dry_run", True)
-            client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
-            AnemoiMLflowLogger.log_hyperparams_in_mlflow(
-                client,
-                run_id,
-                config,
-                expand_keys=config.diagnostics.log.mlflow.expand_hyperparams,
-                clean_params=False,
+            run_id, experiment_id = prepare_mlflow_run_id(
+                config=config,
+                owner=args.owner,
+                run_name=args.run_name,
             )
 
             # Dump run ID in output file
@@ -266,9 +294,9 @@ class MlFlow(Command):
                 "experiment_name": config.diagnostics.log.mlflow.experiment_name,
                 "tracking_uri": config.diagnostics.log.mlflow.tracking_uri,
             }
+
             with Path.open(args.output, "w") as fp:
                 json.dump(mlflow_metadata, fp)
-
             return
         return
 

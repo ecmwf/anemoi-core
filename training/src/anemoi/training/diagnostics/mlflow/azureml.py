@@ -303,7 +303,7 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             def default(self, o: Any) -> str:
                 return str(o)
 
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         now = str(now).replace(" ", "T")
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / f"config.{now}.json"

@@ -10,7 +10,7 @@
 
 import numpy as np
 
-from anemoi.training.utils.usable_indices import get_usable_indices
+from anemoi.training.data.usable_indices import get_usable_indices
 
 
 def test_get_usable_indices() -> None:

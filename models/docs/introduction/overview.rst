@@ -104,6 +104,20 @@ process the data on the hidden grid. The `Processors` use a series of
 checkpointed chunks via `num_chunks` to reduce memory usage during
 training.
 
+Graph Providers
+===============
+
+Graph providers encapsulate the logic for supplying edge indices and
+attributes to mapper and processor layers. This separation allows for
+different graph types:
+
+-  **StaticGraphProvider**: For fixed graph structures with optional
+   trainable edge parameters
+-  **NoOpGraphProvider**: For edge-less architectures (e.g., pure
+   Transformers)
+-  **DynamicGraphProvider**: For on-the-fly graph construction (future)
+-  **ProjectionGraphProvider**: For sparse projection matrices
+
 **************
  Data Indices
 **************
