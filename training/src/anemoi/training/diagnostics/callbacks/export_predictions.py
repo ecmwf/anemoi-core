@@ -165,22 +165,34 @@ class ExportPredictions(pl.Callback):
         data = self._ensure_3d(data, "data")
         preds = self._ensure_3d(preds, "preds")
 
-        time_coord = self._build_time_coord(rollout)
+        data_len = data.shape[0]
+        pred_len = preds.shape[0]
+        target_len = min(rollout, data_len - 1, pred_len)
+        if target_len <= 0:
+            LOGGER.warning(
+                "No target/prediction steps available to export (data_len=%s, pred_len=%s, rollout=%s).",
+                data_len,
+                pred_len,
+                rollout,
+            )
+            return
+
+        time_coord = self._build_time_coord(target_len)
         ds = xr.Dataset(
             data_vars={
                 "input": (("time", "node", "variable"), data[:1]),
-                "target": (("time", "node", "variable"), data[1 : rollout + 1]),
-                "prediction": (("time", "node", "variable"), preds[:rollout]),
+                "target": (("time", "node", "variable"), data[1 : 1 + target_len]),
+                "prediction": (("time", "node", "variable"), preds[:target_len]),
             },
             coords={
-                "time": time_coord[: rollout + 1],
+                "time": time_coord[: 1 + target_len],
                 "variable": var_names,
                 "node": np.arange(data.shape[1], dtype="int64"),
             },
             attrs={
                 "sample_idx": self.sample_idx,
                 "batch_idx": batch_idx,
-                "rollout": rollout,
+                "rollout": target_len,
             },
         )
 
