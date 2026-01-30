@@ -65,6 +65,16 @@ class ExportPredictions(pl.Callback):
             raise KeyError("Multiple datasets present but no 'data' dataset found in data_indices.")
         return data_indices
 
+    def _get_post_processor(self, pl_module: pl.LightningModule):
+        post_processors = pl_module.model.post_processors
+        if isinstance(post_processors, dict):
+            if "data" in post_processors:
+                return post_processors["data"]
+            if len(post_processors) == 1:
+                return next(iter(post_processors.values()))
+            raise KeyError("Multiple datasets present but no 'data' dataset found in post_processors.")
+        return post_processors
+
     def _select_variables(self, pl_module: pl.LightningModule) -> tuple[list[str], list[int]]:
         data_indices = self._get_dataset_indices(pl_module)
         name_to_index = data_indices.model.output.name_to_index
@@ -76,11 +86,12 @@ class ExportPredictions(pl.Callback):
         return names, indices
 
     def _post_process(self, pl_module: pl.LightningModule, tensor: torch.Tensor) -> torch.Tensor:
+        post_processor = self._get_post_processor(pl_module)
         # Use post-processors to denormalize. Avoid in-place if supported.
         try:
-            return pl_module.model.post_processors(tensor, in_place=False)
+            return post_processor(tensor, in_place=False)
         except TypeError:
-            return pl_module.model.post_processors(tensor)
+            return post_processor(tensor)
 
     def on_validation_batch_end(
         self,
