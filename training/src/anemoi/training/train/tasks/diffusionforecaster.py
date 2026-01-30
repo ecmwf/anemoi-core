@@ -179,8 +179,6 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict, torch.Tensor]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
@@ -323,8 +321,6 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict, torch.Tensor]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
