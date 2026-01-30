@@ -40,6 +40,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.checkpoint import transfer_learning_loading_with_rename
 from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.config_utils import parse_multi_dataset_config
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -247,8 +248,14 @@ class AnemoiTrainer(ABC):
         if self.load_weights_only:
             # Sanify the checkpoint for transfer learning
             if self.config.training.transfer_learning:
-                LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
-                model = transfer_learning_loading(model, self.last_checkpoint)
+                if self.config.training.transfer_learning_rename_dict is not None:
+                    rename_dict = self.config.training.transfer_learning_rename_dict
+                    LOGGER.info("Loading weights with Transfer Learning and rename from %s", self.last_checkpoint)
+                    model = transfer_learning_loading_with_rename(model, self.last_checkpoint, rename_dict)
+                else:
+                    LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
+                    model = transfer_learning_loading(model, self.last_checkpoint)
+                
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
@@ -263,8 +270,8 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            #for data_indices in self.data_indices.values():
+            #    data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights

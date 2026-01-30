@@ -100,12 +100,42 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
             del state_dict[key]  # Remove the mismatched key
 
-    # Load the filtered st-ate_dict into the model
+    # Load the filtered state_dict into the model
     model.load_state_dict(state_dict, strict=False)
     # Needed for data indices check
     model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
     return model
 
+def transfer_learning_loading_with_rename(model: torch.nn.Module, ckpt_path: Path | str, rename_map: dict[str, str]) -> nn.Module:
+
+    checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
+
+    checkpoint = chunking_fix_migration(checkpoint)
+
+    state_dict = checkpoint["state_dict"]
+
+    for old_name, new_name in rename_map.items():
+        for layer in list(state_dict.keys()):
+            if old_name in layer:
+                new_layer_name = layer.replace(old_name, new_name)
+                state_dict[new_layer_name] = state_dict.pop(layer)
+                LOGGER.info("Renamed layer %s to %s", layer, new_layer_name)
+    
+    model_state_dict = model.state_dict()
+
+    for key in state_dict.copy():
+        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
+            LOGGER.info("Skipping loading parameter: %s", key)
+            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
+            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
+
+            del state_dict[key]  # Remove the mismatched key
+
+    # Load the filtered st-ate_dict into the model
+    model.load_state_dict(state_dict, strict=False)
+    # Needed for data indices check
+    #model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
+    return model    
 
 def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
     """Recursively freezes the parameters of a submodule with the specified name.

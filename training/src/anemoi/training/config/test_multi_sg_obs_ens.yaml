@@ -26,8 +26,8 @@ system:
       mlflow: ${system.output.root}mlflow/
   
   hardware:
-    num_gpus_per_model: 2
-    num_gpus_per_ensemble: 4
+    num_gpus_per_model: 4
+    num_gpus_per_ensemble: 8
 
 dataloader:
   num_workers:
@@ -36,9 +36,9 @@ dataloader:
     test: ${dataloader.num_workers.training}
 
   limit_batches:
-    training: 50
-    validation: 50
-    test: 20
+    training: null
+    validation: null
+    test: null
     
   batch_size:
     training: 1
@@ -76,7 +76,10 @@ model:
     hidden2data: 0
     hidden2hidden: 0
 
-  num_channels: 512
+  num_channels: 1024
+
+  processor:
+    num_chunks: 4
 
 training:
   model_task: anemoi.training.train.tasks.GraphEnsForecaster
@@ -86,7 +89,26 @@ training:
     num_gpus_per_ensemble: ${system.hardware.num_gpus_per_ensemble}
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
-  
+
+  fork_run_id: 399f98e6955e4f8392ae2b1f5c1c6e1d
+  load_weights_only: True
+  transfer_learning: True
+  transfer_learning_rename_dict:
+    pre_processors.processors: pre_processors.era_meps_sg.processors
+    post_processors.processors: post_processors.era_meps_sg.processors
+    encoder.proc: encoder.era_meps_sg.proc
+    decoder.proc: decoder.era_meps_sg.proc
+
+  submodules_to_freeze: ["era_meps_sg"]
+
+  max_steps: 5000
+
+  lr:
+    warmup: 200
+    rate: 1.0e-5
+    iterations: ${training.max_steps}
+    min: 3e-7
+
   training_loss:
     _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
     scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
@@ -136,8 +158,8 @@ per_dataset_overrides:
   era_meps_sg: 
     data:
       dataset_specific:
-        forcing: ['cos_julian_day', 'cos_latitude', 'cos_local_time', 'cos_longitude', 'lsm', 'z', 'sin_julian_day', 'sin_latitude', 'sin_local_time', 'sin_longitude']
-        diagnostic: ['tp']
+        forcing: ['cos_julian_day', 'cos_latitude', 'cos_local_time', 'cos_longitude', 'lsm', 'z', 'sin_julian_day', 'sin_latitude', 'sin_local_time', 'sin_longitude', 'insolation']
+        diagnostic: ['tp', 'ssrd', 'strd']
         processors:
           normalizer: 
             _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
@@ -192,7 +214,7 @@ per_dataset_overrides:
     data:
       dataset_specific:
         forcing: ["lsm", "z"]
-        diagnostic: []
+        diagnostic: ["2t", "10u", "10v"]
         processors:
           normalizer: 
             _target_: anemoi.models.preprocessing.normalizer.InputNormalizer

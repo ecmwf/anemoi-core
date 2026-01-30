@@ -6,6 +6,7 @@ defaults:
 run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
+transfer_learning_rename_dict: null # dictionary for renaming submodules when doing transfer learning
 load_weights_only: False # only load model weights, do not restore optimiser states etc.
 
 # run in deterministic mode ; slows down
