@@ -230,7 +230,7 @@ class AnemoiTrainer(ABC):
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 try:
-                    raw_ckpt = torch.load(self.last_checkpoint, map_location="cpu")
+                    raw_ckpt = torch.load(self.last_checkpoint, map_location="cpu", weights_only=False)
                 except Exception:
                     raw_ckpt = None
                 if raw_ckpt is not None:
