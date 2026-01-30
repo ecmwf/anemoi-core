@@ -37,6 +37,7 @@ log:
     # logger options (these probably come with some overhead)
     gradients: False
     parameters: False
+    interval: ${log.interval} # passed to trainer.log_every_n_steps
   mlflow:
     enabled: False
     _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger

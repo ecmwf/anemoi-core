@@ -56,10 +56,21 @@ def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, 
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
 
-    logger = get_mlflow_logger(config)
+    # Minimal inputs required by get_mlflow_logger
+    run_id = "test-run-id"
+    fork_run_id = "test-fork-run-id"
+    paths = config.paths
+    logger_config = config.diagnostics.log
 
-    if config.diagnostics.log.mlflow.enabled:
-        assert Path(config.diagnostics.log.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
+    logger = get_mlflow_logger(
+        run_id=run_id,
+        fork_run_id=fork_run_id,
+        paths=paths,
+        logger_config=logger_config,
+    )
+
+    if logger_config.mlflow.enabled:
+        assert Path(logger_config.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
         assert isinstance(logger, AnemoiMLflowLogger)
 
 

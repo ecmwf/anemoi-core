@@ -344,12 +344,29 @@ class WandbSchema(BaseModel):
     "Whether to log the hyper parameters."
     entity: str | None = None
     "Username or team name where to send runs. This entity must exist before you can send runs there."
+    interval: PositiveInt
+    "Logging frequency in batches."
 
     @root_validator(pre=True)
     def clean_entity(cls: type["WandbSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["entity"] = None
         return values
+
+    @model_validator(mode="after")
+    def check_valid_extras(self) -> Any:
+        # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
+        allowed_extras = {"interval": int}
+        extras = getattr(self, "__pydantic_extra__", {}) or {}
+        for extra_field, value in extras.items():
+            if extra_field not in allowed_extras:
+                msg = f"Extra field '{extra_field}' is not allowed. Allowed fields are: {list(allowed_extras.keys())}."
+                raise ValueError(msg)
+            if not isinstance(value, allowed_extras[extra_field]):
+                msg = f"Extra field '{extra_field}' must be of type {allowed_extras[extra_field].__name__}."
+                raise TypeError(msg)
+
+        return self
 
 
 class MlflowSchema(BaseModel):

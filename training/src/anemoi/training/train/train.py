@@ -371,7 +371,6 @@ class AnemoiTrainer(ABC):
     def _logger_kwargs(self) -> dict:
         """Shared keyword arguments for all loggers."""
         return {
-            "diagnostics_config": self.config.diagnostics,
             "run_id": self.run_id,
             "fork_run_id": self.config.training.fork_run_id,
             "paths": self.config.system.output,

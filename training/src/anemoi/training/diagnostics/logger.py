@@ -21,7 +21,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 def get_mlflow_logger(
-    diagnostics_config: DictConfig,
     run_id: str,
     fork_run_id: str,
     paths: DictConfig,
@@ -29,11 +28,12 @@ def get_mlflow_logger(
     **kwargs,
 ) -> None:
     del kwargs
-    if not diagnostics_config.log.mlflow.enabled:
+    mlflow_config = logger_config.mlflow
+    if not mlflow_config.enabled:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
-    logger_config = OmegaConf.to_container(convert_to_omegaconf(logger_config.mlflow))
+    logger_config = OmegaConf.to_container(convert_to_omegaconf(mlflow_config))
     del logger_config["enabled"]
 
     # backward compatibility to not break configs
@@ -46,7 +46,7 @@ def get_mlflow_logger(
     logger = instantiate(
         logger_config,
         run_id=run_id,
-        ork_run_id=fork_run_id,
+        fork_run_id=fork_run_id,
     )
     if logger.log_terminal:
         logger.log_terminal_output(artifact_save_dir=paths.plots)
@@ -57,7 +57,6 @@ def get_mlflow_logger(
 
 
 def get_wandb_logger(
-    diagnostics_config: DictConfig,
     run_id: str,
     paths: DictConfig,
     model: pl.LightningModule,
@@ -86,12 +85,14 @@ def get_wandb_logger(
     """
     del kwargs
 
-    if not diagnostics_config.log.wandb.enabled:
+    save_dir = paths.logs.wandb
+    wandb_config = logger_config.wandb
+
+    if not wandb_config.enabled:
         LOGGER.debug("Weights & Biases logging is disabled.")
         return None
 
-    save_dir = paths.logs.wandb
-    logger_config = OmegaConf.to_container(convert_to_omegaconf(logger_config.wandb))
+    logger_config = OmegaConf.to_container(convert_to_omegaconf(wandb_config))
 
     try:
         logger = instantiate(
@@ -104,13 +105,13 @@ def get_wandb_logger(
         msg = "To activate W&B logging, please install `wandb` as an optional dependency."
         raise ImportError(msg) from err
 
-    if diagnostics_config.log.wandb.gradients or diagnostics_config.log.wandb.parameters:
-        if diagnostics_config.log.wandb.gradients and diagnostics_config.log.wandb.parameters:
+    if wandb_config.gradients or wandb_config.parameters:
+        if wandb_config.gradients and wandb_config.parameters:
             log_ = "all"
-        elif diagnostics_config.log.wandb.gradients:
+        elif wandb_config.gradients:
             log_ = "gradients"
         else:
             log_ = "parameters"
-        logger.watch(model, log=log_, log_freq=diagnostics_config.log.interval, log_graph=False)
+        logger.watch(model, log=log_, log_freq=wandb_config.interval, log_graph=False)
 
     return logger
