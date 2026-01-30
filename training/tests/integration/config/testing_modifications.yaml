@@ -16,7 +16,7 @@ diagnostics:
       enabled: False
       entity: null # override '???'
     mlflow:
-      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
       enabled: False
       tracking_uri: null # override '???'
   #! adding section here to overwrite plotting settings - deactivate PlotSpectrum callback until fix for
