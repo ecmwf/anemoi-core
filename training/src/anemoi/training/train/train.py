@@ -76,6 +76,8 @@ class AnemoiTrainer(ABC):
 
             LOGGER.info("Skipping config validation.")
 
+        self.config = convert_to_omegaconf(self.config)
+
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
@@ -104,7 +106,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
+        datamodule = AnemoiDatasetsDataModule(self.config, self.graph_data)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -161,7 +163,7 @@ class AnemoiTrainer(ABC):
         # Create new graph
         from anemoi.graphs.create import GraphCreator
 
-        graph_config = convert_to_omegaconf(self.config).graph
+        graph_config = self.config.graph
 
         # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
         if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
@@ -182,7 +184,7 @@ class AnemoiTrainer(ABC):
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
         graphs = {}
-        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
+        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
         for dataset_name, dataset_config in dataset_configs.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
             graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
@@ -208,7 +210,7 @@ class AnemoiTrainer(ABC):
         "Please use a different activation function."
 
         kwargs = {
-            "config": convert_to_omegaconf(self.config),
+            "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
@@ -350,7 +352,7 @@ class AnemoiTrainer(ABC):
 
         md_dict = {
             "version": "2.0",
-            "config": convert_to_omegaconf(self.config),
+            "config": self.config,
             "seed": self.initial_seed,
             "run_id": self.run_id,
             "dataset": None,  # will be populated in DataModule
@@ -522,7 +524,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def strategy(self) -> Any:
         return instantiate(
-            convert_to_omegaconf(self.config).training.strategy,
+            self.config.training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
