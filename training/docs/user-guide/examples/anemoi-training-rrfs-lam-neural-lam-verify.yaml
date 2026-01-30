@@ -3,7 +3,7 @@ defaults:
   - dataloader: rrfs_native_no_frequency
   - diagnostics: evaluation
   - system: example
-  - graph: existing_graph
+  - graph: existing
   - model: graphtransformer
   - training: lam
   - override /diagnostics/plot: rollout_eval
