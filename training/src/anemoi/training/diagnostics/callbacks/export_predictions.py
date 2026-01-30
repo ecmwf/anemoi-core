@@ -67,7 +67,7 @@ class ExportPredictions(pl.Callback):
 
     def _get_post_processor(self, pl_module: pl.LightningModule):
         post_processors = pl_module.model.post_processors
-        if isinstance(post_processors, dict):
+        if isinstance(post_processors, dict) or isinstance(post_processors, torch.nn.ModuleDict):
             if "data" in post_processors:
                 return post_processors["data"]
             if len(post_processors) == 1:
