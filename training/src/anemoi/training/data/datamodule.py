@@ -22,6 +22,7 @@ from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -117,8 +118,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout = max(rollout_value, val_rollout)
         multi_step = self.config.training.multistep_input
         return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
-
-
     @cached_property
     def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
         """Initialize grid indices for spatial sharding for each dataset."""
@@ -161,6 +160,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
         return timestep // frequency
 
+    @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
         return self._get_dataset(
