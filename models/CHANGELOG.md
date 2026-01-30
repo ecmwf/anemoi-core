@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.12.1](https://github.com/ecmwf/anemoi-core/compare/models-0.12.0...models-0.12.1) (2026-01-30)
+
+
+### Features
+
+* **training:** Make activation checkpoints configurable ([#797](https://github.com/ecmwf/anemoi-core/issues/797)) ([b06b450](https://github.com/ecmwf/anemoi-core/commit/b06b450509dfc2ff36a4a20f161676917ed976ae))
+
 ## [0.12.0](https://github.com/ecmwf/anemoi-core/compare/models-0.11.3...models-0.12.0) (2026-01-28)
 
 
