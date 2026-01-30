@@ -73,6 +73,12 @@ diagnostics:
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
         precip_and_related_fields: []
         colormaps: ${diagnostics.plot.colormaps}
+      #! DEACTIVATING UNTIL PYSHTOOLS FIX FOR 3.13
+      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+      #   dataset_names: ${diagnostics.plot.datasets_to_plot}
+      #   sample_idx: ${diagnostics.plot.sample_idx}
+      #   every_n_batches: ${diagnostics.plot.frequency.batch}
+      #   parameters: ${diagnostics.plot.parameters}
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         sample_idx: ${diagnostics.plot.sample_idx}
