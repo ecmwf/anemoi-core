@@ -22,28 +22,28 @@ class TestFullGrid:
         """Create a FullGrid instance."""
         return FullGrid()
 
-    def test_full_grid_get_shard_indices_with_none(self, grid: FullGrid) -> None:
+    def test_full_grid_get_shard_indices_with_none(self, full_grid: FullGrid) -> None:
         """Test get_shard_indices with None returns None."""
-        assert grid.supporting_arrays == {}
-        assert grid.get_shard_indices(None) is None
+        assert full_grid.supporting_arrays == {}
+        assert full_grid.get_shard_indices(None) is None
 
-    def test_full_grid_get_shard_indices_with_array(self, grid: FullGrid) -> None:
+    def test_full_grid_get_shard_indices_with_array(self, full_grid: FullGrid) -> None:
         """Test get_shard_indices with array returns the same array."""
         indices_array = np.array([0, 1, 2, 3, 4])
-        result_array = grid.get_shard_indices(indices_array)
+        result_array = full_grid.get_shard_indices(indices_array)
         np.testing.assert_array_equal(result_array, indices_array)
 
-    def test_full_grid_get_shard_indices_with_slice(self, grid: FullGrid) -> None:
+    def test_full_grid_get_shard_indices_with_slice(self, full_grid: FullGrid) -> None:
         """Test get_shard_indices with slice returns the same slice."""
         indices_slice = slice(0, 10, 2)
-        result_slice = grid.get_shard_indices(indices_slice)
+        result_slice = full_grid.get_shard_indices(indices_slice)
         assert result_slice == indices_slice
 
-    def test_full_grid_preserves_dtype(self, grid: FullGrid) -> None:
+    def test_full_grid_preserves_dtype(self, full_grid: FullGrid) -> None:
         """Test that get_shard_indices preserves the dtype of the input array."""
         # Preservers dtype
         indices_int32 = np.array([0, 1, 2], dtype=np.int32)
-        result_int32 = grid.get_shard_indices(indices_int32)
+        result_int32 = full_grid.get_shard_indices(indices_int32)
         assert result_int32.dtype == np.int32
 
 
