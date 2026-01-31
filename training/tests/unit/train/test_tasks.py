@@ -150,6 +150,7 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         self.updating_scalars = {}
         self.data_indices = data_indices
         self.dataset_names = list(data_indices.keys())
+        self.target_dataset_names = self.dataset_names
         self.grid_dim = -2
         self.config = config
         self.loss = {"data": DummyLoss()}
