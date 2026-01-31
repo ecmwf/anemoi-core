@@ -365,7 +365,7 @@ training:
   precision: 16-mixed
   multistep_input: 2
   accum_grad_batches: 1
-  num_sanity_val_steps: 6
+  num_sanity_val_steps: 0
   gradient_clip:
     val: 32.0
     algorithm: value
@@ -420,7 +420,7 @@ training:
       - u_850
       - v_850
   rollout:
-    start: 1
+    start: 2
     epoch_increment: 0
     max: 2
   max_epochs: 1
