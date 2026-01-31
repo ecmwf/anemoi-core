@@ -1019,7 +1019,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             if output_times[1] != "forecast":
                 output_times = [1]
-            
+
             for rollout_step in range(output_times[0]):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 start = pl_module.multi_step + rollout_step * pl_module.multi_out
@@ -1040,7 +1040,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                     epoch=epoch,
                     tag=f"loss_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
                     exp_log_tag=f"loss_sample_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
-                )                    
+                )
 
     def on_validation_batch_end(
         self,
