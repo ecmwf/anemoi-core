@@ -31,12 +31,24 @@ class BaseResidualConnection(nn.Module, ABC):
         super().__init__()
 
     @abstractmethod
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_shapes=None,
+        model_comm_group=None,
+        multi_out: int | None = None,
+    ) -> torch.Tensor:
         """Define the residual connection operation.
 
         Should be overridden by subclasses.
         """
         pass
+
+    @staticmethod
+    def _expand_time(x: torch.Tensor, multi_out: int | None) -> torch.Tensor:
+        if multi_out is None:
+            return x
+        return x.unsqueeze(1).expand(-1, multi_out, -1, -1, -1).contiguous()
 
 
 class SkipConnection(BaseResidualConnection):
@@ -51,9 +63,16 @@ class SkipConnection(BaseResidualConnection):
         super().__init__()
         self.step = step
 
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_shapes=None,
+        model_comm_group=None,
+        multi_out: int | None = None,
+    ) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
-        return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
+        x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
+        return self._expand_time(x_skip, multi_out)
 
 
 class TruncatedConnection(BaseResidualConnection):
@@ -185,7 +204,13 @@ class TruncatedConnection(BaseResidualConnection):
             up_edges = down_edges = None  # Not used when loading from files
         return up_edges, down_edges
 
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_shapes=None,
+        model_comm_group=None,
+        multi_out: int | None = None,
+    ) -> torch.Tensor:
         """Apply truncated skip connection."""
         batch_size = x.shape[0]
         x = x[:, -1, ...]  # pick latest step
@@ -198,7 +223,7 @@ class TruncatedConnection(BaseResidualConnection):
         x = self._to_grid_shards(x, shard_shapes, model_comm_group)
         x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
 
-        return x
+        return self._expand_time(x, multi_out)
 
     def _to_channel_shards(self, x, shard_shapes=None, model_comm_group=None):
         return self._reshard(x, shard_channels, shard_shapes, model_comm_group)

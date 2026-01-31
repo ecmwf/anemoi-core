@@ -73,7 +73,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_ens_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name]
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+            multi_out=self.multi_out,
+        )
 
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -92,10 +97,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         if self.condition_on_residual:
+            x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
             x_data_latent = torch.cat(
                 (
                     x_data_latent,
-                    einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars"),
+                    einops.rearrange(x_skip_cond, "bse grid vars -> (bse grid) vars"),
                 ),
                 dim=-1,
             )
@@ -117,16 +123,30 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     ):
         ensemble_size = batch_ens_size // batch_size
         x_out = (
-            einops.rearrange(x_out, "(bs e n) f -> bs e n f", bs=batch_size, e=ensemble_size).to(dtype=dtype).clone()
+            einops.rearrange(
+                x_out,
+                "(bs e n) (time vars) -> bs time e n vars",
+                bs=batch_size,
+                e=ensemble_size,
+                time=self.multi_out,
+            )
+            .to(dtype=dtype)
+            .clone()
         )
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+        assert (
+            x_skip.shape[1] == x_out.shape[1]
+        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
         x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
+        # TODO(dieter): verify if this is needed or can be solved alternatively
+        x_out = x_out.contiguous()  # necessary after expand()
         return x_out
 
     def forward(

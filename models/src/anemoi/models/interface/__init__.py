@@ -16,6 +16,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
@@ -116,12 +117,27 @@ class AnemoiModelInterface(torch.nn.Module):
         pre_processors_tendencies = None
         post_processors_tendencies = None
         if statistics_tendencies is not None:
-            processors_tendencies = [
-                [name, instantiate(processor, data_indices=data_indices, statistics=statistics_tendencies)]
-                for name, processor in processors_configs.items()
-            ]
-            pre_processors_tendencies = Processors(processors_tendencies)
-            post_processors_tendencies = Processors(processors_tendencies, inverse=True)
+            if "lead_times" in statistics_tendencies:
+                lead_times = statistics_tendencies.get("lead_times")
+                pre_processors_tendencies = StepwiseProcessors(lead_times)
+                post_processors_tendencies = StepwiseProcessors(lead_times)
+                for lead_time in lead_times:
+                    step_stats = statistics_tendencies.get(lead_time)
+                    if step_stats is None:
+                        continue
+                    processors_tendencies = [
+                        [name, instantiate(processor, data_indices=data_indices, statistics=step_stats)]
+                        for name, processor in processors_configs.items()
+                    ]
+                    pre_processors_tendencies.set(lead_time, Processors(processors_tendencies))
+                    post_processors_tendencies.set(lead_time, Processors(processors_tendencies, inverse=True))
+            else:
+                processors_tendencies = [
+                    [name, instantiate(processor, data_indices=data_indices, statistics=statistics_tendencies)]
+                    for name, processor in processors_configs.items()
+                ]
+                pre_processors_tendencies = Processors(processors_tendencies)
+                post_processors_tendencies = Processors(processors_tendencies, inverse=True)
 
         return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
 
