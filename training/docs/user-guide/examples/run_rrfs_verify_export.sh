@@ -22,7 +22,7 @@ export HYDRA_FULL_ERROR="${HYDRA_FULL_ERROR:-1}"
 export ANEMOI_LOG_LEVEL="${ANEMOI_LOG_LEVEL:-DEBUG}"
 
 # Debug: show the dataset dates as seen by anemoi.datasets (outside the training loader)
-python - <<'PY'
+python - <<PY
 from anemoi.datasets import open_dataset
 path = "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/test-20km-bcmask-time-s.zarr"
 ds = open_dataset(path, start="${START}", end="${END}", frequency="${FREQ}")
