@@ -18,7 +18,45 @@ END="$3"
 FREQ="$4"
 
 export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-12345}"
+export HYDRA_FULL_ERROR="${HYDRA_FULL_ERROR:-1}"
+export ANEMOI_LOG_LEVEL="${ANEMOI_LOG_LEVEL:-DEBUG}"
 
+# Debug: show the dataset dates as seen by anemoi.datasets (outside the training loader)
+python - <<'PY'
+from anemoi.datasets import open_dataset
+path = "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/test-20km-bcmask-time-s.zarr"
+ds = open_dataset(path, start="${START}", end="${END}", frequency="${FREQ}")
+print("DEBUG_DATASET_PATH:", path)
+print("DEBUG_DATASET_LEN:", len(ds.dates))
+print("DEBUG_DATASET_START:", ds.dates[0])
+print("DEBUG_DATASET_END:", ds.dates[-1])
+PY
+
+# Debug: dump the resolved config with overrides for inspection (no training run)
+anemoi-training train \
+  --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
+  --config-name anemoi-training-rrfs-lam-neural-lam-verify \
+  system.input.warm_start="$CHECKPOINT_PATH" \
+  dataloader.training.datasets.data.start="$START" \
+  dataloader.training.datasets.data.end="$END" \
+  dataloader.validation.datasets.data.start="$START" \
+  dataloader.validation.datasets.data.end="$END" \
+  dataloader.test.datasets.data.start="$START" \
+  dataloader.test.datasets.data.end="$END" \
+  data.frequency="$FREQ" \
+  dataloader.training.datasets.data.frequency="$FREQ" \
+  dataloader.validation.datasets.data.frequency="$FREQ" \
+  dataloader.test.datasets.data.frequency="$FREQ" \
+  training.multistep_input=2 \
+  training.rollout.start=2 \
+  training.rollout.max=2 \
+  dataloader.validation_rollout=2 \
+  training.num_sanity_val_steps=0 \
+  --cfg job > /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tmp-verify-resolved.yaml
+
+echo "DEBUG_CONFIG_SAVED: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tmp-verify-resolved.yaml"
+
+# Actual verify run
 anemoi-training train \
   --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
   --config-name anemoi-training-rrfs-lam-neural-lam-verify \
