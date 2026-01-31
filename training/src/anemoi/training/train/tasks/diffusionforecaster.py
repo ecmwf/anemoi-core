@@ -188,14 +188,14 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         """Step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
@@ -203,16 +203,9 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
         Returns
         -------
-        tuple[torch.Tensor, dict, torch.Tensor]
+        tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(
-            1,
-            dtype=next(iter(batch.values())).dtype,
-            device=self.device,
-            requires_grad=False,
-        )
-
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
 
@@ -431,15 +424,24 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list]:
-        """Step for the tendency-based diffusion forecaster."""
-        loss = torch.zeros(
-            1,
-            dtype=next(iter(batch.values())).dtype,
-            device=self.device,
-            requires_grad=False,
-        )
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+        """Step for the tendency-based diffusion forecaster.
 
+        Will run pre_processors on batch, but not post_processors on predictions.
+
+        Parameters
+        ----------
+        batch : dict[str, torch.Tensor]
+            Normalized batch to use for rollout (assumed to be already preprocessed).
+        validation_mode : bool, optional
+            Whether in validation mode, and to calculate validation metrics, by default False
+            If False, metrics will be empty
+
+        Returns
+        -------
+        tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
+            Loss value, metrics, and predictions (per step)
+        """
         # batch is already normalized in BaseGraphModule._normalize_batch
         # x: data.input.full (normalized), y: data.output.full (normalized)
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
