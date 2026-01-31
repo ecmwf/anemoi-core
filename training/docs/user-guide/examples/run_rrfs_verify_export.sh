@@ -30,6 +30,9 @@ anemoi-training train \
   dataloader.test.datasets.data.start="$START" \
   dataloader.test.datasets.data.end="$END" \
   data.frequency="$FREQ" \
+  dataloader.training.datasets.data.frequency="$FREQ" \
+  dataloader.validation.datasets.data.frequency="$FREQ" \
+  dataloader.test.datasets.data.frequency="$FREQ" \
   training.multistep_input=2 \
   training.rollout.start=2 \
   training.rollout.max=2 \
