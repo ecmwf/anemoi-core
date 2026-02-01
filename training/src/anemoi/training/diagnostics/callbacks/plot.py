@@ -406,6 +406,7 @@ class LongRolloutPlots(BasePlotCallback):
         per_sample: int = 6,
         every_n_epochs: int = 1,
         animation_interval: int = 400,
+        dataset_names: list[str] | None = None,
     ) -> None:
         """Initialise LongRolloutPlots callback.
 
@@ -432,7 +433,7 @@ class LongRolloutPlots(BasePlotCallback):
         animation_interval : int, optional
             Delay between frames in the animation in milliseconds, by default 400
         """
-        super().__init__(config)
+        super().__init__(config, dataset_names=dataset_names)
 
         self.every_n_epochs = every_n_epochs
 
@@ -479,14 +480,6 @@ class LongRolloutPlots(BasePlotCallback):
         start_time = time.time()
         logger = trainer.logger
 
-        # Initialize required variables for plotting
-        plot_parameters_dict = {
-            pl_module.data_indices.model.output.name_to_index[name]: (
-                name,
-                name not in self.config.data.get("diagnostic", []),
-            )
-            for name in self.parameters
-        }
         if self.latlons is None:
             self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
             self.latlons = np.rad2deg(self.latlons.cpu().numpy())
@@ -510,57 +503,71 @@ class LongRolloutPlots(BasePlotCallback):
         )
         data_0 = self.post_processors(input_tensor_0)[self.sample_idx]
 
-        if self.video_rollout:
-            data_over_time = []
-            # collect min and max values for each variable for the colorbar
-            vmin, vmax = (np.inf * np.ones(len(plot_parameters_dict)), -np.inf * np.ones(len(plot_parameters_dict)))
-
         # Plot for each rollout step
         with torch.no_grad():
-            for rollout_step, (_, _, y_pred) in enumerate(
-                pl_module.rollout_step(
-                    batch,
-                    rollout=self.max_rollout,
-                    validation_mode=True,
-                ),
-            ):
-                # plot only if the current rollout step is in the list of rollout steps
-                if (rollout_step + 1) in self.rollout:
-                    self._plot_rollout_step(
-                        pl_module,
-                        plot_parameters_dict,
-                        batch,
-                        data_0,
-                        rollout_step,
-                        y_pred,
-                        batch_idx,
-                        epoch,
-                        logger,
+            for chunk_idx, param_chunk in enumerate(self._chunk_parameters(self.parameters)):
+                plot_parameters_dict = {
+                    pl_module.data_indices.model.output.name_to_index[name]: (
+                        name,
+                        name not in self.config.data.get("diagnostic", []),
+                    )
+                    for name in param_chunk
+                }
+
+                if self.video_rollout:
+                    data_over_time = []
+                    # collect min and max values for each variable for the colorbar
+                    vmin, vmax = (
+                        np.inf * np.ones(len(plot_parameters_dict)),
+                        -np.inf * np.ones(len(plot_parameters_dict)),
                     )
 
-                if self.video_rollout and rollout_step < self.video_rollout:
-                    data_over_time, vmin, vmax = self._store_video_frame_data(
+                for rollout_step, (_, _, y_pred) in enumerate(
+                    pl_module.rollout_step(
+                        batch,
+                        rollout=self.max_rollout,
+                        validation_mode=True,
+                    ),
+                ):
+                    # plot only if the current rollout step is in the list of rollout steps
+                    if (rollout_step + 1) in self.rollout:
+                        self._plot_rollout_step(
+                            pl_module,
+                            plot_parameters_dict,
+                            batch,
+                            data_0,
+                            rollout_step,
+                            y_pred,
+                            batch_idx,
+                            epoch,
+                            logger,
+                            chunk_idx=chunk_idx,
+                        )
+
+                    if self.video_rollout and rollout_step < self.video_rollout:
+                        data_over_time, vmin, vmax = self._store_video_frame_data(
+                            data_over_time,
+                            y_pred,
+                            plot_parameters_dict,
+                            vmin,
+                            vmax,
+                        )
+
+                # Generate and save video rollout animation if enabled
+                if self.video_rollout:
+                    self._generate_video_rollout(
+                        data_0,
                         data_over_time,
-                        y_pred,
                         plot_parameters_dict,
                         vmin,
                         vmax,
+                        self.video_rollout,
+                        batch_idx,
+                        epoch,
+                        logger,
+                        animation_interval=self.animation_interval,
+                        chunk_idx=chunk_idx,
                     )
-
-            # Generate and save video rollout animation if enabled
-            if self.video_rollout:
-                self._generate_video_rollout(
-                    data_0,
-                    data_over_time,
-                    plot_parameters_dict,
-                    vmin,
-                    vmax,
-                    self.video_rollout,
-                    batch_idx,
-                    epoch,
-                    logger,
-                    animation_interval=self.animation_interval,
-                )
 
         LOGGER.info("Time taken to plot/animate samples for longer rollout: %d seconds", int(time.time() - start_time))
 
@@ -576,6 +583,7 @@ class LongRolloutPlots(BasePlotCallback):
         batch_idx: int,
         epoch: int,
         logger: pl.loggers.logger.Logger,
+        chunk_idx: int = 0,
     ) -> None:
         """Plot the predicted output, input, true target and error plots for a given rollout step."""
         # prepare true output tensor for plotting
@@ -614,7 +622,7 @@ class LongRolloutPlots(BasePlotCallback):
             epoch=epoch,
             tag=(
                 f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_"
-                f"rank{pl_module.local_rank:01d}_{var_label}"
+                f"rank{pl_module.local_rank:01d}_{var_label}_chunk{chunk_idx:02d}"
             ),
             exp_log_tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
         )
@@ -649,6 +657,7 @@ class LongRolloutPlots(BasePlotCallback):
         epoch: int,
         logger: pl.loggers.logger.Logger,
         animation_interval: int = 400,
+        chunk_idx: int = 0,
     ) -> None:
         """Generate the video animation for the rollout."""
         for idx, (variable_idx, (variable_name, _)) in enumerate(plot_parameters_dict.items()):
@@ -690,7 +699,10 @@ class LongRolloutPlots(BasePlotCallback):
                 fig,
                 anim,
                 epoch=epoch,
-                tag=f"pred_val_animation_{variable_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0",
+                tag=(
+                    f"pred_val_animation_{variable_name}_rstep{rollout_step:02d}_"
+                    f"batch{batch_idx:04d}_rank0_chunk{chunk_idx:02d}"
+                ),
             )
 
     def on_validation_batch_end(

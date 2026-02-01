@@ -96,7 +96,6 @@ diagnostics:
   plot:
     asynchronous: false
     datashader: false
-    max_vars_per_figure: 8
     datasets_to_plot: [data]
     frequency:
       batch: 100000
@@ -182,6 +181,7 @@ diagnostics:
         sample_idx: ${diagnostics.plot.sample_idx}
         parameters: ${diagnostics.plot.parameters}
         colormaps: ${diagnostics.plot.colormaps}
+        dataset_names: [data]
   export_predictions:
     enabled: true
     format: netcdf
