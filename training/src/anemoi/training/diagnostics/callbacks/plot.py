@@ -593,11 +593,19 @@ class LongRolloutPlots(BasePlotCallback):
             output_tensor[0, 0, :, :],  # rolloutstep, first member
             colormaps=self.colormaps,
         )
+        var_names = [name for _, (name, _) in plot_parameters_dict.items()]
+        if len(var_names) <= 6:
+            var_label = "vars_" + "-".join(var_names)
+        else:
+            var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
         self._output_figure(
             logger,
             fig,
             epoch=epoch,
-            tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_rank{pl_module.local_rank:01d}",
+            tag=(
+                f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_"
+                f"rank{pl_module.local_rank:01d}_{var_label}"
+            ),
             exp_log_tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
         )
 
@@ -1220,11 +1228,19 @@ class PlotSample(BasePlotAdditionalMetrics):
                     colormaps=self.colormaps,
                 )
 
+                var_names = [name for _, (name, _) in plot_parameters_dict.items()]
+                if len(var_names) <= 6:
+                    var_label = "vars_" + "-".join(var_names)
+                else:
+                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
                 self._output_figure(
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                    tag=(
+                        f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}"
+                    ),
                     exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}",
                 )
 
@@ -1308,11 +1324,19 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     min_delta=self.min_delta,
                 )
 
+                var_names = [name for _, (name, _) in plot_parameters_dict_spectrum.items()]
+                if len(var_names) <= 6:
+                    var_label = "vars_" + "-".join(var_names)
+                else:
+                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
                 self._output_figure(
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                    tag=(
+                        f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}"
+                    ),
                     exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
                 )
 
@@ -1406,10 +1430,18 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     self.log_scale,
                 )
 
+                var_names = [name for _, (name, _) in plot_parameters_dict_histogram.items()]
+                if len(var_names) <= 6:
+                    var_label = "vars_" + "-".join(var_names)
+                else:
+                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
                 self._output_figure(
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                    tag=(
+                        f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}"
+                    ),
                     exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
                 )
