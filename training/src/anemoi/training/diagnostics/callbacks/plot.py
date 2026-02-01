@@ -735,13 +735,24 @@ class LongRolloutPlots(BasePlotCallback):
         batch_idx: int,
     ) -> None:
         if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
-            batch = pl_module.allgather_batch(batch)
-            output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
+            grid_indices = pl_module.grid_indices
+            if isinstance(grid_indices, dict):
+                dataset_name = next(iter(grid_indices.keys()))
+                grid_indices = grid_indices[dataset_name]
+            batch = pl_module.allgather_batch(batch, grid_indices, pl_module.grid_dim)
+            output = [
+                output[0],
+                [pl_module.allgather_batch(pred, grid_indices, pl_module.grid_dim) for pred in output[1]],
+            ]
 
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
             for post_processor in self.post_processors.processors.values():
                 if hasattr(post_processor, "nan_locations"):
-                    post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
+                    post_processor.nan_locations = pl_module.allgather_batch(
+                        post_processor.nan_locations,
+                        grid_indices,
+                        pl_module.grid_dim,
+                    )
             self.post_processors = self.post_processors.cpu()
 
             precision_mapping = {
