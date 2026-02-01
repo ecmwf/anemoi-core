@@ -11,13 +11,19 @@
 import logging
 from dataclasses import dataclass
 
-import datashader as dsh
+try:
+    import datashader as dsh
+    from datashader.mpl_ext import dsshow
+except Exception as exc:  # pragma: no cover - optional dependency
+    dsh = None
+    dsshow = None
+    LOGGER = logging.getLogger(__name__)
+    LOGGER.warning("Datashader unavailable (%s). Falling back to matplotlib plots.", exc)
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
 import pandas as pd
-from datashader.mpl_ext import dsshow
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
@@ -102,6 +108,14 @@ def init_plot_settings() -> None:
     plt.rc("ytick", labelsize=small_font_size)  # fontsize of the tick labels
     plt.rc("legend", fontsize=small_font_size)  # legend fontsize
     plt.rc("figure", titlesize=small_font_size)  # fontsize of the figure title
+
+
+def _require_datashader(datashader: bool) -> bool:
+    """Return False if datashader requested but unavailable."""
+    if datashader and dsh is None:
+        LOGGER.warning("Datashader requested but not available; using matplotlib fallback.")
+        return False
+    return datashader
 
 
 def _hide_axes_ticks(ax: plt.Axes) -> None:
@@ -442,6 +456,7 @@ def plot_predicted_multilevel_flat_sample(
         The figure object handle.
 
     """
+    datashader = _require_datashader(datashader)
     n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
@@ -654,6 +669,8 @@ def single_plot(
     -------
     None
     """
+    datashader = _require_datashader(datashader)
+    datashader = _require_datashader(datashader)
     if cmap is None:
         cmap = "viridis"
     if not datashader:
