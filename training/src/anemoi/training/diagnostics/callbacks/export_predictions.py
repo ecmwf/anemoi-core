@@ -189,10 +189,11 @@ class ExportPredictions(pl.Callback):
                 )
 
         var_names, var_idx = self._select_variables(pl_module)
-        data = data[:, :, var_idx].numpy()
-        preds = preds[:, :, var_idx].numpy()
-        data = self._ensure_3d(data, "data")
-        preds = self._ensure_3d(preds, "preds")
+        data = self._ensure_3d(data.numpy(), "data")
+        preds = self._ensure_3d(preds.numpy(), "preds")
+        # Select variables after enforcing (time,node,variable) to avoid slicing the wrong axis.
+        data = data[:, :, var_idx]
+        preds = preds[:, :, var_idx]
 
         data_len = data.shape[0]
         pred_len = preds.shape[0]
