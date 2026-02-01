@@ -402,6 +402,7 @@ class LongRolloutPlots(BasePlotCallback):
         parameters: list[str],
         video_rollout: int = 0,
         accumulation_levels_plot: list[float] | None = None,
+        cmap_accumulation: dict[str, Colormap] | None = None,
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_epochs: int = 1,
@@ -449,6 +450,8 @@ class LongRolloutPlots(BasePlotCallback):
 
         self.sample_idx = sample_idx
         self.accumulation_levels_plot = accumulation_levels_plot
+        # Accept legacy config key; long rollout plots use colormaps directly.
+        self.cmap_accumulation = cmap_accumulation
         self.colormaps = colormaps
         self.per_sample = per_sample
         self.parameters = parameters
