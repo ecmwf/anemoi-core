@@ -68,6 +68,8 @@ class AnemoiModelEncProcDec(nn.Module):
         self._graph_name_hidden = model_config.graph.hidden
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
+        self.skip_skip_connection = model_config.model.get("skip_skip_connection", False)
+        print(f"Skip skip connection: {self.skip_skip_connection}")
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
@@ -217,8 +219,9 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # residual connection (just for the prognostic variables)
-        x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
-
+        if self.skip_skip_connection is False:
+            x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
+            
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
@@ -395,3 +398,32 @@ class AnemoiModelEncProcDec(nn.Module):
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out
+
+
+import torch
+import torch.nn as nn
+import einops
+
+class ManifoldHyperConnection(nn.Module):
+    def __init__(self, D, d):
+        super().__init__()
+        self.proj_in = nn.Linear(D, d, bias=False)
+        self.proj_out = nn.Linear(d, D, bias=False)
+
+        self.gate = nn.Linear(2 * D, D)
+
+        # stability-friendly init
+        nn.init.zeros_(self.proj_out.weight)
+        nn.init.constant_(self.gate.bias, 2.0)
+
+    def forward(self, x_out, x_skip):
+        # project onto manifold
+        z = torch.tanh(self.proj_in(x_skip))
+        skip_m = self.proj_out(z)
+
+        # hyperconnection gate
+        g = torch.sigmoid(
+            self.gate(torch.cat([x_out, skip_m], dim=-1))
+        )
+
+        return x_out + g * skip_m
