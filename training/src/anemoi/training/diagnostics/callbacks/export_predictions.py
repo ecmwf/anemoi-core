@@ -207,17 +207,22 @@ class ExportPredictions(pl.Callback):
             return
 
         time_coord = self._build_time_coord(data_len)
+        input_time = time_coord[: pl_module.multi_step]
+        target_time = time_coord[pl_module.multi_step : pl_module.multi_step + target_len]
+        pred_time = target_time
         ds = xr.Dataset(
             data_vars={
-                "input": (("time", "node", "variable"), data[: pl_module.multi_step]),
+                "input": (("input_time", "node", "variable"), data[: pl_module.multi_step]),
                 "target": (
-                    ("time", "node", "variable"),
+                    ("target_time", "node", "variable"),
                     data[pl_module.multi_step : pl_module.multi_step + target_len],
                 ),
-                "prediction": (("time", "node", "variable"), preds[:target_len]),
+                "prediction": (("pred_time", "node", "variable"), preds[:target_len]),
             },
             coords={
-                "time": time_coord,
+                "input_time": input_time,
+                "target_time": target_time,
+                "pred_time": pred_time,
                 "variable": var_names,
                 "node": np.arange(data.shape[1], dtype="int64"),
             },
