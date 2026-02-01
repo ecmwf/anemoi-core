@@ -136,28 +136,54 @@ class ExportPredictions(pl.Callback):
                     data_batch = next(iter(batch.values()))
                 else:
                     raise KeyError("Multiple datasets present in batch but no 'data' dataset found.")
+            if data_batch.ndim < 3:
+                LOGGER.warning("Unexpected batch shape for export: %s", tuple(data_batch.shape))
+                return
+
+            time_len = data_batch.shape[1] if data_batch.ndim >= 2 else 1
+            needed_len = pl_module.multi_step + rollout + 1
+            if time_len < needed_len:
+                LOGGER.warning(
+                    "Batch time length too short for export (time_len=%s, needed=%s).",
+                    time_len,
+                    needed_len,
+                )
+                return
+
             input_tensor = (
                 data_batch[
                     :,
-                    pl_module.multi_step - 1 : pl_module.multi_step + rollout + 1,
+                    0:needed_len,
                     ...,
                     data_indices.data.output.full,
                 ]
                 .detach()
                 .cpu()
             )
-            data = self._post_process(pl_module, input_tensor)[self.sample_idx]
+            # Post-process expects (batch,node,var); flatten time then restore.
+            bsz, tlen = input_tensor.shape[0], input_tensor.shape[1]
+            flat = input_tensor.reshape(bsz * tlen, *input_tensor.shape[2:])
+            flat = self._post_process(pl_module, flat)
+            data = flat.reshape(bsz, tlen, *flat.shape[1:])[self.sample_idx]
 
-            preds = torch.cat(
-                tuple(
-                    self._post_process(
-                        pl_module,
-                        (x["data"] if isinstance(x, dict) else x).detach().cpu(),
-                    )[self.sample_idx : self.sample_idx + 1]
-                    for x in outputs[1]
-                ),
-                dim=0,
-            ).squeeze(1)
+            pred_steps = []
+            for x in outputs[1]:
+                step_pred = x["data"] if isinstance(x, dict) else x
+                step_pred = step_pred.detach().cpu()
+                step_pred = self._post_process(pl_module, step_pred)
+                pred_steps.append(step_pred[self.sample_idx : self.sample_idx + 1])
+            preds = torch.cat(pred_steps, dim=0)
+
+            if batch_idx == 0:
+                LOGGER.info(
+                    "ExportPredictions shapes: data_batch=%s input=%s data=%s preds=%s multi_step=%s rollout=%s",
+                    tuple(data_batch.shape),
+                    tuple(input_tensor.shape),
+                    tuple(data.shape),
+                    tuple(preds.shape),
+                    pl_module.multi_step,
+                    rollout,
+                )
 
         var_names, var_idx = self._select_variables(pl_module)
         data = data[:, :, var_idx].numpy()
