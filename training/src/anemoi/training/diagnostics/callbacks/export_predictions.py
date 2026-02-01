@@ -94,11 +94,14 @@ class ExportPredictions(pl.Callback):
             return post_processor(tensor)
 
     def _ensure_3d(self, arr: np.ndarray, name: str) -> np.ndarray:
-        # Expected dims: (time, node, variable). Squeeze singleton dims if needed.
-        while arr.ndim > 3 and arr.shape[0] == 1:
-            arr = arr[0]
-        if arr.ndim == 4:
-            # Fallback: drop leading dimension (e.g., ensemble/member)
+        # Expected dims: (time, node, variable). Squeeze singleton dims if needed,
+        # but never drop the time dimension unless it's truly singleton.
+        if arr.ndim > 3:
+            squeeze_axes = [i for i in range(1, arr.ndim) if arr.shape[i] == 1]
+            if squeeze_axes:
+                arr = np.squeeze(arr, axis=tuple(squeeze_axes))
+        if arr.ndim == 4 and arr.shape[0] == 1:
+            # If time dimension is singleton, drop it.
             arr = arr[0]
         if arr.ndim != 3:
             raise ValueError(f"{name} has unexpected shape {arr.shape}, expected 3D (time,node,variable).")
