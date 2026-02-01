@@ -46,14 +46,14 @@ class ExportPredictions(pl.Callback):
             output_times = (getattr(pl_module, "rollout", 0), "forecast")
         return output_times
 
-    def _build_time_coord(self, rollout: int) -> np.ndarray:
+    def _build_time_coord(self, length: int) -> np.ndarray:
         if self.start and self.frequency:
             start = np.datetime64(self.start)
             step = frequency_to_timedelta(self.frequency)
             step_s = int(step.total_seconds())
-            times = start + np.arange(rollout + 1, dtype="int64") * np.timedelta64(step_s, "s")
+            times = start + np.arange(length, dtype="int64") * np.timedelta64(step_s, "s")
             return times
-        return np.arange(rollout + 1, dtype="int64")
+        return np.arange(length, dtype="int64")
 
     def _get_dataset_indices(self, pl_module: pl.LightningModule):
         data_indices = pl_module.data_indices
@@ -141,7 +141,7 @@ class ExportPredictions(pl.Callback):
                 return
 
             time_len = data_batch.shape[1] if data_batch.ndim >= 2 else 1
-            needed_len = pl_module.multi_step + rollout + 1
+            needed_len = pl_module.multi_step + rollout
             if time_len < needed_len:
                 LOGGER.warning(
                     "Batch time length too short for export (time_len=%s, needed=%s).",
@@ -193,7 +193,7 @@ class ExportPredictions(pl.Callback):
 
         data_len = data.shape[0]
         pred_len = preds.shape[0]
-        target_len = min(rollout, data_len - 1, pred_len)
+        target_len = min(rollout, data_len - pl_module.multi_step, pred_len)
         if target_len <= 0:
             LOGGER.warning(
                 "No target/prediction steps available to export (data_len=%s, pred_len=%s, rollout=%s).",
@@ -203,15 +203,18 @@ class ExportPredictions(pl.Callback):
             )
             return
 
-        time_coord = self._build_time_coord(target_len)
+        time_coord = self._build_time_coord(data_len)
         ds = xr.Dataset(
             data_vars={
-                "input": (("time", "node", "variable"), data[:1]),
-                "target": (("time", "node", "variable"), data[1 : 1 + target_len]),
+                "input": (("time", "node", "variable"), data[: pl_module.multi_step]),
+                "target": (
+                    ("time", "node", "variable"),
+                    data[pl_module.multi_step : pl_module.multi_step + target_len],
+                ),
                 "prediction": (("time", "node", "variable"), preds[:target_len]),
             },
             coords={
-                "time": time_coord[: 1 + target_len],
+                "time": time_coord,
                 "variable": var_names,
                 "node": np.arange(data.shape[1], dtype="int64"),
             },
