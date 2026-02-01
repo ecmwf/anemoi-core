@@ -326,7 +326,9 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             )
             self._flag_log_hparams = False
 
+        # initialize server2server lineage attributes
         self._fork_run_server2server = None
+        self._parent_run_server2server = None
         self._parent_dry_run = False
         self._max_params_length = max_params_length
 
