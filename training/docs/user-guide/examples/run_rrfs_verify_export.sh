@@ -34,6 +34,7 @@ echo "DEBUG_PLOTS_DIR: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/v
 export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-12345}"
 export HYDRA_FULL_ERROR="${HYDRA_FULL_ERROR:-1}"
 export ANEMOI_LOG_LEVEL="${ANEMOI_LOG_LEVEL:-DEBUG}"
+export MPLBACKEND="${MPLBACKEND:-Agg}"
 
 # Debug: show the dataset dates as seen by anemoi.datasets (outside the training loader)
 python - <<PY

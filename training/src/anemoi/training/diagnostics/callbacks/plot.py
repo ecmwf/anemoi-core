@@ -203,6 +203,25 @@ class BasePlotCallback(Callback, ABC):
             data[:, :, ~pl_module.output_mask, :] = np.nan
         return data
 
+    def _plot_parameters_dict(
+        self,
+        name_to_index: dict[str, int],
+        parameters: list[str],
+        diagnostics: list[str] | None = None,
+        label: str | None = None,
+    ) -> dict[int, tuple[str, bool]]:
+        diagnostics = [] if diagnostics is None else diagnostics
+        missing = [p for p in parameters if p not in name_to_index]
+        if missing:
+            tag = f" ({label})" if label else ""
+            LOGGER.warning(
+                "Skipping %d plot parameters not present in model outputs%s: %s",
+                len(missing),
+                tag,
+                missing[:10],
+            )
+        return {name_to_index[p]: (p, p not in diagnostics) for p in parameters if p in name_to_index}
+
     @abstractmethod
     @rank_zero_only
     def _plot(
@@ -509,13 +528,12 @@ class LongRolloutPlots(BasePlotCallback):
         # Plot for each rollout step
         with torch.no_grad():
             for chunk_idx, param_chunk in enumerate(self._chunk_parameters(self.parameters)):
-                plot_parameters_dict = {
-                    pl_module.data_indices.model.output.name_to_index[name]: (
-                        name,
-                        name not in self.config.data.get("diagnostic", []),
-                    )
-                    for name in param_chunk
-                }
+                plot_parameters_dict = self._plot_parameters_dict(
+                    pl_module.data_indices.model.output.name_to_index,
+                    param_chunk,
+                    self.config.data.get("diagnostic", []),
+                    label="data",
+                )
 
                 if self.video_rollout:
                     data_over_time = []
@@ -1231,13 +1249,12 @@ class PlotSample(BasePlotAdditionalMetrics):
             local_rank = pl_module.local_rank
 
             for chunk_idx, param_chunk in enumerate(self._chunk_parameters(self.parameters)):
-                plot_parameters_dict = {
-                    pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                        name,
-                        name not in diagnostics,
-                    )
-                    for name in param_chunk
-                }
+                plot_parameters_dict = self._plot_parameters_dict(
+                    pl_module.data_indices[dataset_name].model.output.name_to_index,
+                    param_chunk,
+                    diagnostics,
+                    label=dataset_name,
+                )
 
                 for rollout_step in range(output_times[0]):
 
@@ -1333,13 +1350,12 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     else self.config.data.datasets[dataset_name].diagnostic
                 )
                 for chunk_idx, param_chunk in enumerate(self._chunk_parameters(self.parameters)):
-                    plot_parameters_dict_spectrum = {
-                        pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                            name,
-                            name not in diagnostics,
-                        )
-                        for name in param_chunk
-                    }
+                    plot_parameters_dict_spectrum = self._plot_parameters_dict(
+                        pl_module.data_indices[dataset_name].model.output.name_to_index,
+                        param_chunk,
+                        diagnostics,
+                        label=dataset_name,
+                    )
 
                     init_step = self._get_init_step(rollout_step, output_times[1])
 
@@ -1440,13 +1456,12 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 )
 
                 for chunk_idx, param_chunk in enumerate(self._chunk_parameters(self.parameters)):
-                    plot_parameters_dict_histogram = {
-                        pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                            name,
-                            name not in diagnostics,
-                        )
-                        for name in param_chunk
-                    }
+                    plot_parameters_dict_histogram = self._plot_parameters_dict(
+                        pl_module.data_indices[dataset_name].model.output.name_to_index,
+                        param_chunk,
+                        diagnostics,
+                        label=dataset_name,
+                    )
 
                     init_step = self._get_init_step(rollout_step, output_times[1])
 
