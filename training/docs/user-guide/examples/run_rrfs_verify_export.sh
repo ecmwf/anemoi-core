@@ -29,6 +29,7 @@ if [[ "$PLOT_MODE" == "no-plots" ]]; then
 fi
 
 echo "DEBUG_CONFIG_NAME: $CONFIG_NAME"
+echo "DEBUG_PLOTS_DIR: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/plots/plots"
 
 export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-12345}"
 export HYDRA_FULL_ERROR="${HYDRA_FULL_ERROR:-1}"
