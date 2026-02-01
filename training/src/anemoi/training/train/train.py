@@ -332,7 +332,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        return get_callbacks(self.config.model_dump(by_alias=True))
+        return get_callbacks(self.config)
 
     @cached_property
     def metadata(self) -> dict:
@@ -515,7 +515,7 @@ class AnemoiTrainer(ABC):
     def prepare_compilation(self) -> None:
 
         if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
+            self.model = mark_for_compilation(self.model, self.config.model.compile)
         if hasattr(self.config.training, "recompile_limit"):
             torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
             torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
