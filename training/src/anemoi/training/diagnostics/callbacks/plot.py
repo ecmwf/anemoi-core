@@ -735,17 +735,35 @@ class LongRolloutPlots(BasePlotCallback):
         batch_idx: int,
     ) -> None:
         if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
+            dataset_name = None
             grid_indices = pl_module.grid_indices
             if isinstance(grid_indices, dict):
                 dataset_name = next(iter(grid_indices.keys()))
                 grid_indices = grid_indices[dataset_name]
-            batch = pl_module.allgather_batch(batch, grid_indices, pl_module.grid_dim)
-            output = [
-                output[0],
-                [pl_module.allgather_batch(pred, grid_indices, pl_module.grid_dim) for pred in output[1]],
-            ]
 
-            self.post_processors = copy.deepcopy(pl_module.model.post_processors)
+            if isinstance(batch, dict):
+                if dataset_name is None:
+                    dataset_name = next(iter(batch.keys()))
+                batch_tensor = batch[dataset_name]
+                batch = pl_module.allgather_batch(batch_tensor, grid_indices, pl_module.grid_dim)
+            else:
+                batch = pl_module.allgather_batch(batch, grid_indices, pl_module.grid_dim)
+
+            preds = []
+            for pred in output[1]:
+                if isinstance(pred, dict):
+                    if dataset_name is None:
+                        dataset_name = next(iter(pred.keys()))
+                    pred = pred[dataset_name]
+                preds.append(pl_module.allgather_batch(pred, grid_indices, pl_module.grid_dim))
+            output = [output[0], preds]
+
+            post_processors = pl_module.model.post_processors
+            if isinstance(post_processors, dict):
+                if dataset_name is None:
+                    dataset_name = next(iter(post_processors.keys()))
+                post_processors = post_processors[dataset_name]
+            self.post_processors = copy.deepcopy(post_processors)
             for post_processor in self.post_processors.processors.values():
                 if hasattr(post_processor, "nan_locations"):
                     post_processor.nan_locations = pl_module.allgather_batch(
