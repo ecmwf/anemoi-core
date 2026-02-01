@@ -83,6 +83,16 @@ class BasePlotCallback(Callback, ABC):
             self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
             self.loop_thread.start()
 
+    def _chunk_parameters(self, parameters: list[str]) -> list[list[str]]:
+        """Split parameter list into chunks to avoid overly large figures."""
+        try:
+            max_vars = int(getattr(self.config.diagnostics.plot, "max_vars_per_figure", 0) or 0)
+        except Exception:
+            max_vars = 0
+        if max_vars <= 0:
+            max_vars = 8
+        return [parameters[i : i + max_vars] for i in range(0, len(parameters), max_vars)]
+
     def start_event_loop(self) -> None:
         """Start the event loop in a separate thread."""
         self.loop = asyncio.new_event_loop()
@@ -1200,49 +1210,51 @@ class PlotSample(BasePlotAdditionalMetrics):
                 if self.config.data.datasets[dataset_name].diagnostic is None
                 else self.config.data.datasets[dataset_name].diagnostic
             )
-            plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name not in diagnostics,
-                )
-                for name in self.parameters
-            }
 
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
             local_rank = pl_module.local_rank
 
-            for rollout_step in range(output_times[0]):
+            for chunk_idx, param_chunk in enumerate(self._chunk_parameters(self.parameters)):
+                plot_parameters_dict = {
+                    pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
+                        name,
+                        name not in diagnostics,
+                    )
+                    for name in param_chunk
+                }
 
-                init_step = self._get_init_step(rollout_step, output_times[1])
-                fig = plot_predicted_multilevel_flat_sample(
-                    plot_parameters_dict,
-                    self.per_sample,
-                    self.latlons[dataset_name],
-                    self.accumulation_levels_plot,
-                    data[init_step, ...].squeeze(),
-                    data[rollout_step + 1, ...].squeeze(),
-                    output_tensor[rollout_step, ...],
-                    datashader=self.datashader_plotting,
-                    precip_and_related_fields=self.precip_and_related_fields,
-                    colormaps=self.colormaps,
-                )
+                for rollout_step in range(output_times[0]):
 
-                var_names = [name for _, (name, _) in plot_parameters_dict.items()]
-                if len(var_names) <= 6:
-                    var_label = "vars_" + "-".join(var_names)
-                else:
-                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
-                self._output_figure(
-                    logger,
-                    fig,
-                    epoch=epoch,
-                    tag=(
-                        f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}"
-                    ),
-                    exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}",
-                )
+                    init_step = self._get_init_step(rollout_step, output_times[1])
+                    fig = plot_predicted_multilevel_flat_sample(
+                        plot_parameters_dict,
+                        self.per_sample,
+                        self.latlons[dataset_name],
+                        self.accumulation_levels_plot,
+                        data[init_step, ...].squeeze(),
+                        data[rollout_step + 1, ...].squeeze(),
+                        output_tensor[rollout_step, ...],
+                        datashader=self.datashader_plotting,
+                        precip_and_related_fields=self.precip_and_related_fields,
+                        colormaps=self.colormaps,
+                    )
+
+                    var_names = [name for _, (name, _) in plot_parameters_dict.items()]
+                    if len(var_names) <= 6:
+                        var_label = "vars_" + "-".join(var_names)
+                    else:
+                        var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
+                    self._output_figure(
+                        logger,
+                        fig,
+                        epoch=epoch,
+                        tag=(
+                            f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_"
+                            f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}_chunk{chunk_idx:02d}"
+                        ),
+                        exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}",
+                    )
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
@@ -1305,40 +1317,41 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     if self.config.data.datasets[dataset_name].diagnostic is None
                     else self.config.data.datasets[dataset_name].diagnostic
                 )
-                plot_parameters_dict_spectrum = {
-                    pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                        name,
-                        name not in diagnostics,
+                for chunk_idx, param_chunk in enumerate(self._chunk_parameters(self.parameters)):
+                    plot_parameters_dict_spectrum = {
+                        pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
+                            name,
+                            name not in diagnostics,
+                        )
+                        for name in param_chunk
+                    }
+
+                    init_step = self._get_init_step(rollout_step, output_times[1])
+
+                    fig = plot_power_spectrum(
+                        plot_parameters_dict_spectrum,
+                        self.latlons[dataset_name],
+                        data[init_step, ...].squeeze(),
+                        data[rollout_step + 1, ...].squeeze(),
+                        output_tensor[rollout_step, ...],
+                        min_delta=self.min_delta,
                     )
-                    for name in self.parameters
-                }
 
-                init_step = self._get_init_step(rollout_step, output_times[1])
-
-                fig = plot_power_spectrum(
-                    plot_parameters_dict_spectrum,
-                    self.latlons[dataset_name],
-                    data[init_step, ...].squeeze(),
-                    data[rollout_step + 1, ...].squeeze(),
-                    output_tensor[rollout_step, ...],
-                    min_delta=self.min_delta,
-                )
-
-                var_names = [name for _, (name, _) in plot_parameters_dict_spectrum.items()]
-                if len(var_names) <= 6:
-                    var_label = "vars_" + "-".join(var_names)
-                else:
-                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
-                self._output_figure(
-                    logger,
-                    fig,
-                    epoch=epoch,
-                    tag=(
-                        f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}"
-                    ),
-                    exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
-                )
+                    var_names = [name for _, (name, _) in plot_parameters_dict_spectrum.items()]
+                    if len(var_names) <= 6:
+                        var_label = "vars_" + "-".join(var_names)
+                    else:
+                        var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
+                    self._output_figure(
+                        logger,
+                        fig,
+                        epoch=epoch,
+                        tag=(
+                            f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_"
+                            f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}_chunk{chunk_idx:02d}"
+                        ),
+                        exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                    )
 
 
 class PlotHistogram(BasePlotAdditionalMetrics):
@@ -1411,37 +1424,38 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     else self.config.data.datasets[dataset_name].diagnostic
                 )
 
-                plot_parameters_dict_histogram = {
-                    pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                        name,
-                        name not in diagnostics,
+                for chunk_idx, param_chunk in enumerate(self._chunk_parameters(self.parameters)):
+                    plot_parameters_dict_histogram = {
+                        pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
+                            name,
+                            name not in diagnostics,
+                        )
+                        for name in param_chunk
+                    }
+
+                    init_step = self._get_init_step(rollout_step, output_times[1])
+
+                    fig = plot_histogram(
+                        plot_parameters_dict_histogram,
+                        data[init_step, ...].squeeze(),
+                        data[rollout_step + 1, ...].squeeze(),
+                        output_tensor[rollout_step, ...],
+                        self.precip_and_related_fields,
+                        self.log_scale,
                     )
-                    for name in self.parameters
-                }
 
-                init_step = self._get_init_step(rollout_step, output_times[1])
-
-                fig = plot_histogram(
-                    plot_parameters_dict_histogram,
-                    data[init_step, ...].squeeze(),
-                    data[rollout_step + 1, ...].squeeze(),
-                    output_tensor[rollout_step, ...],
-                    self.precip_and_related_fields,
-                    self.log_scale,
-                )
-
-                var_names = [name for _, (name, _) in plot_parameters_dict_histogram.items()]
-                if len(var_names) <= 6:
-                    var_label = "vars_" + "-".join(var_names)
-                else:
-                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
-                self._output_figure(
-                    logger,
-                    fig,
-                    epoch=epoch,
-                    tag=(
-                        f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}"
-                    ),
-                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
-                )
+                    var_names = [name for _, (name, _) in plot_parameters_dict_histogram.items()]
+                    if len(var_names) <= 6:
+                        var_label = "vars_" + "-".join(var_names)
+                    else:
+                        var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
+                    self._output_figure(
+                        logger,
+                        fig,
+                        epoch=epoch,
+                        tag=(
+                            f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_"
+                            f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}_chunk{chunk_idx:02d}"
+                        ),
+                        exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                    )
