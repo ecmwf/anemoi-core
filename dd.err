@@ -1,167 +1,511 @@
-DEBUG_CONFIG_NAME: anemoi-training-rrfs-lam-neural-lam-verify-plot
-DEBUG_PLOTS_DIR: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/plots/plots
-DEBUG_DATASET_PATH: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/test-20km-bcmask-time-s.zarr
-DEBUG_DATASET_LEN: 24
-DEBUG_DATASET_START: 2024-05-05T00:00:00
-DEBUG_DATASET_END: 2024-05-05T23:00:00
-2026-02-01 23:47:32 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-verify-plot', 'system.input.warm_start=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/0b1d843b-20a4-492d-a9ed-0a021e9d0370/inference-anemoi-by_epoch-epoch_2233-step_044680.ckpt', 'dataloader.training.datasets.data.start=2024-05-05T00:00:00', 'dataloader.training.datasets.data.end=2024-05-05T23:00:00', 'dataloader.validation.datasets.data.start=2024-05-05T00:00:00', 'dataloader.validation.datasets.data.end=2024-05-05T23:00:00', 'dataloader.test.datasets.data.start=2024-05-05T00:00:00', 'dataloader.test.datasets.data.end=2024-05-05T23:00:00', 'data.frequency=1h', 'dataloader.training.datasets.data.frequency=1h', 'dataloader.validation.datasets.data.frequency=1h', 'dataloader.test.datasets.data.frequency=1h', 'training.multistep_input=2', 'training.rollout.start=2', 'training.rollout.max=2', 'dataloader.validation_rollout=2', 'training.num_sanity_val_steps=0', '--cfg', 'job']
-2026-02-01 23:48:30 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-01 23:48:30 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-DEBUG_CONFIG_SAVED: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tmp-verify-resolved.yaml
-2026-02-01 23:48:32 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-verify-plot', 'system.input.warm_start=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/0b1d843b-20a4-492d-a9ed-0a021e9d0370/inference-anemoi-by_epoch-epoch_2233-step_044680.ckpt', 'dataloader.training.datasets.data.start=2024-05-05T00:00:00', 'dataloader.training.datasets.data.end=2024-05-05T23:00:00', 'dataloader.validation.datasets.data.start=2024-05-05T00:00:00', 'dataloader.validation.datasets.data.end=2024-05-05T23:00:00', 'dataloader.test.datasets.data.start=2024-05-05T00:00:00', 'dataloader.test.datasets.data.end=2024-05-05T23:00:00', 'data.frequency=1h', 'dataloader.training.datasets.data.frequency=1h', 'dataloader.validation.datasets.data.frequency=1h', 'dataloader.test.datasets.data.frequency=1h', 'training.multistep_input=2', 'training.rollout.start=2', 'training.rollout.max=2', 'dataloader.validation_rollout=2', 'training.num_sanity_val_steps=0']
-2026-02-01 23:48:40 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-01 23:48:40 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-[2026-02-01 23:48:41,477][anemoi.training.train.train][INFO] - Config validated.
-[2026-02-01 23:48:41,477][anemoi.training.train.train][INFO] - Starting from checkpoint: True
-[2026-02-01 23:48:41,478][anemoi.training.train.train][INFO] - Run id: 2187fa46-6a40-4347-b46d-41dfd4522702
-[2026-02-01 23:48:41,478][anemoi.training.train.train][INFO] - Checkpoints path: root=PosixPath('/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/2187fa46-6a40-4347-b46d-41dfd4522702') every_n_epochs='anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}' every_n_train_steps='anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}' every_n_minutes='anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}'
-[2026-02-01 23:48:41,478][anemoi.training.train.train][INFO] - Plots path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/plots/2187fa46-6a40-4347-b46d-41dfd4522702
-[2026-02-01 23:48:41,735][anemoi.training.train.train][INFO] - Creating graph for dataset 'data'
-[2026-02-01 23:48:46,953][anemoi.training.train.train][INFO] - Loading graph data from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-20km_data.pt
-[2026-02-01 23:48:47,171][anemoi.training.data.datamodule][INFO] - Initializing multi-dataset module with datasets: ['data']
-[2026-02-01 23:48:47,172][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 2
-[2026-02-01 23:48:47,172][anemoi.training.data.datamodule][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-02-01 23:48:47,174][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
-[2026-02-01 23:48:47,237][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-02-01 23:48:47,238][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 21 valid indices each
-[2026-02-01 23:48:47,239][anemoi.training.train.train][INFO] - Dataset 'data' - Number of variables: 45
-[2026-02-01 23:48:47,239][anemoi.training.train.train][INFO] - Dataset 'data' - Variables: ['clmr_200', 'clmr_500', 'clmr_850', 'clmr_925', 'grle_200', 'grle_500', 'grle_850', 'grle_925', 'height_200', 'height_500', 'height_850', 'height_925', 'icmr_200', 'icmr_500', 'icmr_850', 'icmr_925', 'landcover', 'orography', 'pres_0g', 'refc', 'rwmr_200', 'rwmr_500', 'rwmr_850', 'rwmr_925', 'snmr_200', 'snmr_500', 'snmr_850', 'snmr_925', 'sphum_200', 'sphum_500', 'sphum_850', 'sphum_925', 'swdown', 'temp_200', 'temp_500', 'temp_850', 'temp_925', 'ugrd_200', 'ugrd_500', 'ugrd_850', 'ugrd_925', 'vgrd_200', 'vgrd_500', 'vgrd_850', 'vgrd_925']
-[2026-02-01 23:48:47,240][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of prognostic variables: 42
-[2026-02-01 23:48:47,240][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of auxiliary variables: 3
-[2026-02-01 23:48:47,240][anemoi.training.train.train][INFO] - Total GPU count / model group size: 1 - NB: the learning rate will be scaled by this factor!
-[2026-02-01 23:48:47,241][anemoi.training.train.train][INFO] - Effective learning rate: 6.250e-05
-[2026-02-01 23:48:47,241][anemoi.training.train.train][INFO] - Training limits: max_epochs=1, max_steps=1. Training will stop when either limit is reached first. Learning rate scheduler will run for 1 steps.
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py:463: UserWarning: Pydantic serializer warnings:
-  PydanticSerializationUnexpectedValue(Expected `int` - serialized value may not be as expected [input_value={'data': 45}, input_type=dict])
-  return self.__pydantic_serializer__.to_python(
-[2026-02-01 23:48:47,409][anemoi.training.diagnostics.plots][WARNING] - Datashader unavailable (Numba needs NumPy 2.2 or less. Got NumPy 2.3.). Falling back to matplotlib plots.
-[2026-02-01 23:48:47,454][anemoi.training.diagnostics.callbacks.plot][INFO] - Using defined accumulation colormap for fields: []
-[2026-02-01 23:48:47,460][anemoi.training.diagnostics.callbacks.plot][INFO] - Using precip histogram plotting method for fields: [].
-[2026-02-01 23:48:47,464][anemoi.training.diagnostics.callbacks.plot][INFO] - ('Setting up callback for plots with long rollout: rollout for plots = [2], ', 'rollout for video = 2, frequency = every 1 epoch.')
-[2026-02-01 23:48:47,465][anemoi.training.diagnostics.callbacks][INFO] - Using progress bar: <class 'pytorch_lightning.callbacks.progress.tqdm_progress.TQDMProgressBar'>
-[2026-02-01 23:48:47,574][anemoi.models.migrations.migrator][INFO] - Loading migration 1755530253_initial
-[2026-02-01 23:48:47,574][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857427_deprecate_eda
-[2026-02-01 23:48:47,574][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857428_chunking_fix
-[2026-02-01 23:48:47,574][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479917_hardware_schema_update
-[2026-02-01 23:48:47,574][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479918_refactor_mapper
-[2026-02-01 23:48:47,574][anemoi.models.migrations.migrator][INFO] - Loading migration 1767108147_move_to_multiple_datasets
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py:463: UserWarning: Pydantic serializer warnings:
-  PydanticSerializationUnexpectedValue(Expected `int` - serialized value may not be as expected [input_value={'data': 45}, input_type=dict])
-  return self.__pydantic_serializer__.to_python(
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/lightning_fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3.12 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3 ...
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/accelerator_connector.py:513: You passed `Trainer(accelerator='cpu', precision='16-mixed')` but AMP with fp16 is not supported on CPU. Using `precision='bf16-mixed'` instead.
-[2026-02-01 23:48:47,648][pytorch_lightning.utilities.rank_zero][INFO] - Using bfloat16 Automatic Mixed Precision (AMP)
-[2026-02-01 23:48:47,686][pytorch_lightning.utilities.rank_zero][INFO] - GPU available: False, used: False
-[2026-02-01 23:48:47,686][pytorch_lightning.utilities.rank_zero][INFO] - TPU available: False, using: 0 TPU cores
-[2026-02-01 23:48:47,686][pytorch_lightning.utilities.rank_zero][INFO] - HPU available: False, using: 0 HPUs
-[2026-02-01 23:48:47,686][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer(limit_train_batches=1)` was configured so 1 batch per epoch will be used.
-[2026-02-01 23:48:47,725][lightning_fabric.utilities.seed][INFO] - Seed set to 12345
-[2026-02-01 23:48:47,848][anemoi.training.train.train][INFO] - Initial seed: Rank 0, initial seed 12345, running with random seed: 12345
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/provenance.py:143: UserWarning: The '__version__' attribute is deprecated and will be removed in MarkupSafe 3.1. Use feature detection, or `importlib.metadata.version("markupsafe")`, instead.
-  versions[name] = str(module.__version__)
-[2026-02-01 23:49:04,632][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 2
-[2026-02-01 23:49:04,780][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_850 is not normalized.
-[2026-02-01 23:49:04,780][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_925 is not normalized.
-[2026-02-01 23:49:04,780][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: landcover is not normalized.
-[2026-02-01 23:49:04,780][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: orography is not normalized.
-[2026-02-01 23:49:04,780][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: refc is not normalized.
-[2026-02-01 23:49:04,780][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_850 is not normalized.
-[2026-02-01 23:49:04,780][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_925 is not normalized.
-[2026-02-01 23:49:04,780][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: swdown is not normalized.
-[2026-02-01 23:49:04,880][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-01 23:49:04,881][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-01 23:49:04,881][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-01 23:49:04,883][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-01 23:49:04,884][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-01 23:49:04,950][anemoi.models.layers.block][WARNING] - GraphTransformerMapperBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,030][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-01 23:49:05,030][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-01 23:49:05,031][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-01 23:49:05,032][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-01 23:49:05,032][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-01 23:49:05,096][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,161][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,226][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,290][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,355][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,420][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,485][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,549][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,614][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,679][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,743][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,808][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,872][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:05,936][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:06,000][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:06,064][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:06,085][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-01 23:49:06,085][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-01 23:49:06,086][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-01 23:49:06,086][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-01 23:49:06,087][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-01 23:49:06,150][anemoi.models.layers.block][WARNING] - GraphTransformerMapperBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-01 23:49:06,213][anemoi.training.losses.scalers.variable_level][INFO] - Variable Level Scaling: Applying ReluVariableLevelScaler scaling to pl variables ({'param': ['q', 't', 'u', 'v', 'w', 'z']})
-[2026-02-01 23:49:06,213][anemoi.training.losses.scalers.variable_level][INFO] - with slope = 0.001 and y-intercept/minimum = 0.2.
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:57: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
-  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
-[2026-02-01 23:49:06,263][anemoi.training.train.train][INFO] - Resuming training from last checkpoint: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/0b1d843b-20a4-492d-a9ed-0a021e9d0370/inference-anemoi-by_epoch-epoch_2233-step_044680.ckpt
-[2026-02-01 23:49:06,263][anemoi.training.train.train][INFO] - Restoring only model weights from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/0b1d843b-20a4-492d-a9ed-0a021e9d0370/inference-anemoi-by_epoch-epoch_2233-step_044680.ckpt
-[2026-02-01 23:49:07,195][anemoi.training.train.train][INFO] - Warm start ckpt type: AnemoiModelInterface
-[2026-02-01 23:49:07,198][anemoi.models.data_indices.collection][INFO] - No variable order to compare. Skipping variable order check.
-[2026-02-01 23:49:07,198][anemoi.training.train.train][INFO] - The following submodules will NOT be trained: []
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py:463: UserWarning: Pydantic serializer warnings:
-  PydanticSerializationUnexpectedValue(Expected `int` - serialized value may not be as expected [input_value={'data': 45}, input_type=dict])
-  return self.__pydantic_serializer__.to_python(
-[2026-02-01 23:49:10,420][anemoi.models.utils.compile][INFO] - The following modules will be compiled: ['anemoi.models.layers.conv.GraphTransformerConv']
-[2026-02-01 23:49:10,421][anemoi.training.train.train][INFO] - Recompile limit set to 32
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/lightning_fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3.12 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3 ...
-[2026-02-01 23:49:10,588][lightning_fabric.utilities.distributed][INFO] - Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/1
-[2026-02-01 23:49:10,598][pytorch_lightning.utilities.rank_zero][INFO] - ----------------------------------------------------------------------------------------------------
-distributed_backend=gloo
-All distributed processes registered. Starting with 1 processes
-----------------------------------------------------------------------------------------------------
-
-[2026-02-01 23:49:16,814][timm.scheduler.cosine_lr][WARNING] - Cosine annealing scheduler will have no effect on the learning rate since t_initial = t_mul = eta_mul = 1.
-[2026-02-01 23:49:16,902][lightning_fabric.utilities.seed][INFO] - [rank: 0] Seed set to 12345
-[2026-02-01 23:49:16,912][pytorch_lightning.callbacks.model_summary][INFO] - 
-  | Name    | Type                 | Params | Mode 
----------------------------------------------------------
-0 | model   | AnemoiModelInterface | 255 M  | train
-1 | loss    | ModuleDict           | 0      | train
-2 | metrics | ModuleDict           | 0      | train
----------------------------------------------------------
-255 M     Trainable params
-0         Non-trainable params
-255 M     Total params
-1,022.769 Total estimated model params size (MB)
-344       Modules in train mode
-0         Modules in eval mode
-[2026-02-01 23:49:16,914][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-[2026-02-01 23:49:17,051][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 2748289, global_rank 0, model comm group 0)  has low/high range 0 / 3
-[2026-02-01 23:49:17,051][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 2748290, global_rank 0, model comm group 0)  has low/high range 3 / 6
-[2026-02-01 23:49:17,051][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 2748302, global_rank 0, model comm group 0)  has low/high range 6 / 9
-[2026-02-01 23:49:17,051][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 2748316, global_rank 0, model comm group 0)  has low/high range 9 / 12
-[2026-02-01 23:49:17,058][anemoi.training.data.multidataset][INFO] - Worker 0 (training, pid 2748289, base_seed 12345, sanity rnd 0.227336)
-[2026-02-01 23:49:17,059][anemoi.training.data.multidataset][INFO] - Worker 1 (training, pid 2748290, base_seed 12345, sanity rnd 0.227336)
-[2026-02-01 23:49:17,059][anemoi.training.data.multidataset][INFO] - Worker 3 (training, pid 2748316, base_seed 12345, sanity rnd 0.227336)
-[2026-02-01 23:49:17,059][anemoi.training.data.multidataset][INFO] - Worker 2 (training, pid 2748302, base_seed 12345, sanity rnd 0.227336)
-[2026-02-01 23:49:17,063][anemoi.training.data.multidataset][INFO] - Worker 4 (pid 2748331, global_rank 0, model comm group 0)  has low/high range 12 / 15
-[2026-02-01 23:49:17,066][anemoi.training.data.multidataset][INFO] - Worker 4 (training, pid 2748331, base_seed 12345, sanity rnd 0.227336)
-[2026-02-01 23:49:17,088][anemoi.training.data.multidataset][INFO] - Worker 5 (pid 2748335, global_rank 0, model comm group 0)  has low/high range 15 / 17
-[2026-02-01 23:49:17,091][anemoi.training.data.multidataset][INFO] - Worker 5 (training, pid 2748335, base_seed 12345, sanity rnd 0.227336)
-[2026-02-01 23:49:17,113][anemoi.training.data.multidataset][INFO] - Worker 6 (pid 2748336, global_rank 0, model comm group 0)  has low/high range 17 / 19
-[2026-02-01 23:49:17,116][anemoi.training.data.multidataset][INFO] - Worker 6 (training, pid 2748336, base_seed 12345, sanity rnd 0.227336)
-[2026-02-01 23:49:17,135][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 2
-[2026-02-01 23:49:17,137][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
-[2026-02-01 23:49:17,138][anemoi.training.data.multidataset][INFO] - Worker 7 (pid 2748347, global_rank 0, model comm group 0)  has low/high range 19 / 21
-[2026-02-01 23:49:17,141][anemoi.training.data.multidataset][INFO] - Worker 7 (training, pid 2748347, base_seed 12345, sanity rnd 0.227336)
-[2026-02-01 23:49:17,142][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-02-01 23:49:17,142][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 21 valid indices each
-[2026-02-01 23:49:17,143][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
-Training: |          | 0/? [00:00<?, ?it/s][2026-02-01 23:49:17,145][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
-Training:   0%|          | 0/1 [00:00<?, ?it/s]Epoch 0:   0%|          | 0/1 [00:00<?, ?it/s] /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `on_after_batch_transfer` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
-No ROCm runtime is found, using ROCM_HOME='/opt/rocm'
+2026-02-02 13:58:25 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+2026-02-02 13:58:25 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+2026-02-02 13:58:25 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+2026-02-02 13:58:25 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+2026-02-02 13:59:16 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-02 13:59:16 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-02 13:59:16 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-02 13:59:16 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-02 13:59:16 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-02 13:59:16 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-02 13:59:16 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-02 13:59:16 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
+dataloader.training.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T00:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.end.[key]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T23:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+dataloader.validation.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T00:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T18:00:00', input_type=str]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.start.[key]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
+dataloader.training.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T00:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.end.[key]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T23:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+dataloader.validation.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T00:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T18:00:00', input_type=str]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.start.[key]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+dataloader.test.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T19:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T23:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+dataloader.grid_indices._target_.[key]
+  Input should be 'datasets' [type=literal_error, input_value='_target_', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices._target_
+  Input should be a valid dictionary [type=dict_type, input_value='anemoi.training.data.grid_indices.FullGrid', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.grid_indices.nodes_name.[key]
+  Input should be 'datasets' [type=literal_error, input_value='nodes_name', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices.nodes_name
+  Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+dataloader.test.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T19:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T23:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
+dataloader.training.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T00:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.end.[key]
+dataloader.grid_indices._target_.[key]
+  Input should be 'datasets' [type=literal_error, input_value='_target_', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices._target_
+  Input should be a valid dictionary [type=dict_type, input_value='anemoi.training.data.grid_indices.FullGrid', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.grid_indices.nodes_name.[key]
+  Input should be 'datasets' [type=literal_error, input_value='nodes_name', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices.nodes_name
+  Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T23:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T00:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T18:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
+dataloader.training.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T00:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T23:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T00:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T18:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T19:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T23:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.grid_indices._target_.[key]
+  Input should be 'datasets' [type=literal_error, input_value='_target_', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices._target_
+  Input should be a valid dictionary [type=dict_type, input_value='anemoi.training.data.grid_indices.FullGrid', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.grid_indices.nodes_name.[key]
+  Input should be 'datasets' [type=literal_error, input_value='nodes_name', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices.nodes_name
+  Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.start
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T19:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.end
+  Input should be a valid dictionary [type=dict_type, input_value='2024-05-05T23:00:00', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.grid_indices._target_.[key]
+  Input should be 'datasets' [type=literal_error, input_value='_target_', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices._target_
+  Input should be a valid dictionary [type=dict_type, input_value='anemoi.training.data.grid_indices.FullGrid', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.grid_indices.nodes_name.[key]
+  Input should be 'datasets' [type=literal_error, input_value='nodes_name', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices.nodes_name
+  Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+srun: error: u22g12: tasks 0-1: Exited with exit code 1
+srun: Terminating StepId=8142464.0
+srun: error: u22g13: tasks 2-3: Exited with exit code 1
