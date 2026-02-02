@@ -1,43 +1,50 @@
-2026-02-02 14:09:35 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
-2026-02-02 14:09:35 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
-2026-02-02 14:09:35 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
-2026-02-02 14:09:35 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
-2026-02-02 14:10:24 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-02 14:10:24 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-02 14:10:24 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-02-02 14:10:24 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-02 14:10:24 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-02-02 14:10:24 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-02 14:10:24 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-02-02 14:10:24 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-02 14:42:43 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+2026-02-02 14:42:43 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+2026-02-02 14:42:43 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+2026-02-02 14:42:43 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
+2026-02-02 14:43:43 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-02 14:43:43 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-02 14:43:43 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-02 14:43:43 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-02 14:43:43 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-02 14:43:43 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-02 14:43:43 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-02 14:43:43 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=4']
 Traceback (most recent call last):
 Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
     cmd.run(args, unknown)
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
     main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
     anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
     _run_hydra(
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
     _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
     run_and_report(
-Traceback (most recent call last):
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
-Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
     raise ex
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
@@ -46,80 +53,45 @@ Traceback (most recent call last):
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
     lambda: hydra.run(
             ^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
     _ = ret.return_value
         ^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
     raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
     ret.return_value = task_function(task_cfg)
                        ^^^^^^^^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
     AnemoiTrainer(config).train()
     ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
     AnemoiTrainer(config).train()
     ^^^^^^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
     self.config = BaseSchema(**config)
                   ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
     validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Traceback (most recent call last):
 pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
 dataloader.training.dataset.[key]
   Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
@@ -134,12 +106,6 @@ dataloader.training.start
   Input should be a valid dictionary [type=dict_type, input_value=None, input_type=NoneType]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
 dataloader.training.end.[key]
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
   Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/literal_error
 dataloader.training.end
@@ -155,14 +121,8 @@ dataloader.validation.dataset.[key]
   Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/literal_error
 dataloader.validation.dataset
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
   Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
 dataloader.validation.start.[key]
@@ -177,15 +137,8 @@ dataloader.validation.end.[key]
 dataloader.validation.end
   Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
 dataloader.validation.drop.[key]
   Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/literal_error
@@ -200,19 +153,100 @@ dataloader.test.dataset
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
 dataloader.test.start.[key]
   Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
-    AnemoiTrainer(config).train()
-    ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
     For further information visit https://errors.pydantic.dev/2.11/v/literal_error
 dataloader.test.start
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
+dataloader.training.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.start
+  Input should be a valid dictionary [type=dict_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.end.[key]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.end
+  Input should be a valid dictionary [type=dict_type, input_value=2020, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.dataset
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.start
+  Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.end
+  Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+dataloader.validation.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.start
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
     raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
   Input should be a valid dictionary [type=dict_type, input_value=2022, input_type=int]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
 dataloader.test.end.[key]
@@ -228,9 +262,11 @@ dataloader.test.drop
   Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
 dataloader.grid_indices._target_.[key]
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
   Input should be 'datasets' [type=literal_error, input_value='_target_', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/literal_error
 dataloader.grid_indices._target_
@@ -242,6 +278,55 @@ dataloader.grid_indices.nodes_name.[key]
 dataloader.grid_indices.nodes_name
   Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  Input should be a valid dictionary [type=dict_type, input_value=2022, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.end
+  Input should be a valid dictionary [type=dict_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.grid_indices._target_.[key]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  Input should be 'datasets' [type=literal_error, input_value='_target_', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices._target_
+  Input should be a valid dictionary [type=dict_type, input_value='anemoi.training.data.grid_indices.FullGrid', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.grid_indices.nodes_name.[key]
+  Input should be 'datasets' [type=literal_error, input_value='nodes_name', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.grid_indices.nodes_name
+  Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 602, in main
     AnemoiTrainer(config).train()
     ^^^^^^^^^^^^^^^^^^^^^
@@ -265,150 +350,6 @@ dataloader.training.start
   Input should be a valid dictionary [type=dict_type, input_value=None, input_type=NoneType]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
 dataloader.training.end.[key]
-pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
-dataloader.training.dataset.[key]
-  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.training.dataset
-  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.training.start.[key]
-  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.training.start
-  Input should be a valid dictionary [type=dict_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.training.end.[key]
-  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.training.end
-  Input should be a valid dictionary [type=dict_type, input_value=2020, input_type=int]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.training.drop.[key]
-  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.training.drop
-  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.validation.dataset.[key]
-  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.validation.dataset
-  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.training.end
-  Input should be a valid dictionary [type=dict_type, input_value=2020, input_type=int]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.training.drop.[key]
-  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.training.drop
-  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.validation.dataset.[key]
-  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.validation.dataset
-  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.validation.start.[key]
-  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.validation.start
-  Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.validation.end.[key]
-  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.validation.end
-  Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.validation.start.[key]
-  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.validation.start
-  Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.validation.end.[key]
-  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.validation.end
-  Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.validation.drop.[key]
-  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.validation.drop
-  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.test.dataset.[key]
-  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.test.dataset
-  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.test.start.[key]
-  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
-dataloader.validation.drop.[key]
-  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.validation.drop
-  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.test.dataset.[key]
-  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.test.dataset
-  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.test.start.[key]
-  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.test.start
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.test.start
-  Input should be a valid dictionary [type=dict_type, input_value=2022, input_type=int]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.test.end.[key]
-  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.test.end
-  Input should be a valid dictionary [type=dict_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.test.drop.[key]
-  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.test.drop
-  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.grid_indices._target_.[key]
-pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
-dataloader.training.dataset.[key]
-  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.training.dataset
-  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.training.start.[key]
-  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.training.start
-  Input should be a valid dictionary [type=dict_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.training.end.[key]
-  Input should be 'datasets' [type=literal_error, input_value='_target_', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.grid_indices._target_
-  Input should be a valid dictionary [type=dict_type, input_value='anemoi.training.data.grid_indices.FullGrid', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-dataloader.grid_indices.nodes_name.[key]
-  Input should be 'datasets' [type=literal_error, input_value='nodes_name', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-dataloader.grid_indices.nodes_name
-  Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
   Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/literal_error
 dataloader.training.end
@@ -480,6 +421,65 @@ dataloader.grid_indices.nodes_name.[key]
 dataloader.grid_indices.nodes_name
   Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+pydantic_core._pydantic_core.ValidationError: 28 validation errors for BaseSchema
+dataloader.training.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.start
+  Input should be a valid dictionary [type=dict_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.end
+  Input should be a valid dictionary [type=dict_type, input_value=2020, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.training.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.training.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.start
+  Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.end.[key]
+  Input should be 'datasets' [type=literal_error, input_value='end', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.end
+  Input should be a valid dictionary [type=dict_type, input_value=2021, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.validation.drop.[key]
+  Input should be 'datasets' [type=literal_error, input_value='drop', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.validation.drop
+  Input should be a valid dictionary [type=dict_type, input_value=['boundary_mask'], input_type=ListConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.dataset.[key]
+  Input should be 'datasets' [type=literal_error, input_value='dataset', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.dataset
+  Input should be a valid dictionary [type=dict_type, input_value='/scratch3/NCEPDEV/fv3-ca...20km-bcmask-time-s.zarr', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/dict_type
+dataloader.test.start.[key]
+  Input should be 'datasets' [type=literal_error, input_value='start', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+dataloader.test.start
   Input should be a valid dictionary [type=dict_type, input_value=2022, input_type=int]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
 dataloader.test.end.[key]
@@ -506,7 +506,6 @@ dataloader.grid_indices.nodes_name.[key]
 dataloader.grid_indices.nodes_name
   Input should be a valid dictionary [type=dict_type, input_value='data', input_type=str]
     For further information visit https://errors.pydantic.dev/2.11/v/dict_type
-srun: error: u21g02: tasks 2-3: Exited with exit code 1
-srun: Terminating StepId=8142849.0
-slurmstepd: error: *** STEP 8142849.0 ON u21g01 CANCELLED AT 2026-02-02T14:10:25 ***
-srun: error: u21g01: tasks 0-1: Exited with exit code 1
+srun: error: u20g11: tasks 0-1: Exited with exit code 1
+srun: Terminating StepId=8144190.0
+srun: error: u22g10: tasks 2-3: Exited with exit code 1
