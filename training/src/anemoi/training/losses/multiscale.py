@@ -107,9 +107,9 @@ class MultiscaleLossWrapper(BaseLoss):
 
         These matrices apply spatial smoothing while preserving grid size.
         """
-        if loss_matrices and loss_matrices_graph:
-            msg = "Specify either loss_matrices or loss_matrices_graph, not both."
-            raise ValueError(msg)
+        assert not (
+            loss_matrices and loss_matrices_graph
+        ), "Specify either loss_matrices or loss_matrices_graph, not both."
 
         if loss_matrices_graph is not None:
             return self._load_graph_smoothing_matrices(loss_matrices_graph, graph_data)
@@ -122,9 +122,7 @@ class MultiscaleLossWrapper(BaseLoss):
         loss_matrices_graph: list[dict | None],
         graph_data: HeteroData | None,
     ) -> list[ProjectionGraphProvider | None]:
-        if graph_data is None:
-            msg = "graph_data must be provided when using loss_matrices_graph."
-            raise ValueError(msg)
+        assert graph_data is not None, "graph_data must be provided when using loss_matrices_graph."
 
         smoothing_matrices: list[ProjectionGraphProvider | None] = []
         for entry in loss_matrices_graph:
@@ -134,9 +132,7 @@ class MultiscaleLossWrapper(BaseLoss):
                 continue
 
             edges_name = entry.get("edges_name")
-            if edges_name is None:
-                msg = "Each loss_matrices_graph entry must include 'edges_name'."
-                raise ValueError(msg)
+            assert edges_name is not None, "Each loss_matrices_graph entry must include 'edges_name'."
             edges_name = tuple(edges_name)
 
             provider = ProjectionGraphProvider(

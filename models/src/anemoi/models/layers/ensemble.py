@@ -138,12 +138,12 @@ class NoiseConditioning(BaseNoiseInjector):
 
         self.noise_graph_provider = None
         self._sparse_projector = None
-        if noise_matrix is not None and noise_edges_name is not None:
-            raise ValueError("Specify either noise_matrix or noise_edges_name, not both.")
+        assert not (
+            noise_matrix is not None and noise_edges_name is not None
+        ), "Specify either noise_matrix or noise_edges_name, not both."
 
         if noise_edges_name is not None:
-            if graph_data is None:
-                raise ValueError("graph_data must be provided when using noise_edges_name.")
+            assert graph_data is not None, "graph_data must be provided when using noise_edges_name."
             self.noise_graph_provider = ProjectionGraphProvider(
                 graph=graph_data,
                 edges_name=tuple(noise_edges_name),
