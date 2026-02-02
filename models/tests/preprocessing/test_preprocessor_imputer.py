@@ -19,6 +19,11 @@ from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
 
 
+@pytest.fixture(scope="module")
+def device():
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 @pytest.fixture()
 def non_default_input_imputer():
     config = DictConfig(
@@ -72,41 +77,41 @@ def default_input_imputer():
 
 
 @pytest.fixture()
-def non_default_input_data():
+def non_default_input_data(device):
     # one sample, two time steps, two grid points, 6 variables
-    base = torch.Tensor(
+    base = torch.tensor(
         [
             [
                 [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]],
                 [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, np.nan, 1.0]],
             ]
         ]
-    )
-    expected = torch.Tensor(
+    ).to(device)
+    expected = torch.tensor(
         [
             [
                 [[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 2.0, 8.0, 9.0, 3.0, 1.0]],
                 [[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, 3.0, 1.0]],
             ]
         ]
-    )
-    restored = torch.Tensor(
+    ).to(device)
+    restored = torch.tensor(
         [
             [
                 [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]],
                 [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]],
             ]
         ]
-    )
+    ).to(device)
     return base, expected, restored
 
 
 @pytest.fixture()
-def default_input_data():
+def default_input_data(device):
     # one sample, one time step, two grid points, 6 variables
-    base = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
-    expected = torch.Tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, 1.0, 1.0]]]])
-    restored = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 1.0, 1.0]]]])
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]]).to(device)
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, 1.0, 1.0]]]]).to(device)
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 1.0, 1.0]]]]).to(device)
     return base, expected, restored
 
 
@@ -145,20 +150,20 @@ def default_constant_imputer():
 
 
 @pytest.fixture()
-def default_constant_data():
+def default_constant_data(device):
     # one sample, one time step, two grid points, 6 variables
-    base = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
-    expected = torch.Tensor([[[[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]]]])
-    restored = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 22.7, 1.0]]]])
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]]).to(device)
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]]]]).to(device)
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 22.7, 1.0]]]]).to(device)
     return base, expected, restored
 
 
 @pytest.fixture()
-def non_default_constant_data():
+def non_default_constant_data(device):
     # one sample, one time step, two grid points, 6 variables
-    base = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
-    expected = torch.Tensor([[[[1.0, 2.0, 3.0, 10.0, 5.0, 1.0], [6.0, 3.0, 8.0, 9.0, 3.0, 1.0]]]])
-    restored = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]]]])
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]]).to(device)
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 10.0, 5.0, 1.0], [6.0, 3.0, 8.0, 9.0, 3.0, 1.0]]]]).to(device)
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]]]]).to(device)
     return base, expected, restored
 
 
@@ -180,11 +185,11 @@ def copy_imputer():
 
 
 @pytest.fixture()
-def copy_data():
+def copy_data(device):
     # one sample, one time step, two grid points, 6 variables
-    base = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]])
-    expected = torch.Tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 6.0, 8.0, 9.0, 6.0, 1.0]]]])
-    restored = torch.Tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 6.0, 1.0]]]])
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]]).to(device)
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 6.0, 8.0, 9.0, 6.0, 1.0]]]]).to(device)
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 6.0, 1.0]]]]).to(device)
     return base, expected, restored
 
 
@@ -317,7 +322,10 @@ def test_mask_saving(imputer_fixture, data_fixture, request):
 def test_loss_nan_mask(imputer_fixture, data_fixture, request):
     """Check that the imputer correctly transforms a tensor with NaNs."""
     x, _, _ = request.getfixturevalue(data_fixture)
-    expected = torch.tensor([[[1.0, 1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 1.0]]])  # only prognostic and diagnostic variables
+    expected = torch.tensor(
+        [[[1.0, 1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 1.0]]],
+        device=x.device,
+    )  # only prognostic and diagnostic variables
     imputer = request.getfixturevalue(imputer_fixture)
     imputer.transform(x)
     assert torch.allclose(

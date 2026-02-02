@@ -23,6 +23,11 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
+@pytest.fixture(scope="module")
+def device():
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 @dataclass
 class GNNProcessorInit:
     num_channels: int = 128
@@ -44,12 +49,14 @@ class TestGNNProcessor:
     NUM_EDGES: int = 200
 
     @pytest.fixture
-    def fake_graph(self) -> tuple[HeteroData, int]:
+    def fake_graph(self, device) -> tuple[HeteroData, int]:
         graph = HeteroData()
-        graph["nodes"].x = torch.rand((self.NUM_NODES, 2))
-        graph[("nodes", "to", "nodes")].edge_index = torch.randint(0, self.NUM_NODES, (2, self.NUM_EDGES))
-        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((self.NUM_EDGES, 3))
-        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((self.NUM_EDGES, 4))
+        graph["nodes"].x = torch.rand((self.NUM_NODES, 2), device=device)
+        graph[("nodes", "to", "nodes")].edge_index = torch.randint(
+            0, self.NUM_NODES, (2, self.NUM_EDGES), device=device
+        )
+        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((self.NUM_EDGES, 3), device=device)
+        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((self.NUM_EDGES, 4), device=device)
         return graph
 
     @pytest.fixture
@@ -57,20 +64,21 @@ class TestGNNProcessor:
         return GNNProcessorInit()
 
     @pytest.fixture
-    def graph_provider(self, fake_graph):
-        return create_graph_provider(
+    def graph_provider(self, fake_graph, device):
+        provider = create_graph_provider(
             graph=fake_graph[("nodes", "to", "nodes")],
             edge_attributes=["edge_attr1", "edge_attr2"],
             src_size=self.NUM_NODES,
             dst_size=self.NUM_NODES,
             trainable_size=8,
         )
+        return provider.to(device)
 
     @pytest.fixture
-    def graphconv_processor(self, graphconv_init, graph_provider):
+    def graphconv_processor(self, graphconv_init, graph_provider, device):
         config = asdict(graphconv_init)
         config["edge_dim"] = graph_provider.edge_dim
-        return GNNProcessor(**config)
+        return GNNProcessor(**config).to(device)
 
     def test_graphconv_processor_init(self, graphconv_processor, graphconv_init, graph_provider):
         assert graphconv_processor.num_chunks == graphconv_init.num_chunks
@@ -83,7 +91,9 @@ class TestGNNProcessor:
 
     def test_forward(self, graphconv_processor, graphconv_init, graph_provider):
         batch_size = 1
-        x = torch.rand((self.NUM_NODES, graphconv_init.num_channels))
+        x = torch.rand(
+            (self.NUM_NODES, graphconv_init.num_channels), device=next(graphconv_processor.parameters()).device
+        )
         shard_shapes = [list(x.shape)]
 
         # Run forward pass of processor
@@ -93,7 +103,7 @@ class TestGNNProcessor:
 
         # Generate dummy target and loss function
         loss_fn = torch.nn.MSELoss()
-        target = torch.rand((self.NUM_NODES, graphconv_init.num_channels))
+        target = torch.rand((self.NUM_NODES, graphconv_init.num_channels), device=output.device)
         loss = loss_fn(output, target)
 
         # Check loss
