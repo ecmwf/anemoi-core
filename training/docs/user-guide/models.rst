@@ -7,10 +7,10 @@ anemoi-training:
 
 **Model Tasks:**
 
-#. Deterministic Forecasting (GraphForecaster)
-#. Ensemble Forecasting (GraphEnsForecaster)
+#. Deterministic Forecasting (GraphForecaster + DirectPredictionObjective)
+#. Stochastic Forecasting (GraphForecaster + DiffusionObjective/FlowObjective)
+#. Ensemble Forecasting (GraphEnsForecaster + objective)
 #. Time Interpolation (GraphInterpolator)
-#. Diffusion-based Forecasting (GraphDiffusionForecaster)
 
 The model tasks specify the training objective and are specified in the
 configuration through ``training.model_task``. They are our
@@ -37,7 +37,7 @@ For detailed instructions on creating models, see the
 .. note::
 
    Currently, the GNN model type is not supported with the Ensemble
-   Forecasting model task and the Diffusion Forecasting model task.
+   Forecasting model task and stochastic objectives.
 
 ************
  Processors

@@ -9,9 +9,11 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
+from anemoi.training.train.objectives import DiffusionObjective
+from anemoi.training.train.objectives import DirectPredictionObjective
 from anemoi.training.train.tasks.base import BaseGraphModule
-from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
+from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -25,12 +27,9 @@ class DummyLoss(torch.nn.Module):
 class DummyModel:
     def __init__(self, num_output_variables: int | None = None, output_times: int = 1, add_skip: bool = False) -> None:
         self.called_with: dict[str, Any] | None = None
-        self.pre_processors = Processors([])
-        self.post_processors = Processors([], inverse=True)
         self.output_times = output_times
         self.num_output_variables = num_output_variables
         self.add_skip = add_skip
-        self.metrics = {}
 
     def _forward_tensor(
         self,
@@ -116,16 +115,27 @@ class DummyDiffusionModel(DummyModel):
         return y_noised + 0.1 * pred
 
 
+class DummyModelInterface(torch.nn.Module):
+    def __init__(self, model: DummyModel) -> None:
+        super().__init__()
+        self.model = model
+        self.pre_processors = Processors([])
+        self.post_processors = Processors([], inverse=True)
+
+    def forward(
+        self,
+        x: torch.Tensor | dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> torch.Tensor | dict[str, torch.Tensor]:
+        return self.model(x, **kwargs)
+
+
 def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
     cfg = DictConfig({"forcing": [], "diagnostic": [], "target": []})
     return IndexCollection(cfg, name_to_index)
 
 
-def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
-    class DummyDiffusion:
-        def __init__(self, model: DummyDiffusionModel) -> None:
-            self.model = model
-
+def test_graphforecaster_diffusion_objective(monkeypatch: pytest.MonkeyPatch) -> None:
     def _stub_init(
         self: BaseGraphModule,
         *,
@@ -141,7 +151,8 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         pl.LightningModule.__init__(self)
         self.multi_step = config.training.multistep_input
         model = DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
-        self.model = DummyDiffusion(model=model)
+        self.model = DummyModelInterface(model)
+        self.objective = DiffusionObjective(rho=config.model.model.diffusion.rho)
         self.model_comm_group = None
         self.model_comm_group_size = 1
         self.grid_shard_shapes = {"data": None}
@@ -157,12 +168,17 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         self.loss_supports_sharding = False
         self.metrics_support_sharding = True
         self.multi_out = 1
+        self.output_mask = {"data": NoOutputMask()}
 
     monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
 
     cfg = DictConfig(
         {
-            "training": {"multistep_input": 1, "multistep_output": 1},
+            "training": {
+                "multistep_input": 1,
+                "multistep_output": 1,
+                "rollout": {"start": 1, "epoch_increment": 0, "max": 1},
+            },
             "model": {
                 "model": {
                     "diffusion": {
@@ -176,7 +192,7 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     name_to_index = {"A": 0, "B": 1}
     data_indices = {"data": _make_minimal_index_collection(name_to_index)}
 
-    forecaster = GraphDiffusionForecaster(
+    forecaster = GraphForecaster(
         config=cfg,
         graph_data={"data": HeteroData()},
         statistics={"data": {}},
@@ -216,8 +232,9 @@ def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.M
         y: dict[str, torch.Tensor],
         step: int | None = None,
         validation_mode: bool = False,
+        **kwargs: Any,
     ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
-        del y, step, validation_mode
+        del y, step, validation_mode, kwargs
         assert isinstance(self, GraphEnsForecaster)
         pred = next(iter(y_pred.values()))
         return torch.zeros(1, device=pred.device, dtype=pred.dtype), {}, y_pred
@@ -235,7 +252,9 @@ def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.M
     forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
     pl.LightningModule.__init__(forecaster)
 
-    forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
+    forecaster.model = DummyModelInterface(
+        DummyModel(num_output_variables=len(data_indices.model.output), output_times=1),
+    )
     forecaster.output_mask = {"data": NoOutputMask()}
     forecaster.loss = {"data": DummyLoss()}
     forecaster.data_indices = {"data": data_indices}
@@ -249,6 +268,7 @@ def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.M
     forecaster.model_comm_group = None
     forecaster.model_comm_group_size = 1
     forecaster.grid_dim = -2
+    forecaster.objective = DirectPredictionObjective()
 
     b, e_dummy, g, v = 2, 1, 4, len(name_to_index)
     batch = {"data": torch.randn((b, forecaster.multi_step + forecaster.rollout, e_dummy, g, v), dtype=torch.float32)}
@@ -274,7 +294,9 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
     forecaster.multi_out = 1
     forecaster.rollout = 1
     forecaster.nens_per_device = 2
-    forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
+    forecaster.model = DummyModelInterface(
+        DummyModel(num_output_variables=len(data_indices.model.output), output_times=1),
+    )
     forecaster.model_comm_group = None
     forecaster.model_comm_group_size = 1
     forecaster.grid_shard_shapes = {"data": None}
@@ -283,6 +305,7 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
     forecaster.data_indices = {"data": data_indices}
     forecaster.dataset_names = ["data"]
     forecaster.grid_dim = -2
+    forecaster.objective = DirectPredictionObjective()
 
     def _compute_loss_metrics(
         y_pred: dict[str, torch.Tensor],

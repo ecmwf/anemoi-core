@@ -48,6 +48,8 @@ optimizer:
 
 # select model
 model_task: anemoi.training.train.tasks.GraphEnsForecaster
+objective:
+  _target_: anemoi.training.train.objectives.DirectPredictionObjective
 
 # number of ensemble members per device
 ensemble_size_per_device: 4

@@ -23,14 +23,13 @@ from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import SpectralL2Loss
-from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.spectral import SpectralLoss
 from anemoi.training.utils.enums import TensorDim
 
-losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
+losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS]
 spectral_losses = [SpectralL2Loss, FourierCorrelationLoss, LogSpectralDistance]
 losses += spectral_losses
 
@@ -125,6 +124,17 @@ def test_simple_functionalloss(
 
     assert isinstance(loss, torch.Tensor)
     assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
+
+
+def test_pre_loss_weights_applied() -> None:
+    pred = torch.ones((1, 1, 1, 1, 1))
+    target = torch.zeros((1, 1, 1, 1, 1))
+    pre_loss_weights = torch.full((1, 1, 1, 1, 1), 2.0)
+
+    loss = MSELoss()
+    loss_val = loss(pred, target, pre_loss_weights=pre_loss_weights)
+
+    assert torch.allclose(loss_val, torch.tensor(2.0)), "pre_loss_weights should scale the raw loss difference"
 
 
 def test_batch_invariance(
@@ -239,7 +249,7 @@ def test_grid_invariance(
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
 )
 def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(DictConfig({"_target_": f"anemoi.training.losses.{loss_cls.__name__}"}))
@@ -248,7 +258,7 @@ def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
 )
 def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(
@@ -268,7 +278,7 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
 )
 def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(
@@ -288,7 +298,7 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
 )
 def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(
@@ -306,7 +316,7 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
 )
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(

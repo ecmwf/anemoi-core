@@ -203,6 +203,7 @@ class BaseLoss(nn.Module, ABC):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        pre_loss_weights: torch.Tensor | None = None,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -219,6 +220,8 @@ class BaseLoss(nn.Module, ABC):
             Prediction tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
         target : torch.Tensor
             Target tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
+        pre_loss_weights : torch.Tensor | None, optional
+            Weights applied to the raw difference before scaling, by default None
         squash : bool, optional
             Average last dimension, by default True
         scaler_indices: tuple[int,...], optional
@@ -261,6 +264,7 @@ class FunctionalLoss(BaseLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        pre_loss_weights: torch.Tensor | None = None,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -277,6 +281,8 @@ class FunctionalLoss(BaseLoss):
             Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
         target : torch.Tensor
             Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+        pre_loss_weights : torch.Tensor | None, optional
+            Weights applied to the raw difference before scaling, by default None
         squash : bool, optional
             Average last dimension, by default True
         scaler_indices: tuple[int,...], optional
@@ -296,6 +302,8 @@ class FunctionalLoss(BaseLoss):
         """
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
+        if pre_loss_weights is not None:
+            out = out * pre_loss_weights
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
         return self.reduce(out, squash, group=group if is_sharded else None)

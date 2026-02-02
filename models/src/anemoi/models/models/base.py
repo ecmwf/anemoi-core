@@ -263,7 +263,8 @@ class BaseGraphModel(nn.Module):
         """Prediction step for the model.
 
         Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
-        Subclasses can override this for different behavior (e.g., sampling for diffusion models).
+        Subclasses can override this for different behavior (e.g., sampling for diffusion models),
+        or override prepare_predict_inputs/finalize_predict_outputs to customize inference handling.
 
         Parameters
         ----------
@@ -288,46 +289,88 @@ class BaseGraphModel(nn.Module):
             Model output (after post-processing)
         """
         with torch.no_grad():
-            dataset_names = list(batch.keys())
+            prepared_inputs, grid_shard_shapes = self.prepare_predict_inputs(
+                batch,
+                pre_processors,
+                multi_step,
+                model_comm_group,
+                **kwargs,
+            )
 
-            for dataset_name in dataset_names:
-                assert (
-                    len(batch[dataset_name].shape) == 4
-                ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
-                # Dimensions are: batch, timesteps, grid, variables
-
-            x = {}
-            for dataset_name in dataset_names:
-                x[dataset_name] = batch[dataset_name][
-                    :, 0:multi_step, None, ...
-                ]  # add dummy ensemble dimension as 3rd index
-
-            # Handle distributed processing
-            grid_shard_shapes = None
-            if model_comm_group is not None:
-                grid_shard_shapes = {}
-                for dataset_name in dataset_names:
-                    shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
-                    grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
-                    x[dataset_name] = shard_tensor(x[dataset_name], -2, shard_shapes, model_comm_group)
-
-            for dataset_name in dataset_names:
-                x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
-
-            # Perform forward pass
+            x = prepared_inputs[0]
             y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
 
-            # Apply post-processing
-            for dataset_name in dataset_names:
-                y_hat[dataset_name] = post_processors[dataset_name](y_hat[dataset_name], in_place=False)
-
-            # Gather output if needed
-            if gather_out and model_comm_group is not None:
-                for dataset_name in dataset_names:
-                    y_hat_shard_shapes = apply_shard_shapes(y_hat[dataset_name], -2, grid_shard_shapes[dataset_name])
-                    y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
+            y_hat = self.finalize_predict_outputs(
+                y_hat,
+                post_processors,
+                prepared_inputs,
+                model_comm_group=model_comm_group,
+                grid_shard_shapes=grid_shard_shapes,
+                gather_out=gather_out,
+                **kwargs,
+            )
 
         return y_hat
+
+    def prepare_predict_inputs(
+        self,
+        batch: dict[str, torch.Tensor],
+        pre_processors: nn.ModuleDict,
+        multi_step: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
+    ) -> tuple[tuple[dict[str, torch.Tensor]], dict[str, Optional[list]]]:
+        """Prepare inputs for prediction."""
+        del kwargs
+        dataset_names = list(batch.keys())
+
+        for dataset_name in dataset_names:
+            assert (
+                len(batch[dataset_name].shape) == 4
+            ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
+            # Dimensions are: batch, timesteps, grid, variables
+
+        x = {}
+        for dataset_name in dataset_names:
+            x[dataset_name] = batch[dataset_name][
+                :, 0:multi_step, None, ...
+            ]  # add dummy ensemble dimension as 3rd index
+
+        grid_shard_shapes = None
+        if model_comm_group is not None:
+            grid_shard_shapes = {}
+            for dataset_name in dataset_names:
+                shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
+                grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
+                x[dataset_name] = shard_tensor(x[dataset_name], -2, shard_shapes, model_comm_group)
+
+        for dataset_name in dataset_names:
+            x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
+
+        return (x,), grid_shard_shapes
+
+    def finalize_predict_outputs(
+        self,
+        out: dict[str, torch.Tensor],
+        post_processors: nn.ModuleDict,
+        prepared_inputs: tuple[dict[str, torch.Tensor], ...],
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: dict[str, Optional[list]] = None,
+        gather_out: bool = True,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Finalize outputs after prediction."""
+        del prepared_inputs, kwargs
+
+        for dataset_name in out:
+            out[dataset_name] = post_processors[dataset_name](out[dataset_name], in_place=False)
+
+        if gather_out and model_comm_group is not None:
+            for dataset_name in out:
+                out_shard_shapes = apply_shard_shapes(out[dataset_name], -2, grid_shard_shapes[dataset_name])
+                out[dataset_name] = gather_tensor(out[dataset_name], -2, out_shard_shapes, model_comm_group)
+
+        return out
 
     @abstractmethod
     def fill_metadata(self, md_dict) -> None:

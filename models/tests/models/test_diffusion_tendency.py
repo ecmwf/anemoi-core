@@ -255,13 +255,13 @@ def test_after_sampling_reinserts_nans() -> None:
     def _passthrough_add_tendency(_state_inp, tendency, *_args, **_kwargs):
         return tendency
 
-    model.apply_reference_state_truncation = _identity_ref
-    model.add_tendency_to_state = _passthrough_add_tendency
+    model._tendency_apply_reference_state_truncation = _identity_ref
+    model._tendency_add_tendency_to_state = _passthrough_add_tendency
 
     out = {"data": torch.ones((1, 1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)}
     before_sampling_data = ({}, {"data": torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32)})
 
-    result = model._after_sampling(
+    result = model.finalize_predict_outputs(
         out,
         post_processors,
         before_sampling_data,

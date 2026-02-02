@@ -21,6 +21,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.train.objectives import DirectPredictionObjective
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ class GraphInterpolator(BaseGraphModule):
     """Graph neural network interpolator for PyTorch Lightning."""
 
     task_type = "time-interpolator"
+    supported_objectives = (DirectPredictionObjective,)
 
     def __init__(
         self,
@@ -149,6 +151,7 @@ class GraphInterpolator(BaseGraphModule):
 
         x_bound = {}
         for dataset_name in self.dataset_names:
+            # Boundary inputs: conditioning states at explicit boundary times.
             x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][
                 ...,
                 self.data_indices[dataset_name].data.input.full,
@@ -157,9 +160,9 @@ class GraphInterpolator(BaseGraphModule):
         for interp_step in self.interp_times:
             target_forcing = self.get_target_forcing(batch, interp_step)
 
-            y_pred = self(x_bound, target_forcing)
             y = {}
             for dataset_name, dataset_batch in batch.items():
+                # Target output state at the interpolation time.
                 y[dataset_name] = dataset_batch[
                     :,
                     self.imap[interp_step],
@@ -168,12 +171,48 @@ class GraphInterpolator(BaseGraphModule):
                     self.data_indices[dataset_name].data.output.full,
                 ]
 
+            shapes = {k: y_.shape for k, y_ in y.items()}
+            model_impl = self.model.model
+            # Objective provides schedule (e.g., sigma or time) per batch.
+            # Unused in direct prediction objective.
+            schedule = self.objective.sample_schedule(
+                shape=shapes,
+                device=next(iter(batch.values())).device,
+                model=model_impl,
+            )
+            # Objective builds (conditioning, target) pair for the training loss.
+            # y_cond is None for direct prediction objective.
+            y_cond, target = self.objective.build_training_pair(y, schedule)
+            # Forward pass in objective space (e.g., denoising or velocity).
+            y_pred = self.objective.forward(
+                model_impl,
+                x_bound,
+                y_cond,
+                schedule,
+                model_comm_group=self.model_comm_group,
+                grid_shard_shapes=self.grid_shard_shapes,
+                target_forcing=target_forcing,
+            )
+            metrics_y_pred = None
+            metrics_y = None
+            if validation_mode:
+                # Clean prediction/target in normalized output state space for metrics.
+                y_pred_clean, y_clean = self.objective.clean_pred_target_pair(y_pred, y, y_cond, schedule)
+                metrics_y_pred = y_pred_clean
+                metrics_y = y_clean
+            # Optional pre-loss weights (e.g., diffusion noise weighting).
+            # None for direct prediction objective.
+            pre_loss_weights = self.objective.pre_loss_weights(schedule, model=model_impl)
+
             loss_step, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
-                y,
+                target,
                 step=interp_step - 1,
                 validation_mode=validation_mode,
+                metrics_y_pred=metrics_y_pred,
+                metrics_y=metrics_y,
+                pre_loss_weights=pre_loss_weights,
                 use_reentrant=False,
             )
 
@@ -181,6 +220,7 @@ class GraphInterpolator(BaseGraphModule):
             metrics.update(metrics_next)
             y_preds.append(y_pred)
 
+        # Aggregate loss across interpolation times; predictions used for diagnostics.
         loss *= 1.0 / len(self.interp_times)
         return loss, metrics, y_preds
 
@@ -192,6 +232,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
     """Graph neural network interpolator with multiple output steps for PyTorch Lightning."""
 
     task_type = "time-interpolator"
+    supported_objectives = (DirectPredictionObjective,)
 
     def __init__(
         self,
@@ -251,11 +292,13 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         x_bound = {}
         y = {}
         for dataset_name, dataset_batch in batch.items():
+            # Boundary inputs: conditioning states at explicit boundary times.
             x_bound[dataset_name] = dataset_batch[:, itemgetter(*self.boundary_times)(self.imap)][
                 ...,
                 self.data_indices[dataset_name].data.input.full,
             ]  # (bs, time, ens, latlon, nvar)
 
+            # Target output window: full output variables for all interpolation times.
             y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)][
                 ...,
                 self.data_indices[dataset_name].data.output.full,
@@ -263,13 +306,46 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
-        y_pred = self(x_bound)
+        shapes = {k: y_.shape for k, y_ in y.items()}
+        model_impl = self.model.model
+        # Objective provides schedule (e.g., sigma or time) per batch.
+        # Unused in direct prediction objective.
+        schedule = self.objective.sample_schedule(
+            shape=shapes,
+            device=next(iter(batch.values())).device,
+            model=model_impl,
+        )
+        # Objective builds (conditioning, target) pair for the training loss.
+        # y_cond is None for direct prediction objective.
+        y_cond, target = self.objective.build_training_pair(y, schedule)
+        # Forward pass in objective space (e.g., denoising or velocity).
+        y_pred = self.objective.forward(
+            model_impl,
+            x_bound,
+            y_cond,
+            schedule,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
+        metrics_y_pred = None
+        metrics_y = None
+        if validation_mode:
+            # Clean prediction/target in normalized output state space for metrics.
+            y_pred_clean, y_clean = self.objective.clean_pred_target_pair(y_pred, y, y_cond, schedule)
+            metrics_y_pred = y_pred_clean
+            metrics_y = y_clean
+        # Optional pre-loss weights (e.g., diffusion noise weighting).
+        # None for direct prediction objective.
+        pre_loss_weights = self.objective.pre_loss_weights(schedule, model=model_impl)
 
         loss, metrics, _ = checkpoint(
             self.compute_loss_metrics,
             y_pred,
-            y,
+            target,
             validation_mode=validation_mode,
+            metrics_y_pred=metrics_y_pred,
+            metrics_y=metrics_y,
+            pre_loss_weights=pre_loss_weights,
             use_reentrant=False,
         )
 

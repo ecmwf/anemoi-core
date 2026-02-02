@@ -18,6 +18,7 @@ from .autoencoder import AnemoiModelAutoEncoder  # isort: skip
 from .hierarchical_autoencoder import AnemoiModelHierarchicalAutoEncoder  # isort: skip
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec  # isort: skip
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec  # isort: skip
+from .tendency_encoder_processor_decoder import AnemoiTendModelEncProcDec  # isort: skip
 
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "AnemoiEnsModelEncProcDec",
     "AnemoiDiffusionModelEncProcDec",
     "AnemoiDiffusionTendModelEncProcDec",
+    "AnemoiTendModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiModelEncProcDecInterpolator",
     "AnemoiEnsModelEncProcDec",

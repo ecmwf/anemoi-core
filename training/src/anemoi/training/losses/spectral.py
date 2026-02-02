@@ -128,6 +128,7 @@ class SpectralL2Loss(SpectralLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        pre_loss_weights: torch.Tensor | None = None,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -135,6 +136,7 @@ class SpectralL2Loss(SpectralLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        _ = pre_loss_weights
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
@@ -159,6 +161,7 @@ class LogSpectralDistance(SpectralLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        pre_loss_weights: torch.Tensor | None = None,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -166,6 +169,7 @@ class LogSpectralDistance(SpectralLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        _ = pre_loss_weights
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
@@ -194,6 +198,7 @@ class FourierCorrelationLoss(SpectralLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        pre_loss_weights: torch.Tensor | None = None,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -201,6 +206,7 @@ class FourierCorrelationLoss(SpectralLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        _ = pre_loss_weights
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps

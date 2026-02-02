@@ -60,6 +60,8 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec"
     )
     ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec"
+    ANEMOI_TEND_MODEL_ENC_PROC_DEC = "anemoi.models.models.tendency_encoder_processor_decoder.AnemoiTendModelEncProcDec"
+    ANEMOI_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTendModelEncProcDec"
     ANEMOI_MODEL_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"

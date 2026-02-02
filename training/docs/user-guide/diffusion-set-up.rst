@@ -10,9 +10,9 @@ deterministic training:
 
 **Differences from deterministic training:**
 
--  **Forecaster class**: Use :class:`GraphDiffusionForecaster` (or
-   :class:`GraphDiffusionTendForecaster` for tendency prediction)
-   instead of :class:`GraphForecaster`
+-  **Forecaster class**: Use :class:`GraphForecaster` (or
+   :class:`GraphTendForecaster` for tendency prediction) with a
+   diffusion objective.
 
 -  **Model config**: Use `graphtransformer_diffusion.yaml` or
    `transformer_diffusion.yaml` (or their `_diffusiontend` variants)
@@ -24,9 +24,8 @@ deterministic training:
    :class:`AnemoiDiffusionTendModelEncProcDec`) instead of
    :class:`AnemoiModelEncProcDec`
 
--  **Loss computation**: WeightedMSELoss is recommended for diffusion
-   training as it properly handles weighting according to the noise
-   level.
+-  **Loss computation**: Use :class:`MSELoss`; the diffusion objective
+   supplies pre-loss weights derived from the noise schedule.
 
 *************************
  Changes in model config
@@ -149,12 +148,17 @@ The training configuration for diffusion models requires changes:
 
 .. code:: yaml
 
-   # Select diffusion model task
+   # Select model task
    # For standard diffusion:
-   model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
+   model_task: anemoi.training.train.tasks.GraphForecaster
 
    # For tendency-based diffusion:
-   model_task: anemoi.training.train.tasks.GraphDiffusionTendForecaster
+   model_task: anemoi.training.train.tasks.GraphTendForecaster
+
+   # Objective (diffusion)
+   objective:
+     _target_: anemoi.training.train.objectives.DiffusionObjective
+     rho: ${model.model.diffusion.rho}
 
    # Standard training configuration remains similar
    multistep_input: 2
@@ -162,26 +166,25 @@ The training configuration for diffusion models requires changes:
      start: 1
      max: 1
 
-The model task must be set to the appropriate diffusion forecaster class
-to handle the diffusion-specific forward pass with preconditioning and
-noise injection.
+The model task stays the same; the diffusion behavior is selected by the
+objective strategy.
 
 *****************************
  Changes in loss computation
 *****************************
 
-The diffusion training uses WeightedMSELoss which handles noise weights
-properly:
+The diffusion training uses :class:`MSELoss`; the diffusion objective
+provides ``pre_loss_weights`` based on the noise schedule:
 
 .. code:: yaml
 
    training_loss:
       datasets:
           your_dataset_name:
-              _target_: anemoi.training.losses.WeightedMSELoss
+              _target_: anemoi.training.losses.MSELoss
 
-During training, the :class:`GraphDiffusionForecaster` automatically
-passes the required `weights` based on the noise level to the loss
+During training, the diffusion objective automatically passes the
+required ``pre_loss_weights`` based on the noise level to the loss
 function.
 
 **************************
@@ -198,7 +201,7 @@ Uses `graphtransformer_diffusion.yaml` or `transformer_diffusion.yaml`:
 -  Predicts the denoised state directly
 -  Applies noise to the target state during training
 -  Model class: :class:`AnemoiDiffusionModelEncProcDec`
--  Forecaster: :class:`GraphDiffusionForecaster`
+-  Forecaster: :class:`GraphForecaster`
 -  Use single-step rollout (`rollout.max: 1`)
 
 **Tendency-based Diffusion**
@@ -210,7 +213,7 @@ Uses `graphtransformer_diffusiontend.yaml` or
 -  Predicts the tendency (change) between timesteps
 -  Applies noise to the tendency rather than the state
 -  Model class: :class:`AnemoiDiffusionTendModelEncProcDec`
--  Forecaster: :class:`GraphDiffusionTendForecaster`
+-  Forecaster: :class:`GraphTendForecaster`
 -  Requires `statistics_tendencies` for normalization
 -  Use single-step rollout (`rollout.max: 1`)
 
@@ -234,9 +237,12 @@ A minimal config file for standard diffusion training:
    - training: diffusion                 # Use diffusion training config
    - _self_
 
-   # Select model task for diffusion
+   # Select model task and diffusion objective
    training:
-     model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
+     model_task: anemoi.training.train.tasks.GraphForecaster
+     objective:
+       _target_: anemoi.training.train.objectives.DiffusionObjective
+       rho: ${model.model.diffusion.rho}
 
    config_validation: True
 
@@ -254,9 +260,12 @@ For tendency-based diffusion, change the model config and model task:
    - training: diffusion                     # Same training config
    - _self_
 
-   # Select model task for tendency-based diffusion
+   # Select model task and diffusion objective for tendency-based diffusion
    training:
-     model_task: anemoi.training.train.tasks.GraphDiffusionTendForecaster
+     model_task: anemoi.training.train.tasks.GraphTendForecaster
+     objective:
+       _target_: anemoi.training.train.objectives.DiffusionObjective
+       rho: ${model.model.diffusion.rho}
 
    # Ensure statistics_tendencies are available
    config_validation: True

@@ -48,6 +48,8 @@ optimizer:
 
 # select model
 model_task: anemoi.training.train.tasks.GraphForecaster
+objective:
+  _target_: anemoi.training.train.objectives.DirectPredictionObjective
 
 # select strategy
 strategy:

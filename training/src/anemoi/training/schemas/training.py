@@ -251,7 +251,6 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
-    weighted_mse = "anemoi.training.losses.WeightedMSELoss"
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
@@ -428,6 +427,8 @@ class BaseTrainingSchema(BaseModel):
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: DatasetDict[dict[str, LossSchemas] | None]
     "List of validation metrics configurations."
+    objective: dict | None = None
+    "Objective strategy configuration (Hydra _target_)."
     variable_groups: DatasetDict[VariableGroupType]
     "Groups for variable loss scaling"
     max_epochs: PositiveInt | None = None
@@ -458,16 +459,8 @@ class ForecasterEnsSchema(ForecasterSchema):
     "Training objective."
 
 
-class DiffusionForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
-    "Training objective."
-
-
-class DiffusionTendForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
-        ...,
-        alias="model_task",
-    )
+class TendForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphTendForecaster"] = Field(..., alias="model_task")
     "Training objective."
 
 
@@ -499,8 +492,7 @@ TrainingSchema = Annotated[
     | ForecasterEnsSchema
     | InterpolationSchema
     | InterpolationMultiSchema
-    | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema
+    | TendForecasterSchema
     | AutoencoderSchema,
     Discriminator("model_task"),
 ]

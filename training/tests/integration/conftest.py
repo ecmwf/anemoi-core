@@ -245,14 +245,18 @@ def multi_out_multidatasets_config(multidatasets_config: tuple[DictConfig, list[
         pytest.param(
             [
                 "model=graphtransformer_diffusion",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
+                "training.model_task=anemoi.training.train.tasks.GraphForecaster",
+                "training.objective._target_=anemoi.training.train.objectives.DiffusionObjective",
+                "training.objective.rho=${model.model.diffusion.rho}",
             ],
             id="diffusion",
         ),
         pytest.param(
             [
                 "model=graphtransformer_diffusiontend",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+                "training.model_task=anemoi.training.train.tasks.GraphTendForecaster",
+                "training.objective._target_=anemoi.training.train.objectives.DiffusionObjective",
+                "training.objective.rho=${model.model.diffusion.rho}",
             ],
             id="diffusiontend",
         ),
@@ -653,7 +657,7 @@ def multi_out_interpolator_config(
         [],
         [
             "model=graphtransformer_diffusiontend",
-            "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+            "training.model_task=anemoi.training.train.tasks.GraphTendForecaster",
         ],
     ],
     ids=["diffusion", "diffusiontend"],

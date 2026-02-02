@@ -202,6 +202,16 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
+        objective_cfg = getattr(config.training, "objective", None)
+        assert objective_cfg is not None, "Training objective must be configured for this task."
+        self.objective = instantiate(objective_cfg)
+        supported_objectives = getattr(self, "supported_objectives", None)
+        if supported_objectives is not None:
+            assert isinstance(
+                self.objective,
+                supported_objectives,
+            ), f"{self.__class__.__name__} does not support objective {self.objective.__class__.__name__}."
+
         # Initialize components for multi-dataset
         self.target_dataset_names = []  # list of dataset names used for loss computation
         self.scalers = {}  # dict of dict of tensors
@@ -274,7 +284,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # TODO(dieter): change to n_step_in and n_step_out
         self.multi_step = config.training.multistep_input
         self.multi_out = config.training.multistep_output  # defaults to 1 via pydantic
-        LOGGER.info("GraphModule with multistep_input=%s and multistep_output=%s", self.multi_step, self.multi_out)
+        LOGGER.info(
+            "GraphModule with multistep_input=%s and multistep_output=%s",
+            self.multi_step,
+            self.multi_out,
+        )
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -482,7 +496,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         tuple[torch.Tensor, torch.Tensor, slice | None]
             Prepared y_pred, y, and grid_shard_slice
         """
-        # Handle multi-dataset case for grid shard slice and shapes
+        # Resolve shard metadata for this dataset, then decide whether to gather.
         grid_shard_slice = self.grid_shard_slice[dataset_name]
         grid_shard_shapes = self.grid_shard_shapes[dataset_name]
 
@@ -492,7 +506,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             self.metrics_support_sharding or not validation_mode
         )
 
-        if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
+        # If sharding isn't supported for loss/metrics, gather to full grid.
+        if is_sharded and not sharding_supported:
             shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, grid_shard_shapes)
             y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
             y_full = gather_tensor(torch.clone(y), self.grid_dim, shard_shapes, self.model_comm_group)
@@ -501,6 +516,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y_pred_full, y_full = y_pred, y
             final_grid_shard_slice = grid_shard_slice
 
+        # Returned to compute_dataset_loss_metrics for loss/metric evaluation.
         return y_pred_full, y_full, final_grid_shard_slice
 
     def _compute_loss(
@@ -509,6 +525,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pre_loss_weights: torch.Tensor | dict[str, torch.Tensor] | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -523,6 +540,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Grid shard slice for distributed training
         dataset_name : str
             Dataset name for multi-dataset scenarios
+        pre_loss_weights : torch.Tensor | dict[str, torch.Tensor] | None
+            Optional weights applied to the raw loss difference before scaling.
         **_kwargs
             Additional arguments
 
@@ -531,9 +550,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
+        # Resolve per-dataset weights when passed as a dict.
+        dataset_weights = pre_loss_weights
+        if isinstance(pre_loss_weights, dict):
+            dataset_weights = pre_loss_weights.get(dataset_name)
+
         return self.loss[dataset_name](
             y_pred,
             y,
+            pre_loss_weights=dataset_weights,
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )
@@ -568,6 +593,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        metrics_y_pred: torch.Tensor | None = None,
+        metrics_y: torch.Tensor | None = None,
         validation_mode: bool = False,
         dataset_name: str | None = None,
         **kwargs,
@@ -580,6 +607,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
+        metrics_y_pred : torch.Tensor
+            Prediction to use for validation metrics (typically clean state)
+        metrics_y : torch.Tensor
+            Target to use for validation metrics (typically clean target)
         step : int, optional
             Current step
         validation_mode : bool, optional
@@ -591,8 +622,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         -------
         tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
             Loss, metrics dictionary (if validation_mode), and full predictions
+
         """
-        # Prepare tensors for loss/metrics computation
+        # Per-dataset path: prepare tensors (gather if needed), then compute loss/metrics.
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred,
             y,
@@ -611,20 +643,39 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
+            assert (
+                metrics_y_pred is not None and metrics_y is not None
+            ), "metrics_y_pred and metrics_y must be provided when validation_mode is True."
+            # If loss/metrics use the exact same tensors, reuse the prepared loss tensors
+            # to avoid an extra gather when sharding is enabled.
+            if metrics_y_pred is y_pred and metrics_y is y:
+                metrics_pred_full, metrics_full = y_pred_full, y_full
+                metrics_slice = grid_shard_slice
+            else:
+                metrics_pred_full, metrics_full, metrics_slice = self._prepare_tensors_for_loss(
+                    metrics_y_pred,
+                    metrics_y,
+                    validation_mode=validation_mode,
+                    dataset_name=dataset_name,
+                )
+
             metrics_next = self._compute_metrics(
-                y_pred_full,
-                y_full,
-                grid_shard_slice=grid_shard_slice,
+                metrics_pred_full,
+                metrics_full,
+                grid_shard_slice=metrics_slice,
                 dataset_name=dataset_name,
                 **kwargs,
             )
 
+        # Return original (sharded) y_pred for rollout/advance.
         return loss, metrics_next, y_pred
 
     def compute_loss_metrics(
         self,
         y_pred: dict[str, torch.Tensor],
         y: dict[str, torch.Tensor],
+        metrics_y_pred: dict[str, torch.Tensor] | None = None,
+        metrics_y: dict[str, torch.Tensor] | None = None,
         validation_mode: bool = False,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
@@ -636,6 +687,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted values
         y : dict[str, torch.Tensor]
             Target values
+        metrics_y_pred : dict[str, torch.Tensor]
+            Predictions to use for validation metrics (typically clean state)
+        metrics_y : dict[str, torch.Tensor]
+            Targets to use for validation metrics (typically clean target)
         step : int, optional
             Current step
         validation_mode : bool, optional
@@ -647,18 +702,38 @@ class BaseGraphModule(pl.LightningModule, ABC):
         -------
         tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
             Loss, metrics dictionary (if validation_mode), and full predictions
+
+        Call sequence
+        -------------
+        compute_loss_metrics →
+          compute_dataset_loss_metrics →
+            _prepare_tensors_for_loss →
+            _compute_loss (+ _compute_metrics if validation_mode)
         """
         assert isinstance(y_pred, dict), "y_pred must be a dict keyed by dataset name"
         assert isinstance(y, dict), "y must be a dict keyed by dataset name"
-        # Prepare tensors for loss/metrics computation
+        if validation_mode:
+            assert (
+                metrics_y_pred is not None and metrics_y is not None
+            ), "metrics_y_pred and metrics_y must be provided when validation_mode is True."
+            assert isinstance(metrics_y_pred, dict), "metrics_y_pred must be a dict keyed by dataset name"
+            assert isinstance(metrics_y, dict), "metrics_y must be a dict keyed by dataset name"
+        else:
+            assert (
+                metrics_y_pred is None and metrics_y is None
+            ), "metrics_y_pred/metrics_y should be omitted when validation_mode is False."
+        # Aggregate across datasets: compute per-dataset loss/metrics and sum losses.
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
+            dataset_kwargs = dict(kwargs)
+            dataset_kwargs["metrics_y_pred"] = metrics_y_pred[dataset_name] if metrics_y_pred is not None else None
+            dataset_kwargs["metrics_y"] = metrics_y[dataset_name] if metrics_y is not None else None
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
                 y_pred[dataset_name],
                 y[dataset_name],
                 validation_mode=validation_mode,
                 dataset_name=dataset_name,
-                **kwargs,
+                **dataset_kwargs,
             )
 
             if dataset_loss is not None:
@@ -670,10 +745,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
                     metrics_next[f"{dataset_name}_{loss_name}_loss"] = dataset_loss
 
-            # Prefix dataset name to metric keys
+            # Prefix dataset name to metric keys for multi-dataset logging.
             for metric_name, metric_value in dataset_metrics.items():
                 metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
 
+        # Return totals to the task step for logging and backprop.
         return total_loss, metrics_next, y_preds
 
     def on_after_batch_transfer(self, batch: dict[str, torch.Tensor], _: int) -> dict[str, torch.Tensor]:
@@ -1000,7 +1076,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+    def configure_optimizers(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
         scheduler = self._create_scheduler(optimizer)

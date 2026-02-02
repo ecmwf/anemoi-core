@@ -1,0 +1,88 @@
+num_channels: 1024
+condition_on_residual: False
+cpu_offload: False
+
+keep_batch_sharded: True
+
+model:
+  _target_: anemoi.models.models.AnemoiTendModelEncProcDec
+
+layer_kernels:
+  LayerNorm:
+    _target_: torch.nn.LayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+processor:
+  _target_: anemoi.models.layers.processor.TransformerProcessor
+  num_layers: 16
+  num_chunks: 4
+  mlp_hidden_ratio: 4
+  num_heads: 16
+  window_size: 512
+  dropout_p: 0.0
+  attention_implementation: flash_attention
+  qk_norm: False
+  softcap: 0.0
+  use_alibi_slopes: False
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
+
+encoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  trainable_size: ${model.trainable_parameters.data2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_chunks: 4
+  mlp_hidden_ratio: 4
+  num_heads: 16
+  qk_norm: False
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"
+
+decoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_chunks: 4
+  mlp_hidden_ratio: 4
+  num_heads: 16
+  initialise_data_extractor_zero: False
+  qk_norm: False
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"
+
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection
+  step: -1
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
+
+trainable_parameters:
+  data: 8
+  hidden: 8
+  data2hidden: 8
+  hidden2data: 8
+  hidden2hidden: 8
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []

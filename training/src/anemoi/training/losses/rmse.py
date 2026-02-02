@@ -27,6 +27,7 @@ class RMSELoss(MSELoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        pre_loss_weights: torch.Tensor | None = None,
         squash: bool = True,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -62,6 +63,7 @@ class RMSELoss(MSELoss):
         mse = super().forward(
             pred=pred,
             target=target,
+            pre_loss_weights=pre_loss_weights,
             squash=squash,
             scaler_indices=scaler_indices,
             without_scalers=without_scalers,

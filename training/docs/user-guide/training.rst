@@ -338,7 +338,7 @@ tasks and easily allows for custom loss functions to be added.
    training_loss:
       datasets:
          your_dataset_name:
-            _target_: anemoi.training.losses.mse.WeightedMSELoss
+            _target_: anemoi.training.losses.MSELoss
             # class kwargs
 
 The choice of loss function depends on the model task and the desired

@@ -49,7 +49,10 @@ optimizer:
   eps: 1e-7
 
 # select model
-model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
+model_task: anemoi.training.train.tasks.GraphForecaster
+objective:
+  _target_: anemoi.training.train.objectives.DiffusionObjective
+  rho: ${model.model.diffusion.rho}
 
 # select strategy
 strategy:
@@ -69,7 +72,7 @@ training_loss:
   datasets:
     data: # user-defined key in data
       # loss class to initialise
-      _target_: anemoi.training.losses.WeightedMSELoss
+      _target_: anemoi.training.losses.MSELoss
       # Scalers to include in loss calculation
       # A selection of available scalers are listed in training/scalers.
       # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded

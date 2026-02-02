@@ -43,7 +43,7 @@ to :ref:`loss-function-scaling`.
 These are available in the ``anemoi.training.losses`` module, at
 ``anemoi.training.losses.{short_name}.{class_name}``.
 
-So for example, to use the ``WeightedMSELoss`` class, you would
+So for example, to use the ``MSELoss`` class, you would
 reference it in the config as follows:
 
 .. code:: yaml
@@ -53,7 +53,7 @@ reference it in the config as follows:
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.mse.WeightedMSELoss
+            _target_: anemoi.training.losses.MSELoss
             # loss function kwargs here
 
 ******************************
@@ -65,8 +65,9 @@ The following probabilistic loss functions are available by default:
 -  ``KernelCRPSLoss``: Kernel CRPS loss.
 -  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
    et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
--  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
-   handle noise weights
+
+Diffusion objectives can provide ``pre_loss_weights`` to functional
+losses (e.g. ``MSELoss``) when a noise schedule is in use.
 
 The config for these loss functions is the same as for the
 deterministic:
@@ -148,7 +149,7 @@ define whether to include them in the loss function by setting
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.mse.WeightedMSELoss
+            _target_: anemoi.training.losses.MSELoss
             scalers: ['scaler1', 'scaler2']
 
 Scalers can be added as options for the loss functions using the
@@ -405,7 +406,7 @@ losses above.
          your_dataset_name:
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-               - __target__: anemoi.training.losses.mse.WeightedMSELoss
+               - __target__: anemoi.training.losses.MSELoss
                - __target__: anemoi.training.losses.mae.WeightedMAELoss
             scalers: ['variable']
             loss_weights: [1.0,0.5]
@@ -430,7 +431,7 @@ individual loss config.
          your_dataset_name:
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-                  - _target_: anemoi.training.losses.mse.WeightedMSELoss
+                  - _target_: anemoi.training.losses.MSELoss
                   scalars: ['variable']
                   - _target_: anemoi.training.losses.mae.WeightedMAELoss
                   scalars: ['loss_weights_mask']
