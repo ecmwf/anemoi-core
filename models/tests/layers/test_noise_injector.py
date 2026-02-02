@@ -60,7 +60,7 @@ def test_noise_conditioning_graph_projection_shape() -> None:
 
 def test_noise_conditioning_rejects_mixed_sources() -> None:
     graph = _build_noise_graph()
-    with pytest.raises(ValueError, match="noise_matrix or noise_edges_name"):
+    with pytest.raises(AssertionError, match="noise_matrix or noise_edges_name"):
         NoiseConditioning(
             noise_std=1,
             noise_channels_dim=2,
@@ -74,7 +74,7 @@ def test_noise_conditioning_rejects_mixed_sources() -> None:
 
 
 def test_noise_conditioning_requires_graph_data() -> None:
-    with pytest.raises(ValueError, match="graph_data must be provided"):
+    with pytest.raises(AssertionError, match="graph_data must be provided"):
         NoiseConditioning(
             noise_std=1,
             noise_channels_dim=2,

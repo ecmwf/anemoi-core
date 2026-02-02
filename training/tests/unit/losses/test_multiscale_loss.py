@@ -69,7 +69,7 @@ def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, t
 
 def test_multiscale_graph_requires_graph_data() -> None:
     per_scale_loss = MSELoss()
-    with pytest.raises(ValueError, match="graph_data must be provided"):
+    with pytest.raises(AssertionError, match="graph_data must be provided"):
         MultiscaleLossWrapper(
             per_scale_loss=per_scale_loss,
             weights=[1.0, 1.0],

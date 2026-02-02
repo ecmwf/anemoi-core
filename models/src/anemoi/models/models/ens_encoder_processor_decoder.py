@@ -47,11 +47,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def _build_networks(self, model_config):
         super()._build_networks(model_config)
+        first_dataset_name = next(iter(self._graph_data.keys()))
         self.noise_injector = instantiate(
             model_config.model.noise_injector,
             _recursive_=False,
             num_channels=self.num_channels,
-            graph_data=self.graph_data,
+            graph_data=self._graph_data[first_dataset_name],
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
