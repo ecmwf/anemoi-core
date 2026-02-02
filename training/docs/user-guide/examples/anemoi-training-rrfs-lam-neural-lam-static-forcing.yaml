@@ -54,17 +54,34 @@ dataloader:
     validation: 4
     test: 4
   training:
-    start: "2024-05-05T00:00:00"
-    end: "2024-05-05T23:00:00"
-    drop: [boundary_mask]
+    datasets:
+      data:
+        dataset: ${system.input.dataset}
+        start: "2024-05-05T00:00:00"
+        end: "2024-05-05T23:00:00"
+        frequency: ${data.frequency}
+        drop: [boundary_mask]
   validation:
-    start: "2024-05-05T00:00:00"
-    end: "2024-05-05T18:00:00"
-    drop: [boundary_mask]
+    datasets:
+      data:
+        dataset: ${system.input.dataset}
+        start: "2024-05-05T00:00:00"
+        end: "2024-05-05T18:00:00"
+        frequency: ${data.frequency}
+        drop: [boundary_mask]
   test:
-    start: "2024-05-05T19:00:00"
-    end: "2024-05-05T23:00:00"
-    drop: [boundary_mask]
+    datasets:
+      data:
+        dataset: ${system.input.dataset}
+        start: "2024-05-05T19:00:00"
+        end: "2024-05-05T23:00:00"
+        frequency: ${data.frequency}
+        drop: [boundary_mask]
+  grid_indices:
+    datasets:
+      data:
+        _target_: anemoi.training.data.grid_indices.FullGrid
+        nodes_name: ${graph.data}
 
 training:
   metrics:
