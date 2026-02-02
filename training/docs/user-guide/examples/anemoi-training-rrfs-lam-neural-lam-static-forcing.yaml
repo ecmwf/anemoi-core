@@ -1,6 +1,5 @@
 defaults:
   - data: zarr
-  - dataloader: rrfs_native_no_frequency
   - diagnostics: evaluation_no_plot
   - system: example
   - graph: existing
