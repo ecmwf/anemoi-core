@@ -12,36 +12,6 @@ import functools
 from collections import deque
 from typing import Any
 
-from omegaconf import DictConfig
-
-from anemoi.training.diagnostics.mlflow.utils import AnemoiMlflowClient
-
-
-def _get_or_create_experiment_id(client: AnemoiMlflowClient, experiment_name: str) -> str:
-    experiment = client.get_experiment_by_name(experiment_name)
-    return experiment.experiment_id if experiment is not None else client.create_experiment(experiment_name)
-
-
-def create_run_id(mlflow_cfg: DictConfig) -> str:
-
-    client_path = mlflow_cfg.save_dir if mlflow_cfg.offline else mlflow_cfg.tracking_uri
-
-    client = AnemoiMlflowClient(
-        client_path,
-        authentication=mlflow_cfg.authentication,
-        check_health=False,
-    )
-    experiment_id = _get_or_create_experiment_id(
-        client,
-        mlflow_cfg.experiment_name,
-    )
-
-    run = client.create_run(
-        experiment_id,
-        run_name=mlflow_cfg.run_name or None,
-    )
-    return run.info.run_id
-
 
 class FixedLengthSet:
     def __init__(self, maxlen: int):

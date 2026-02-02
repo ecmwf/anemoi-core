@@ -254,15 +254,6 @@ class AnemoiTrainer(ABC):
 
         return model
 
-    @rank_zero_only
-    def _get_mlflow_run_id(self) -> str:
-        from anemoi.training.diagnostics.mlflow.utils import create_run_id
-
-        run_id = create_run_id(self.config.diagnostics.log.mlflow)
-        # for resumed runs or offline runs logging this can be useful
-        LOGGER.info("Mlflow Run id: %s", run_id)
-        return run_id
-
     @cached_property
     def run_id(self) -> str:
         """Unique identifier for the current run."""
@@ -278,7 +269,7 @@ class AnemoiTrainer(ABC):
         # When we rely on mlflow to create a new run ID
         if self.config.diagnostics.log.mlflow.enabled:
             # if using mlflow with a new run get the run_id from mlflow
-            return self._get_mlflow_run_id()
+            return self.mlflow_logger.run_id
 
         # When no run ID is provided a random one is generated
         import uuid
@@ -364,10 +355,9 @@ class AnemoiTrainer(ABC):
     def _logger_kwargs(self) -> dict:
         """Shared keyword arguments for all loggers."""
         return {
-            "run_id": self.run_id,
+            "run_id": self.config.training.run_id,
             "fork_run_id": self.config.training.fork_run_id,
             "paths": self.config.system.output,
-            "model": self.model,
             "logger_config": self.config.diagnostics.log,
         }
 
@@ -381,7 +371,8 @@ class AnemoiTrainer(ABC):
     def wandb_logger(self) -> None:
         """Lazily initialize and cache the W&B logger."""
         LOGGER.info("Initializing W&B logger lazily...")
-        return get_wandb_logger(**self._logger_kwargs)
+        kwargs = self._logger_kwargs.update({"model": self.model})
+        return get_wandb_logger(**kwargs)
 
     @cached_property
     def loggers(self) -> list:
