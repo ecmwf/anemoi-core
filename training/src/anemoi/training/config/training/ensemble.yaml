@@ -71,7 +71,7 @@ training_loss:
       # loss class to initialise, can be anything subclassing torch.nn.Module
       _target_: anemoi.training.losses.MultiscaleLossWrapper
       loss_matrices_path: ${system.input.loss_matrices_path}
-      loss_matrices: [null]
+      loss_matrices_graph: ${graph.projections.multiscale.matrices}
       weights: [1.0]
 
       keep_batch_sharded: ${model.keep_batch_sharded}
@@ -110,7 +110,7 @@ validation_metrics:
         _target_: anemoi.training.losses.MultiscaleLossWrapper
 
         loss_matrices_path: ${system.input.loss_matrices_path}
-        loss_matrices: [null]
+        loss_matrices_graph: ${graph.projections.multiscale.matrices}
         weights: [1.0]
 
         keep_batch_sharded: ${model.keep_batch_sharded}

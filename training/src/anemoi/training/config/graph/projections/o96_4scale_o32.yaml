@@ -1,0 +1,116 @@
+# @package graph.projections
+---
+# Example: o96 input data, 4-scale multiscale smoothing (K=16/32/64/128), and truncation to o32.
+# Sigma values are in radians (~30/60/120/240 km).
+
+multiscale:
+  matrices:
+    - edges_name: [smooth_1x, "to", smooth_1x]
+      edge_weight_attribute: gauss_weight
+    - edges_name: [smooth_2x, "to", smooth_2x]
+      edge_weight_attribute: gauss_weight
+    - edges_name: [smooth_4x, "to", smooth_4x]
+      edge_weight_attribute: gauss_weight
+    - edges_name: [smooth_8x, "to", smooth_8x]
+      edge_weight_attribute: gauss_weight
+
+  nodes:
+    smooth_1x:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+        grid: o96
+    smooth_2x:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+        grid: o96
+    smooth_4x:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+        grid: o96
+    smooth_8x:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+        grid: o96
+
+  edges:
+    - source_name: smooth_1x
+      target_name: smooth_1x
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 16
+      attributes:
+        gauss_weight:
+          _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+          norm: l1
+          sigma: 0.00471
+
+    - source_name: smooth_2x
+      target_name: smooth_2x
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 32
+      attributes:
+        gauss_weight:
+          _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+          norm: l1
+          sigma: 0.00942
+
+    - source_name: smooth_4x
+      target_name: smooth_4x
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 64
+      attributes:
+        gauss_weight:
+          _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+          norm: l1
+          sigma: 0.01884
+
+    - source_name: smooth_8x
+      target_name: smooth_8x
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 128
+      attributes:
+        gauss_weight:
+          _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+          norm: l1
+          sigma: 0.03768
+
+residual:
+  data_nodes: ${graph.data}
+  truncation_nodes: truncation
+  down_edges_name: ["${graph.projections.residual.data_nodes}", "to", "${graph.projections.residual.truncation_nodes}"]
+  up_edges_name: ["${graph.projections.residual.truncation_nodes}", "to", "${graph.projections.residual.data_nodes}"]
+  edge_weight_attribute: gauss_weight
+
+  truncation_grid: o32
+
+  nodes:
+    truncation:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+        grid: ${graph.projections.residual.truncation_grid}
+
+  edges:
+    - source_name: ${graph.data}
+      target_name: ${graph.projections.residual.truncation_nodes}
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 32
+      attributes:
+        gauss_weight:
+          _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+          norm: l1
+          sigma: 0.03139
+
+    - source_name: ${graph.projections.residual.truncation_nodes}
+      target_name: ${graph.data}
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 32
+      attributes:
+        gauss_weight:
+          _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+          norm: l1
+          sigma: 0.03139

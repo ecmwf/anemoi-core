@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Any
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
@@ -49,6 +50,8 @@ class BaseGraphSchema(PydanticBaseModel):
     "Nodes schema for all types of nodes (ex. data, hidden)."
     edges: list[EdgeSchema] | None = Field(default=None)
     "List of edges schema."
+    projections: dict[str, Any] | None = Field(default=None)
+    "Optional projection graph definitions (nodes/edges metadata for losses or residuals)."
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
     post_processors: list[ProcessorSchemas] = Field(default_factory=list)

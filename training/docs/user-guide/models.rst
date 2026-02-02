@@ -169,7 +169,7 @@ main purposes:
    matrices can be used to compute losses at different scales.
 
 **************
- Matrix Types
+Matrix Types
 **************
 
 The truncation system supports several types of transformation matrices:
@@ -181,6 +181,12 @@ The truncation system supports several types of transformation matrices:
 **Inverse Truncation Matrix (``truncation_inv``)**
    The inverse transformation matrix.
 
+**Truncation Edge Names (``truncation_down_edges_name``, ``truncation_up_edges_name``)**
+   Graph edge identifiers for the down/up projections when using
+   :class:`anemoi.models.layers.residual.TruncatedConnection` with
+   graph-based projections. Each entry is a tuple
+   ``[source, relation, target]``.
+
 **Loss Matrices Path (``loss_matrices_path``)**
    Path to the directory containing smoothing matrices for multi-scale
    loss computation. The list of matrix filenames is configured directly
@@ -190,14 +196,87 @@ The truncation system supports several types of transformation matrices:
    corresponds to the largest scales. The following matrices then
    include smaller and smaller scales.
 
+**Loss Matrices Graph (``loss_matrices_graph``)**
+   List of graph-based smoothing definitions used by
+   ``MultiscaleLossWrapper``. Each entry is a dictionary containing an
+   ``edges_name`` tuple (and optional ``edge_weight_attribute``). The
+   edges are defined in ``config.graph.projections`` and are merged into
+   the main graph at startup. Gaussian distance weights computed with
+   ``norm: l1`` should be used as ``edge_weight_attribute`` (commonly
+   ``gauss_weight`` in the projection graph).
+
 .. note::
 
    The truncation matrices required for field truncation can be
-   generated using the ``anemoi-graphs`` package.
+   generated using the ``anemoi-graphs`` package, or constructed at
+   runtime via graph-based projections defined in
+   ``config.graph.projections``.
 
    For detailed instructions on how to create these matrices, see the
    documentation at :ref:`Create sparse matrices with anemoi-graphs
    <anemoi-graphs:usage-create_sparse_matrices>` tutorial.
+
+Graph-based configuration (recommended)
+***************************************
+
+Define projection graphs under ``config.graph.projections`` and reference
+them from the loss and residual configs. The projection nodes and edges
+are merged into the main graph at startup, so you can keep all matrix
+definitions alongside the rest of your graph config.
+Use either the graph-based options or the file-based options, not both.
+For both multiscale smoothing and truncation, Gaussian distance weights
+with ``norm: l1`` should be used as ``edge_weight_attribute`` (commonly
+``gauss_weight`` in the projection graph).
+
+.. code:: yaml
+
+   # graph config
+   graph:
+     projections:
+       multiscale:
+         matrices:
+           - edges_name: [smooth_1x, "to", smooth_1x]
+             edge_weight_attribute: gauss_weight
+           - edges_name: [smooth_2x, "to", smooth_2x]
+             edge_weight_attribute: gauss_weight
+         nodes: ...
+         edges: ...
+       residual:
+         down_edges_name: [${graph.data}, "to", truncation]
+         up_edges_name: [truncation, "to", ${graph.data}]
+         edge_weight_attribute: gauss_weight
+         nodes: ...
+         edges: ...
+
+.. code:: yaml
+
+   # training + model config
+   training:
+     training_loss:
+       datasets:
+         your_dataset_name:
+           _target_: anemoi.training.losses.MultiscaleLossWrapper
+           loss_matrices_graph: ${graph.projections.multiscale.matrices}
+           weights: [1.0, 1.0]
+           per_scale_loss:
+             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             scalers: ['node_weights']
+
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       truncation_down_edges_name: ${graph.projections.residual.down_edges_name}
+       truncation_up_edges_name: ${graph.projections.residual.up_edges_name}
+       edge_weight_attribute: ${graph.projections.residual.edge_weight_attribute}
+
+File-based configuration (still supported)
+******************************************
+
+If you prefer precomputed sparse matrices, continue to use file paths and
+``loss_matrices_path``. For truncation, set
+``truncation_down_file_path`` and ``truncation_up_file_path`` in the
+``model.residual`` config, typically pointing to
+``system.input.truncation`` and ``system.input.truncation_inv``.
 
 ***************
  Ensemble Size

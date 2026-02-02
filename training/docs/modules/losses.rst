@@ -90,7 +90,43 @@ presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
 functions such as the `AlmostFairKernelCRPSLoss` to provide scale-aware
 model training.
 
-The config for the multiscale loss functions is the following:
+The multiscale wrapper supports two ways to supply smoothing matrices:
+
+#. **Graph-based** (recommended): reference projection edges defined in
+   ``config.graph.projections`` so sparse matrices are built at runtime.
+#. **File-based**: load precomputed ``.npz`` matrices from disk.
+
+Graph-based configuration (recommended):
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.MultiscaleLossWrapper
+            loss_matrices_graph: ${graph.projections.multiscale.matrices}
+            weights:
+               - 1.0
+               - 1.0
+               - 1.0
+               - 1.0
+            per_scale_loss:
+               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               scalers: ['node_weights']
+               ignore_nans: False
+               no_autocast: True
+               alpha: 1.0
+
+Each entry in ``loss_matrices_graph`` must include an ``edges_name`` tuple
+``[source, relation, target]`` and may optionally include
+``edge_weight_attribute``. The graph edges and any additional nodes are
+defined under ``config.graph.projections``. Gaussian distance weights
+computed with ``norm: l1`` should be used as ``edge_weight_attribute``
+(commonly ``gauss_weight`` in the projection graph).
+Set either ``loss_matrices_graph`` or ``loss_matrices_path``/``loss_matrices``,
+not both.
+
+File-based configuration (still supported):
 
 .. code:: yaml
 

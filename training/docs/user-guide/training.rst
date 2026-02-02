@@ -16,9 +16,8 @@ Anemoi Training requires two primary components to get started:
 Step 1 and 2:
 =============
 
-#. **Graph Definition from Anemoi Graphs:** This defines the structure
-   of your machine learning model, including the layers, connections,
-   and operations that will be used during training.
+#. **Graph Definition from Anemoi Graphs:** This defines connectivity
+   of your machine learning model.
 
 #. **Dataset from Anemoi Datasets:** This provides the training data
    that will be fed into the model. The dataset should be pre-processed
