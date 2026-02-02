@@ -35,6 +35,22 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return pred, target, loss_result
 
 
+@pytest.fixture
+def multiscale_graph_data() -> HeteroData:
+    graph = HeteroData()
+    graph["data"].num_nodes = 4
+    graph["smooth_8x"].num_nodes = 4
+    graph["smooth_4x"].num_nodes = 4
+    graph["smooth_2x"].num_nodes = 4
+    graph["smooth_1x"].num_nodes = 4
+
+    identity_edges = torch.tensor([[0, 1, 2, 3], [0, 1, 2, 3]])
+    for name in ["smooth_8x", "smooth_4x", "smooth_2x", "smooth_1x"]:
+        graph[(name, "to", name)].edge_index = identity_edges
+        graph[(name, "to", name)].edge_weight = torch.ones(4)
+    return graph
+
+
 def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> None:
     """Test multiscale loss instantiation with single scale."""
     per_scale_loss = AlmostFairKernelCRPS()
@@ -49,6 +65,47 @@ def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, t
 
     assert isinstance(loss, torch.Tensor)
     assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
+
+
+def test_multiscale_graph_requires_graph_data() -> None:
+    per_scale_loss = MSELoss()
+    with pytest.raises(ValueError, match="graph_data must be provided"):
+        MultiscaleLossWrapper(
+            per_scale_loss=per_scale_loss,
+            weights=[1.0, 1.0],
+            keep_batch_sharded=False,
+            loss_matrices_graph=[
+                {"edges_name": ["smooth_8x", "to", "smooth_8x"], "edge_weight_attribute": "edge_weight"},
+                None,
+            ],
+            graph_data=None,
+        )
+
+
+def test_multiscale_graph_based(
+    loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    multiscale_graph_data: HeteroData,
+) -> None:
+    per_scale_loss = MSELoss()
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=per_scale_loss,
+        weights=[1.0, 1.0, 1.0, 1.0, 1.0],
+        keep_batch_sharded=False,
+        loss_matrices_graph=[
+            {"edges_name": ["smooth_8x", "to", "smooth_8x"], "edge_weight_attribute": "edge_weight"},
+            {"edges_name": ["smooth_4x", "to", "smooth_4x"], "edge_weight_attribute": "edge_weight"},
+            {"edges_name": ["smooth_2x", "to", "smooth_2x"], "edge_weight_attribute": "edge_weight"},
+            {"edges_name": ["smooth_1x", "to", "smooth_1x"], "edge_weight_attribute": "edge_weight"},
+            None,
+        ],
+        graph_data=multiscale_graph_data,
+    )
+
+    pred, target, _ = loss_inputs_multiscale
+    loss = multiscale_loss(pred, target)
+
+    assert isinstance(loss, torch.Tensor)
+    assert multiscale_loss.smoothing_matrices[-1] is None
 
 
 @pytest.mark.parametrize("per_scale_loss", [AlmostFairKernelCRPS(), MSELoss()])

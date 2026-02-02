@@ -5,14 +5,15 @@
 
 multiscale:
   matrices:
-    - edges_name: [smooth_1x, "to", smooth_1x]
-      edge_weight_attribute: gauss_weight
-    - edges_name: [smooth_2x, "to", smooth_2x]
+    - edges_name: [smooth_8x, "to", smooth_8x]
       edge_weight_attribute: gauss_weight
     - edges_name: [smooth_4x, "to", smooth_4x]
       edge_weight_attribute: gauss_weight
-    - edges_name: [smooth_8x, "to", smooth_8x]
+    - edges_name: [smooth_2x, "to", smooth_2x]
       edge_weight_attribute: gauss_weight
+    - edges_name: [smooth_1x, "to", smooth_1x]
+      edge_weight_attribute: gauss_weight
+    - null
 
   nodes:
     smooth_1x:

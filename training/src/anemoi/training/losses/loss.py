@@ -22,10 +22,16 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
+NESTED_LOSSES = {
+    "anemoi.training.losses.MultiscaleLossWrapper",
+    "anemoi.training.losses.multiscale.MultiscaleLossWrapper",
+}
 GRAPH_DATA_WRAPPER_LOSSES = {
     "anemoi.training.losses.MultiscaleLossWrapper",
+    "anemoi.training.losses.multiscale.MultiscaleLossWrapper",
+    "anemoi.training.losses.CombinedLoss",
     "anemoi.training.losses.combined.CombinedLoss",
+    "anemoi.training.losses.FilteringLossWrapper",
     "anemoi.training.losses.filtering.FilteringLossWrapper",
 }
 LOGGER = logging.getLogger(__name__)
