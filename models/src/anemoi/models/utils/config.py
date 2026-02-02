@@ -14,6 +14,8 @@ from omegaconf import OmegaConf
 DEFAULT_DATASET_NAME = "data"
 
 
+# This function retrieves the configuration for multiple datasets, supporting both new and old config formats.
+# Its location in the codebase may be revisited in the near future.
 def get_multiple_datasets_config(config: DictConfig, default_dataset_name: str = DEFAULT_DATASET_NAME) -> dict:
     """Get multiple datasets configuration for old configs.
     Use /'data/' as the default dataset name.

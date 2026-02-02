@@ -56,7 +56,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         self.rho = config.model.model.diffusion.rho
 
-    def get_input(self, batch: torch.Tensor) -> torch.Tensor:
+    def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
         x = {}
         for dataset_name, dataset_batch in batch.items():
@@ -69,7 +69,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
-    def get_target(self, batch: torch.Tensor) -> torch.Tensor:
+    def get_target(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get target tensor shape for diffusion model."""
         y = {}
         for dataset_name, dataset_batch in batch.items():
@@ -82,7 +82,12 @@ class BaseDiffusionForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
-    def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         return self.model.model.fwd_with_preconditioning(
             x,
             y_noised,
@@ -159,16 +164,16 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         """Step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
@@ -176,11 +181,9 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
         Returns
         -------
-        tuple[torch.Tensor, dict, torch.Tensor]
+        tuple[dict[str, torch.Tensor], dict, list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
@@ -303,16 +306,16 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         """Step for the tendency-based diffusion forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
@@ -320,16 +323,14 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         Returns
         -------
-        tuple[torch.Tensor, dict, torch.Tensor]
+        tuple[dict[str, torch.Tensor], dict, list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-
         x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
         y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
-        if pre_processors_tendencies is None:
+        if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
             msg = (
                 "pre_processors_tendencies not found. This is required for tendency-based diffusion models. "
                 "Ensure that statistics_tendencies is provided during model initialization."
