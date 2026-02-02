@@ -13,24 +13,29 @@ data:
   resolution: 3p0km
   frequency: 1h
   timestep: 1h
-  forcing:
-    - landcover
-    - orography
-    - swdown
-  diagnostic: []
-  normalizer:
-    default: "mean-std"
-    std: []
-    min-max: []
-    max: []
-    none:
-      - landcover
-      - orography
-      - icmr_850
-      - icmr_925
-      - snmr_850
-      - snmr_925
-      - refc
+  datasets:
+    data:
+      forcing:
+        - landcover
+        - orography
+        - swdown
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: "mean-std"
+            std: []
+            min-max: []
+            max: []
+            none:
+              - landcover
+              - orography
+              - icmr_850
+              - icmr_925
+              - snmr_850
+              - snmr_925
+              - refc
 
 system:
   hardware:
