@@ -256,18 +256,9 @@ class AnemoiTrainer(ABC):
 
     @rank_zero_only
     def _get_mlflow_run_id(self) -> str:
-        from anemoi.utils.mlflow.client import AnemoiMlflowClient
+        from anemoi.training.diagnostics.mlflow.utils import create_run_id
 
-        client = AnemoiMlflowClient(self.config.diagnostics.log.mlflow.tracking_uri, authentication=True)
-        experiment = client.get_experiment_by_name(self.config.diagnostics.log.mlflow.experiment_name)
-        experiment_id = (
-            experiment.experiment_id
-            if experiment is not None
-            else client.create_experiment(self.config.diagnostics.log.mlflow.experiment_name)
-        )
-        run_name = self.config.diagnostics.log.mlflow.run_name if self.config.diagnostics.log.mlflow.run_name else None
-        run = client.create_run(experiment_id, run_name=run_name)
-        run_id = run.info.run_id
+        run_id = create_run_id(self.config.diagnostics.log.mlflow)
         # for resumed runs or offline runs logging this can be useful
         LOGGER.info("Mlflow Run id: %s", run_id)
         return run_id

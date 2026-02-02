@@ -322,7 +322,10 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         self._flag_log_hparams = log_hyperparams
         if self._resumed and not on_resume_create_child:
             LOGGER.info(
-                ("Resuming run without creating child run - MLFlow logs will not update the"),
+                "Resuming run without creating child run - MLFlow logs will not update the"
+                "initial runs hyperparameters with those of the resumed run."
+                "To update the initial run's hyperparameters, set "
+                "`diagnostics.log.mlflow.on_resume_create_child: True`.",
             )
             self._flag_log_hparams = False
 
@@ -332,6 +335,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         self._parent_dry_run = False
         self._max_params_length = max_params_length
 
+        # max http retries
         os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(http_max_retries)
         os.environ["_MLFLOW_HTTP_REQUEST_MAX_RETRIES_LIMIT"] = str(http_max_retries + 1)
 
@@ -518,7 +522,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             # Handle duplicate metric key issue gracefully
             if "duplicate key value violates unique constraint" in str(e):
                 LOGGER.warning("Duplicate metric detected %s", e)
-                # Optionally: return None or continue silently
             else:
                 # Re-raise if it's a different kind of error
                 raise
