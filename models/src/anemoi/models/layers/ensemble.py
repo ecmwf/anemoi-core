@@ -9,6 +9,7 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_tensor
@@ -106,9 +107,12 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_mlp_hidden_dim: int,
         layer_kernels: DotDict,
         noise_matrix: Optional[str] = None,
+        noise_edges_name: Optional[tuple[str, str, str]] = None,
+        edge_weight_attribute: Optional[str] = None,
         row_normalize_noise_matrix: bool = False,
         autocast: bool = False,
         num_channels: Optional[int] = None,
+        graph_data: Optional[HeteroData] = None,
     ) -> None:
         """Initialize NoiseConditioning."""
         super().__init__()
@@ -134,6 +138,21 @@ class NoiseConditioning(BaseNoiseInjector):
 
         self.noise_graph_provider = None
         self._sparse_projector = None
+        if noise_matrix is not None and noise_edges_name is not None:
+            raise ValueError("Specify either noise_matrix or noise_edges_name, not both.")
+
+        if noise_edges_name is not None:
+            if graph_data is None:
+                raise ValueError("graph_data must be provided when using noise_edges_name.")
+            self.noise_graph_provider = ProjectionGraphProvider(
+                graph=graph_data,
+                edges_name=tuple(noise_edges_name),
+                edge_weight_attribute=edge_weight_attribute,
+                row_normalize=row_normalize_noise_matrix,
+            )
+            self._sparse_projector = SparseProjector(autocast=autocast)
+            LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
+
         if noise_matrix is not None:
             self.noise_graph_provider = ProjectionGraphProvider(
                 file_path=noise_matrix,
@@ -210,6 +229,7 @@ class NoiseInjector(BaseNoiseInjector):
         num_channels: int,
         layer_kernels: DotDict,
         noise_matrix: Optional[str] = None,
+        graph_data: Optional[HeteroData] = None,
     ) -> None:
         """Initialize NoiseInjector.
 
@@ -227,8 +247,11 @@ class NoiseInjector(BaseNoiseInjector):
             Layer kernel configurations
         noise_matrix : str, optional
             Optional path to noise truncation matrix
+        graph_data : Optional[HeteroData], optional
+            Unused. Accepted for interface compatibility, by default None.
         """
         super().__init__()
+        _ = graph_data
 
         self._noise_conditioning = NoiseConditioning(
             noise_std=noise_std,

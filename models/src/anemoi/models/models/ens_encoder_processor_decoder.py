@@ -51,6 +51,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             model_config.model.noise_injector,
             _recursive_=False,
             num_channels=self.num_channels,
+            graph_data=self.graph_data,
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
