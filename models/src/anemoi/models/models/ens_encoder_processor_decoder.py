@@ -71,7 +71,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size)
-        grid_shard_shapes = grid_shard_shapes[dataset_name]
+        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
         
         if self.use_residual[dataset_name]:
             x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
@@ -207,8 +207,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
             x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
+            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
             if self.use_encoder[dataset_name]:
-                shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
                 encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
                     dataset_name

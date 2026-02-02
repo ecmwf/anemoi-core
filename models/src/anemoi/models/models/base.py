@@ -77,7 +77,7 @@ class BaseGraphModel(nn.Module):
             self.use_decoder[dataset_name] = model_config.model.decoder.datasets[dataset_name].get("use_decoder", True)
             self.use_residual[dataset_name] = model_config.model.residual.datasets[dataset_name].get("use_residual", True)
 
-        self.inputs = [dataset for dataset in self._graph_names_data if len(data_incdices[dataset].model.input.includes) != 0]
+        self.inputs = [dataset for dataset in self._graph_names_data if len(data_indices[dataset].model.input.includes) != 0]
         self.outputs = [dataset for dataset in self._graph_names_data if self.use_decoder[dataset] or self.use_residual[dataset]]
         
         assert self.outputs == self._graph_names_data, "Not supported yet; all datasets must be outputs with use_decoder: True"

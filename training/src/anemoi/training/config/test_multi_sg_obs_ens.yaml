@@ -36,9 +36,9 @@ dataloader:
     test: ${dataloader.num_workers.training}
 
   limit_batches:
-    training: null
-    validation: null
-    test: null
+    training: 100
+    validation: 100
+    test: 100
     
   batch_size:
     training: 1
