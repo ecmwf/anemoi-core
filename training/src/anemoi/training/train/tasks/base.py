@@ -200,7 +200,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         # Initialize components for multi-dataset
-        self.latlons_data = {}  # plotting only, dict of tensors
+        self.target_dataset_names = []  # list of dataset names used for loss computation
         self.scalers = {}  # dict of dict of tensors
         self.updating_scalars = {}  # dict of dict of objects
         self.val_metric_ranges = {}  # dict of dict of lists
@@ -214,7 +214,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
         for dataset_name in self.dataset_names:
-            self.latlons_data[dataset_name] = graph_data[dataset_name][config.graph.data].x
+            if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
+                LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
+                continue
+
+            self.target_dataset_names.append(dataset_name)
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
@@ -367,7 +371,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             },
         )
 
-    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
@@ -645,7 +649,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
-        for dataset_name in self.dataset_names:
+        for dataset_name in self.target_dataset_names:
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
                 y_pred[dataset_name],
                 y[dataset_name],
@@ -669,19 +673,19 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return total_loss, metrics_next, y_preds
 
-    def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
+    def on_after_batch_transfer(self, batch: dict[str, torch.Tensor], _: int) -> dict[str, torch.Tensor]:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
         Also normalize the batch in-place if needed.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Batch to transfer
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Batch after transfer
         """
         # Gathering/sharding of batch
@@ -695,7 +699,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return batch
 
-    def _setup_batch_sharding(self, batch: dict) -> torch.Tensor:
+    def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Setup batch sharding before every step.
 
         If the batch is sharded, it will be setup with the grid shard shapes and slice.
@@ -703,12 +707,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Batch to setup
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Batch after setup
         """
         self.grid_shard_shapes = {}
@@ -732,10 +736,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def transfer_batch_to_device(
         self,
-        batch: dict,
+        batch: dict[str, torch.Tensor],
         device: torch.device,
         _dataloader_idx: int = 0,
-    ) -> dict:
+    ) -> dict[str, torch.Tensor]:
         """Transfer batch to device, handling dictionary batches."""
         transferred_batch = {}
         for dataset_name, dataset_batch in batch.items():
@@ -746,17 +750,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
             )
         return transferred_batch
 
-    def _normalize_batch(self, batch: torch.Tensor) -> torch.Tensor:
+    def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Normalize batch for training and validation before every step.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Batch to prepare
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Normalized batch
         """
         for dataset_name in batch:
@@ -775,9 +779,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
     @abstractmethod
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+    ) -> tuple[dict[str, torch.Tensor], Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         pass
 
     def allgather_batch(self, batch: torch.Tensor, grid_indices: dict, grid_dim: int) -> torch.Tensor:

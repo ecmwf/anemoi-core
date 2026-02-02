@@ -343,7 +343,7 @@ class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
 
 StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
 
-VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]]
+VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
 class BaseTrainingSchema(BaseModel):
@@ -384,7 +384,7 @@ class BaseTrainingSchema(BaseModel):
     "Dynamic rescaling of the loss gradient. Not yet tested."
     scalers: DatasetDict[dict[str, ScalerSchema]]
     "Scalers to use in the computation of the loss and validation scores."
-    validation_metrics: DatasetDict[dict[str, LossSchemas]]
+    validation_metrics: DatasetDict[dict[str, LossSchemas] | None]
     "List of validation metrics configurations."
     variable_groups: DatasetDict[VariableGroupType]
     "Groups for variable loss scaling"
@@ -444,13 +444,11 @@ class AutoencoderSchema(ForecasterSchema):
 
 
 TrainingSchema = Annotated[
-    (
-        ForecasterSchema
-        | ForecasterEnsSchema
-        | InterpolationSchema
-        | DiffusionForecasterSchema
-        | DiffusionTendForecasterSchema
-        | AutoencoderSchema
-    ),
+    ForecasterSchema
+    | ForecasterEnsSchema
+    | InterpolationSchema
+    | DiffusionForecasterSchema
+    | DiffusionTendForecasterSchema
+    | AutoencoderSchema,
     Discriminator("model_task"),
 ]
