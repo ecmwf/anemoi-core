@@ -26,7 +26,7 @@ class KernelCRPS(BaseLoss):
         self,
         fair: bool = True,
         ignore_nans: bool = False,
-        **kwargs,
+        **kwargs,  # noqa: ARG002
     ) -> None:
         """Latitude- and (inverse-)variance-weighted kernel CRPS loss.
 
@@ -108,7 +108,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         alpha: float = 1.0,
         no_autocast: bool = True,
         ignore_nans: bool = False,
-        **kwargs,
+        **kwargs,  # noqa: ARG002
     ) -> None:
         """Latitude- and (inverse-)variance-weighted kernel CRPS loss.
 

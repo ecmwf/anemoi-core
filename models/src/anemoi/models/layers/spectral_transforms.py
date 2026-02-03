@@ -165,7 +165,7 @@ class RegularSHT(SpectralTransform):
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
-        assert p == self.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
         x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.nlat, x=self.nlon)
         coeffs = self._sht(x)
 
@@ -197,7 +197,7 @@ class ReducedSHT(SpectralTransform):
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
-        assert p == self.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
         x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.nlat, x=self.nlon)
         coeffs = self._sht(x)
 
@@ -226,8 +226,8 @@ class OctahedralSHT(SpectralTransform):
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
         assert (
-            p == self.n_grid_points
-        ), f"Input points={p} does not match expected octahedral flattened rings={self.n_grid_points}"
+            p == self._sht.n_grid_points
+        ), f"Input points={p} does not match expected octahedral flattened rings={self._sht.n_grid_points}"
 
         # expects [..., points] where points is flattened spatial dim
         x = einops.rearrange(data, "b e p v -> (b e v) p")

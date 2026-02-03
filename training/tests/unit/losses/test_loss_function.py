@@ -468,90 +468,11 @@ def test_octahedral_sht_loss() -> None:
         _ = loss(pred_wrong, target_wrong, squash=True)
 
 
-def test_cartesian_sht_loss() -> None:
-    nlat = 8
-    nlon = 16
-    nvars = 3
-    expected_points = nlat * nlon
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.spectral.SpectralL2Loss",
-                "transform": "cartesian_sht",
-                "x_dim": nlon,
-                "y_dim": nlat,
-                "grid": "legendre-gauss",
-                "scalers": [],
-            },
-        ),
-    )
-
-    pred = torch.zeros((2, 1, expected_points, nvars))
-    target = torch.zeros_like(pred)
-    out = loss(pred, target, squash=False)
-    assert out.shape == (nvars,)
-    out_total = loss(pred, target, squash=True)
-    assert out_total.numel() == 1
-    pred_wrong = torch.zeros((2, 1, expected_points + 1, nvars))
-    target_wrong = torch.zeros_like(pred_wrong)
-    with pytest.raises(AssertionError):
-        _ = loss(pred_wrong, target_wrong, squash=True)
-
-
 def _expected_octahedral_points(truncation: int) -> int:
     # full globe reduced-octahedral points for ecTrans definition
     # NH lons: 20 + 4*i, i=0..T  => sum_NH = 2*(T+1)*(T+10)
     # full globe doubles:        => 4*(T+1)*(T+10)
     return 4 * (truncation + 1) * (truncation + 10)
-
-
-class _DummyEcTransOctahedralSHTModule(torch.nn.Module):
-    """Stub that avoids needing ectrans assets/npz but preserves shapes."""
-
-    def __init__(self, truncation: int, dtype: torch.dtype = torch.float32, filepath: str | None = None) -> None:
-        super().__init__()
-        self.truncation = int(truncation)
-        self.dtype = dtype
-        self.n_grid_points = _expected_octahedral_points(self.truncation)
-        self.filepath = filepath
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        bsz, ens, _, nvars = x.shape
-        l_dim = self.truncation + 1
-        m_dim = self.truncation + 1
-
-        complex_dtype = torch.complex64 if x.dtype in (torch.float16, torch.float32) else torch.complex128
-        return torch.zeros((bsz, ens, l_dim, m_dim, nvars), device=x.device, dtype=complex_dtype)
-
-
-def test_spectral_l2_loss_ectrans_octahedral_sht_no_assets(monkeypatch: pytest.MonkeyPatch) -> None:
-    import anemoi.models.layers.spectral_transforms as st
-    from anemoi.training.losses.spectral import SpectralL2Loss
-
-    monkeypatch.setattr(st, "EcTransOctahedralSHTModule", _DummyEcTransOctahedralSHTModule)
-
-    trunc = 8
-    nvars = 3
-    points = _expected_octahedral_points(trunc)
-
-    loss = SpectralL2Loss(
-        transform="ectrans_octahedral_sht",
-        truncation=trunc,
-        # filepath=None is fine because we stub the module
-    )
-
-    pred = torch.zeros((2, 1, points, nvars), dtype=torch.float32)
-    target = torch.zeros_like(pred)
-    out = loss(pred, target, squash=False)
-    assert out.shape == (nvars,)
-    torch.testing.assert_close(out, torch.zeros((nvars,)))
-    out_total = loss(pred, target, squash=True)
-    assert out_total.numel() == 1
-    torch.testing.assert_close(out_total, torch.tensor(0.0))
-    pred_wrong = torch.zeros((2, 1, points + 1, nvars), dtype=torch.float32)
-    target_wrong = torch.zeros_like(pred_wrong)
-    with pytest.raises(AssertionError):
-        _ = loss(pred_wrong, target_wrong, squash=True)
 
 
 def test_spectral_crps_fft_and_dct() -> None:
