@@ -110,23 +110,25 @@ class SphericalHarmonicTransform(Module):
 
         self.lmax = lmax or nlat
         self.mmax = mmax or nlat
-
         self.nlat = nlat
         self.lons_per_lat = lons_per_lat
-
         self.n_grid_points = sum(self.lons_per_lat)
 
+        # Set offsets to start of each latitude in flattened grid dimension
         self.slon = [0] + list(np.cumsum(self.lons_per_lat))[:-1]
 
         # Set padding for each latitude so every rFFT output ring has the same length
         self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
 
+        # Compute Gaussian latitudes and quadrature weights
         theta, weight = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
 
+        # Precompute associated Legendre polynomials
         pct = precompute_legpoly(self.mmax, self.lmax, theta)
         pct = torch.from_numpy(pct)
 
+        # Premultiple associated Legendre polynomials by quadrature weights
         weight = torch.from_numpy(weight)
         weight = torch.einsum("mlk, k -> mlk", pct, weight)
 
@@ -188,9 +190,11 @@ class InverseSphericalHarmonicTransform(Module):
         self.nlat = nlat
         self.lons_per_lat = lons_per_lat
 
+        # Compute Gaussian latitudes (don't need quadrature weights for the inverse)
         theta, _ = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
 
+        # Precompute associated Legendre polynomials
         pct = precompute_legpoly(self.mmax, self.lmax, theta, inverse=True)
         pct = torch.from_numpy(pct)
 
