@@ -21,9 +21,7 @@ from rich.console import Console
 
 from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
-from ..migrations import MigrationOp
 from ..migrations import Migrator
-from ..migrations import RollbackOp
 from ..migrations.migrator import LOGGER as migrator_logger
 from . import Command
 
@@ -144,25 +142,6 @@ def migrate(ckpt: CkptType) -> CkptType:
         The migrated checkpoint dict.
     \"""
     return ckpt
-{% if not no_rollback %}
-
-
-def rollback(ckpt: CkptType) -> CkptType:
-    \"""Rollback the checkpoint.
-
-
-    Parameters
-    ----------
-    ckpt : CkptType
-        The checkpoint dict.
-
-    Returns
-    -------
-    CkptType
-        The rollbacked checkpoint dict.
-    \"""
-    return ckpt
-{% endif %}
 {% endif %}
 """
 
@@ -195,12 +174,6 @@ class Migration(Command):
             action="store_true",
             default=False,
             help="Set this if need the migrate_setup and rollback_setup callback.",
-        )
-        create_parser.add_argument(
-            "--no-rollback",
-            action="store_true",
-            default=False,
-            help="Set this if you do not plan to support rollbacking.",
         )
 
         help_sync = "Apply migrations to a checkpoint."
@@ -314,14 +287,9 @@ class Migration(Command):
             if not len(done_ops):
                 console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
             for op in done_ops:
-                if isinstance(op, RollbackOp):
-                    console.print(
-                        f"  [red]+ ROLLBACK [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/red]"
-                    )
-                elif isinstance(op, MigrationOp):
-                    console.print(
-                        f"  [green]+ MIGRATE [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/green]"
-                    )
+                console.print(
+                    f"  [green]+ MIGRATE [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/green]"
+                )
         except IncompatibleCheckpointException as e:
             print(str(e))
 
@@ -356,17 +324,6 @@ class Migration(Command):
                 console.print(
                     f"  [cyan]* [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/cyan]"
                 )
-            if len(extra_migrations):
-                print(
-                    len(extra_migrations),
-                    "extra",
-                    maybe_plural(len(extra_migrations), "migration"),
-                    "to rollback:",
-                )
-            for migration in extra_migrations:
-                console.print(
-                    f"  [red]+ [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/red]"
-                )
             if len(missing_migrations):
                 print(
                     len(missing_migrations),
@@ -379,7 +336,19 @@ class Migration(Command):
                 console.print(
                     f"  [green]+ [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
                 )
-            if len(missing_migrations) or len(extra_migrations):
+            if len(extra_migrations):
+                print(
+                    len(extra_migrations),
+                    "extra",
+                    maybe_plural(len(extra_migrations), "migration"),
+                    "in the checkpoint.",
+                )
+                for migration in extra_migrations:
+                    console.print(f"  [red]+ [bold]{migration}[/bold][/red]")
+                console.print(
+                    "\n[red][italic]Your checkpoint cannot be migrated because it contains extra migrations.[/italic][/red]"
+                )
+            if len(missing_migrations) and not len(extra_migrations):
                 console.print("\n[italic]To update your checkpoint, run:[/italic]")
                 console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
         except IncompatibleCheckpointException as e:
