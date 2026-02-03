@@ -42,7 +42,7 @@ __all__ = [
     "ICONMultiMeshNodes",
     "ICONCellGridNodes",
     "TextNodes",
-    "StretchedConcentricNodes",
-    "ConcentricNodes",
     "XArrayNodes",
+    "ConcentricNodes",
+    "StretchedConcentricNodes",
 ]

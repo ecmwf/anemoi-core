@@ -28,8 +28,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ConcentricNodes(BaseNodeBuilder, ABC):
-    """
-    Nodes based on concentric circles around a specific location.
+    """Nodes based on concentric circles around a specific location.
 
     Attributes
     ----------
@@ -100,8 +99,7 @@ class ConcentricNodes(BaseNodeBuilder, ABC):
 
 
 class StretchedConcentricNodes(IcosahedralNodes):
-    """
-    Nodes based on iterative refinements of an icosahedron for the LAM area,
+    """Nodes based on iterative refinements of an icosahedron for the LAM area,
     and concentric mesh for the global.
 
     Attributes
@@ -109,6 +107,8 @@ class StretchedConcentricNodes(IcosahedralNodes):
     area_mask_builder : KNNAreaMaskBuilder
         The area of interest mask builder.
     """
+
+    multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.StretchedTriNodesEdgeBuilder"
 
     def __init__(
         self,

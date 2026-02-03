@@ -15,6 +15,7 @@ from typing import Tuple
 
 import networkx as nx
 import numpy as np
+import torch
 
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
@@ -27,30 +28,21 @@ LOGGER = logging.getLogger(__name__)
 
 
 def central_point_on_sphere(latlons: np.ndarray) -> np.ndarray:
-    """
-    Compute the central point of a set of points on a sphere.
+    # Convert NumPy to Tensor so latlon_rad_to_cartesian is happy
+    latlons_torch = torch.from_numpy(latlons)
 
-    Parameters
-    ----------
-    latlons : np.ndarray
-        Array of shape (N, 2) containing latitude and longitude in radians.
-
-    Returns
-    -------
-    np.ndarray
-        Central point (latitude, longitude) in radians.
-    """
     # Convert lat-lon to Cartesian
-    xyz = latlon_rad_to_cartesian((latlons[:, 0], latlons[:, 1]))
+    xyz = latlon_rad_to_cartesian(locations=latlons_torch)
 
-    # Compute mean of Cartesian coordinates
-    mean_xyz = xyz.mean(axis=0)
-
-    # Normalize to project back onto the sphere
-    mean_xyz /= np.linalg.norm(mean_xyz)
+    # Note: If latlon_rad_to_cartesian returns a Tensor,
+    # you might need to convert back to numpy for mean/norm
+    # or use torch equivalents.
+    mean_xyz = xyz.mean(dim=0)
+    mean_xyz /= torch.linalg.norm(mean_xyz)
 
     # Convert back to lat-lon
-    return cartesian_to_latlon_rad(mean_xyz[np.newaxis, :])[0]
+    res = cartesian_to_latlon_rad(mean_xyz[None, :])
+    return res[0]
 
 
 def get_latlon_coords_concentric(
@@ -61,8 +53,7 @@ def get_latlon_coords_concentric(
     max_n_points: int,
     sphere_radius: float = 6371.0,  # default Earth's radius in km
 ) -> np.ndarray:
-    """
-    Generate concentric geodesic circles (lat, lon in radians) around a given center on Earth.
+    """Generate concentric geodesic circles (lat, lon in radians) around a given center on Earth.
 
     Uses the spherical destination formulas:
       lat2 = arcsin( sin(lat1)*cos(d/R) + cos(lat1)*sin(d/R)*cos(theta) )
@@ -181,8 +172,7 @@ def create_stretched_concentric(
     lam_resolution: int = 10,
     area_mask_builder: KNNAreaMaskBuilder | None = None,
 ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
-    """
-    Creates a global mesh with 2 levels of resolution.
+    """Creates a global mesh with 2 levels of resolution.
 
     The nodes outside the Area Of Interest (AOI) are generated as a concentric mesh,
     while the lam_resolution is used to define the nodes inside the AOI.
