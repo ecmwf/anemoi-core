@@ -71,11 +71,10 @@ When a focus area is applied, the plot filenames and experiment log tags will au
 
    # Example: Focusing on multiple specific geographic region
    focus_areas:
-      datasets:
-         data:
-            - latlon_bbox: [30.0, -20.0, 60.0, 40.0]
-            - latlon_bbox: [10.0, -2.0, 30.5, 40.0]
-            - mask_attr_name: "cutout_mask"
+      europe:
+         latlon_bbox: [30.0, -20.0, 60.0, 40.0]
+      china:
+         latlon_bbox: [18.0, 73.0, 54.0, 135.0]
 
 **Rendering Methods**
 
@@ -142,10 +141,10 @@ which is recommended for interactive terminals and
       datasets_to_plot: ["data"]
 
       focus_areas:
-         datasets:
-            data:
-            - latlon_bbox: [30.0, -20.0, 60.0, 40.0]
-            - null # This is to plot the full domain
+         europe:
+            latlon_bbox: [30.0, -20.0, 60.0, 40.0]
+         china:
+            latlon_bbox: [18.0, 73.0, 54.0, 135.0]
 
       callbacks:
          - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss

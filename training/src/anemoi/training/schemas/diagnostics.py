@@ -303,7 +303,7 @@ class PlotSchema(BaseModel):
     "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
-    focus_areas: list[FocusAreaSchema]
+    focus_areas: dict[str, FocusAreaSchema]
     "List of regions of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
