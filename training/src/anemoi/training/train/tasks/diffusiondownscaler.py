@@ -40,6 +40,8 @@ LOGGER = logging.getLogger(__name__)
 class GraphDiffusionDownscaler(BaseGraphModule):
     """Graph neural network downscaler for diffusion."""
 
+    task_type = "downscaler"
+
     def __init__(
         self,
         *,
@@ -79,6 +81,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             },
         )
         reader_group_size = self.config.dataloader.read_group_size
+        """
         self.lres_grid_indices = instantiate(
             self.config.model_dump(by_alias=True).dataloader.lres_grid_indices,
             reader_group_size=reader_group_size,
@@ -97,9 +100,42 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lres_grid_shard_slice = None
         self.hres_grid_shard_shapes = None
         self.hres_grid_shard_slice = None
+        """
 
         fields_direct_prediction = getattr(config.data, "direct_prediction", None)
         self.indices_direct_prediction = ...
+
+    
+
+    def get_inputs(self, batch: dict, sample_length: int) -> dict:
+        # start rollout of preprocessed batch
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.multi_step,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, multi_step, latlon, nvar)
+            msg = (
+                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {sample_length}"
+            )
+            assert dataset_batch.shape[1] >= sample_length, msg
+            LOGGER.info("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+        return x
+
+    def get_targets(self, batch: dict, lead_step: int) -> dict:
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            y[dataset_name] = dataset_batch[
+                :,
+                lead_step,
+                ...,
+                self.data_indices[dataset_name].data.output.full,
+            ]
+            LOGGER.info("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+        return y        
 
     def forward(
         self,
@@ -165,78 +201,75 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """
 
         del batch_idx
-        # loss = torch.zeros(
-        #    1, dtype=batch[0].dtype, device=self.device, requires_grad=False
-        # )
+        x = self.get_inputs(batch, sample_length=self.multi_step)  # (bs, multi_step, ens, latlon, nvar)
+        y = self.get_targets(batch, lead_step=self.multi_step - 1)  # (bs, multi_step, ens, latlon, nvar)
 
-        x_in, x_in_hres, y = batch
+        assert len(x) == 2, "Expected x to contain two elements: [low_res, high_res]"
 
-        x_in_interp_to_hres = self.model.model.apply_interpolate_to_high_res(
-            x_in[:, 0, ...],
+        x_lres, x_hres = x 
+
+        x_lres_upsampled = self.model.model.apply_interpolate_to_high_res(
+            x_lres[:, 0, ...],
             grid_shard_shapes=self.lres_grid_shard_shapes,
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
 
-        self.x_in_matching_channel_indices = self.x_in_matching_channel_indices.to(
-            x_in_interp_to_hres.device
-        )
-        residuals_target = self.model.model.compute_residuals(
+        resid = self.model.model.compute_residuals(
             y,
-            x_in_interp_to_hres[..., self.x_in_matching_channel_indices],
+            x_lres_upsampled[..., self.x_in_matching_channel_indices.to(
+            x_lres_upsampled.device
+        )],
         )
 
-        # Y = Y[:, :, :, ..., self.data_indices.data.output.full] #(see if necessary)
-
-        x_in_interp_to_hres = self.model.pre_processors(
-            x_in_interp_to_hres, dataset="input_lres"
-        )  # need in place ?, in_place=False)
-        # x_in_interp_to_hres = x_in_interp_to_hres[  :, :, ..., self.data_indices.data.input[0].full] (see if necessary)
-        x_in_hres = self.model.pre_processors(
-            x_in_hres, dataset="input_hres"
-        )  # , in_place=False
-        # x_in_hres = x_in_hres[:, :, ..., self.data_indices.data.input[1].full]
-        residuals_target = self.model.pre_processors(residuals_target, dataset="output")
-
-        # Scaler update
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
+        x_lres_upsampled = self.model.pre_processors(
+            x_lres_upsampled, dataset="input_lres"
+        )  
+        x_hres = self.model.pre_processors(
+            x_hres, dataset="input_hres"
+        )
+        resid = self.model.pre_processors(resid, dataset="output")
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
-            shape=(residuals_target.shape[0],) + (1,) * (residuals_target.ndim - 2),
+            shape=(resid.shape[0],) + (1,) * (resid.ndim - 2),
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
             rho=self.rho,
-            device=residuals_target.device,
+            device=resid.device,
         )
 
         # get targets and noised targets
-        residuals_target_noised = self._noise_target(residuals_target, sigma)
-
-        # prediction, fwd_with_preconditioning
-        # time_for_pred = time.time()
+        resid_noised = self._noise_target(resid, sigma)
 
         y_pred = self(
-            x_in_interp_to_hres,
-            x_in_hres,
-            residuals_target_noised,
+            x_lres_upsampled,
+            x_hres,
+            resid_noised,
             sigma,
         )  # shape is (bs, ens, latlon, nvar)
-        # print("time for pred", time.time() - time_for_pred)
+
 
         # Use checkpoint for compute_loss_metrics
         loss, metrics_next = checkpoint(
             self.compute_loss_metrics,
             y_pred=y_pred[:, 0, ...],
-            y=residuals_target[:, 0, ...],  # removing time dim for loss computation,
-            rollout_step=0,
+            y=resid[:, 0, ...],  # removing time dim for loss computation,
+
             training_mode=training_mode,
             validation_mode=validation_mode,
             weights=noise_weights,
             use_reentrant=False,
         )
 
-        y_preds = [x_in_interp_to_hres + y_pred, y_pred]
+        denorm_x_lres_upsampled = self.model.post_processors(
+            x_lres_upsampled, dataset="input_lres"
+        )
+        denorm_y_pred = self.model.post_processors(
+            y_pred, dataset="output"
+        )
+
+        y_preds = [denorm_x_lres_upsampled + denorm_y_pred, denorm_y_pred]
 
         return loss, metrics_next, y_preds
 
@@ -279,79 +312,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
         return sigma, weight
 
-    def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
-        """Allgather the batch-shards across the reader group.
 
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch-shard of current reader rank
-
-        Returns
-        -------
-        torch.Tensor
-            Allgathered (full) batch
-        """
-
-        return batch  # already have the full grid
-
-    def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
-        """Calculate the loss over a validation batch using the training loss function.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Validation batch
-        batch_idx : int
-            Batch inces
-
-        """
-        with torch.no_grad():
-            val_loss, metrics, y_preds = self._step(
-                batch, batch_idx, training_mode=True, validation_mode=True
-            )
-
-        self.log(
-            "val_" + self.loss.name + "_loss",
-            val_loss,
-            on_epoch=True,
-            on_step=True,
-            prog_bar=True,
-            logger=self.logger_enabled,
-            batch_size=batch[0].shape[0],
-            sync_dist=True,
-        )
-
-        for mname, mvalue in metrics.items():
-            self.log(
-                "val_" + mname,
-                mvalue,
-                on_epoch=True,
-                on_step=False,
-                prog_bar=False,
-                logger=self.logger_enabled,
-                batch_size=batch[0].shape[0],
-                sync_dist=True,
-            )
-
-        return val_loss, y_preds
-
-    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss, _, _ = self._step(
-            batch, batch_idx, training_mode=True, validation_mode=False
-        )
-        self.log(
-            "train_" + self.loss.name + "_loss",
-            train_loss,
-            on_epoch=True,
-            on_step=True,
-            prog_bar=True,
-            logger=self.logger_enabled,
-            batch_size=batch[0].shape[0],
-            sync_dist=True,
-        )
-
-        return train_loss
 
     def calculate_val_metrics(
         self,
@@ -411,91 +372,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         return metrics
 
-    def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
-        """Assemble batch after transfer to GPU by gathering the batch shards if needed.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch to transfer
-
-        Returns
-        -------
-        torch.Tensor
-            Batch after transfer
-        """
-
-        if self.keep_batch_sharded and self.model_comm_group_size > 1:
-            self.lres_grid_shard_shapes = self.lres_grid_indices.shard_shapes
-            self.hres_grid_shard_shapes = self.hres_grid_indices.shard_shapes
-            self.grid_shard_shapes = self.grid_indices.shard_shapes
-            self.lres_grid_shard_slice = self.lres_grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
-            self.hres_grid_shard_slice = self.hres_grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
-            self.grid_shard_slice = self.grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
-        else:
-            batch = self.allgather_batch(batch)
-            self.lres_grid_shard_shapes, self.lres_grid_shard_slice = None, None
-            self.hres_grid_shard_shapes, self.hres_grid_shard_slice = None, None
-        return batch
-
-    def on_fit_start(self):
-        self.bw_last = 0.0
-        self.opt_last = 0.0
-
-    def on_train_batch_start(self, batch, batch_idx):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self._t0 = time.perf_counter()
-
-    def on_before_backward(self, loss):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self._tb = time.perf_counter()
-
-    def on_after_backward(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.bw_last = time.perf_counter() - self._tb
-
-    def optimizer_step(
-        self, epoch, batch_idx, optimizer, optimizer_closure=None, *a, **k
-    ):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        t = time.perf_counter()
-        optimizer.step(closure=optimizer_closure)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.opt_last = time.perf_counter() - t
-
-    def on_train_batch_end(self, outputs, batch, batch_idx):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        dt = time.perf_counter() - self._t0
-        it_s = 1.0 / dt
-        """
-        self.log_dict(
-            {"it_s": it_s, "bw_s": self.bw_last, "opt_s": self.opt_last},
-            on_step=True,
-            prog_bar=True,
-            logger=False,
-        )
-
-        print(
-            {
-                "step": self.global_step,
-                "it_s": it_s,
-                "bw_s": self.bw_last,
-                "opt_s": self.opt_last,
-            }
-        )
-        """
 
 
 def match_tensor_channels(input_name_to_index, output_name_to_index):
@@ -517,3 +393,25 @@ def match_tensor_channels(input_name_to_index, output_name_to_index):
     channel_indices = torch.tensor(channel_mapping)
 
     return channel_indices
+
+def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
+    """Assemble batch after transfer to GPU by gathering the batch shards if needed.
+
+
+    Parameters
+    ----------
+    batch : torch.Tensor
+        Batch to transfer
+
+    Returns
+    -------
+    torch.Tensor
+        Batch after transfer
+    """
+    # Gathering/sharding of batch
+    batch = self._setup_batch_sharding(batch)
+
+    # Prepare scalers, e.g. init delayed scalers and update scalers
+    self._prepare_loss_scalers()
+
+    return batch
