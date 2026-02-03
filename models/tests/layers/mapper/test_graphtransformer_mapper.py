@@ -24,11 +24,6 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
-@pytest.fixture(scope="module")
-def device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
 class ConcreteGraphTransformerBaseMapper(GraphTransformerBaseMapper):
     """Concrete implementation of GraphTransformerBaseMapper for testing."""
 
@@ -100,7 +95,7 @@ class TestGraphTransformerBaseMapper:
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
         )
 
-    @pytest.fixture
+    @pytest.fixture(scope="module")
     def fake_graph(self, device) -> HeteroData:
         """Fake graph."""
         graph = HeteroData()

@@ -23,11 +23,6 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
-@pytest.fixture(scope="module")
-def device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
 @dataclass
 class GNNProcessorInit:
     num_channels: int = 128
@@ -48,7 +43,7 @@ class TestGNNProcessor:
     NUM_NODES: int = 100
     NUM_EDGES: int = 200
 
-    @pytest.fixture
+    @pytest.fixture(scope="module")
     def fake_graph(self, device) -> tuple[HeteroData, int]:
         graph = HeteroData()
         graph["nodes"].x = torch.rand((self.NUM_NODES, 2), device=device)

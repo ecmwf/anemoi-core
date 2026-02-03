@@ -19,11 +19,6 @@ from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
 
 
-@pytest.fixture(scope="module")
-def device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
 @pytest.fixture()
 def non_default_input_imputer():
     config = DictConfig(

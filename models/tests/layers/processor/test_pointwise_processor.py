@@ -21,11 +21,6 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
-@pytest.fixture(scope="module")
-def device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
 @dataclass
 class PointWiseMLPProcessorConfig:
     num_layers: int = 2
