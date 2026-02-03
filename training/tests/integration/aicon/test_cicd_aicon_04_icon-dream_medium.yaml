@@ -16,81 +16,73 @@
 # 11/2024, DWD
 # ---------------------------------------------------------------
 
-# set to true to switch off config validation
+# set to true to switch on config validation
 config_validation: True
 
-hardware:
-  paths:
+
+system:
+  input:
     graph: none
-    output: output_training/${data.resolution}/
-    logs:
-      base: ${hardware.paths.output}logs/
-      wandb: ${hardware.paths.logs.base}
-      mlflow: ${hardware.paths.logs.base}mlflow/
-      tensorboard: ${hardware.paths.logs.base}tensorboard/
-    checkpoints: ${hardware.paths.output}checkpoint/
-    plots: ${hardware.paths.output}plots/
-    profiler: ${hardware.paths.output}profiler/
-    data: "placeholder-for-config-validation"
-  files:
-    graph: none
-    dataset: dataset_20220101_20230101_6H.zarr/3.zarr
+    dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
+    forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
     warm_start: null
-    checkpoint:
+  output:
+    root: output_training/${data.resolution}
+    checkpoints:
+      root: checkpoint
       every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
       every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
       every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+    plots: plots
+    logs:
+      root: logs
+      wandb: ""
+      mlflow: mlflow
+      tensorboard: tensorboard
+    profiler: profiler
   # number of GPUs per node and number of nodes (for DDP)
-  accelerator: auto
-  num_gpus_per_node: 1
-  num_nodes: 1
-  num_gpus_per_model: 1
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
 
 graph:
   overwrite: True
   data: "data"
   hidden: "hidden"
   nodes:
-    # ICON mesh
-    icon_mesh:
-      node_builder:
-        _target_: anemoi.graphs.nodes.ICONNodes
-        name: "icon_grid_0026_R03B07_G"
-        grid_filename: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
-        max_level_multimesh: 3
-        max_level_dataset: 3
     # Data nodes
     data:
       node_builder:
         _target_: anemoi.graphs.nodes.ICONCellGridNodes
-        icon_mesh: "icon_mesh"
+        max_level: 3
+        grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
       attributes: ${graph.attributes.nodes}  # options: l1, l2, unit-max, unit-sum, unit-std
     # Hidden nodes
     hidden:
       node_builder:
-        _target_: anemoi.graphs.nodes.ICONMultimeshNodes
-        icon_mesh: "icon_mesh"
+        _target_: anemoi.graphs.nodes.ICONMultiMeshNodes
+        max_level: 3
+        grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
   edges:
     # Processor configuration
     - source_name: ${graph.hidden}
       target_name: ${graph.hidden}
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
-          icon_mesh: "icon_mesh"
       attributes: ${graph.attributes.edges}
     # Encoder configuration
     - source_name: ${graph.data}
       target_name: ${graph.hidden}
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalEncoderEdges
-          icon_mesh: "icon_mesh"
       attributes: ${graph.attributes.edges}
     # Decoder configuration
     - source_name: ${graph.hidden}
       target_name: ${graph.data}
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalDecoderEdges
-          icon_mesh: "icon_mesh"
       attributes: ${graph.attributes.edges}
   attributes:
     nodes:
@@ -106,97 +98,101 @@ graph:
         _target_: anemoi.graphs.edges.attributes.EdgeDirection
         norm: unit-std
 
-datamodule:
-  _target_: anemoi.training.data.datamodule.AnemoiDatasetsDataModule
-
 
 data:
   resolution: mrl${data.refinement}
   refinement: 3
   frequency: 6h
   timestep: 6h
-  forcing:
-  - "HSURF"
-  - "FR_LAND"
-  - "Z0"
-  - "FR_LAKE"
-  - "EMIS_RAD"
-  - "SSO_STDH"
-  - "SSO_THETA"
-  - "SSO_GAMMA"
-  - "SSO_SIGMA"
-  - "cos_latitude"
-  - "sin_latitude"
-  - "cos_longitude"
-  - "sin_longitude"
-  - "cos_julian_day"
-  - "sin_julian_day"
-  - "cos_local_time"
-  - "sin_local_time"
-  normalizer:
-    default: mean-std # none
-    min-max: null
-    max:
-    - "SSO_STDH"
-    - "SSO_THETA"
-    - "SSO_GAMMA"
-    - "SSO_SIGMA"
-    none:
-    - EMIS_RAD
-    - cos_latitude
-    - cos_longitude
-    - sin_latitude
-    - sin_longitude
-    - "cos_local_time"
-    - "sin_local_time"
-    std: []
-  imputer:
-    default: none
-  processors:
-    normalizer:
-      _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-      config: ${data.normalizer}
+  datasets:
+    data:
+      forcing:
+      - "HSURF"
+      - "FR_LAND"
+      - "Z0"
+      - "FR_LAKE"
+      - "EMIS_RAD"
+      - "SSO_STDH"
+      - "SSO_THETA"
+      - "SSO_GAMMA"
+      - "SSO_SIGMA"
+      - "cos_latitude"
+      - "sin_latitude"
+      - "cos_longitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "sin_julian_day"
+      - "cos_local_time"
+      - "sin_local_time"
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std # none
+            min-max: null
+            max:
+            - "SSO_STDH"
+            - "SSO_THETA"
+            - "SSO_GAMMA"
+            - "SSO_SIGMA"
+            none:
+            - EMIS_RAD
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - "cos_local_time"
+            - "sin_local_time"
+            std: []
+
   num_features: null
   format: zarr
-  diagnostic: []
-  remapped:
-  remapper:
-    default: "none"
 
 model:
-  output_mask: null
+  output_mask:
+    _target_: anemoi.training.utils.masks.NoOutputMask
   cpu_offload: False
 
   model:
-    _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
+
+  keep_batch_sharded: True
 
   num_channels: 5 # reduced for CI/CD test. original value 512
-  activation: GELU
   processor:
     _target_: anemoi.models.layers.processor.GNNProcessor
-    activation: ${model.activation}
     trainable_size: ${model.trainable_parameters.hidden2hidden}
     sub_graph_edge_attributes: ${model.attributes.edges}
     num_layers: 2
     num_chunks: 2
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
+    layer_kernels:
+      Activation:
+        _target_: torch.nn.GELU
   encoder:
     _target_: anemoi.models.layers.mapper.GNNForwardMapper
     trainable_size: ${model.trainable_parameters.data2hidden}
     sub_graph_edge_attributes: ${model.attributes.edges}
-    activation: ${model.activation}
     num_chunks: 1
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
+    layer_kernels:
+      Activation:
+        _target_: torch.nn.GELU
   decoder:
     _target_: anemoi.models.layers.mapper.GNNBackwardMapper
     trainable_size: ${model.trainable_parameters.hidden2data}
     sub_graph_edge_attributes: ${model.attributes.edges}
-    activation: ${model.activation}
-    num_chunks: 1
+    num_chunks: 3
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
+    layer_kernels:
+      Activation:
+        _target_: torch.nn.GELU
+  residual:
+    _target_: anemoi.models.layers.residual.SkipConnection
   attributes:
     edges:
     - edge_length
@@ -216,10 +212,10 @@ training:
   run_id: null
   fork_run_id: null
   transfer_learning: False # activate to perform transfer learning
-  model_task: anemoi.training.train.forecaster.GraphForecaster
+  model_task: anemoi.training.train.tasks.GraphForecaster
   submodules_to_freeze: []
   num_sanity_val_steps: 2
-  load_weights_only: false
+  load_weights_only: False
   deterministic: false
   precision: 16-mixed
   multistep_input: 2
@@ -231,15 +227,14 @@ training:
     enabled: false
     lr: 0.0001
   optimizer:
-    zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
-    kwargs:
-      betas: [0.9, 0.95]
+    _target_: torch.optim.AdamW # or anemoi.training.optimizers.AdEMAMix.AdEMAMix
+    betas: [0.9, 0.95]
   # select strategy
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-    num_gpus_per_model: ${hardware.num_gpus_per_model}
+    num_gpus_per_model: ${system.hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
-  loss_gradient_scaling: false
+  loss_gradient_scaling: False
   rollout:
     start: 1
     epoch_increment: 1
@@ -250,32 +245,45 @@ training:
     iterations: 300000
     min: 3.0e-07
     warmup: 1000
-  variable_loss_scaling:
-    default: 1
-    pl:
-      P: 1
-    sfc: {}
-  metrics: []
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+            P: 1
+        pressure_level:
+          _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+          group: ml
+          y_intercept: 0.2
+          slope: 0.001
+        node_weights:
+          _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+          nodes_name: ${graph.data}
+          nodes_attribute_name: area_weight
+          norm: unit-sum
+  metrics:
+    datasets:
+      data: []
+  variable_groups:
+    datasets:
+      data:
+        default: sfc
+        ml: [P, T, U, V]
   training_loss:
-    _target_: anemoi.training.losses.mse.WeightedMSELoss
-    scalars: ['variable', 'loss_weights_mask']
-  node_loss_weights:
-    _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
-    target_nodes: ${graph.data}
-    node_attribute: area_weight
+    datasets:
+      data:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ['pressure_level', 'general_variable', 'node_weights']
+        ignore_nans: False
   validation_metrics:
-    - _target_: anemoi.training.losses.mse.WeightedMSELoss
-      scalars: []
-      ignore_nans: False
-
-  scale_validation_metrics:
-    scalars_to_apply: ['variable']
-    metrics:
-      - 'all'
-  pressure_level_scaler:
-    _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
-    minimum: 0.2
-    slope: 0.001
+    datasets:
+      data:
+        raw_mse:
+          _target_: anemoi.training.losses.MSELoss
+          scalers: []
+          ignore_nans: False
 
 diagnostics:
   plot:
@@ -300,12 +308,11 @@ diagnostics:
 
     # Precipitation and related fields
     precip_and_related_fields: [tp, cp]
-
+    datasets_to_plot: ["data"]
     callbacks: []
 
   debug:
     anomaly_detection: false
-  profiler: false
   checkpoint:
     every_n_minutes:
       save_frequency: 30
@@ -329,6 +336,7 @@ diagnostics:
     tensorboard:
       enabled: false
     mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
       offline: True
       authentication: False
@@ -346,6 +354,9 @@ diagnostics:
     interval: 100
   enable_checkpointing: False
   enable_progress_bar: true
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
   print_memory_summary: false
   benchmark_profiler:
     # Use anemoi-profile to profile the training process
@@ -373,8 +384,8 @@ diagnostics:
 dataloader:
   prefetch_factor: 1
   pin_memory: True
-  read_group_size: ${hardware.num_gpus_per_model}
-  #dataset: ${hardware.paths.data}/${hardware.files.dataset}
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  #dataset: ${system.input.dataset}
   batch_size:
     training: 1
     validation: 1
@@ -384,37 +395,41 @@ dataloader:
     validation: null
     test: 20
   training:
-    dataset:
-      join:
-      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/dataset_20220101_20230101_6H.zarr
-      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/forcings_20220101_20230101_6H.zarr
-      #- ../dataset_20220101_20230101_6H.zarr
-      #- ../forcings_20220101_20230101_6H.zarr
-    start: "2022-01-01T00:00:00"
-    end: "2022-01-04T00:00:00"
-    frequency: ${data.frequency}
-    drop: []
+    datasets:
+      data:
+        dataset:
+          join:
+          - ${system.input.dataset}
+          - ${system.input.forcing_dataset}
+        start: "2022-01-01T00:00:00"
+        end: "2022-01-04T00:00:00"
+        frequency: ${data.frequency}
+        drop: []
   validation:
-    dataset:
-      join:
-      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/dataset_20220101_20230101_6H.zarr
-      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/forcings_20220101_20230101_6H.zarr
-      #- ../dataset_20220101_20230101_6H.zarr
-      #- ../forcings_20220101_20230101_6H.zarr
-    start: "2022-01-04T06:00:00"
-    end: "2022-01-06T06:00:00"
-    frequency: ${data.frequency}
-    drop: []
+    datasets:
+      data:
+        dataset:
+          join:
+          - ${system.input.dataset}
+          - ${system.input.forcing_dataset}
+        start: "2022-01-04T06:00:00"
+        end: "2022-01-06T06:00:00"
+        frequency: ${data.frequency}
+        drop: []
   test:
-    dataset: {}
-    start: 2022
-    end: null
-    frequency: ${data.frequency}
+    datasets:
+      data:
+        dataset: {}
+        start: 2022
+        end: null
+        frequency: ${data.frequency}
   num_workers:
     training: 2
     validation: 2
     test: 1
   grid_indices:
-    _target_: anemoi.training.data.grid_indices.FullGrid
-    nodes_name: ${graph.data}
+    datasets:
+      data:
+        _target_: anemoi.training.data.grid_indices.FullGrid
+        nodes_name: ${graph.data}
   validation_rollout: 1

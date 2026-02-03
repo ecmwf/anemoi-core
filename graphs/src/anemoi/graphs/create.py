@@ -7,12 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from itertools import chain
 from pathlib import Path
-from warnings import warn
 
 import torch
 from hydra.utils import instantiate
@@ -40,26 +38,6 @@ class GraphCreator:
         else:
             self.config = config
 
-        # Support previous version. This will be deprecated in a future release
-        edges = []
-        for edges_cfg in self.config.get("edges", []):
-            if "edge_builder" in edges_cfg:
-                warn(
-                    "This format will be deprecated. The key 'edge_builder' is renamed to 'edge_builders' and takes a list of edge builders. In addition, the source_mask_attr_name & target_mask_attr_name fields are moved under the each edge builder.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
-                edge_builder_cfg = edges_cfg.get("edge_builder")
-                if edge_builder_cfg is not None:
-                    edge_builder_cfg = DotDict(edge_builder_cfg)
-                    edge_builder_cfg.source_mask_attr_name = edges_cfg.get("source_mask_attr_name", None)
-                    edge_builder_cfg.target_mask_attr_name = edges_cfg.get("target_mask_attr_name", None)
-                    edges_cfg["edge_builders"] = [edge_builder_cfg]
-
-            edges.append(edges_cfg)
-        self.config.edges = edges
-
     def update_graph(self, graph: HeteroData) -> HeteroData:
         """Update the graph.
 
@@ -84,11 +62,16 @@ class GraphCreator:
         for edges_cfg in self.config.get("edges", {}):
             for edge_builder_cfg in edges_cfg.edge_builders:
                 edge_builder = instantiate(
-                    edge_builder_cfg, source_name=edges_cfg.source_name, target_name=edges_cfg.target_name
+                    edge_builder_cfg,
+                    source_name=edges_cfg.source_name,
+                    target_name=edges_cfg.target_name,
                 )
                 graph = edge_builder.update_graph(graph, attrs_config=None)
 
             graph = edge_builder.register_attributes(graph, edges_cfg.get("attributes", {}))
+
+        if graph.num_nodes == 0:
+            LOGGER.warning("The graph that was created has no nodes. Please check your graph configuration file.")
 
         return graph
 
@@ -136,7 +119,7 @@ class GraphCreator:
         Each post-processor should implement an `update_graph` method that takes and returns a HeteroData object.
         """
         for processor in self.config.get("post_processors", []):
-            graph = instantiate(processor).update_graph(graph)
+            graph = instantiate(processor).update_graph(graph, graph_config=self.config)
 
         return graph
 
@@ -159,7 +142,11 @@ class GraphCreator:
             torch.save(graph, save_path)
             LOGGER.info(f"Graph saved at {save_path}.")
         else:
-            LOGGER.info("Graph already exists. Use overwrite=True to overwrite.")
+            # The error is only logged for compatibility with multi-gpu training in anemoi-training.
+            # Currently, distributed graph creation is not supported so we create the same graph in each gpu.
+            LOGGER.error(
+                f"Graph not saved because {save_path} already exists. If this occurred during a multi-process or multi-GPU run, another process likely saved it first. If you intended to recreate it, rerun with overwrite=True."
+            )
 
     def create(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
         """Create the graph and save it to the output path.

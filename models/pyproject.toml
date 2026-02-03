@@ -23,7 +23,7 @@ authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
 
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -31,11 +31,8 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -46,10 +43,11 @@ dependencies = [
   "anemoi-utils>=0.1.9",
   "einops>=0.6.1",
   "hydra-core>=1.3",
-  "torch>=2.2",
-  "torch-geometric>=2.3,<2.5",
+  "torch>=2.3",
+  "torch-geometric>=2.3",
 ]
-optional-dependencies.all = [  ]
+
+optional-dependencies.all = [ "anemoi-models[migrations]" ]
 
 optional-dependencies.dev = [
   "anemoi-models[all,docs,tests]",
@@ -59,12 +57,19 @@ optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
   "rstfmt",
-  "sphinx<8.2",          # Fixed until nbsphinx updates
+  "sphinx<8.2; python_version<'3.11'",   # Fixed until nbsphinx updates
+  "sphinx>=8.2; python_version>='3.11'",
   "sphinx-argparse<0.5",
   "sphinx-rtd-theme",
 ]
 
-optional-dependencies.tests = [ "hypothesis", "pytest" ]
+optional-dependencies.migrations = [
+  "cloudpickle>=3.1",
+  "jinja2>=3.1",
+  "rich",
+]
+
+optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8" ]
 
 urls.Documentation = "https://anemoi-models.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-models/"

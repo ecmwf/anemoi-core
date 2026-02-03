@@ -10,7 +10,7 @@ pin_memory: True
 #   The number of GPUs per model must be divisible by read_group_size.
 #   To disable, set to 1.
 # ============
-read_group_size: ${hardware.num_gpus_per_model}
+read_group_size: ${system.hardware.num_gpus_per_model}
 
 num_workers:
   training: 8
@@ -40,8 +40,10 @@ limit_batches:
 # set a custom mask for grid points.
 # Useful for LAM (dropping unconnected nodes from forcing dataset)
 grid_indices:
-  _target_: anemoi.training.data.grid_indices.FullGrid
-  nodes_name: ${graph.data}
+  datasets:
+    data: # user-defined name for the dataset
+      _target_: anemoi.training.data.grid_indices.FullGrid
+      nodes_name: ${graph.data}
 
 # ============
 # Dataloader definitions
@@ -50,27 +52,33 @@ grid_indices:
 # See https://anemoi-datasets.readthedocs.io
 # ============
 
-dataset: ${hardware.paths.data}/${hardware.files.dataset}
+dataset: ${system.input.dataset}
 
 training:
-  dataset: ${dataloader.dataset}
-  start: null
-  end: 2020
-  frequency: ${data.frequency}
-  drop:  []
+  datasets:
+    data:
+      dataset: ${dataloader.dataset}
+      start: null
+      end: 2020
+      frequency: ${data.frequency}
+      drop: []
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
 
 validation:
-  dataset: ${dataloader.dataset}
-  start: 2021
-  end: 2021
-  frequency: ${data.frequency}
-  drop:  []
+  datasets:
+    data:
+      dataset: ${dataloader.dataset}
+      start: 2021
+      end: 2021
+      frequency: ${data.frequency}
+      drop: []
 
 test:
-  dataset: ${dataloader.dataset}
-  start: 2022
-  end: null
-  frequency: ${data.frequency}
-  drop:  []
+  datasets:
+    data:
+      dataset: ${dataloader.dataset}
+      start: 2022
+      end: null
+      frequency: ${data.frequency}
+      drop: []

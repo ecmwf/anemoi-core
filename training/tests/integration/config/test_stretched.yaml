@@ -1,0 +1,113 @@
+# Modifications for the stretched grid template "stretched.yaml"
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${system.input.dataset}
+        thinning: 25 # ???-value in stretched config
+      - dataset: ${system.input.forcing_dataset}
+  training:
+    datasets:
+      data:
+        start: "2017-01-01"
+        end: "2017-01-07"
+  validation:
+    datasets:
+      data:
+        start: "2017-01-08"
+        end: "2017-01-10"
+
+# need this modification since some variables set in the default zarr config are not part of the dataset
+data:
+  datasets:
+    data:
+      forcing:
+        - "cos_latitude"
+        - "cos_longitude"
+        - "sin_latitude"
+        - "sin_longitude"
+        - "cos_julian_day"
+        - "cos_local_time"
+        - "sin_julian_day"
+        - "sin_local_time"
+      diagnostic:
+        - tp
+      processors:
+        normalizer:
+          config:
+            default: "mean-std"
+            std:
+              - "tp"
+            min-max:
+            max:
+            none:
+              - "cos_latitude"
+              - "cos_longitude"
+              - "sin_latitude"
+              - "sin_longitude"
+              - "cos_julian_day"
+              - "cos_local_time"
+              - "sin_julian_day"
+              - "sin_local_time"
+
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
+    forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        # use coarser resolution for testing
+        lam_resolution: 5
+        global_resolution: 3
+
+training:
+  scalers:
+    datasets:
+      data:
+        node_weights:
+          weight_frac_of_total: 0.25
+
+
+diagnostics:
+  plot:
+    # Parameters to plot
+    parameters:
+    - tp
+    callbacks:
+      # Add plot callbacks here
+      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+        dataset_names: ["data"]
+        every_n_epochs: 5
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+        dataset_names: ["data"]
+        # group parameters by categories when visualizing contributions to the loss
+        # one-parameter groups are possible to highlight individual parameters
+        parameter_groups:
+          moisture: [tp]
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+        dataset_names: ["data"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        per_sample : 6
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        #Defining the accumulation levels for precipitation related fields and the colormap
+        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+        precip_and_related_fields: ["tp"]
+        colormaps: ${diagnostics.plot.colormaps}
+      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+      #   # every_n_batches: 100 # Override for batch frequency
+      #   # min_delta: 0.01 # Minimum distance between two consecutive points
+      #   sample_idx: ${diagnostics.plot.sample_idx}
+      #   every_n_batches: ${diagnostics.plot.frequency.batch}
+      #   parameters:
+      #   - tp
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+        dataset_names: ["data"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        precip_and_related_fields: ["tp"]
+        parameters:
+        - tp

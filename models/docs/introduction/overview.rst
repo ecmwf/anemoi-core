@@ -25,8 +25,8 @@ anemoi-models package:
 The `AnemoiModelInterface` is designed to provide an interface between
 the training and the model itself. This code is used for making
 predictions with an underlying machine learning model. It implements the
-the interface for pre-processing input data, performing inference using
-the model, and post-processing the output.
+interface for pre-processing input data, performing inference using the
+model, and post-processing the output.
 
 These components can be extended and switched out with the config files.
 
@@ -55,48 +55,68 @@ Currently the package includes the following preprocessing steps:
  Model
 *******
 
-The `models` is the core component of the anemoi-models package,
-defining the core model architecture for the graph neural network. The
-model is designed to be flexible and modular, allowing for easy
-customization and extension. The model is built using the PyTorch
-Geometric library, which provides a wide range of tools and utilities
-for building graph neural networks.
+The `models` module is the core component of the anemoi-models package,
+defining various model architectures to work with graph data. The models
+are designed to be flexible and modular, allowing for easy customization
+and extension through configuration.
 
-The model is designed to take in a graph representation of the input
-data, process it using a series of modules, and output a prediction.
+The package currently includes the following model architectures:
 
-Currently the package includes the following models:
+-  **AnemoiModelEncProcDec**: The base encoder-processor-decoder
+   architecture, e.g. AIFS-single
+-  **AnemoiModelEncProcDecHierarchical**: A hierarchical variant of the
+   base architecture
+-  **AnemoiEnsModelEncProcDec**: The CRPS-optimized ensemble version
+   that injects noise in the processor, e.g. AIFS-CRPS
+-  **AnemoiModelEncProcDecInterpolator**: A specialized architecture for
+   time interpolation
 
--  Encoder-Processor-Decoder architecture
+All models support flexible layer kernel configuration, allowing for
+customization of linear and normalization layers in different parts of
+the model.
 
 ********
  Layers
 ********
 
-The `layers` module provides the core building blocks for the graph
-neural network in `Models`. This includes graph transformers, graph
+The `layers` module provides the core building blocks for the neural
+network in `Models`. This includes graph transformers, graph
 convolutions, and transformers, as well as, other layers that are used
 to process the input data.
 
 The layers are designed as extensible classes to allow for easy
 experimentation and switching out of components.
 
-The layers implement `Mappers`, which can encode and decode data from
-the graph representation. The `Mappers` are used to process the input
-data and output the prediction. The `Mappers` use the `Blocks` to
-process the data, which are the building blocks of the graph neural
-network.
+Graph Mappers
+=============
+
+The layers implement `Mappers`, which maps data between the input grid
+and the internal hidden grid. The `Mappers` are used as encoder and
+decoder. The `Mappers` use the `Blocks` to process the data, which are
+the building blocks of the graph neural network.
+
+Processors
+==========
 
 Additionally, the layers implement `Processors` which are used to
-process the data in the graph representation. The `Processors` use a
-chunking strategy with `Chunks` that pass a subset of layers to `Blocks`
-to allow for more efficient processing of the data.
+process the data on the hidden grid. The `Processors` use a series of
+`Blocks` to process the data. These `Blocks` can be partitioned into
+checkpointed chunks via `num_chunks` to reduce memory usage during
+training.
 
-Currently the package includes the following implementations:
+Graph Providers
+===============
 
--  Graph Convolution (Mapper, Processor)
--  Graph Transformer (Mapper, Processor)
--  Transformer (Processor)
+Graph providers encapsulate the logic for supplying edge indices and
+attributes to mapper and processor layers. This separation allows for
+different graph types:
+
+-  **StaticGraphProvider**: For fixed graph structures with optional
+   trainable edge parameters
+-  **NoOpGraphProvider**: For edge-less architectures (e.g., pure
+   Transformers)
+-  **DynamicGraphProvider**: For on-the-fly graph construction (future)
+-  **ProjectionGraphProvider**: For sparse projection matrices
 
 **************
  Data Indices

@@ -7,21 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import time
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
+from omegaconf import DictConfig
+from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
-
-if TYPE_CHECKING:
-    from omegaconf import DictConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,9 +65,9 @@ class TimeLimit(pl.callbacks.Callback):
         _ = pl_module
         self._run_stopping_check(trainer)
 
+    @rank_zero_only
     def _run_stopping_check(self, trainer: pl.Trainer) -> None:
-        """
-        Check if the time limit has been reached and stop the training if so.
+        """Check if the time limit has been reached and stop the training if so.
 
         Parameters
         ----------
@@ -84,9 +81,9 @@ class TimeLimit(pl.callbacks.Callback):
         trainer.should_stop = True
         self._log_to_file(trainer)
 
+    @rank_zero_only
     def _log_to_file(self, trainer: pl.Trainer) -> None:
-        """
-        Log the last checkpoint path to a file if given.
+        """Log the last checkpoint path to a file if given.
 
         Parameters
         ----------
@@ -107,8 +104,7 @@ class EarlyStopping(pl.callbacks.EarlyStopping):
     """Thin wrapper around Pytorch Lightning's EarlyStopping callback."""
 
     def __init__(self, config: DictConfig, **kwargs) -> None:
-        """
-        Early stopping callback.
+        """Early stopping callback.
 
         Set `monitor` to metric to check.
         Common names within `Anemoi` are:

@@ -29,11 +29,34 @@ adjustments:
        training: 100
        validation: 100
 
-   hardware:
-     num_gpus_per_node: 1
+   system:
+      hardware:
+      num_gpus_per_node: 1
 
 These settings limit the data processed and use a single GPU, helping
 isolate issues related to data or parallelization.
+
+****************
+ PyTorch errors
+****************
+
+1. Error when opening checkpoints > 2 GB
+========================================
+
+If you're using a version of PyTorch < 2.6 with checkpoint files > 2 GB
+you may encounter an error such as
+
+.. code:: python
+
+   RuntimeError: PytorchStreamReader failed reading zip archive: invalid header or archive is corrupted
+
+This is due to a limitation with the zip implementation. If you're
+unable to move to a more recent version of PyTorch you can try to remove
+the metadata stored in the checkpoint using
+
+.. code:: bash
+
+   anemoi-utils metadata checkpoint.ckpt --remove --output output.ckpt
 
 ***********************************
  PyTorch Lightning Debugging Tools
@@ -172,8 +195,9 @@ training complexities:
 
 .. code:: yaml
 
-   hardware:
-     num_gpus_per_node: 1
+   system:
+      hardware:
+      num_gpus_per_node: 1
 
 The code is still distributed, but at least it removes the multi-GPU
 aspect and you can use debug statements.
@@ -215,16 +239,7 @@ This can be enabled in the diagnostics configuration:
        mlflow:
            system: true
 
-4. Use PyTorch Profiler
-=======================
-
-Leverage PyTorch's built-in profiler to identify performance
-bottlenecks:
-
-We are currently updating the Anemoi profiler to use modern Pytorch
-profiling tools.
-
-5. Gradient Checking
+4. Gradient Checking
 ====================
 
 If you suspect issues with backpropagation, consider implementing

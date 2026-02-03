@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Optional
 
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
@@ -31,20 +32,30 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
-def load_layer_kernels(kernel_config: DotDict) -> DotDict:
+def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool = True) -> DotDict["str" : nn.Module]:
     """Load layer kernels from the config.
 
-    Args:
-        kernel_config : DotDict
-            Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear", "_partial_": True}}
+    This function tries to load the layer kernels from the config. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.
 
-    Returns:
-        DotDict: hydra partial instantiation of the layer kernels
+    Parameters
+    ----------
+    kernel_config : DotDict
+        Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear"}}
+    instance : bool
+        If True, instantiate the kernels. If False, return the config.
+        This is useful for testing purposes.
+        Defaults to True.
+
+    Returns
+    -------
+    DotDict
+        Container with layer factories.
     """
     # If self.layer_kernels entry is missing from the config, use torch.nn kernels
     default_kernels = {
-        "Linear": {"_target_": "torch.nn.Linear", "_partial_": True},
-        "LayerNorm": {"_target_": "torch.nn.LayerNorm", "_partial_": True},
+        "Linear": {"_target_": "torch.nn.Linear"},
+        "LayerNorm": {"_target_": "torch.nn.LayerNorm"},
+        "Activation": {"_target_": "torch.nn.GELU"},
         "QueryNorm": {
             "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
             "_partial_": True,
@@ -56,18 +67,24 @@ def load_layer_kernels(kernel_config: DotDict) -> DotDict:
             "bias": False,
         },
     }
-    layer_kernels = {**default_kernels, **kernel_config}
+
+    if kernel_config is None:
+        kernel_config = DotDict()
+
+    layer_kernels = DotDict()
 
     # Loop through all kernels in the layer_kernels config entry and try import them
-    for kernel in layer_kernels:
-        kernel_entry = layer_kernels[kernel]
-        try:
-            instantiate(kernel_entry)
-        except InstantiationException:
-            LOGGER.info(
-                f"{kernel_entry['_target_']} not found! check your config.model.layer_kernel.{kernel} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
-            )
-            raise InstantiationException
+    for name, kernel_entry in {**default_kernels, **kernel_config}.items():
+        if instance:
+            try:
+                layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
+            except InstantiationException:
+                LOGGER.info(
+                    f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
+                )
+                raise InstantiationException
+            else:
+                LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
         else:
-            LOGGER.info(f"{kernel} kernel: {kernel_entry}")
+            layer_kernels[name] = kernel_entry
     return layer_kernels

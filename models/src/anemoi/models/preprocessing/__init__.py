@@ -57,16 +57,21 @@ class BasePreprocessor(nn.Module):
 
         super().__init__()
 
-        self.default, self.remap, self.method_config = self._process_config(config)
+        self.default, self.remap, self.normalizer, self.method_config = self._process_config(config)
         self.methods = self._invert_key_value_list(self.method_config)
 
         self.data_indices = data_indices
 
     @classmethod
     def _process_config(cls, config):
-        _special_keys = ["default", "remap"]  # Keys that do not contain a list of variables in a preprocessing method.
+        _special_keys = [
+            "default",
+            "remap",
+            "normalizer",
+        ]  # Keys that do not contain a list of variables in a preprocessing method.
         default = config.get("default", "none")
         remap = config.get("remap", {})
+        normalizer = config.get("normalizer", "none")
         method_config = {k: v for k, v in config.items() if k not in _special_keys and v is not None and v != "none"}
 
         if not method_config:
@@ -79,7 +84,7 @@ class BasePreprocessor(nn.Module):
             elif isinstance(method_config[m], list):
                 method_config[m] = {method: f"{m}_{method}" for method in method_config[m]}
 
-        return default, remap, method_config
+        return default, remap, normalizer, method_config
 
     @staticmethod
     def _invert_key_value_list(method_config: dict[str, list[str]]) -> dict[str, str]:
@@ -102,7 +107,7 @@ class BasePreprocessor(nn.Module):
             for variable in variables
         }
 
-    def forward(self, x, in_place: bool = True, inverse: bool = False) -> Tensor:
+    def forward(self, x, in_place: bool = True, inverse: bool = False, **kwargs) -> Tensor:
         """Process the input tensor.
 
         Parameters
@@ -113,6 +118,8 @@ class BasePreprocessor(nn.Module):
             Whether to process the tensor in place
         inverse : bool
             Whether to inverse transform the input
+        **kwargs
+            Additional keyword arguments to pass to transform/inverse_transform
 
         Returns
         -------
@@ -120,16 +127,16 @@ class BasePreprocessor(nn.Module):
             Processed tensor
         """
         if inverse:
-            return self.inverse_transform(x, in_place=in_place)
-        return self.transform(x, in_place=in_place)
+            return self.inverse_transform(x, in_place=in_place, **kwargs)
+        return self.transform(x, in_place=in_place, **kwargs)
 
-    def transform(self, x, in_place: bool = True) -> Tensor:
+    def transform(self, x, in_place: bool = True, **kwargs) -> Tensor:
         """Process the input tensor."""
         if not in_place:
             x = x.clone()
         return x
 
-    def inverse_transform(self, x, in_place: bool = True) -> Tensor:
+    def inverse_transform(self, x, in_place: bool = True, **kwargs) -> Tensor:
         """Inverse process the input tensor."""
         if not in_place:
             x = x.clone()
@@ -162,7 +169,7 @@ class Processors(nn.Module):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__} [{'inverse' if self.inverse else 'forward'}]({self.processors})"
 
-    def forward(self, x, in_place: bool = True) -> Tensor:
+    def forward(self, x, in_place: bool = True, **kwargs) -> Tensor:
         """Process the input tensor.
 
         Parameters
@@ -171,6 +178,8 @@ class Processors(nn.Module):
             Input tensor
         in_place : bool
             Whether to process the tensor in place
+        **kwargs
+            Additional keyword arguments to pass to processors
 
         Returns
         -------
@@ -178,7 +187,7 @@ class Processors(nn.Module):
             Processed tensor
         """
         for processor in self.processors.values():
-            x = processor(x, in_place=in_place, inverse=self.inverse)
+            x = processor(x, in_place=in_place, inverse=self.inverse, **kwargs)
 
         if self.first_run:
             self.first_run = False

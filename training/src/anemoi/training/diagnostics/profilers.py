@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
 from __future__ import annotations
 
 import logging
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
     from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-    from anemoi.training.train.forecaster import GraphForecaster
+    from anemoi.training.train.tasks.base import BaseGraphModule
 
     if importlib.util.find_spec("ipywidgets") is not None:
         from tqdm.auto import tqdm as _tqdm
@@ -307,7 +308,7 @@ class BenchmarkProfiler(Profiler):
 
     @rank_zero_only
     def create_output_path(self) -> None:
-        self.dirpath = Path(self.config.hardware.paths.profiler)
+        self.dirpath = Path(self.config.system.output.profiler)
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def broadcast_profiler_path(self, string_var: str, src_rank: int) -> str:
@@ -498,14 +499,15 @@ class BenchmarkProfiler(Profiler):
             f.write(model_summary)
             f.close()
 
-    def get_model_summary(self, model: GraphForecaster, example_input_array: np.ndarray) -> str:
+    def get_model_summary(self, model: BaseGraphModule, example_input_array: dict[str, np.ndarray]) -> str:
 
         from torchinfo import summary
 
         # when using flash attention model, we need to convert the input and model to float16 and cuda
         # since FlashAttention only supports fp16 and bf16 data type
-        example_input_array = example_input_array.to(dtype=torch.float16)
-        example_input_array = example_input_array.to("cuda")
+        for dataset_name in example_input_array:
+            example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
+            example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")
         model.half()
         model = model.to("cuda")
 
@@ -632,15 +634,18 @@ class BenchmarkProfiler(Profiler):
         flag = ["--" not in row for row in memory_df["Name"]]
         memory_df = memory_df[flag]
         time_rows = [row for row in table.split("\n")[-3:] if row != ""]
-        if time_rows:
-            time_rows_dict = {}
-            for row in time_rows:
-                key, val = row.split(":")
-                val = convert_to_seconds(val.strip())
-                time_rows_dict[key] = val
-            self.time_rows_dict = time_rows_dict
+        try:
+            if time_rows:
+                time_rows_dict = {}
+                for row in time_rows:
+                    key, val = row.split(":")
+                    val = convert_to_seconds(val.strip())
+                    time_rows_dict[key] = val
+                self.time_rows_dict = time_rows_dict
 
-            memory_df = memory_df[~memory_df["Name"].isin(time_rows)]
+                memory_df = memory_df[~memory_df["Name"].isin(time_rows)]
+        except ValueError as e:
+            LOGGER.info("Error saving memory df: %s", e)
 
         self.memory_report_fname = self.dirpath / "memory_profiler.csv"
         self._save_report(memory_df, self.memory_report_fname)
@@ -658,10 +663,11 @@ class ProfilerProgressBar(TQDMProgressBar):
         List to store training rates (it/s).
     """
 
-    def __init__(self):
+    def __init__(self, refresh_rate: int = 1):
         super().__init__()
         self.validation_rates = []
         self.training_rates = []
+        self._refresh_rate = refresh_rate
 
     def _extract_rate(self, pbar: _tqdm) -> float:
         """Extracts the iteration rate from the progress bar.
@@ -687,7 +693,6 @@ class ProfilerProgressBar(TQDMProgressBar):
         batch_idx: int,
     ) -> None:
         """Appends the rate from the progress bar to the list of 'training_rates'."""
-        batch_idx + 1
         super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         if self.train_progress_bar.format_dict["n"] != 0:
             self.training_rates.append(self._extract_rate(self.train_progress_bar))

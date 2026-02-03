@@ -1,0 +1,116 @@
+num_channels: 1024
+cpu_offload: False
+
+keep_batch_sharded: True
+
+model:
+  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+
+layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    _target_: torch.nn.LayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+processor:
+  _target_: anemoi.models.layers.processor.TransformerProcessor
+  _convert_: all
+  num_layers: 16
+  num_chunks: 2
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  window_size: 512
+  dropout_p: 0.0 # GraphTransformer
+  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
+  cpu_offload: ${model.cpu_offload}
+  qk_norm: False
+  use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
+
+encoder:
+  _target_: anemoi.models.layers.mapper.TransformerForwardMapper
+  _convert_: all
+  cpu_offload: ${model.cpu_offload}
+  num_chunks: 2
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  window_size: -1
+  dropout_p: 0.0
+  attention_implementation: flash_attention  # Possible values: scaled_dot_product_attention, flash_attention
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
+  qk_norm: False
+  use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+
+decoder:
+  _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
+  _convert_: all
+  cpu_offload: ${model.cpu_offload}
+  num_chunks: 2
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  window_size: -1
+  dropout_p: 0.0
+  attention_implementation: flash_attention # Possible values: scaled_dot_product_attention, flash_attention
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
+  qk_norm: False
+  use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
+
+trainable_parameters:
+  data: 8
+  hidden: 8
+  data2hidden: 8
+  hidden2data: 8
+
+attributes:
+  edges:
+    - edge_length
+    - edge_dirs
+  nodes: []
+
+node_loss_weight: area_weight
+
+# Bounding configuration
+bounding: #These are applied in order
+  # Bound tp (total precipitation) with a Relu bounding layer
+  # ensuring a range of [0, infinity) to avoid negative precipitation values.
+  - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+    variables:
+      - tp
+
+  # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
+  # This guarantees that cp is physically consistent with tp by restricting cp
+  # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
+  # NOTE: If this bounding strategy is used, the normalization of cp must be
+  # changed to "std" normalization, and the "cp" statistics should be remapped
+  # to those of tp to ensure consistency.
+
+  # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
+  #   variables:
+  #   - cp
+  #   min_val: 0
+  #   max_val: 1
+  #   total_var: tp

@@ -45,6 +45,104 @@ latitude and longitude coordinates of the source and target nodes.
          edge_length:
             _target_: anemoi.graphs.edges.attributes.EdgeDirection
 
+.. warning::
+
+   The result of this class, `EdgeDirection` is fixed with
+   `anemoi-graphs=0.8`. If you train a model on a graph using a version
+   before 0.8 and then run inference or finetuning with `anemoi-graphs`
+   version 0.8 or later, results may be inconsistent or incorrect.
+   Previously edge directions were wrong by 90 degrees. Ensure that the
+   same version of `anemoi-graphs` is used for both training and
+   inference/finetuning to avoid compatibility issues.
+
+***********************
+ Directional Harmonics
+***********************
+
+The `Directional Harmonics` attribute computes harmonic features from
+edge directions, providing a periodic encoding of the angle between
+source and target nodes. For each order :math:`m` from 1 to the
+specified maximum, it computes :math:`\sin(m\psi)` and
+:math:`\cos(m\psi)` where :math:`\psi` is the edge direction angle.
+
+.. code:: yaml
+
+   edges:
+     - source_name: ...
+       target_name: ...
+       edge_builders: ...
+       attributes:
+         dir_harmonics:
+            _target_: anemoi.graphs.edges.attributes.DirectionalHarmonics
+            order: 3
+
+***********************
+ Radial Basis Features
+***********************
+
+The `Radial Basis Features` attribute computes Gaussian radial basis
+function (RBF) features from edge distances. It evaluates a set of
+Gaussian basis functions centered at different scaled distances. By
+default, per-node adaptive scaling is used.
+
+.. code:: yaml
+
+   edges:
+     - source_name: ...
+       target_name: ...
+       edge_builders: ...
+       attributes:
+         rbf_features:
+            _target_: anemoi.graphs.edges.attributes.RadialBasisFeatures
+            r_scale: auto
+            centers: [0.0, 0.25, 0.5, 0.75, 1.0]
+            sigma: 0.2
+
+******************
+ Gaussian Weights
+******************
+
+The `Gaussian Weights` attribute assigns a weight to each edge based on
+the distance between its source and target nodes, using a Gaussian
+(normal) function of the edge length. This is useful for encoding
+spatial locality or for constructing weighted adjacency matrices.
+
+The Gaussian weight for an edge is computed as:
+
+.. math::
+
+   w_{ij} = \exp\left(-\frac{(\ell_{ij})^2}{2\sigma^2}\right)
+
+where:
+
+-  :math:`w_{ij}` is the weight assigned to the edge from node :math:`i`
+   to node :math:`j`
+-  :math:`\ell_{ij}` is the edge length (distance between nodes, as
+   computed by the ``EdgeLength`` attribute)
+-  :math:`\sigma` is a configurable parameter controlling the width of
+   the Gaussian (the "spread" of the weights)
+
+This means that edges connecting closer nodes will have higher weights,
+while those connecting distant nodes will have lower weights.
+
+Example configuration:
+
+.. code:: yaml
+
+   edges:
+     - source_name: ...
+       target_name: ...
+       edge_builders: ...
+       attributes:
+         gaus_weight:
+            _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+            sigma: 1.0
+
+.. note::
+
+   This edge attribute normalisation is applied independently for each
+   target node, and the default normalisation is :math:`L_1` for this.
+
 *********************
  Attribute from Node
 *********************

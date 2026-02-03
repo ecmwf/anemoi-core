@@ -10,17 +10,17 @@
 import logging
 import os
 from pathlib import Path
-from typing import Optional
-from typing import Union
 
 import torch
 
 from anemoi.graphs.plotting.displots import plot_distribution_edge_attributes
 from anemoi.graphs.plotting.displots import plot_distribution_node_attributes
 from anemoi.graphs.plotting.displots import plot_distribution_node_derived_attributes
-from anemoi.graphs.plotting.interactive_html import plot_interactive_nodes
-from anemoi.graphs.plotting.interactive_html import plot_interactive_subgraph
-from anemoi.graphs.plotting.interactive_html import plot_isolated_nodes
+from anemoi.graphs.plotting.interactive_2d_html import plot_interactive_nodes_2d
+from anemoi.graphs.plotting.interactive_2d_html import plot_interactive_subgraph_2d
+from anemoi.graphs.plotting.interactive_2d_html import plot_isolated_nodes_2d
+from anemoi.graphs.plotting.interactive_3d_html import plot_interactive_graph_3d
+from anemoi.graphs.processors.post_process import SubsetNodesInArea
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,29 +30,34 @@ class GraphInspector:
 
     Attributes
     ----------
-    path: Union[str, Path]
+    path: str | Path
         Path to the graph file.
     output_path: Path
         Path to the output directory where the plots will be saved.
-    show_attribute_distributions: Optional[bool]
+    show_attribute_distributions: bool, optional
         Whether to show the distribution of the node and edge attributes.
-    show_nodes: Optional[bool]
+    show_nodes: bool, optional
         Whether to show the interactive plots of the nodes.
     """
 
     def __init__(
         self,
-        path: Union[str, Path],
+        path: str | Path,
         output_path: Path,
-        show_attribute_distributions: Optional[bool] = True,
-        show_nodes: Optional[bool] = False,
+        area: tuple[float, float, float, float] = None,
+        show_attribute_distributions: bool | None = True,
+        show_nodes: bool | None = False,
         **kwargs,
     ):
         self.path = path
         self.graph = torch.load(self.path, weights_only=False, map_location="cpu")
+        self.area = area
         self.output_path = output_path
         self.show_attribute_distributions = show_attribute_distributions
         self.show_nodes = show_nodes
+
+        if self.area is not None:
+            self.graph = SubsetNodesInArea(nodes_name=list(self.graph.node_types), area=area).update_graph(self.graph)
 
         if isinstance(self.output_path, str):
             self.output_path = Path(self.output_path)
@@ -64,13 +69,17 @@ class GraphInspector:
 
     def inspect(self):
         """Run all the inspector methods."""
+
+        LOGGER.info("Saving interactive 3d plot of the graph...")
+        plot_interactive_graph_3d(self.graph, out_file=self.output_path / "graph.html")
+
         LOGGER.info("Saving interactive plots of isolated nodes ...")
-        plot_isolated_nodes(self.graph, self.output_path / "isolated_nodes.html")
+        plot_isolated_nodes_2d(self.graph, self.output_path / "isolated_nodes.html")
 
         LOGGER.info("Saving interactive plots of subgraphs ...")
         for edges_subgraph in self.graph.edge_types:
             ofile = self.output_path / f"{edges_subgraph[0]}_to_{edges_subgraph[2]}.html"
-            plot_interactive_subgraph(self.graph, edges_subgraph, out_file=ofile)
+            plot_interactive_subgraph_2d(self.graph, edges_subgraph, out_file=ofile)
 
         if self.show_attribute_distributions:
             LOGGER.info("Saving distribution plots of node ande edge attributes ...")
@@ -81,8 +90,6 @@ class GraphInspector:
         if self.show_nodes:
             LOGGER.info("Saving interactive plots of nodes ...")
             for nodes_name in self.graph.node_types:
-                plot_interactive_nodes(self.graph, nodes_name, out_file=self.output_path / f"{nodes_name}_nodes.html")
-
-
-if __name__ == "__main__":
-    GraphInspector("/home/ecm1924/GitRepos/anemoi/g.pt", "output_gpu2").inspect()
+                plot_interactive_nodes_2d(
+                    self.graph, nodes_name, out_file=self.output_path / f"{nodes_name}_nodes.html"
+                )

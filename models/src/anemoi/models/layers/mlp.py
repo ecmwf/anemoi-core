@@ -28,7 +28,6 @@ class MLP(nn.Module):
         out_features: int,
         layer_kernels: DotDict,
         n_extra_layers: int = 0,
-        activation: str = "SiLU",
         final_activation: bool = False,
         layer_norm: bool = True,
     ) -> nn.Module:
@@ -42,47 +41,35 @@ class MLP(nn.Module):
             Hidden dimensions
         out_features : int
             Number of output features
-        layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
-            Defined in config/models/<model>.yaml
         n_extra_layers : int, optional
             Number of extra layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
         final_activation : bool, optional
             Whether to apply a final activation function to last layer, by default True
         layer_norm : bool, optional
             Whether to apply layer norm after activation, by default True
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
 
         Returns
         -------
         nn.Module
             Returns a MLP module
-
-        Raises
-        ------
-        RuntimeError
-            If activation function is not supported
         """
         super().__init__()
 
-        Linear = layer_kernels["Linear"]
-        LayerNorm = layer_kernels["LayerNorm"]
+        Linear = layer_kernels.Linear
+        LayerNorm = layer_kernels.LayerNorm
+        Activation = layer_kernels.Activation
 
-        try:
-            act_func = getattr(nn, activation)
-        except AttributeError as ae:
-            LOGGER.error("Activation function %s not supported", activation)
-            raise RuntimeError from ae
-
-        self.mlp = nn.Sequential(Linear(in_features, hidden_dim), act_func())
+        self.mlp = nn.Sequential(Linear(in_features, hidden_dim), Activation())
         for _ in range(n_extra_layers + 1):
             self.mlp.append(Linear(hidden_dim, hidden_dim))
-            self.mlp.append(act_func())
+            self.mlp.append(Activation())
         self.mlp.append(Linear(hidden_dim, out_features))
 
         if final_activation:
-            self.mlp.append(act_func())
+            self.mlp.append(Activation())
 
         self.layer_norm = None
         if layer_norm:

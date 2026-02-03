@@ -34,7 +34,6 @@ class GraphConv(MessagePassing):
         out_channels: int,
         layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
-        activation: str = "SiLU",
         **kwargs,
     ) -> None:
         """Initialize GraphConv node interactions.
@@ -46,12 +45,10 @@ class GraphConv(MessagePassing):
         out_channels : int
             Number of output channels.
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         mlp_extra_layers : int, optional
             Extra layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
         """
         super().__init__(**kwargs)
 
@@ -61,7 +58,6 @@ class GraphConv(MessagePassing):
             out_channels,
             layer_kernels=layer_kernels,
             n_extra_layers=mlp_extra_layers,
-            activation=activation,
         )
 
     def forward(self, x: OptPairTensor, edge_attr: Tensor, edge_index: Adj, size: Optional[Size] = None):

@@ -122,6 +122,7 @@ Get more information in the :ref:`installing-graphs` section.
 
    usage/getting_started
    usage/limited_area
+   usage/create_sparse_matrices
 
 .. toctree::
    :maxdepth: 1
@@ -140,6 +141,7 @@ Get more information in the :ref:`installing-graphs` section.
    :hidden:
    :caption: API Reference
 
+   modules/schemas
    modules/node_builder
    modules/edge_builder
    modules/node_attributes

@@ -32,7 +32,7 @@ def test_base_node_attribute_invalid_nodes_name(graph_with_nodes: HeteroData, no
 @pytest.mark.parametrize("norm", ["l3", "invalide"])
 def test_base_node_attribute_invalid_norm(graph_with_nodes: HeteroData, norm: str):
     """Test BaseNodeAttribute raises error with invalid nodes name."""
-    with pytest.raises(ValueError):
+    with pytest.raises(AssertionError):
         ExtendedBaseNodeAttribute(norm=norm).compute(graph_with_nodes, "test_nodes")
 
 
