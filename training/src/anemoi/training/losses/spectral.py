@@ -65,8 +65,6 @@ class SpectralLoss(BaseLoss):
         self,
         transform: Literal["fft2d", "sht"] = "fft2d",
         *,
-        x_dim: int | None = None,
-        y_dim: int | None = None,
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -93,17 +91,14 @@ class SpectralLoss(BaseLoss):
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
         _ = scalers  # intentionally unused
         kwargs.pop("scalers", None)
-
-        if x_dim is not None:
-            kwargs.setdefault("x_dim", x_dim)
-        if y_dim is not None:
-            kwargs.setdefault("y_dim", y_dim)
+        x_dim = kwargs.get("x_dim")
+        y_dim = kwargs.get("y_dim")
 
         if transform == "fft2d":
             self.transform = FFT2D(**kwargs)
             # expose dims on the loss (legacy API + tests)
-            self.x_dim = int(kwargs.get("x_dim"))
-            self.y_dim = int(kwargs.get("y_dim"))
+            self.x_dim = int(x_dim) if x_dim is not None else None
+            self.y_dim = int(y_dim) if y_dim is not None else None
         elif transform == "sht":
             self.transform = SHT()
         else:
