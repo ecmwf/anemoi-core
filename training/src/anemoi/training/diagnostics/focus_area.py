@@ -76,7 +76,7 @@ class BoundingBoxSpatialMask(SpatialMask):
         pass
 
     def compute_mask(self, _graph_data: dict[str, Any], latlons: np.ndarray) -> None:
-        (lat_min, lon_min, lat_max, lon_max) = self.bbox
+        lat_min, lon_min, lat_max, lon_max = self.bbox
         lat, lon = latlons[:, 0], latlons[:, 1]
         self.focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
 
