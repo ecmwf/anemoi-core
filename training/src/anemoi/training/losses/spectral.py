@@ -31,8 +31,7 @@ import torch
 
 from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
-from anemoi.models.layers.spectral_transforms import CartesianSHT
-from anemoi.models.layers.spectral_transforms import EcTransOctahedralSHT
+from anemoi.models.layers.spectral_transforms import ReducedSHT
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
@@ -69,9 +68,8 @@ class SpectralLoss(BaseLoss):
         self,
         transform: Literal[
             "fft2d",
-            "cartesian_sht",
+            "reduced_sht",
             "octahedral_sht",
-            "ectrans_octahedral_sht",
             "dct2d",
         ] = "fft2d",
         *,
@@ -109,18 +107,14 @@ class SpectralLoss(BaseLoss):
         elif transform == "dct2d":
             LOGGER.info("Using DCT2D spectral transform in spectral loss.")
             self.transform = DCT2D(**kwargs)
-        elif transform == "cartesian_sht":
+        elif transform == "reduced_sht":
             # expected additional args: grid
-            LOGGER.info("Using Cartesian SHT spectral transform in spectral loss.")
-            self.transform = CartesianSHT(**kwargs)
+            LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
+            self.transform = ReducedSHT(**kwargs)
         elif transform == "octahedral_sht":
             # expected additional args: lmax/mmax/folding
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
-        elif transform == "ectrans_octahedral_sht":
-            # expected args: truncation (+ optional dtype, filepath)
-            LOGGER.info("Using EcTrans Octahedral SHT spectral transform in spectral loss.")
-            self.transform = EcTransOctahedralSHT(**kwargs)
         else:
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
@@ -270,7 +264,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
     Works with:
       - FFT2D
       - DCT2D
-      - Cartesian SHT
+      - Reduced SHT
       - Octahedral SHT
     """
 
@@ -279,7 +273,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         transform: Literal[
             "fft2d",
             "dct2d",
-            "cartesian_sht",
+            "reduced_sht",
             "octahedral_sht",
         ] = "fft2d",
         *,
