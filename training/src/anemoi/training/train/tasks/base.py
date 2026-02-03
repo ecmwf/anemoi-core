@@ -205,6 +205,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metadata_extractor=metadata_extractor,
             output_mask=self.output_mask,
         )
+        LOGGER.info(self.scalers)
 
         self.val_metric_ranges = get_metric_ranges(
             config,

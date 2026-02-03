@@ -70,6 +70,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.training_approach = getattr(
             config.training, "training_approach", "probabilistic_low_noise"
         )
+        LOGGER.info("Training approach: %s", self.training_approach)
         self.x_in_matching_channel_indices = match_tensor_channels(
             self.data_indices.data.input[0].name_to_index,
             {
@@ -277,6 +278,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             )
 
         weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+
         return sigma, weight
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:

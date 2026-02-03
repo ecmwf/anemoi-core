@@ -143,6 +143,7 @@ class AnemoiModelInterface(torch.nn.Module):
         x_in_hres: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
+        extra_args={},
         **kwargs,
     ) -> torch.Tensor:
         """Prediction step for the model.
@@ -180,4 +181,4 @@ class AnemoiModelInterface(torch.nn.Module):
             )
 
         # Delegate to the model's predict_step implementation with processors
-        return self.model.predict_step(**predict_kwargs, **kwargs)
+        return self.model.predict_step(**predict_kwargs, **extra_args, **kwargs)

@@ -16,6 +16,7 @@ from typing import Optional
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+
 DenoisingFunction = Callable[
     [torch.Tensor, torch.Tensor, torch.Tensor, Optional[ProcessGroup], Optional[list]],
     torch.Tensor,
@@ -83,7 +84,7 @@ class KarrasScheduler(NoiseScheduler):
             / (self.num_steps - 1.0)
             * (self.sigma_min ** (1.0 / self.rho) - self.sigma_max ** (1.0 / self.rho))
         ) ** self.rho
-
+        sigmas = torch.cat([torch.as_tensor(sigmas), torch.zeros_like(sigmas[:1])])
         return sigmas
 
 
@@ -203,10 +204,6 @@ class DiffusionSampler(ABC):
         pass
 
 
-### WARNING : MODIFIED TEMPORARILY FOR DOWNSCALING
-from icecream import ic
-
-
 class EDMHeunSampler(DiffusionSampler):
     """EDM Heun sampler with stochastic churn following Karras et al."""
 
@@ -239,13 +236,19 @@ class EDMHeunSampler(DiffusionSampler):
         **kwargs,
     ) -> torch.Tensor:
         # Override instance defaults with any kwargs
+
+        print("x_in_interp val", x_in_interp.mean(dim=-1).std())
+        print("x_in_hres val", x_in_hres.mean(dim=-1).std())
+
+        print("y val", y.mean(dim=-1).std())
+
         S_churn = kwargs.get("S_churn", self.S_churn)
         S_min = kwargs.get("S_min", self.S_min)
         S_max = kwargs.get("S_max", self.S_max)
         S_noise = kwargs.get("S_noise", self.S_noise)
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
-
+        print("sigmas", sigmas, S_churn, S_min, S_max, S_noise)
         batch_size, ensemble_size = x_in_interp.shape[0], x_in_interp.shape[2]
         num_steps = len(sigmas) - 1
 

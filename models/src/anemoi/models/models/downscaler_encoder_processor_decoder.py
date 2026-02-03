@@ -397,6 +397,14 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             model_comm_group=model_comm_group,
         )[:, None, ...]
 
+        for i in range(6):
+            LOGGER.info(
+                "Interpolated tensor statistics for index %d: mean=%f, std=%f",
+                i,
+                x_in_interp_to_hres[..., i].mean().item(),
+                x_in_interp_to_hres[..., i].std().item(),
+            )
+
         x_in_interp_to_hres = pre_processors(
             x_in_interp_to_hres, dataset="input_lres", in_place=False
         )
@@ -454,23 +462,26 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             Sampled output (after post-processing)
         """
 
+        LOGGER.info("Starting predict_step in downscaling model.", kwargs)
+
         noise_scheduler_params = {
-            "schedule_type": "karras",
-            # "sigma_max": 88,
-            "sigma_max": 100000,
-            "sigma_min": 0.03,
-            "rho": 7.0,
-            "num_steps": 80,
+            "schedule_type": kwargs.get("schedule_type", "karras"),
+            "sigma_max": kwargs.get("sigma_max", 100000),
+            "sigma_min": kwargs.get("sigma_min", 0.03),
+            "rho": kwargs.get("rho", 7.0),
+            "num_steps": kwargs.get("num_steps", 80),
         }
 
         sampler_params = {
-            "sampler": "heun",
-            "S_churn": 2.5,
-            "S_min": 0.75,
-            # "S_max": 88,
-            "S_max": 100000,
-            "S_noise": 1.05,
+            "sampler": kwargs.get("sampler", "heun"),
+            "S_churn": kwargs.get("S_churn", 2.5),
+            "S_min": kwargs.get("S_min", 0.75),
+            "S_max": kwargs.get("S_max", 100000),
+            "S_noise": kwargs.get("S_noise", 1.05),
         }
+
+        LOGGER.info("noise_scheduler_params: %s", noise_scheduler_params)
+        LOGGER.info("sampler_params: %s", sampler_params)
 
         print("noise_scheduler_params:", noise_scheduler_params)
         print("sampler_params:", sampler_params)
@@ -570,7 +581,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             noise_scheduler_config.update(noise_scheduler_params)
 
         warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}")
-        print(f"noise_scheduler_config: {noise_scheduler_config}")
+        LOGGER.info(f"noise_scheduler_config: {noise_scheduler_config}")
 
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
@@ -596,12 +607,16 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             grid_size,
             self.num_output_channels,
         )
+        # seed = 42
+        # torch.manual_seed(seed)
+        # if torch.cuda.is_available():
+        #    torch.cuda.manual_seed_all(seed)
         y_init = (
-            torch.randn(shape, device=x_in_interp_to_hres.device, dtype=sigmas.dtype)
+            torch.randn(
+                shape, device=x_in_interp_to_hres.device
+            )  # , dtype=sigmas.dtype)
             * sigmas[0]
         )
-
-        print("sigmas", sigmas)
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
@@ -662,14 +677,38 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         torch.Tensor
             the de-normalised state
         """
-        state_outp = post_processors_state(residuals, dataset="output", in_place=False)
-
-        state_outp += post_processors_state(
-            state_inp,
-            dataset="input_lres",
-            in_place=False,
+        denorm_residuals = post_processors_state(
+            residuals, dataset="output", in_place=False
         )
-        return state_outp
+
+        for i in range(6):
+            LOGGER.info(
+                "Residual tensor statistics for index %d: mean=%f, std=%f",
+                i,
+                denorm_residuals[..., i].mean().item(),
+                denorm_residuals[..., i].std().item(),
+            )
+
+        denorm_state_inp = post_processors_state(
+            state_inp, dataset="input_lres", in_place=False
+        )
+        for i in range(6):
+            LOGGER.info(
+                "Input tensor statistics for index %d: mean=%f, std=%f",
+                i,
+                denorm_state_inp[..., i].mean().item(),
+                denorm_state_inp[..., i].std().item(),
+            )
+
+        denorm_output = denorm_residuals + denorm_state_inp
+        for i in range(6):
+            LOGGER.info(
+                "Output tensor statistics for index %d: mean=%f, std=%f",
+                i,
+                denorm_output[..., i].mean().item(),
+                denorm_output[..., i].std().item(),
+            )
+        return denorm_output
 
     def correction_bug_to_delete(self, out, y_pred_residuals, post_processors_state):
         """Temporary fix to correct a bug in the addition of residuals to state"""
