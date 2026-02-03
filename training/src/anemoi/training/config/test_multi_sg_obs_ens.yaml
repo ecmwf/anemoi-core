@@ -214,6 +214,7 @@ per_dataset_overrides:
       dataset_specific:
         forcing: ["lsm", "z"]
         prognostic: ["2t", "10u", "10v"]
+        diagnostic: []
         processors:
           normalizer: 
             _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
