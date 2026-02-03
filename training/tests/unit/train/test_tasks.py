@@ -300,7 +300,7 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
     batch = {"data": torch.randn((b, forecaster.multi_step + forecaster.rollout, 1, g, v), dtype=torch.float32)}
 
     # Run one rollout step; should not raise and should yield a 5D prediction
-    (loss, metrics, preds) = next(forecaster._rollout_step(batch=batch, rollout=1, validation_mode=False))
+    loss, metrics, preds = next(forecaster._rollout_step(batch=batch, rollout=1, validation_mode=False))
     assert isinstance(loss, torch.Tensor)
     assert metrics == {}
     assert isinstance(preds, dict)
