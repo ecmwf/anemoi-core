@@ -7,13 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from functools import cached_property
-from pathlib import Path
 
 import numpy as np
 import torch
 from torch import Tensor
-from torch.fft import rfft
 from torch.nn import Module
 
 
@@ -107,13 +104,7 @@ def precompute_legpoly(
 
 class SphericalHarmonicTransform(Module):
 
-    def __init__(
-        self,
-        nlat: int,
-        lons_per_lat: list[int],
-        lmax: int | None = None,
-        mmax: int | None = None
-    ) -> None:
+    def __init__(self, nlat: int, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
 
         super().__init__()
 
@@ -173,13 +164,7 @@ class SphericalHarmonicTransform(Module):
 
 class InverseSphericalHarmonicTransform(Module):
 
-    def __init__(
-        self,
-        nlat: int,
-        lons_per_lat: list[int],
-        lmax: int | None = None,
-        mmax: int | None = None
-    ) -> None:
+    def __init__(self, nlat: int, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
 
         super().__init__()
 
