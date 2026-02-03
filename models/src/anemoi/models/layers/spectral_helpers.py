@@ -134,13 +134,12 @@ class SphericalHarmonicTransform(Module):
 
         self.register_buffer("weight", weight, persistent=False)
 
-    def rfft(self, x: Tensor) -> Tensor:
-
-        return torch.fft.rfft(input=x, norm="forward")
-
     def rfft_rings(self, x: Tensor) -> Tensor:
 
-        rfft = [self.rfft(x[..., slon : slon + nlon]) for slon, nlon in zip(self.slon, self.lons_per_lat)]
+        rfft = [
+            torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
+            for slon, nlon in zip(self.slon, self.lons_per_lat)
+        ]
 
         rfft = [
             torch.cat([x, torch.zeros((*x.shape[:-1], rlon), device=x.device)], dim=-1)
@@ -200,17 +199,12 @@ class InverseSphericalHarmonicTransform(Module):
 
         self.register_buffer("pct", pct, persistent=False)
 
-    def irfft(self, x: Tensor, nlon: int) -> Tensor:
-
-        return torch.fft.irfft(
-            input=x,
-            n=nlon,
-            norm="forward",
-        )
-
     def irfft_rings(self, x: Tensor) -> Tensor:
 
-        irfft = [self.irfft(x[..., t, :], nlon) for t, nlon in enumerate(self.lons_per_lat)]
+        irfft = [
+            torch.fft.irfft(x[..., t, :], nlon, norm="forward")
+            for t, nlon in enumerate(self.lons_per_lat)
+        ]
 
         return torch.cat(
             tensors=irfft,
