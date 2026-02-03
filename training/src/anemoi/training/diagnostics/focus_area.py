@@ -44,7 +44,7 @@ class NoOpSpatialMask(SpatialMask):
 
 
 class NodeAttributeSpatialMask(SpatialMask):
-    def __init__(self, node_attribute_name: str, name=None) -> None:
+    def __init__(self, node_attribute_name: str, name: str | None = None) -> None:
         tag = f"_{node_attribute_name}" if name is None else name
         super().__init__(tag)
         self.node_attribute_name = node_attribute_name
@@ -64,7 +64,7 @@ class NodeAttributeSpatialMask(SpatialMask):
 
 
 class BoundingBoxSpatialMask(SpatialMask):
-    def __init__(self, bbox: tuple[float, float, float, float], name: str = None) -> None:
+    def __init__(self, bbox: tuple[float, float, float, float], name: str | None = None) -> None:
         tag = f"_bbox_lat-{bbox[0]}-{bbox[2]}_lon-{bbox[1]}-{bbox[3]}" if name is None else name
 
         super().__init__(tag)
