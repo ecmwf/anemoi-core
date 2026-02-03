@@ -72,19 +72,23 @@ class FilteringLossWrapper(BaseLoss):
         """Hook to set the data indices for the loss."""
         self.data_indices = data_indices
         name_to_index = data_indices.data.output.name_to_index
+        data_output = data_indices.data.output
         model_output = data_indices.model.output
-        output_indices = model_output.full
+        model_output_indices = model_output.full
 
         if self.predicted_variables is not None:
             predicted_indices = [model_output.name_to_index[name] for name in self.predicted_variables]
         else:
-            predicted_indices = output_indices
-            self.predicted_variables = list(name_to_index.keys())
+            predicted_indices = model_output_indices
+            self.predicted_variables = model_output.includes
         if self.target_variables is not None:
             target_indices = [name_to_index[name] for name in self.target_variables]
         else:
-            target_indices = output_indices
-            self.target_variables = list(name_to_index.keys())
+            self.target_variables = [var for var in data_output.includes if var in self.predicted_variables]
+            target_indices = torch.tensor(
+                [i for (n, i) in name_to_index.items() if n in self.target_variables],
+                dtype=data_output.full.dtype,
+            )
 
         assert len(predicted_indices) == len(
             target_indices,

@@ -344,7 +344,6 @@ class TestFilteringLossWrapperSetDataIndices:
         - imerg: target-only (index 9)
 
         data.output.full = [0, 1, 4, 5, 8, 9] (forcings excluded)
-        Positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4, imerg→5
         """
         data_config = {
             "forcing": ["f_0", "f_1", "f_2", "f_3"],
@@ -480,9 +479,11 @@ class TestFilteringLossWrapperSetDataIndices:
         wrapper.set_data_indices(data_indices_with_target_only)
 
         # Both default to model.output.full (5 prognostic variables)
+        # imerg is ignored though it is present as a target
         # They must have the same length for loss computation
         assert len(wrapper.predicted_indices) == 5
         assert len(wrapper.target_indices) == 5
+        assert wrapper.predicted_variables == wrapper.target_variables
 
 
 class TestFilteringLossWrapperForward:

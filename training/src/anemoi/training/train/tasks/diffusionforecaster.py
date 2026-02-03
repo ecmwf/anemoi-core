@@ -208,13 +208,13 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
-            batch[:, self.multi_step, ...],
+            batch[:, self.multi_step],
             validation_mode=validation_mode,
             weights=noise_weights,
             use_reentrant=False,
         )
 
-        return loss, metrics, [y_pred]
+        return loss, metrics, y_pred
 
 
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
@@ -350,7 +350,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             self.model.pre_processors_tendencies,
             input_post_processor=self.model.post_processors,
         )
-        tendency_target_full = batch[:, self.multi_step, ...]
+        tendency_target_full = batch[:, self.multi_step]
         tendency_target_full[..., self.data_indices.data.output.full] = tendency_target
 
         # get noise level and associated loss weights
@@ -386,10 +386,10 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             tendency_pred,
             tendency_target_full,
             y_pred_state=y_pred,
-            y_state=batch[:, self.multi_step, ...],
+            y_state=batch[:, self.multi_step],
             validation_mode=validation_mode,
             weights=noise_weights,
             use_reentrant=False,
         )
 
-        return loss, metrics, [y_pred]
+        return loss, metrics, y_pred
