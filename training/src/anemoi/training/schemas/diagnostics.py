@@ -21,7 +21,6 @@ from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
-from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
@@ -145,6 +144,8 @@ class PlotSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotSpectrumSchema(BaseModel):
@@ -158,6 +159,8 @@ class PlotSpectrumSchema(BaseModel):
     "List of parameters to plot."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotHistogramSchema(BaseModel):
@@ -173,6 +176,8 @@ class PlotHistogramSchema(BaseModel):
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotEnsSampleSchema(BaseModel):
@@ -198,6 +203,8 @@ class PlotEnsSampleSchema(BaseModel):
     "List of colormaps to use, by default None."
     members: list[int] | None = Field(default=None)
     "List of ensemble members to plot. If None, plots all members."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotEnsLossSchema(BaseModel):
@@ -222,6 +229,8 @@ class PlotEnsSpectrumSchema(BaseModel):
     "List of parameters to plot."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotEnsHistogramSchema(BaseModel):
@@ -237,6 +246,8 @@ class PlotEnsHistogramSchema(BaseModel):
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
@@ -292,9 +303,8 @@ class PlotSchema(BaseModel):
     "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
-    focus_areas: DatasetDict[list[FocusAreaSchema]]
-    "List of regions of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox',"
-    " for each specific dataset."
+    focus_areas: list[FocusAreaSchema]
+    "List of regions of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class TimeLimitSchema(BaseModel):
