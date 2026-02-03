@@ -733,7 +733,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         config: OmegaConf,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
-        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback.
 
@@ -744,7 +743,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         every_n_epochs: int | None, optional
             Override for frequency to plot at, by default None
         """
-        super().__init__(config, dataset_names=dataset_names, every_n_epochs=every_n_epochs, focus_area=focus_area)
+        super().__init__(config, dataset_names=dataset_names, every_n_epochs=every_n_epochs)
         self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
 
     def get_node_trainable_tensors(
@@ -878,7 +877,6 @@ class PlotLoss(BasePerBatchPlotCallback):
         parameter_groups: dict[dict[str, list[str]]],
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotLoss callback.
 
@@ -891,7 +889,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         every_n_batches : int, optional
             Override for batch frequency, by default None
         """
-        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
+        super().__init__(config, every_n_batches=every_n_batches, dataset_names=dataset_names)
         self.parameter_groups = parameter_groups
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
         if self.parameter_groups is None:
@@ -1101,16 +1099,18 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     def __init__(
         self,
         config: BaseSchema,
+        every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
     ) -> None:
 
-        super().__init__(config, dataset_names)
+        super().__init__(config, every_n_batches=every_n_batches, dataset_names=dataset_names)
 
         # Build focus mask
         self.focus_mask = build_spatial_mask(
             node_attribute_name=focus_area.get("mask_attr_name", None) if focus_area is not None else None,
             latlon_bbox=focus_area.get("latlon_bbox", None) if focus_area is not None else None,
+            name=focus_area.get("name", None) if focus_area is not None else None,
         )
 
     def process(

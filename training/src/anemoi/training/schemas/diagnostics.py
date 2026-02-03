@@ -36,6 +36,9 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
 
 
 class FocusAreaSchema(BaseModel):
+    name: str | None = Field(default=None)
+    "Name of the focus_area, will be used for plot naming."
+
     mask_attr_name: str | None = Field(default=None)
     "Name of the node attribute to use as masking. eg. cutout_mask"
 

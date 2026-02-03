@@ -6,8 +6,9 @@ import numpy as np
 
 
 class SpatialMask(ABC):
-    def __init__(self) -> None:
+    def __init__(self, tag) -> None:
         self.focus_mask: np.ndarray | None = None
+        self.tag = "_" + tag
 
     @abstractmethod
     def verify_mask(self, graph_data: dict[str, Any]) -> None:
@@ -29,8 +30,7 @@ class SpatialMask(ABC):
 
 class NoOpSpatialMask(SpatialMask):
     def __init__(self) -> None:
-        super().__init__()
-        self.tag = ""
+        super().__init__(tag="")
 
     def verify_mask(self, _graph_data: dict[str, Any]) -> None:
         pass
@@ -44,11 +44,11 @@ class NoOpSpatialMask(SpatialMask):
 
 
 class NodeAttributeSpatialMask(SpatialMask):
-    def __init__(self, node_attribute_name: str) -> None:
-        super().__init__()
+    def __init__(self, node_attribute_name: str, name=None) -> None:
+        tag = f"_{node_attribute_name}" if name is None else name
+        super().__init__(tag)
         self.node_attribute_name = node_attribute_name
         self.mask_name = node_attribute_name
-        self.tag = f"_mask_{node_attribute_name}"
 
     def verify_mask(self, graph_data: dict[str, Any]) -> None:
         assert self.node_attribute_name in graph_data["data"], (
@@ -64,10 +64,11 @@ class NodeAttributeSpatialMask(SpatialMask):
 
 
 class BoundingBoxSpatialMask(SpatialMask):
-    def __init__(self, bbox: tuple[float, float, float, float]) -> None:
-        super().__init__()
+    def __init__(self, bbox: tuple[float, float, float, float], name: str = None) -> None:
+        tag = f"_bbox_lat-{bbox[0]}-{bbox[2]}_lon-{bbox[1]}-{bbox[3]}" if name is None else name
+
+        super().__init__(tag)
         self.bbox = bbox
-        self.tag = f"_bbox_lat-{bbox[0]}-{bbox[2]}_lon-{bbox[1]}-{bbox[3]}"
         # Internal logical validation
         lat_min, lon_min, lat_max, lon_max = self.bbox
         assert lat_min < lat_max and lon_min < lon_max
@@ -84,9 +85,10 @@ class BoundingBoxSpatialMask(SpatialMask):
 def build_spatial_mask(
     node_attribute_name: str | None = None,
     latlon_bbox: tuple[float, float, float, float] | None = None,
+    name: str | None = None,
 ) -> Any:
     if node_attribute_name is not None:
-        return NodeAttributeSpatialMask(node_attribute_name)
+        return NodeAttributeSpatialMask(node_attribute_name, name)
     if latlon_bbox is not None:
-        return BoundingBoxSpatialMask(latlon_bbox)
+        return BoundingBoxSpatialMask(latlon_bbox, name)
     return NoOpSpatialMask()
