@@ -23,7 +23,7 @@ that inverse transformed fields are also real.
 
 
 def random_spectral_array(truncation, dtype):
-    # Shape: [batch index, ensemble member, l, m, variable]
+    # Shape: [batch index, ensemble member, l, m]
     shape = (1, 1, truncation + 1, truncation + 1)
     spectral_array = torch.complex(torch.randn(shape, dtype=dtype), torch.randn(shape, dtype=dtype))
     spectral_array[0, 0, :, 0].imag = 0.0  # m = 0 modes must be real
