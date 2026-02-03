@@ -249,9 +249,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
             x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
             if self.use_encoder[dataset_name]:
-                shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
                 encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
                     dataset_name

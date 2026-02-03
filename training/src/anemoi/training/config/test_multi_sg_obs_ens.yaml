@@ -37,8 +37,8 @@ dataloader:
 
   limit_batches:
     training: 100
-    validation: 100
-    test: 100
+    validation: 20
+    test: null
     
   batch_size:
     training: 1
@@ -99,13 +99,12 @@ training:
     encoder.proc: encoder.era_meps_sg.proc
     decoder.proc: decoder.era_meps_sg.proc
 
-  submodules_to_freeze: ["era_meps_sg"]
-
+  submodules_to_freeze: ["era_meps_sg", "processor", "noise_injector"]
   max_steps: 5000
 
   lr:
-    warmup: 200
-    rate: 1.0e-5
+    warmup: 20
+    rate: 6.25e-5
     iterations: ${training.max_steps}
     min: 3e-7
 
@@ -148,7 +147,7 @@ datasets:
       dataset: ${system.input.datasets}${system.input.dataset_meps}
       trim_edge: 200
     thinning: 4
-    select: ["2t", "10u", "10v", "lsm", "z"]
+    select: ['2t', '10u', '10v', 'lsm', 'z', 'cos_julian_day', 'cos_latitude', 'cos_local_time', 'cos_longitude', 'insolation', 'sin_julian_day', 'sin_latitude', 'sin_local_time', 'sin_longitude']
 
 selected_vars: ['10u', '10v', '2d', '2t', 'cos_julian_day', 'cos_latitude', 'cos_local_time', 'cos_longitude', 'hcc', 'insolation', 'lcc', 'lsm', 'mcc', 'msl', 'q_100', 'q_1000', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_50', 'q_500', 'q_700', 'q_850', 'q_925', 'sin_julian_day', 'sin_latitude', 'sin_local_time', 'sin_longitude', 'skt', 'sp', 'ssrd', 'strd', 't_100', 't_1000', 't_150', 't_200', 't_250', 't_300', 't_400', 't_50', 't_500', 't_700', 't_850', 't_925', 'tcc', 'tcw', 'tp', 'u_100', 'u_1000', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_50', 'u_500', 'u_700', 'u_850', 'u_925', 'v_100', 'v_1000', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_50', 'v_500', 'v_700', 'v_850', 'v_925', 'w_100', 'w_1000', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_50', 'w_500', 'w_700', 'w_850', 'w_925', 'z', 'z_100', 'z_1000', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_50', 'z_500', 'z_700', 'z_850', 'z_925']
 
@@ -214,7 +213,7 @@ per_dataset_overrides:
     data:
       dataset_specific:
         forcing: ["lsm", "z"]
-        diagnostic: ["2t", "10u", "10v"]
+        prognostic: ["2t", "10u", "10v"]
         processors:
           normalizer: 
             _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
@@ -224,7 +223,16 @@ per_dataset_overrides:
               max:
               - "z"
               none:
-              - "lsm"
+              - cos_latitude
+              - cos_longitude
+              - sin_latitude
+              - sin_longitude
+              - cos_julian_day
+              - cos_local_time
+              - sin_julian_day
+              - sin_local_time
+              - insolation
+              - lsm
     dataloader:
       grid_indices:
         _target_: anemoi.training.data.grid_indices.FullGrid
@@ -234,7 +242,7 @@ per_dataset_overrides:
       encoder: 
         use_encoder: False
       residual:
-        use_residual: False
+        use_residual: True
     training: 
       scalers:
         node_weights:

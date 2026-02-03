@@ -69,7 +69,7 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
-    scale_resolutions: ${graph.nodes.hidden.node_builder.global_resolution}
+    scale_resolutions: ${graph.nodes.hidden.node_builder.lam_resolution}
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
