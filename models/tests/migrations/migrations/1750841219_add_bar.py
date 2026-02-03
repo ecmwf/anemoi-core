@@ -24,9 +24,3 @@ def migrate(ckpt: CkptType) -> CkptType:
     assert "bar" not in ckpt
     ckpt["bar"] = "bar"
     return ckpt
-
-
-def rollback(ckpt: CkptType) -> CkptType:
-    """Rollbacks the migration"""
-    del ckpt["bar"]
-    return ckpt

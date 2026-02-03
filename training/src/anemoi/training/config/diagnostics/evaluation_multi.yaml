@@ -40,31 +40,21 @@ log:
     enabled: False
   mlflow:
     _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
-    enabled: True
+    enabled: False
     offline: False
-    experiment_name: 'test_plotting_multi_datasets'
-    project_name: 'AIFS'
-    run_name: 'eracerra_plots'
-    system: True
-    tracking_uri: 'https://mlflow.ecmwf.int'
-    authentication: True
+    authentication: False
+    tracking_uri: ???
+    experiment_name: 'anemoi-debug'
+    project_name: 'Anemoi'
+    system: False
     terminal: True
-    log_model: False
-  # mlflow:
-  #   enabled: False
-  #   offline: False
-  #   authentication: False
-  #   tracking_uri: ???
-  #   experiment_name: 'anemoi-debug'
-  #   project_name: 'Anemoi'
-  #   system: False
-  #   terminal: True
-  #   run_name: null # If set to null, the run name will be the a random UUID
+    run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True
     expand_hyperparams: # Which keys in hyperparams to expand
       - config
     http_max_retries: 35
-    max_params_length: 10000
+    max_params_length: 2000
+    save_dir: ${system.output.logs.mlflow}
   interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True
