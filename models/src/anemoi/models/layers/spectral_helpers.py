@@ -149,6 +149,18 @@ class SphericalHarmonicTransform(Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Performs direct SHT transform (Fourier transform followed by Legendre transform).
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            spectral representation of field [..., total wavenumber l, zonal wavenumber m]
+        """
 
         x = 2.0 * torch.pi * self.rfft_rings(x)
         x = torch.view_as_real(x)
@@ -200,6 +212,18 @@ class InverseSphericalHarmonicTransform(Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Performs inverse SHT transform (inverse Legendre transform followed by inverse Fourier transform).
+
+        Parameters
+        ----------
+        torch.Tensor
+            spectral representation of field [..., total wavenumber l, zonal wavenumber m]
+
+        Returns
+        -------
+        x : torch.Tensor
+            field [..., grid]
+        """
 
         x = torch.view_as_real(x)
 
