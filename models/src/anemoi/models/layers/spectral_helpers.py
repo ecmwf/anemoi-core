@@ -117,7 +117,9 @@ class SphericalHarmonicTransform(Module):
         self.n_grid_points = sum(self.lons_per_lat)
 
         self.slon = [0] + list(np.cumsum(self.lons_per_lat))[:-1]
-        self.rlon = [nlat + 8 - nlon // 2 for nlon in self.lons_per_lat]
+
+        # Set padding for each latitude so every rFFT output ring has the same length
+        self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
 
         theta, weight = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
