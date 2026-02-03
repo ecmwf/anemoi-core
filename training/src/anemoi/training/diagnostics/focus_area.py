@@ -6,7 +6,7 @@ import numpy as np
 
 
 class SpatialMask(ABC):
-    def __init__(self, tag) -> None:
+    def __init__(self, tag: str | None) -> None:
         self.focus_mask: np.ndarray | None = None
         self.tag = "_" + tag
 
