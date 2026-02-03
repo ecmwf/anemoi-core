@@ -177,11 +177,11 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_edges_name,
         edge_weight_attribute,
     ):
-        are_files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
-        are_edge_names_specified = truncation_up_edges_name is not None or truncation_down_edges_name is not None
-        if not are_files_specified:
+        files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
+        edge_names_specified = truncation_up_edges_name is not None or truncation_down_edges_name is not None
+        if not files_specified:
             assert graph is not None, "graph must be provided if file paths are not specified."
-            if are_edge_names_specified:
+            if edge_names_specified:
                 assert (
                     truncation_up_edges_name is not None and truncation_down_edges_name is not None
                 ), "Both truncation_up_edges_name and truncation_down_edges_name must be provided."
