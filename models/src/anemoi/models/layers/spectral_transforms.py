@@ -11,7 +11,6 @@ import abc
 import logging
 
 import einops
-import numpy as np
 import torch
 import torch.fft
 
@@ -158,16 +157,15 @@ class RegularSHT(SpectralTransform):
         self.nlat = nlat
         self.nlon = nlon
         self.lons_per_lat = [nlon] * nlat
-        self._sht = SphericalHarmonicTransform(nlat=self.nlat, lons_per_lat=self.lons_per_lat,
-                                               lmax=self.nlat // 2, mmax=self.nlat // 2)
+        self._sht = SphericalHarmonicTransform(
+            nlat=self.nlat, lons_per_lat=self.lons_per_lat, lmax=self.nlat // 2, mmax=self.nlat // 2
+        )
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
-        assert (
-            p == self.n_grid_points
-        ), f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        assert p == self.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
         x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.nlat, x=self.nlon)
         coeffs = self._sht(x)
 
@@ -191,16 +189,15 @@ class ReducedSHT(SpectralTransform):
         # self.lons_per_lat = [nlon] * nlat
         raise NotImplementedError("ReducedSHT is not yet implemented.")
 
-        self._sht = SphericalHarmonicTransform(nlat=self.nlat, lons_per_lat=self.lons_per_lat,
-                                               lmax=self.nlat // 2, mmax=self.nlat // 2)
+        self._sht = SphericalHarmonicTransform(
+            nlat=self.nlat, lons_per_lat=self.lons_per_lat, lmax=self.nlat // 2, mmax=self.nlat // 2
+        )
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, e, p, v = data.shape
-        assert (
-            p == self.n_grid_points
-        ), f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        assert p == self.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
         x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.nlat, x=self.nlon)
         coeffs = self._sht(x)
 
@@ -220,8 +217,9 @@ class OctahedralSHT(SpectralTransform):
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
-        self._sht = SphericalHarmonicTransform(nlat=self.nlat, lons_per_lat=self.lons_per_lat,
-                                               lmax=self.nlat // 2, mmax=self.nlat // 2)
+        self._sht = SphericalHarmonicTransform(
+            nlat=self.nlat, lons_per_lat=self.lons_per_lat, lmax=self.nlat // 2, mmax=self.nlat // 2
+        )
         self.y_freq = self._sht.lmax
         self.x_freq = self._sht.mmax
 

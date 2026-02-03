@@ -10,8 +10,8 @@
 import pytest
 import torch
 
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
+from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
 """
 Random array of complex spectral coefficients.
@@ -52,15 +52,14 @@ class TestRegularSphericalHarmonicTransform:
         lons_per_lat = [2 * nlat] * nlat
 
         # Create SHT objects
-        direct = SphericalHarmonicTransform(nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1,
-                                            mmax=truncation + 1).to(device)
-        inverse = InverseSphericalHarmonicTransform(nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1,
-                                            mmax=truncation + 1).to(device)
+        direct = SphericalHarmonicTransform(
+            nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1, mmax=truncation + 1
+        ).to(device)
+        inverse = InverseSphericalHarmonicTransform(
+            nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1, mmax=truncation + 1
+        ).to(device)
 
-        return {
-            "truncation": truncation, "dtype": dtype, "tolerance": tolerance,
-            "direct": direct, "inverse": inverse
-        }
+        return {"truncation": truncation, "dtype": dtype, "tolerance": tolerance, "direct": direct, "inverse": inverse}
 
     def test_idempotency_direct_inverse(self, init):
         """Test that direct followed by inverse transform returns the original data."""
@@ -95,9 +94,7 @@ class TestRegularSphericalHarmonicTransform:
         # Compute max relative diff
         maxdiff = 0.0
         for i in range(truncation + 1):
-            maxdiff = max(
-                maxdiff, torch.abs((before[0, 0, i:, i] - after[0, 0, i:, i]) / before[0, 0, i:, i]).max()
-            )
+            maxdiff = max(maxdiff, torch.abs((before[0, 0, i:, i] - after[0, 0, i:, i]) / before[0, 0, i:, i]).max())
 
         assert maxdiff < tolerance
 
@@ -121,12 +118,11 @@ class TestOctahedralSphericalHarmonicTransform(TestRegularSphericalHarmonicTrans
         lons_per_lat += list(reversed(lons_per_lat))
 
         # Create SHT objects
-        direct = SphericalHarmonicTransform(nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1,
-                                            mmax=truncation + 1).to(device)
-        inverse = InverseSphericalHarmonicTransform(nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1,
-                                            mmax=truncation + 1).to(device)
+        direct = SphericalHarmonicTransform(
+            nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1, mmax=truncation + 1
+        ).to(device)
+        inverse = InverseSphericalHarmonicTransform(
+            nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1, mmax=truncation + 1
+        ).to(device)
 
-        return {
-            "truncation": truncation, "dtype": dtype, "tolerance": tolerance,
-            "direct": direct, "inverse": inverse
-        }
+        return {"truncation": truncation, "dtype": dtype, "tolerance": tolerance, "direct": direct, "inverse": inverse}
