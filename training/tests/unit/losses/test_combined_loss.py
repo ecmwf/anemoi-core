@@ -197,9 +197,6 @@ def test_combined_loss_filtered_and_unfiltered_with_scalers() -> None:
     # First loss should be wrapped (has predicted_variables)
     assert isinstance(loss.losses[0], FilteringLossWrapper)
     assert loss.losses[0].predicted_variables == ["tp"]
-    # Second loss should NOT be wrapped (no variable filtering specified)
-    # assert isinstance(loss.losses[1], MSELoss)
-    # assert not isinstance(loss.losses[1], FilteringLossWrapper)
 
     # Test forward pass with compatible tensor shapes
     batch_size, ensemble, grid_points = 1, 1, 4
@@ -212,4 +209,4 @@ def test_combined_loss_filtered_and_unfiltered_with_scalers() -> None:
 
     # Should not raise IndexError - print_variable_scaling should work with filtered losses
     scaling_values = print_variable_scaling(loss, data_indices)
-    assert "tp" in scaling_values  # The filtered variable should be in the output
+    assert "tp" in scaling_values["FilteringLossWrapper"]  # The filtered variable should be in the output

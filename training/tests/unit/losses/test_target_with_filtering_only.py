@@ -394,9 +394,6 @@ class TestFilteringLossWrapperSetDataIndices:
         - name_to_index: var_0=0, forcing=1, var_2=2, imerg=3
         - data.output.full: [0, 2, 3] (forcing excluded)
         - Positions in output tensor: var_0→0, var_2→1, imerg→2
-
-        Without reindexing, imerg index would be 3 (wrong).
-        With reindexing, imerg index is 2 (correct position in tensor).
         """
         from anemoi.training.losses.mse import MSELoss
 
@@ -443,7 +440,6 @@ class TestFilteringLossWrapperSetDataIndices:
         Fixture layout:
         - model.output.name_to_index: var_0=0, var_1=1, var_2=2, var_3=3, var_4=4
         - data.output.full = [0, 1, 4, 5, 8, 9]
-        - Reindexed positions: var_0→0, var_1→1, var_2→2, var_3→3, var_4→4
         """
         from anemoi.training.losses.mse import MSELoss
 
@@ -457,7 +453,6 @@ class TestFilteringLossWrapperSetDataIndices:
 
         # predicted_indices come from model.output.name_to_index
         assert wrapper.predicted_indices == [0, 1, 2]
-        # target_indices come from reindexed positions in data.output
         # var_0, var_1 are at positions 0, 1 in data.output.full
         # var_2 has name_to_index=4
         assert wrapper.target_indices == [0, 1, 4]
