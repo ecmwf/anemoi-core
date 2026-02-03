@@ -20,7 +20,6 @@ from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
-from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
@@ -98,40 +97,13 @@ def get_loss_function(
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
-    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
     if data_indices is not None:
-        loss_function = _wrap_loss_with_filtering(
-            loss_function,
-            predicted_variables,
-            target_variables,
-            data_indices,
-        )
-    return loss_function
-
-
-def _wrap_loss_with_filtering(
-    loss_function: BaseLoss,
-    predicted_variables: list[str] | None,
-    target_variables: list[str] | None,
-    data_indices: IndexCollection,
-) -> BaseLoss:
-    """Wrap loss function with FilteringLossWrapper if predicted or target variables are specified."""
-    loss_function = FilteringLossWrapper(
-        loss=loss_function,
-        predicted_variables=predicted_variables,
-        target_variables=target_variables,
-    ).set_data_indices(data_indices)
-    subloss = loss_function.loss
-    if subloss.has_scaler_for_dim(TensorDim.VARIABLE) and predicted_variables is not None:
-        # filter scaler to only predicted variables
-        n_variables = len(data_indices.model.output.full)
-        for key, (dims, tens) in subloss.scaler.subset_by_dim(TensorDim.VARIABLE).tensors.items():
-            dims = (dims,) if isinstance(dims, int) else tuple(dims) if not isinstance(dims, tuple) else dims
-            var_dim_pos = list(dims).index(TensorDim.VARIABLE)
-            # Only filter if the scaler has the full number of variables
-            if tens.shape[var_dim_pos] == n_variables:
-                scaling = tens[loss_function.predicted_indices]
-                loss_function.loss.update_scaler(name=key, scaler=scaling, override=True)
+        loss_function = FilteringLossWrapper(
+            loss=loss_function,
+            predicted_variables=predicted_variables,
+            target_variables=target_variables,
+        ).set_data_indices(data_indices)
+    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
     return loss_function
 
 

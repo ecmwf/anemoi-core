@@ -116,4 +116,4 @@ def test_print_variable_scaling() -> None:
     scaling_dict = print_variable_scaling(loss, data_indices)
     assert "FilteringLossWrapper" in scaling_dict  # loss is filtered
     assert "tp" in scaling_dict["FilteringLossWrapper"]
-    loss(torch.zeros((1, 1, 10, 4)), torch.zeros((1, 1, 10, 4)), without_scaler=[-2])
+    assert [var not in scaling_dict["FilteringLossWrapper"] for var in data_indices.name_to_index if var != "tp"]

@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import functools
 from collections.abc import Callable
 from typing import Any
 
@@ -15,6 +16,8 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.utils.enums import TensorDim
 
 
 # TODO(Harrison): Consider renaming and reworking to a RemappingLossWrapper or similar, as it remaps variables
@@ -53,6 +56,17 @@ class FilteringLossWrapper(BaseLoss):
         self.loss = loss
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
+
+    @functools.wraps(ScaleTensor.add_scaler)
+    def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
+        dimension = dimension if isinstance(dimension, int) else dimension[0]
+        if dimension == TensorDim.VARIABLE and self.predicted_variables is not None:
+            # filter scaler to only predicted variables
+            # target variables will be scaled like the predicted variables since that is what
+            # it compares to in the loss
+            # even if a different scaling exists for the target variable
+            scaler = scaler[self.predicted_indices]
+        self.scaler.add_scaler(dimension=dimension, scaler=scaler, name=name)
 
     def set_data_indices(self, data_indices: IndexCollection) -> BaseLoss:
         """Hook to set the data indices for the loss."""
