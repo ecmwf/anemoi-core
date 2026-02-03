@@ -201,10 +201,7 @@ class InverseSphericalHarmonicTransform(Module):
 
     def irfft_rings(self, x: Tensor) -> Tensor:
 
-        irfft = [
-            torch.fft.irfft(x[..., t, :], nlon, norm="forward")
-            for t, nlon in enumerate(self.lons_per_lat)
-        ]
+        irfft = [torch.fft.irfft(x[..., t, :], nlon, norm="forward") for t, nlon in enumerate(self.lons_per_lat)]
 
         return torch.cat(
             tensors=irfft,
