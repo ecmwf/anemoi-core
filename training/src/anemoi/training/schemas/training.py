@@ -317,6 +317,7 @@ LossSchemas = (
     | SpectralLossSchema
     | MultiScaleLossSchema
     | None
+    | None
 )
 
 
