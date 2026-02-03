@@ -40,7 +40,7 @@ class TestRegularSphericalHarmonicTransform:
     @pytest.fixture
     def init(self):
         # Choose GPUs if available
-        device = "cuda" if torch.cuda.is_available() else "cpu"  # Spectral truncation
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         torch.set_default_device(device)
 
         truncation = 39  # T39 corresponding to O40 grid
@@ -105,7 +105,7 @@ class TestOctahedralSphericalHarmonicTransform(TestRegularSphericalHarmonicTrans
     @pytest.fixture
     def init(self):
         # Choose GPUs if available
-        device = "cuda" if torch.cuda.is_available() else "cpu"  # Spectral truncation
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         torch.set_default_device(device)
 
         truncation = 39  # T39 corresponding to O40 grid
