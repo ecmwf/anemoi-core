@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
 
     from anemoi.training.schemas.base_schema import BaseSchema
-    from anemoi.training.schemas.diagnostics import FocusAreaSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -249,7 +248,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         members: list | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
         **kwargs: Any,
     ) -> None:
         # Initialize PlotSample first
@@ -377,7 +376,7 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback."""
         _PlotSpectrum.__init__(
@@ -406,7 +405,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback."""
@@ -438,7 +437,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         log_scale: bool = False,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback."""
         _PlotHistogram.__init__(

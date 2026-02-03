@@ -46,7 +46,6 @@ from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sam
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.diagnostics import FocusAreaSchema
 from anemoi.training.train.tasks import GraphInterpolator
 
 LOGGER = logging.getLogger(__name__)
@@ -734,7 +733,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         config: OmegaConf,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback.
 
@@ -879,7 +878,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         parameter_groups: dict[dict[str, list[str]]],
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotLoss callback.
 
@@ -1103,7 +1102,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         self,
         config: BaseSchema,
         dataset_names: list[str] | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
 
         super().__init__(config, dataset_names)
@@ -1173,7 +1172,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -1300,7 +1299,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback.
 
@@ -1402,7 +1401,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         log_scale: bool = False,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: FocusAreaSchema | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback.
 

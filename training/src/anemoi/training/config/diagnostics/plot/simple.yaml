@@ -36,9 +36,9 @@ focus_areas:
   - full_dataset: null
   - europe:
       latlon_bbox: [30.0, -20.0, 60.0, 40.0]
-  - china: 
+  - china:
       latlon_bbox: [18.0, 73.0, 54.0, 135.0]
-      
+
 callbacks:
   # Add plot callbacks here
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
