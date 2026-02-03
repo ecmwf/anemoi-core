@@ -20,6 +20,8 @@ By definition arranged on an upper triangular matrix of width and height (trunca
 values below the diagonal just set to zero. The m = 0 coefficients are also purely real, to ensure
 that inverse transformed fields are also real.
 """
+
+
 def random_spectral_array(truncation: int, dtype: torch.dtype) -> torch.Tensor:
     # Shape: [batch index, ensemble member, l, m]
     shape = (1, 1, truncation + 1, truncation + 1)
@@ -50,15 +52,15 @@ def sht_setup(request):
 
     truncation = 39  # T39 corresponding to O40 grid
     dtype = torch.float64  # float64 for numerical correctness checking
-    torch.manual_seed(0) # fix RNG seed for reproducibility
+    torch.manual_seed(0)  # fix RNG seed for reproducibility
     tolerance = 1e-11
 
     nlat = 2 * (truncation + 1)
     lons_per_lat = _lons_per_lat(nlat=nlat, grid_kind=request.param)
 
-    direct = SphericalHarmonicTransform(
-        nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1, mmax=truncation + 1
-    ).to(device)
+    direct = SphericalHarmonicTransform(nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1, mmax=truncation + 1).to(
+        device
+    )
     inverse = InverseSphericalHarmonicTransform(
         nlat, lons_per_lat=lons_per_lat, lmax=truncation + 1, mmax=truncation + 1
     ).to(device)
