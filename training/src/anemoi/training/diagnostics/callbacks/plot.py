@@ -33,6 +33,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.training.diagnostics.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -53,7 +54,11 @@ LOGGER = logging.getLogger(__name__)
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
-    def __init__(self, config: BaseSchema, dataset_names: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        config: BaseSchema,
+        dataset_names: list[str] | None = None,
+    ) -> None:
         """Initialise the BasePlotCallback abstract base class.
 
         Parameters
@@ -69,6 +74,7 @@ class BasePlotCallback(Callback, ABC):
 
         self.post_processors = None
         self.latlons = None
+
         init_plot_settings()
 
         self.plot = self._plot
@@ -238,7 +244,12 @@ class BasePlotCallback(Callback, ABC):
 class BasePerBatchPlotCallback(BasePlotCallback):
     """Base Callback for plotting at the end of each batch."""
 
-    def __init__(self, config: OmegaConf, every_n_batches: int | None = None, dataset_names: list[str] | None = None):
+    def __init__(
+        self,
+        config: OmegaConf,
+        every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
+    ):
         """Initialise the BasePerBatchPlotCallback.
 
         Parameters
@@ -323,7 +334,12 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 class BasePerEpochPlotCallback(BasePlotCallback):
     """Base Callback for plotting at the end of each epoch."""
 
-    def __init__(self, config: OmegaConf, every_n_epochs: int | None = None, dataset_names: list[str] | None = None):
+    def __init__(
+        self,
+        config: OmegaConf,
+        every_n_epochs: int | None = None,
+        dataset_names: list[str] | None = None,
+    ):
         """Initialise the BasePerEpochPlotCallback.
 
         Parameters
@@ -872,9 +888,8 @@ class PlotLoss(BasePerBatchPlotCallback):
             Dictionary with parameter groups with parameter names as keys
         every_n_batches : int, optional
             Override for batch frequency, by default None
-
         """
-        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches)
+        super().__init__(config, every_n_batches=every_n_batches, dataset_names=dataset_names)
         self.parameter_groups = parameter_groups
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
         if self.parameter_groups is None:
@@ -993,7 +1008,11 @@ class PlotLoss(BasePerBatchPlotCallback):
         logger = trainer.logger
         _ = batch_idx
 
+        if self.latlons is None:
+            self.latlons = {}
+
         for dataset_name in dataset_names:
+
             data_indices = pl_module.data_indices[dataset_name]
             parameter_names = list(data_indices.model.output.name_to_index.keys())
             parameter_positions = list(data_indices.model.output.name_to_index.values())
@@ -1021,7 +1040,10 @@ class PlotLoss(BasePerBatchPlotCallback):
                     ...,
                     data_indices.data.output.full,
                 ]
-                loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
+
+                loss = reduce_to_last_dim(
+                    self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy(),
+                )
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
                     parameter_names,
@@ -1073,6 +1095,23 @@ class PlotLoss(BasePerBatchPlotCallback):
 
 class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     """Base processing class for additional metrics."""
+
+    def __init__(
+        self,
+        config: BaseSchema,
+        every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
+    ) -> None:
+
+        super().__init__(config, every_n_batches=every_n_batches, dataset_names=dataset_names)
+
+        # Build focus mask
+        self.focus_mask = build_spatial_mask(
+            node_attribute_name=focus_area.get("mask_attr_name", None) if focus_area is not None else None,
+            latlon_bbox=focus_area.get("latlon_bbox", None) if focus_area is not None else None,
+            name=focus_area.get("name", None) if focus_area is not None else None,
+        )
 
     def process(
         self,
@@ -1133,6 +1172,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -1157,7 +1197,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             Batch frequency to plot at, by default None
         """
         del kwargs
-        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches)
+        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
         self.sample_idx = sample_idx
         self.parameters = parameters
 
@@ -1204,13 +1244,21 @@ class PlotSample(BasePlotAdditionalMetrics):
 
             local_rank = pl_module.local_rank
 
-            for rollout_step in range(output_times[0]):
+            # Apply spatial mask
+            latlons, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
 
+            for rollout_step in range(output_times[0]):
                 init_step = self._get_init_step(rollout_step, output_times[1])
+
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
                     self.per_sample,
-                    self.latlons[dataset_name],
+                    latlons,
                     self.accumulation_levels_plot,
                     data[init_step, ...].squeeze(),
                     data[rollout_step + 1, ...].squeeze(),
@@ -1224,8 +1272,8 @@ class PlotSample(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                    exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}",
+                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                 )
 
 
@@ -1245,6 +1293,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback.
 
@@ -1259,7 +1308,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
         """
-        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches)
+        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.min_delta = min_delta
@@ -1282,6 +1331,14 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         for dataset_name in dataset_names:
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
+            # Apply spatial mask
+            latlons, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
+
             for rollout_step in range(output_times[0]):
                 # Build dictionary of inidicies and parameters to be plotted
                 diagnostics = (
@@ -1301,7 +1358,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
                 fig = plot_power_spectrum(
                     plot_parameters_dict_spectrum,
-                    self.latlons[dataset_name],
+                    latlons,
                     data[init_step, ...].squeeze(),
                     data[rollout_step + 1, ...].squeeze(),
                     output_tensor[rollout_step, ...],
@@ -1312,8 +1369,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                    exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                    tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                 )
 
 
@@ -1332,6 +1389,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         log_scale: bool = False,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback.
 
@@ -1347,8 +1405,9 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             Precip variable names, by default None
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
+
         """
-        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches)
+        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.precip_and_related_fields = precip_and_related_fields
@@ -1376,7 +1435,16 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
 
         for dataset_name in dataset_names:
+
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+
+            # Apply spatial mask
+            _, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
 
             for rollout_step in range(output_times[0]):
 
@@ -1410,6 +1478,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                    tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                 )

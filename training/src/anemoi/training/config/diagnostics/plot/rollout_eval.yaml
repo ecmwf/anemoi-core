@@ -32,6 +32,12 @@ colormaps:
 
 datasets_to_plot: ["data"] # Default dataset names to use in the plot callbacks
 
+focus_areas:
+  europe:
+    latlon_bbox: [30.0, -20.0, 60.0, 40.0]
+  china:
+    latlon_bbox: [18.0, 73.0, 54.0, 135.0]
+
 callbacks:
   # Add plot callbacks here
   - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
