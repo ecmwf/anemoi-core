@@ -79,7 +79,7 @@ class TestNativeGridDataset:
         """Test that dataset properties are correctly accessible."""
         dataset = NativeGridDataset(dataset=dataset_path)
 
-        assert isinstance(dataset.dates, list)
+        assert isinstance(dataset.dates, np.ndarray)
         assert len(dataset.dates) > 0
         assert isinstance(dataset.variables, list)
         assert len(dataset.variables) > 0

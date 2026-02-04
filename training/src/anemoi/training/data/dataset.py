@@ -46,7 +46,7 @@ class BaseAnemoiReader:
         self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
 
     @property
-    def dates(self) -> list[datetime.datetime]:
+    def dates(self) -> np.ndarray:
         """Return dataset dates."""
         return self.data.dates
 
