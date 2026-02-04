@@ -1384,11 +1384,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         for dataset_name in dataset_names:
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
-            plot_parameters_dict_spectrum = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name not in diagnostics,
-
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
@@ -1400,7 +1395,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         for dataset_name in dataset_names:
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
-            # Build dictionary of inidicies and parameters to be plotted
+            # Build dictionary of indices and parameters to be plotted
             diagnostics = (
                 []
                 if self.config.data.datasets[dataset_name].diagnostic is None
