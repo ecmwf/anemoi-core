@@ -176,7 +176,8 @@ class PlanarAreaWeights(BaseAreaWeights):
 
         # Compute convex hull over all points (boundary ring included)
         extended_points = np.vstack([latlons, boundary_points])
-        v = Voronoi(extended_points, qhull_options="QJ Pp")
+        # v = Voronoi(extended_points, qhull_options="QJ Pp")
+        v = Voronoi(extended_points, qhull_options="QJ0.2 Pp")
 
         # Compute the area of each node's region, excluding those in the boundary ring
         areas = []
