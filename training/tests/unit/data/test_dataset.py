@@ -75,7 +75,7 @@ class TestNativeGridDataset:
         assert drop_vars[0] not in dataset.variables
         assert len(dataset.variables) == len(original_vars) - 1
 
-    def test_dataset_properties(self, dataset_path: str):
+    def test_dataset_properties(self, dataset_path: str) -> None:
         """Test that dataset properties are correctly accessible."""
         dataset = NativeGridDataset(dataset=dataset_path)
 
