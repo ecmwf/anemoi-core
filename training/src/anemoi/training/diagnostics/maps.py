@@ -31,14 +31,13 @@ class EquirectangularProjection:
     def __call__(self, lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Project longitude and latitude coordinates to equirectangular x, y.
 
-        Args:
-            lon (np.ndarray): Array of longitude values in degrees.
-            lat (np.ndarray): Array of latitude values in degrees.
+        Parameters
+        ----------
+        lon : np.ndarray
+            Array of longitude values in degrees.
+        lat : np.ndarray
+            Array of latitude values in degrees.
 
-        Returns
-        -------
-            tuple[np.ndarray, np.ndarray]: Radians-based (x, y) coordinates,
-                with x shifted to the range [-pi, pi].
         """
         lon_rad = np.radians(lon)
         lat_rad = np.radians(lat)
@@ -50,13 +49,13 @@ class EquirectangularProjection:
     def inverse(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Convert equirectangular x, y coordinates back to degrees.
 
-        Args:
-            x (np.ndarray): Radians-based x coordinate.
-            y (np.ndarray): Radians-based y coordinate.
+        Parameters
+        ----------
+            x : np.ndarray
+                Radians-based x coordinate.
+            y : np.ndarray
+                Radians-based y coordinate.
 
-        Returns
-        -------
-            tuple[np.ndarray, np.ndarray]: (longitude, latitude) in degrees.
         """
         return np.degrees(x), np.degrees(y)
 

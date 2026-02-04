@@ -307,17 +307,12 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             # Apply spatial mask
-            if self.focus_mask is not None:
-                _, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
-                tag = self.focus_mask.tag
-
-            else:
-                tag = ""
+            _, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
 
             local_rank = pl_module.local_rank
             for rollout_step in range(output_times[0]):
@@ -337,8 +332,8 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
-                    exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{tag}",
+                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                 )
 
 

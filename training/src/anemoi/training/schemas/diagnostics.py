@@ -38,10 +38,8 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
 class FocusAreaSchema(BaseModel):
     name: str | None = Field(default=None)
     "Name of the focus_area, will be used for plot naming."
-
     mask_attr_name: str | None = Field(default=None)
     "Name of the node attribute to use as masking. eg. cutout_mask"
-
     latlon_bbox: list[float] | None = Field(default=None, min_items=4, max_items=4)
     "Latitude and longitude bounds as [lat_min, lon_min, lat_max, lon_max]."
 

@@ -1245,18 +1245,12 @@ class PlotSample(BasePlotAdditionalMetrics):
             local_rank = pl_module.local_rank
 
             # Apply spatial mask
-            if self.focus_mask is not None:
-                latlons, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
-                tag = self.focus_mask.tag
-
-            else:
-                latlons = self.latlons[dataset_name]
-                tag = ""
+            latlons, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
 
             for rollout_step in range(output_times[0]):
                 init_step = self._get_init_step(rollout_step, output_times[1])
@@ -1278,8 +1272,8 @@ class PlotSample(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
-                    exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{tag}",
+                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    exp_log_tag=f"val_pred_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                 )
 
 
@@ -1338,18 +1332,12 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
             # Apply spatial mask
-            if self.focus_mask is not None:
-                latlons, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
-                tag = self.focus_mask.tag
-
-            else:
-                latlons = self.latlons[dataset_name]
-                tag = ""
+            latlons, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
 
             for rollout_step in range(output_times[0]):
                 # Build dictionary of inidicies and parameters to be plotted
@@ -1381,8 +1369,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
-                    exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{tag}",
+                    tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    exp_log_tag=f"pred_val_spec_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                 )
 
 
@@ -1451,17 +1439,12 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
             # Apply spatial mask
-            if self.focus_mask is not None:
-                _, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
-                tag = self.focus_mask.tag
-
-            else:
-                tag = ""
+            _, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
 
             for rollout_step in range(output_times[0]):
 
@@ -1495,6 +1478,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{tag}",
-                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{tag}",
+                    tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                 )
