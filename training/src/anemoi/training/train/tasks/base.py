@@ -817,12 +817,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         shard_shapes = apply_shard_shapes(batch, grid_dim, grid_shard_shapes)
         tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
 
-        if not batch.is_contiguous():
-            batch = batch.contiguous()
-
         torch.distributed.all_gather(
             tensor_list,
-            batch,
+            batch.contiguous(),
             group=self.reader_groups[self.reader_group_id],
         )
         return torch.cat(tensor_list, dim=grid_dim)

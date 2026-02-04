@@ -48,7 +48,7 @@ class BaseResidualConnection(nn.Module, ABC):
     def _expand_time(x: torch.Tensor, n_step_output: int | None) -> torch.Tensor:
         if n_step_output is None:
             return x
-        return x.unsqueeze(1).expand(-1, n_step_output, -1, -1, -1).contiguous()
+        return x.unsqueeze(1).expand(-1, n_step_output, -1, -1, -1)
 
 
 class SkipConnection(BaseResidualConnection):
