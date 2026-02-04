@@ -1537,7 +1537,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             # Apply spatial mask
             _, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
-                latlons,
+                self.latlons[dataset_name],
                 data,
                 output_tensor,
             )
