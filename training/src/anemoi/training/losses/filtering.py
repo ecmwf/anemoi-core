@@ -66,7 +66,8 @@ class FilteringLossWrapper(BaseLoss):
             # it compares to in the loss
             # even if a different scaling exists for the target variable
             scaler = scaler[self.predicted_indices]
-        self.scaler.add_scaler(dimension=dimension, scaler=scaler, name=name)
+        # Pass scalers to the inner loss so they are actually applied during loss computation
+        self.loss.add_scaler(dimension=dimension, scaler=scaler, name=name)
 
     def set_data_indices(self, data_indices: IndexCollection) -> BaseLoss:
         """Hook to set the data indices for the loss."""
@@ -99,14 +100,17 @@ class FilteringLossWrapper(BaseLoss):
         return self
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs) -> torch.Tensor:
+        pred_filtered = pred[..., self.predicted_indices]
+        target_filtered = target[..., self.target_indices]
+        
         squash = kwargs.get("squash", True)
         if squash:
-            return self.loss(pred[..., self.predicted_indices], target[..., self.target_indices], **kwargs)
+            return self.loss(pred_filtered, target_filtered, **kwargs)
         len_model_output = pred.shape[-1]
         loss = torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
         loss_per_variable = self.loss(
-            pred[..., self.predicted_indices],
-            target[..., self.target_indices],
+            pred_filtered,
+            target_filtered,
             **kwargs,
         )
         loss[self.predicted_indices] = loss_per_variable

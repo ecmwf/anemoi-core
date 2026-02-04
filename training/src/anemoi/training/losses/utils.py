@@ -62,10 +62,13 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
 
     if isinstance(loss, FilteringLossWrapper):
         subset_vars = enumerate(loss.predicted_variables)
+        # FilteringLossWrapper forwards scalers to its inner loss, so get scaling from there
+        scaler_source = loss.loss.scaler
     else:
         subset_vars = enumerate(data_indices.model.output.name_to_index.keys())
+        scaler_source = loss.scaler
 
-    variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE).get_scaler(len(TensorDim)).reshape(-1)
+    variable_scaling = scaler_source.subset_by_dim(TensorDim.VARIABLE).get_scaler(len(TensorDim)).reshape(-1)
     log_text = f"Final Variable Scaling in {loss.__class__.__name__}: "
     scaling_values, scaling_sum = {}, 0.0
     for idx, name in subset_vars:
