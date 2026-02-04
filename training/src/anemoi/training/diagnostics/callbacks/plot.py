@@ -1528,7 +1528,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
-            # Build dictionary of inidicies and parameters to be plotted
+            # Build dictionary of indices and parameters to be plotted
             diagnostics = (
                 []
                 if self.config.data.datasets[dataset_name].diagnostic is None
@@ -1541,8 +1541,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 data,
                 output_tensor,
             )
-
-            for rollout_step in range(output_times[0]):
 
             plot_parameters_dict_histogram = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
