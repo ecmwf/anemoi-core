@@ -337,6 +337,23 @@ def hierarchical_config(
 
 
 @pytest.fixture
+def autoencoder_config(
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, list[str]]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_autoencoder"):
+        template = compose(config_name="autoencoder")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_autoencoder.yaml")
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, dataset_urls
+
+
+@pytest.fixture
 def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths) -> tuple[DictConfig, str]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(config_name="config")
@@ -427,12 +444,6 @@ def architecture_config_with_checkpoint(
     # Reuse the same overrides that architecture_config gets
     overrides = request.param
 
-    # ✅ Skip ONLY gnn on Python 3.10
-    import sys
-
-    if sys.version_info[:2] == (3, 10) and any("model=gnn" in o for o in overrides):
-        pytest.skip("GNN checkpoint incompatible with Python 3.10")
-
     cfg, dataset_url, model_architecture = build_architecture_config(
         overrides,
         testing_modifications_with_temp_dir,
@@ -441,11 +452,11 @@ def architecture_config_with_checkpoint(
     # rest of your logic...
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-12.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-23.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-01-23.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"
