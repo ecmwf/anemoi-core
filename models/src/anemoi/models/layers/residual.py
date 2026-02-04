@@ -36,7 +36,7 @@ class BaseResidualConnection(nn.Module, ABC):
         x: torch.Tensor,
         grid_shard_shapes=None,
         model_comm_group=None,
-        multi_out: int | None = None,
+        n_step_output: int | None = None,
     ) -> torch.Tensor:
         """Define the residual connection operation.
 
@@ -45,10 +45,10 @@ class BaseResidualConnection(nn.Module, ABC):
         pass
 
     @staticmethod
-    def _expand_time(x: torch.Tensor, multi_out: int | None) -> torch.Tensor:
-        if multi_out is None:
+    def _expand_time(x: torch.Tensor, n_step_output: int | None) -> torch.Tensor:
+        if n_step_output is None:
             return x
-        return x.unsqueeze(1).expand(-1, multi_out, -1, -1, -1).contiguous()
+        return x.unsqueeze(1).expand(-1, n_step_output, -1, -1, -1).contiguous()
 
 
 class SkipConnection(BaseResidualConnection):
@@ -68,11 +68,11 @@ class SkipConnection(BaseResidualConnection):
         x: torch.Tensor,
         grid_shard_shapes=None,
         model_comm_group=None,
-        multi_out: int | None = None,
+        n_step_output: int | None = None,
     ) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
-        return self._expand_time(x_skip, multi_out)
+        return self._expand_time(x_skip, n_step_output)
 
 
 class TruncatedConnection(BaseResidualConnection):
@@ -209,7 +209,7 @@ class TruncatedConnection(BaseResidualConnection):
         x: torch.Tensor,
         grid_shard_shapes=None,
         model_comm_group=None,
-        multi_out: int | None = None,
+        n_step_output: int | None = None,
     ) -> torch.Tensor:
         """Apply truncated skip connection."""
         batch_size = x.shape[0]
@@ -223,7 +223,7 @@ class TruncatedConnection(BaseResidualConnection):
         x = self._to_grid_shards(x, shard_shapes, model_comm_group)
         x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
 
-        return self._expand_time(x, multi_out)
+        return self._expand_time(x, n_step_output)
 
     def _to_channel_shards(self, x, shard_shapes=None, model_comm_group=None):
         return self._reshard(x, shard_channels, shard_shapes, model_comm_group)

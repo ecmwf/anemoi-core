@@ -30,9 +30,9 @@ model:
   latent_skip: False # True/False for skip connection on latent mesh
 
 training:
-  # Instead of inferred using multistep and timeincrement, specify time indices explicitly
+  # Instead of inferred using n-step and timeincrement, specify time indices explicitly
   explicit_times:
     input: [0, 6]
     target: [1, 2, 3, 4, 5]
-  multistep_output: 5
+  n_step_output: 5
   model_task: anemoi.training.train.tasks.GraphMultiOutInterpolator

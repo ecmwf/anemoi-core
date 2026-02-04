@@ -218,8 +218,8 @@ training:
   load_weights_only: False
   deterministic: false
   precision: 16-mixed
-  multistep_input: 2
-  multistep_output: 1
+  n_step_input: 2
+  n_step_output: 1
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0

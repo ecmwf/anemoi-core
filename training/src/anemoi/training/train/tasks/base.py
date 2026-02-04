@@ -102,8 +102,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         Mapping of variable groups for which to calculate validation metrics.
     output_mask : nn.Module
         Masking module that filters outputs during inference.
-    multi_step : bool
-        Flag to enable autoregressive rollouts (used in multi-step forecasting).
+    n_step_input : int
+        Number of input timesteps provided to the model.
+    n_step_output : int
+        Number of output timesteps predicted by the model.
     keep_batch_sharded : bool
         Whether to keep input batches split across GPUs instead of gathering them.
 
@@ -271,10 +273,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
-        # TODO(dieter): change to n_step_in and n_step_out
-        self.multi_step = config.training.multistep_input
-        self.multi_out = config.training.multistep_output  # defaults to 1 via pydantic
-        LOGGER.info("GraphModule with multistep_input=%s and multistep_output=%s", self.multi_step, self.multi_out)
+        self.n_step_input = config.training.n_step_input
+        self.n_step_output = config.training.n_step_output  # defaults to 1 via pydantic
+        LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -314,7 +315,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # set flag if loss and metrics support sharding
         self._check_sharding_support()
 
-        LOGGER.debug("Multistep: %d", self.multi_step)
+        LOGGER.debug("n_step_input: %d", self.n_step_input)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0

@@ -72,7 +72,9 @@ class GraphAutoEncoder(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
-        assert self.multi_step == self.multi_out, "Autoencoders must have the same number of input and output steps."
+        assert (
+            self.n_step_input == self.n_step_output
+        ), "Autoencoders must have the same number of input and output steps."
 
     def _step(
         self,
@@ -80,12 +82,12 @@ class GraphAutoEncoder(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
 
-        required_time_steps = max(self.multi_step, self.multi_out)
+        required_time_steps = max(self.n_step_input, self.n_step_output)
         x = {}
 
         for dataset_name, dataset_batch in batch.items():
             msg = (
-                f"Batch length not sufficient for requested multi_step/multi_out for {dataset_name}!"
+                f"Batch length not sufficient for requested n_step_input/n_step_output for {dataset_name}!"
                 f" {dataset_batch.shape[1]} !>= {required_time_steps}"
             )
             assert dataset_batch.shape[1] >= required_time_steps, msg
@@ -101,7 +103,7 @@ class GraphAutoEncoder(BaseGraphModule):
         y = {}
 
         for dataset_name, dataset_batch in batch.items():
-            y_time = dataset_batch.narrow(1, 0, self.multi_out)
+            y_time = dataset_batch.narrow(1, 0, self.n_step_output)
             var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
             y[dataset_name] = y_time.index_select(-1, var_idx)
 

@@ -69,8 +69,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        multi_out = self.config.training.multistep_output
-        lead_times = [self._lead_time_for_step(step) for step in range(1, multi_out + 1)]
+        n_step_output = self.config.training.n_step_output
+        lead_times = [self._lead_time_for_step(step) for step in range(1, n_step_output + 1)]
 
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.datasets.items():
@@ -123,7 +123,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if hasattr(self.config.training, "explicit_times"):
             return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
 
-        # Calculate indices using multi_step, multi_out and rollout
+        # Calculate indices using n_step_input, n_step_output and rollout
         rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
 
         rollout_max = getattr(rollout_cfg, "max", None)
@@ -137,9 +137,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             LOGGER.warning("Falling back rollout to: %s", rollout_value)
 
         rollout = max(rollout_value, val_rollout)
-        multi_step = self.config.training.multistep_input
-        multi_out = self.config.training.multistep_output  # defaults to 1
-        time_range = multi_step + rollout * multi_out
+        n_step_input = self.config.training.n_step_input
+        n_step_output = self.config.training.n_step_output  # defaults to 1
+        time_range = n_step_input + rollout * n_step_output
         return list(range(time_range))
 
     @cached_property

@@ -193,7 +193,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             None
         """
         rollout_steps = rollout or self.rollout
-        required_time_steps = rollout_steps * self.multi_out + self.multi_step
+        required_time_steps = rollout_steps * self.n_step_output + self.n_step_input
 
         # Stack the analysis nens_per_device times along an ensemble dimension
         # start rollout of preprocessed batch
@@ -201,12 +201,12 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         for dataset_name, dataset_batch in batch.items():
             x[dataset_name] = dataset_batch[
                 :,
-                0 : self.multi_step,
+                0 : self.n_step_input,
                 ...,
                 self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
+            ]  # (bs, n_step_input, latlon, nvar)
             msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
+                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
                 f", {dataset_batch.shape[1]} !>= {required_time_steps}"
             )
             assert dataset_batch.shape[1] >= required_time_steps, msg
@@ -221,21 +221,21 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             assert (
                 len(x[dataset_name].shape) == 5
             ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
-            assert (x[dataset_name].shape[1] == self.multi_step) and (
+            assert (x[dataset_name].shape[1] == self.n_step_input) and (
                 x[dataset_name].shape[2] == self.nens_per_device
             ), (
                 "Shape mismatch in x! "
-                f"Expected ({self.multi_step}, {self.nens_per_device}), "
+                f"Expected ({self.n_step_input}, {self.nens_per_device}), "
                 f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
             )
 
         for rollout_step in range(rollout_steps):
-            # prediction at rollout step rollout_step, shape = (bs, multi_out, ens_size, latlon, nvar)
+            # prediction at rollout step rollout_step, shape = (bs, n_step_output, ens_size, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
             y = {}
             for dataset_name, dataset_batch in batch.items():
-                start = self.multi_step + rollout_step * self.multi_out
-                y_time = dataset_batch.narrow(1, start, self.multi_out)[:, :, 0, :, :]
+                start = self.n_step_input + rollout_step * self.n_step_output
+                y_time = dataset_batch.narrow(1, start, self.n_step_output)[:, :, 0, :, :]
                 var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
                 y[dataset_name] = y_time.index_select(-1, var_idx)
                 LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))

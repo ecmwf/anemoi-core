@@ -194,7 +194,7 @@ class TimeStepScalerSchema(BaseModel):
 
 class UniformTimeStepScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.UniformTimeStepScaler"] = Field(..., alias="_target_")
-    multistep_output: PositiveInt = Field(example=5)
+    n_step_output: PositiveInt = Field(example=5)
     "Number of output time steps."
 
 
@@ -385,6 +385,21 @@ VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str 
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_step_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            legacy_keys = {"multistep_input", "multistep_output", "multi_step", "multi_out"}
+            present = legacy_keys.intersection(data.keys())
+            if present:
+                present_keys = ", ".join(sorted(present))
+                error_msg = (
+                    "Legacy training keys not supported: "
+                    f"{present_keys}. Use n_step_input and n_step_output instead."
+                )
+                raise ValueError(error_msg)
+        return data
+
     "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
@@ -400,14 +415,14 @@ class BaseTrainingSchema(BaseModel):
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
-    multistep_input: PositiveInt = Field(example=2)
+    n_step_input: PositiveInt = Field(example=2)
     """Number of input steps for the model.
     E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
-    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
-    multistep_output: PositiveInt = Field(example=1, default=1)
+    k > 1: n-step scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
+    n_step_output: PositiveInt = Field(example=1, default=1)
     """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
-    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)].
-    During rollout, if multistep_output > multistep_input, only the latest multistep_input outputs
+    k > 1: n-step scheme, predicts [X(t), X(t+1), ... X(t+k)].
+    During rollout, if n_step_output > n_step_input, only the latest n_step_input outputs
     are fed into the next step."""
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.

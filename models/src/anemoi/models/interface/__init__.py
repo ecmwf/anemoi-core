@@ -33,8 +33,8 @@ class AnemoiModelInterface(torch.nn.Module):
         Configuration settings for the model.
     id : str
         A unique identifier for the model instance.
-    multi_step : bool
-        Whether the model uses multi-step input.
+    n_step_input : int
+        Number of input timesteps provided to the model.
     graph_data : HeteroData
         Graph data for the model.
     statistics : dict
@@ -69,7 +69,7 @@ class AnemoiModelInterface(torch.nn.Module):
         super().__init__()
         self.config = config
         self.id = str(uuid.uuid4())
-        self.multi_step = self.config.training.multistep_input
+        self.n_step_input = self.config.training.n_step_input
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
@@ -210,7 +210,7 @@ class AnemoiModelInterface(torch.nn.Module):
             "batch": batch,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
-            "multi_step": self.multi_step,
+            "n_step_input": self.n_step_input,
             "model_comm_group": model_comm_group,
         }
 

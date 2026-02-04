@@ -157,7 +157,7 @@ The training configuration for diffusion models requires changes:
    model_task: anemoi.training.train.tasks.GraphDiffusionTendForecaster
 
    # Standard training configuration remains similar
-   multistep_input: 2
+   n_step_input: 2
    rollout:
      start: 1
      max: 1

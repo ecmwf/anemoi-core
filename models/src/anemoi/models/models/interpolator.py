@@ -94,7 +94,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x,
             grid_shard_shapes=grid_shard_shapes,
             model_comm_group=model_comm_group,
-            multi_out=self.multi_out,
+            n_step_output=self.n_step_output,
         )
 
         if grid_shard_shapes is not None:
@@ -128,7 +128,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
                 "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
-                time=self.multi_out,
+                time=self.n_step_output,
             )
             .to(dtype=dtype)
             .clone()
@@ -344,7 +344,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDecInterpolato
             x,
             grid_shard_shapes=grid_shard_shapes,
             model_comm_group=model_comm_group,
-            multi_out=self.multi_out,
+            n_step_output=self.n_step_output,
         )
 
         if grid_shard_shapes is not None:

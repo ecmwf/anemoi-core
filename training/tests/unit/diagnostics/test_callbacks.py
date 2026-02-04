@@ -129,9 +129,9 @@ def test_ensemble_plot_mixin_process():
 
     # Mock lightning module
     pl_module = MagicMock()
-    pl_module.multi_step = 2
+    pl_module.n_step_input = 2
     pl_module.rollout = 3
-    pl_module.multi_out = 1
+    pl_module.n_step_output = 1
     data_indices = MagicMock()
     data_indices.data.output.full = slice(None)
     pl_module.data_indices = {"data": data_indices}
@@ -197,7 +197,7 @@ def test_rollout_eval_ens_eval():
     # Mock pl_module
     pl_module = MagicMock()
     pl_module.device = torch.device("cpu")
-    pl_module.multi_step = 1
+    pl_module.n_step_input = 1
     pl_module._rollout_step.return_value = [
         (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None, None),
         (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None, None),
@@ -225,8 +225,8 @@ def test_rollout_eval_handles_dict_batch():
     # Mock pl_module
     pl_module = MagicMock()
     pl_module.device = torch.device("cpu")
-    pl_module.multi_step = 1
-    pl_module.multi_out = 1
+    pl_module.n_step_input = 1
+    pl_module.n_step_output = 1
     pl_module._rollout_step.return_value = [
         (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None),
         (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None),

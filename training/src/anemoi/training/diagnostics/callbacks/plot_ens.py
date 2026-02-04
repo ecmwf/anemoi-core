@@ -125,12 +125,12 @@ class EnsemblePlotMixin:
 
         total_targets = output_times[0]
         if output_times[1] == "forecast":
-            total_targets *= pl_module.multi_out
+            total_targets *= pl_module.n_step_output
 
         input_tensor = (
             batch[dataset_name][
                 :,
-                pl_module.multi_step - 1 : pl_module.multi_step + total_targets + 1,
+                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
                 ...,
                 pl_module.data_indices[dataset_name].data.output.full,
             ]
@@ -310,14 +310,14 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             local_rank = pl_module.local_rank
-            if output_times[1] == "forecast" and pl_module.multi_out > 1:
-                max_out_steps = pl_module.multi_out
+            if output_times[1] == "forecast" and pl_module.n_step_output > 1:
+                max_out_steps = pl_module.n_step_output
                 output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
                 if output_steps_limit is not None:
                     max_out_steps = min(max_out_steps, output_steps_limit)
                 for rollout_step in range(output_times[0]):
                     for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.multi_out + out_step + 1
+                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_predicted_ensemble(
                             parameters=plot_parameters_dict,
                             n_plots_per_sample=4,
