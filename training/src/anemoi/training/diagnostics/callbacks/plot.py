@@ -1258,7 +1258,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
             local_rank = pl_module.local_rank
-            
+
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
@@ -1266,7 +1266,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                 data,
                 output_tensor,
             )
-    
+
             if output_times[1] == "forecast":
                 max_out_steps = pl_module.n_step_output
                 output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
@@ -1388,7 +1388,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
                     name not in diagnostics,
-                  
+
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
