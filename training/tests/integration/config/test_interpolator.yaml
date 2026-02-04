@@ -19,7 +19,7 @@ dataloader:
 
 training:
 
-# Instead of inferred using n-step and timeincrement, specify time indices explicitly
+# Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
     input: [0,2]
     target: [1]

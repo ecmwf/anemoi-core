@@ -14,15 +14,15 @@ deterministic: False
 # miscellaneous
 precision: bf16-mixed
 
-# n-step input
+# multistep input
 # 1 = single step scheme, X(t-1) used to predict X(t)
-# k > 1: n-step scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-n_step_input: 2
+# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
+multistep_input: 2
 
-# n-step output
+# multistep output
 # 1 = single step output scheme, single model forward predicts X(t)
-# l > 1: n-step output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
-n_step_output: 1
+# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
+multistep_output: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
