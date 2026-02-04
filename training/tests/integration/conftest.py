@@ -179,11 +179,29 @@ def architecture_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str, str]:
-    return build_architecture_config(
+    cfg, url, model_architecture = build_architecture_config(
         request.param,
         testing_modifications_callbacks_on_with_temp_dir,
         get_tmp_paths,
     )
+
+    cfg.training.multistep_input = 3
+    cfg.training.multistep_output = 2
+
+    OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
+    cfg.training.scalers.datasets.data["output_steps"] = {
+        "_target_": "anemoi.training.losses.scalers.TimeStepScaler",
+        "norm": "unit-sum",
+        "weights": [1.0, 2.0],
+    }
+
+    cfg.training.training_loss.datasets.data.scalers = [
+        "pressure_level",
+        "general_variable",
+        "node_weights",
+        "output_steps",
+    ]
+    return cfg, url, model_architecture
 
 
 @pytest.fixture
@@ -227,19 +245,11 @@ def multidatasets_config(
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, dataset_urls
-
-
-@pytest.fixture
-def n_step_output_multidatasets_config(
-    multidatasets_config: tuple[DictConfig, list[str]],
-) -> tuple[DictConfig, list[str]]:
-    cfg, urls = multidatasets_config
 
     cfg.training.multistep_input = 3
     cfg.training.multistep_output = 2
 
-    return cfg, urls
+    return cfg, dataset_urls
 
 
 @pytest.fixture(
@@ -259,8 +269,9 @@ def n_step_output_multidatasets_config(
             id="diffusiontend",
         ),
     ],
+    ids=["diffusion", "diffusiontend"],
 )
-def n_step_output_multidatasets_diffusion_config(
+def multidatasets_diffusion_config(
     request: pytest.FixtureRequest,
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
@@ -285,7 +296,7 @@ def n_step_output_multidatasets_diffusion_config(
         cfg.training.multistep_output = 2
     else:
         cfg.training.multistep_input = 2
-        cfg.training.multistep_output = 3
+        cfg.training.multistep_output = 1
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls
@@ -372,20 +383,11 @@ def ensemble_config(
     OmegaConf.resolve(cfg)
 
     cfg = handle_truncation_matrices(cfg, get_test_data)
-
     assert isinstance(cfg, DictConfig)
-    return cfg, dataset_urls[0]
-
-
-@pytest.fixture
-def n_step_output_ens_config(ensemble_config: tuple[DictConfig, str]) -> tuple[DictConfig, str]:
-
-    cfg, url = ensemble_config
 
     cfg.training.multistep_input = 3
     cfg.training.multistep_output = 2
-
-    return cfg, url
+    return cfg, dataset_urls[0]
 
 
 @pytest.fixture
@@ -426,17 +428,6 @@ def autoencoder_config(
 
 
 @pytest.fixture
-def n_step_output_autoencoder_config(autoencoder_config: tuple[OmegaConf, list[str]]) -> tuple[OmegaConf, list[str]]:
-
-    cfg, url = autoencoder_config
-
-    cfg.training.multistep_input = 2
-    cfg.training.multistep_output = 2
-
-    return cfg, url
-
-
-@pytest.fixture
 def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths) -> tuple[DictConfig, str]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(config_name="config")
@@ -451,30 +442,6 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls[0]
-
-
-@pytest.fixture
-def n_step_output_config(gnn_config: tuple[DictConfig, str]) -> tuple[DictConfig, str]:
-    cfg, url = gnn_config
-
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
-
-    OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
-    cfg.training.scalers.datasets.data["output_steps"] = {
-        "_target_": "anemoi.training.losses.scalers.TimeStepScaler",
-        "norm": "unit-sum",
-        "weights": [1.0, 2.0],
-    }
-
-    cfg.training.training_loss.datasets.data.scalers = [
-        "pressure_level",
-        "general_variable",
-        "node_weights",
-        "output_steps",
-    ]
-
-    return cfg, url
 
 
 @pytest.fixture(
@@ -613,7 +580,7 @@ def interpolator_config(
     return cfg, dataset_urls[0]
 
 
-def n_step_output_interpolator_config(
+def multi_output_interpolator_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str]:

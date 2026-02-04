@@ -1,7 +1,7 @@
 # Modifications for the basic template "config.yaml"
 system:
   input:
-    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-19-6h-v6-testing.zarr
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
 
 dataloader:
   training:
