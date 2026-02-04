@@ -139,7 +139,7 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> None:
         del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
         pl.LightningModule.__init__(self)
-        self.n_step_input = config.training.n_step_input
+        self.n_step_input = config.training.multistep_input
         model = DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
         self.model = DummyDiffusion(model=model)
         self.model_comm_group = None
@@ -162,7 +162,7 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
 
     cfg = DictConfig(
         {
-            "training": {"n_step_input": 1, "n_step_output": 1},
+            "training": {"multistep_input": 1, "multistep_output": 1},
             "model": {
                 "model": {
                     "diffusion": {
@@ -187,7 +187,7 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     b, e, g, v = 2, 1, 4, len(name_to_index)
-    t = cfg.training.n_step_input
+    t = cfg.training.multistep_input
 
     batch = torch.randn((b, t + 1, e, g, v), dtype=torch.float32)
     loss, metrics, y_preds = forecaster._step(batch={"data": batch}, validation_mode=False)

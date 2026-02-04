@@ -223,7 +223,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         """
         with open_dict(config.training):
-            config.training.n_step_output = len(config.training.explicit_times.target)
+            config.training.multistep_output = len(config.training.explicit_times.target)
         super().__init__(
             config=config,
             graph_data=graph_data,

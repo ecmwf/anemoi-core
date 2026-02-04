@@ -46,7 +46,7 @@ def fake_data(
                     "default": "sfc",
                     "pl": ["y"],
                 },
-                "n_step_output": [0, 1, 3, 6, 12],
+                "multistep_output": [0, 1, 3, 6, 12],
                 "scalers": {
                     "builders": {
                         "additional_scaler": request.param,

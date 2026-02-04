@@ -273,8 +273,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
-        self.n_step_input = config.training.n_step_input
-        self.n_step_output = config.training.n_step_output  # defaults to 1 via pydantic
+        self.n_step_input = config.training.multistep_input
+        self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.lr = (
             config.system.hardware.num_nodes

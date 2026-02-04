@@ -69,7 +69,7 @@ class AnemoiModelInterface(torch.nn.Module):
         super().__init__()
         self.config = config
         self.id = str(uuid.uuid4())
-        self.n_step_input = self.config.training.n_step_input
+        self.n_step_input = self.config.training.multistep_input
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies

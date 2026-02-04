@@ -69,7 +69,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        n_step_output = self.config.training.n_step_output
+        n_step_output = self.config.training.multistep_output
         lead_times = [self._lead_time_for_step(step) for step in range(1, n_step_output + 1)]
 
         stats_by_dataset: dict[str, dict | None] = {}
@@ -137,8 +137,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             LOGGER.warning("Falling back rollout to: %s", rollout_value)
 
         rollout = max(rollout_value, val_rollout)
-        n_step_input = self.config.training.n_step_input
-        n_step_output = self.config.training.n_step_output  # defaults to 1
+        n_step_input = self.config.training.multistep_input
+        n_step_output = self.config.training.multistep_output  # defaults to 1
         time_range = n_step_input + rollout * n_step_output
         return list(range(time_range))
 

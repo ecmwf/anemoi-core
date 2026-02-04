@@ -236,8 +236,8 @@ def n_step_output_multidatasets_config(
 ) -> tuple[DictConfig, list[str]]:
     cfg, urls = multidatasets_config
 
-    cfg.training.n_step_input = 3
-    cfg.training.n_step_output = 2
+    cfg.training.multistep_input = 3
+    cfg.training.multistep_output = 2
 
     return cfg, urls
 
@@ -281,11 +281,11 @@ def n_step_output_multidatasets_diffusion_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     if is_tendency:
-        cfg.training.n_step_input = 3
-        cfg.training.n_step_output = 2
+        cfg.training.multistep_input = 3
+        cfg.training.multistep_output = 2
     else:
-        cfg.training.n_step_input = 2
-        cfg.training.n_step_output = 3
+        cfg.training.multistep_input = 2
+        cfg.training.multistep_output = 3
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls
@@ -382,8 +382,8 @@ def n_step_output_ens_config(ensemble_config: tuple[DictConfig, str]) -> tuple[D
 
     cfg, url = ensemble_config
 
-    cfg.training.n_step_input = 3
-    cfg.training.n_step_output = 2
+    cfg.training.multistep_input = 3
+    cfg.training.multistep_output = 2
 
     return cfg, url
 
@@ -430,8 +430,8 @@ def n_step_output_autoencoder_config(autoencoder_config: tuple[OmegaConf, list[s
 
     cfg, url = autoencoder_config
 
-    cfg.training.n_step_input = 2
-    cfg.training.n_step_output = 2
+    cfg.training.multistep_input = 2
+    cfg.training.multistep_output = 2
 
     return cfg, url
 
@@ -457,8 +457,8 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 def n_step_output_config(gnn_config: tuple[DictConfig, str]) -> tuple[DictConfig, str]:
     cfg, url = gnn_config
 
-    cfg.training.n_step_input = 3
-    cfg.training.n_step_output = 2
+    cfg.training.multistep_input = 3
+    cfg.training.multistep_output = 2
 
     OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
     cfg.training.scalers.datasets.data["output_steps"] = {
