@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-from icecream import ic
 import time
 from typing import TYPE_CHECKING
 import time
@@ -105,8 +104,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         fields_direct_prediction = getattr(config.data, "direct_prediction", None)
         self.indices_direct_prediction = ...
 
-    
-
     def get_inputs(self, batch: dict, sample_length: int) -> dict:
         # start rollout of preprocessed batch
         x = {}
@@ -122,7 +119,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                 f", {dataset_batch.shape[1]} !>= {sample_length}"
             )
             assert dataset_batch.shape[1] >= sample_length, msg
-            LOGGER.info("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+            LOGGER.info(
+                "SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape)
+            )
         return x
 
     def get_targets(self, batch: dict, lead_step: int) -> dict:
@@ -134,8 +133,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                 ...,
                 self.data_indices[dataset_name].data.output.full,
             ]
-            LOGGER.info("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-        return y        
+            LOGGER.info(
+                "SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape)
+            )
+        return y
 
     def forward(
         self,
@@ -201,12 +202,16 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """
 
         del batch_idx
-        x = self.get_inputs(batch, sample_length=self.multi_step)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_targets(batch, lead_step=self.multi_step - 1)  # (bs, multi_step, ens, latlon, nvar)
+        x = self.get_inputs(
+            batch, sample_length=self.multi_step
+        )  # (bs, multi_step, ens, latlon, nvar)
+        y = self.get_targets(
+            batch, lead_step=self.multi_step - 1
+        )  # (bs, multi_step, ens, latlon, nvar)
 
         assert len(x) == 2, "Expected x to contain two elements: [low_res, high_res]"
 
-        x_lres, x_hres = x 
+        x_lres, x_hres = x
 
         x_lres_upsampled = self.model.model.apply_interpolate_to_high_res(
             x_lres[:, 0, ...],
@@ -216,17 +221,15 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         resid = self.model.model.compute_residuals(
             y,
-            x_lres_upsampled[..., self.x_in_matching_channel_indices.to(
-            x_lres_upsampled.device
-        )],
+            x_lres_upsampled[
+                ..., self.x_in_matching_channel_indices.to(x_lres_upsampled.device)
+            ],
         )
 
         x_lres_upsampled = self.model.pre_processors(
             x_lres_upsampled, dataset="input_lres"
-        )  
-        x_hres = self.model.pre_processors(
-            x_hres, dataset="input_hres"
         )
+        x_hres = self.model.pre_processors(x_hres, dataset="input_hres")
         resid = self.model.pre_processors(resid, dataset="output")
 
         # get noise level and associated loss weights
@@ -249,13 +252,11 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             sigma,
         )  # shape is (bs, ens, latlon, nvar)
 
-
         # Use checkpoint for compute_loss_metrics
         loss, metrics_next = checkpoint(
             self.compute_loss_metrics,
             y_pred=y_pred[:, 0, ...],
             y=resid[:, 0, ...],  # removing time dim for loss computation,
-
             training_mode=training_mode,
             validation_mode=validation_mode,
             weights=noise_weights,
@@ -265,9 +266,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         denorm_x_lres_upsampled = self.model.post_processors(
             x_lres_upsampled, dataset="input_lres"
         )
-        denorm_y_pred = self.model.post_processors(
-            y_pred, dataset="output"
-        )
+        denorm_y_pred = self.model.post_processors(y_pred, dataset="output")
 
         y_preds = [denorm_x_lres_upsampled + denorm_y_pred, denorm_y_pred]
 
@@ -311,8 +310,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
         return sigma, weight
-
-
 
     def calculate_val_metrics(
         self,
@@ -373,7 +370,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         return metrics
 
 
-
 def match_tensor_channels(input_name_to_index, output_name_to_index):
     """
     Reorders and selects channels from input tensor to match output tensor structure.
@@ -393,6 +389,7 @@ def match_tensor_channels(input_name_to_index, output_name_to_index):
     channel_indices = torch.tensor(channel_mapping)
 
     return channel_indices
+
 
 def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
     """Assemble batch after transfer to GPU by gathering the batch shards if needed.

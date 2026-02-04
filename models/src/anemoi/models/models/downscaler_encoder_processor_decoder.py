@@ -36,7 +36,6 @@ from anemoi.models.models.diffusion_encoder_processor_decoder import (
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
 
-from icecream import ic
 
 LOGGER = logging.getLogger(__name__)
 

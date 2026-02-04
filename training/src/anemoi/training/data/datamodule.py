@@ -47,12 +47,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         self.config = config
         self.graph_data = graph_data
-        self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
-        self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
-        self.test_dataloader_config = get_multiple_datasets_config(self.config.dataloader.test)
+        self.train_dataloader_config = get_multiple_datasets_config(
+            self.config.dataloader.training
+        )
+        self.valid_dataloader_config = get_multiple_datasets_config(
+            self.config.dataloader.validation
+        )
+        self.test_dataloader_config = get_multiple_datasets_config(
+            self.config.dataloader.test
+        )
 
         self.dataset_names = list(self.train_dataloader_config.keys())
-        LOGGER.info("Initializing multi-dataset module with datasets: %s", self.dataset_names)
+        LOGGER.info(
+            "Initializing multi-dataset module with datasets: %s", self.dataset_names
+        )
 
         # Set training end dates if not specified for each dataset
         for name, dataset_config in self.train_dataloader_config.items():
@@ -84,7 +92,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         supporting_arrays = self.ds_train.supporting_arrays
         for dataset_name, grid_indices in self.grid_indices.items():
             if dataset_name in supporting_arrays:
-                supporting_arrays[dataset_name] = supporting_arrays[dataset_name] | grid_indices.supporting_arrays
+                supporting_arrays[dataset_name] = (
+                    supporting_arrays[dataset_name] | grid_indices.supporting_arrays
+                )
             else:
                 supporting_arrays[dataset_name] = grid_indices.supporting_arrays
         return supporting_arrays
@@ -97,13 +107,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         for dataset_name in self.dataset_names:
             name_to_index = self.ds_train.name_to_index[dataset_name]
             # Get dataset-specific data config
-            indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
+            indices[dataset_name] = IndexCollection(
+                data_config[dataset_name], name_to_index
+            )
         return indices
 
     def relative_date_indices(self, val_rollout: int = 1) -> list:
         """Determine a list of relative time indices to load for each batch."""
         if hasattr(self.config.training, "explicit_times"):
-            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
+            return sorted(
+                set(
+                    self.config.training.explicit_times.input
+                    + self.config.training.explicit_times.target
+                )
+            )
 
         # Calculate indices using multistep, timeincrement and rollout
         rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
@@ -131,8 +148,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
         mr_len = self.config.dataloader.model_run_info.length
 
-        if hasattr(self.config.training, "rollout") and self.config.training.rollout.max is not None:
-            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
+        if (
+            hasattr(self.config.training, "rollout")
+            and self.config.training.rollout.max is not None
+        ):
+            max_rollout_index = max(
+                self.relative_date_indices(self.config.training.rollout.max)
+            )
             assert (
                 max_rollout_index < mr_len
             ), f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}"
@@ -149,9 +171,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         grid_indices_dict = {}
 
         # Each dataset can have its own grid indices configuration
-        grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
+        grid_indices_config = get_multiple_datasets_config(
+            self.config.dataloader.grid_indices
+        )
         for dataset_name, grid_config in grid_indices_config.items():
-            grid_indices = instantiate(grid_config, reader_group_size=self.config.dataloader.read_group_size)
+            grid_indices = instantiate(
+                grid_config, reader_group_size=self.config.dataloader.read_group_size
+            )
             grid_indices.setup(self.graph_data[dataset_name])
             grid_indices_dict[dataset_name] = grid_indices
 
@@ -160,7 +186,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
+        return self._get_dataset(
+            self.train_dataloader_config, shuffle=True, label="training"
+        )
 
     @cached_property
     def ds_valid(self) -> MultiDataset:
@@ -175,7 +203,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_test(self) -> MultiDataset:
         """Create multi-dataset for testing."""
-        return self._get_dataset(self.test_dataloader_config, shuffle=False, label="test")
+        return self._get_dataset(
+            self.test_dataloader_config, shuffle=False, label="test"
+        )
 
     def _get_dataset(
         self,
@@ -187,7 +217,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         data_readers = {}
         for name, dataset_config in datasets.items():
             data_reader = open_dataset(dataset_config)
-            data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
+            data_reader = self.add_trajectory_ids(
+                data_reader
+            )  # NOTE: Functionality to be moved to anemoi datasets
             data_readers[name] = data_reader
 
         return MultiDataset(
@@ -248,11 +280,27 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             metadata["metadata_inference"][dataset_name]["data_indices"] = name_to_index
 
             input_data_indices = data_indices[dataset_name].data.input.todict()
-            input_index_to_name = {v: k for k, v in input_data_indices["name_to_index"].items()}
-            variable_types = {
-                "forcing": [input_index_to_name[int(index)] for index in input_data_indices["forcing"]],
-                "target": [input_index_to_name[int(index)] for index in input_data_indices["target"]],
-                "prognostic": [input_index_to_name[int(index)] for index in input_data_indices["prognostic"]],
-                "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
+            input_index_to_name = {
+                v: k for k, v in input_data_indices["name_to_index"].items()
             }
-            metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types
+            variable_types = {
+                "forcing": [
+                    input_index_to_name[int(index)]
+                    for index in input_data_indices["forcing"]
+                ],
+                "target": [
+                    input_index_to_name[int(index)]
+                    for index in input_data_indices["target"]
+                ],
+                "prognostic": [
+                    input_index_to_name[int(index)]
+                    for index in input_data_indices["prognostic"]
+                ],
+                "diagnostic": [
+                    input_index_to_name[int(index)]
+                    for index in input_data_indices["diagnostic"]
+                ],
+            }
+            metadata["metadata_inference"][dataset_name][
+                "variable_types"
+            ] = variable_types

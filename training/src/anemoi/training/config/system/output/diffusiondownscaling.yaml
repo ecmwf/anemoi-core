@@ -1,0 +1,16 @@
+root: ${oc.env:OUTPUT}
+
+
+logs:
+  root: ${system.output.root}/logs/
+  wandb: ${system.output.logs.root}/wandb/
+  mlflow: ${system.output.logs.root}/mlflow/
+
+checkpoints:
+  root: ${system.output.root}/checkpoint/
+  every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+  every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+  every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+
+plots: ${system.output.root}/plots/
+profiler: ${system.output.root}/profiler/

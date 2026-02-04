@@ -1,5 +1,0 @@
----
-defaults:
-  - output: example
-  - input: example
-  - hardware: slurm

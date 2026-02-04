@@ -1,8 +1,8 @@
 ---
 defaults:
-  - plot: detailed
+  - plot: placeholder
   - callbacks: placeholder
-  - benchmark_profiler: detailed
+  - benchmark_profiler: simple
 
 # another alternative if you don't have any callbacks is to remove it from the
 # defaults list and just use
@@ -39,14 +39,14 @@ log:
   tensorboard:
     enabled: False
   mlflow:
-    enabled: False
+    enabled: True
     _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
-    offline: False
-    authentication: False
-    tracking_uri: ???
-    experiment_name: 'anemoi-debug'
+    offline: True
+    authentication: True
+    tracking_uri: https://mlflow.ecmwf.int
+    experiment_name: 'downscaling'
     project_name: 'Anemoi'
-    system: False
+    system: True
     terminal: True
     run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True

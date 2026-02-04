@@ -1,28 +1,11 @@
-# Multi-dataset data configuration for debugging with era5 and era5_copy
 format: zarr
-# Time frequency requested from dataset
-frequency: 6h
-# Time step of model (must be multiple of frequency)
-timestep: 6h
+frequency: 1h
+timestep: ${data.frequency}
 
-# Dataset-specific configurations
 datasets:
-  era5:
+  lres:
     forcing:
-    - "cos_latitude"
-    - "cos_longitude"
-    - "sin_latitude"
-    - "sin_longitude"
-    - "cos_julian_day"
-    - "cos_local_time"
-    - "sin_julian_day"
-    - "sin_local_time"
-    - "insolation"
-    - "lsm"
-    - "sdor"
-    - "slor"
-    - "z"
-    diagnostic: [tp, cp]
+    diagnostic: [] # [tp, cp]
     processors:
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
@@ -47,7 +30,7 @@ datasets:
           - "insolation"
           - "lsm"
 
-  cerra:
+  hres_forcings:
     forcing:
     - "cos_latitude"
     - "cos_longitude"
@@ -57,7 +40,7 @@ datasets:
     - "cos_local_time"
     - "sin_julian_day"
     - "sin_local_time"
-    diagnostic: [tp]
+    diagnostic: []
     processors:
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
@@ -80,6 +63,32 @@ datasets:
         _target_: anemoi.models.preprocessing.imputer.InputImputer
         config:
           default: "mean"
+  hres:
+    forcing:
+    diagnostic: []
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          - "tp"
+          min-max:
+          max:
+          none:
+          - "cos_latitude"
+          - "cos_longitude"
+          - "sin_latitude"
+          - "sin_longitude"
+          - "cos_julian_day"
+          - "cos_local_time"
+          - "sin_julian_day"
+          - "sin_local_time"
+      const_imputer:
+        _target_: anemoi.models.preprocessing.imputer.InputImputer
+        config:
+          default: "mean"          
+
 
 # Values set in the code
 num_features: null # number of features in the forecast state

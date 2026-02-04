@@ -1,30 +1,33 @@
 datasets:
   data:
-
     # Several scalers can be added here. In order to be applied their names must be included in the loss.
     # scaler name must be included in `scalers` in the losses for this to be applied.
     general_variable:
       _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
       weights:
         default: 1
-        q: 0.6 #1
-        t: 6   #1
-        u: 0.8 #0.5
-        v: 0.5 #0.33
-        w: 0.001
-        z: 12  #1
-        sp: 10
-        10u: 0.1
-        10v: 0.1
-        2d: 0.5
-        tp: 0.025
-        cp: 0.0025
+        q: 2
+        t: 1
+        u: 1.5
+        v: 1.5
+        w: 2
+        z: 0.5
+        sp: 1.5
+        10u: 2.5
+        10v: 2.5
+        2d: 2
+        tp: 2
+        cp: 2
+        msl: 2
+        2t: 2
+        tcw: 1
+        skt: 0.5
 
     pressure_level:
-      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      _target_: anemoi.training.losses.scalers.LinearVariableLevelScaler
       group: pl
-      y_intercept: 0.2
-      slope: 0.001
+      y_intercept: 0.0
+      slope: 0.0001659751037
 
     # mask NaNs with zeros in the loss function
     nan_mask_weights:

@@ -1,18 +1,20 @@
-num_channels: 1024
+num_channels: 512
 cpu_offload: False
 
-keep_batch_sharded: True
+keep_batch_sharded: False
 
 model:
-  _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
+  _target_: anemoi.models.models.AnemoiDownscalingModelEncProcDec
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0
     noise_channels: 32
     noise_cond_dim: 16
-    sigma_max: 100.0
+    sigma_max: 100000.0
     sigma_min: 0.02
     rho: 7.0
+    log_normal_mean: -1.2
+    log_normal_std: 1.2    
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.diffusion.noise_channels}
@@ -20,16 +22,16 @@ model:
     inference_defaults:
       noise_scheduler:
         schedule_type: "karras"
-        sigma_max: 100.0
-        sigma_min: 0.02
+        sigma_max: 100000.0
+        sigma_min: 0.00
         rho: 7.0
-        num_steps: 50
+        num_steps: 80
       diffusion_sampler:
         sampler: "heun"
-        S_churn: 0.0
-        S_min: 0.0
-        S_max: .inf
-        S_noise: 1.0
+        S_churn: 2.5
+        S_min: 0.75
+        S_max: 100000
+        S_noise: 1.05
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
@@ -56,8 +58,8 @@ processor:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4
+  num_heads: 4
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
@@ -68,12 +70,12 @@ encoder:
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4
+  num_heads: 4
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
+  shard_strategy: "heads"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 
@@ -82,13 +84,13 @@ decoder:
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 
+  num_heads: 4
   initialise_data_extractor_zero: False
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
+  shard_strategy: "heads"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 residual:
@@ -99,11 +101,11 @@ output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
-  data: 8
-  hidden: 8
-  data2hidden: 8
-  hidden2data: 8
-  hidden2hidden: 8 # GNN and GraphTransformer Processor only
+  data: 0
+  hidden: 0
+  data2hidden: 0
+  hidden2data: 0
+  hidden2hidden: 0 # GNN and GraphTransformer Processor only
 
 
 attributes:
