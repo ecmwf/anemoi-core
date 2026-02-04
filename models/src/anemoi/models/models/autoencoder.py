@@ -92,7 +92,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         return (
-            self.multi_out * self.num_input_channels_forcings[dataset_name]
+            self.n_step_output * self.num_input_channels_forcings[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
         )
 
@@ -105,7 +105,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
-        x_input = x[:, : self.multi_step, ...]
+        x_input = x[:, : self.n_step_input, ...]
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
@@ -127,7 +127,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
                 "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
-                time=self.multi_out,
+                time=self.n_step_output,
             )
             .to(dtype=dtype)
             .clone()
@@ -148,7 +148,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             )
             node_attributes_target = shard_tensor(node_attributes_target, 0, shard_shapes_nodes, model_comm_group)
 
-        x_forcing = x[:, : self.multi_out, ...]
+        x_forcing = x[:, : self.n_step_output, ...]
         # normalize and add data positional info (lat/lon)
         x_target_latent = torch.cat(
             (

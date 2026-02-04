@@ -77,7 +77,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x,
             grid_shard_shapes=grid_shard_shapes,
             model_comm_group=model_comm_group,
-            multi_out=self.multi_out,
+            n_step_output=self.n_step_output,
         )
 
         if grid_shard_shapes is not None:
@@ -128,7 +128,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 "(bs e n) (time vars) -> bs time e n vars",
                 bs=batch_size,
                 e=ensemble_size,
-                time=self.multi_out,
+                time=self.n_step_output,
             )
             .to(dtype=dtype)
             .clone()

@@ -139,7 +139,7 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> None:
         del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
         pl.LightningModule.__init__(self)
-        self.multi_step = config.training.multistep_input
+        self.n_step_input = config.training.multistep_input
         model = DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
         self.model = DummyDiffusion(model=model)
         self.model_comm_group = None
@@ -156,7 +156,7 @@ def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         self.loss = {"data": DummyLoss()}
         self.loss_supports_sharding = False
         self.metrics_support_sharding = True
-        self.multi_out = 1
+        self.n_step_output = 1
 
     monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
 
@@ -240,8 +240,8 @@ def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.M
     forecaster.loss = {"data": DummyLoss()}
     forecaster.data_indices = {"data": data_indices}
     forecaster.dataset_names = ["data"]
-    forecaster.multi_step = 1
-    forecaster.multi_out = 1
+    forecaster.n_step_input = 1
+    forecaster.n_step_output = 1
     forecaster.rollout = 1
     forecaster.nens_per_device = 2
     forecaster.grid_shard_shapes = {"data": None}
@@ -251,7 +251,7 @@ def test_graphensforecaster_advance_input_handles_time_dim(monkeypatch: pytest.M
     forecaster.grid_dim = -2
 
     b, e_dummy, g, v = 2, 1, 4, len(name_to_index)
-    batch = {"data": torch.randn((b, forecaster.multi_step + forecaster.rollout, e_dummy, g, v), dtype=torch.float32)}
+    batch = {"data": torch.randn((b, forecaster.n_step_input + forecaster.rollout, e_dummy, g, v), dtype=torch.float32)}
 
     # Consume one rollout step and ensure it yields a prediction with a time dim.
     loss, metrics, preds = next(forecaster._rollout_step(batch=batch, rollout=1, validation_mode=False))
@@ -270,8 +270,8 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
 
     forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
     pl.LightningModule.__init__(forecaster)
-    forecaster.multi_step = 1
-    forecaster.multi_out = 1
+    forecaster.n_step_input = 1
+    forecaster.n_step_output = 1
     forecaster.rollout = 1
     forecaster.nens_per_device = 2
     forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
@@ -297,7 +297,7 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics)
     b, g, v = 2, 4, len(name_to_index)
     # Batch has dummy ensemble dim=1 in the dataset
-    batch = {"data": torch.randn((b, forecaster.multi_step + forecaster.rollout, 1, g, v), dtype=torch.float32)}
+    batch = {"data": torch.randn((b, forecaster.n_step_input + forecaster.rollout, 1, g, v), dtype=torch.float32)}
 
     # Run one rollout step; should not raise and should yield a 5D prediction
     loss, metrics, preds = next(forecaster._rollout_step(batch=batch, rollout=1, validation_mode=False))
@@ -309,7 +309,7 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
 
 
 @pytest.mark.parametrize(
-    ("multi_step", "multi_out", "expected"),
+    ("n_step_input", "n_step_output", "expected"),
     [
         (2, 3, [4.0, 5.0]),
         (2, 2, [3.0, 4.0]),
@@ -317,8 +317,8 @@ def test_graphensforecaster_time_dim_does_not_break_advance_input(monkeypatch: p
     ],
 )
 def test_rollout_advance_input_keeps_latest_steps(
-    multi_step: int,
-    multi_out: int,
+    n_step_input: int,
+    n_step_output: int,
     expected: list[float],
 ) -> None:
     name_to_index = {"A": 0, "B": 1}
@@ -326,24 +326,24 @@ def test_rollout_advance_input_keeps_latest_steps(
 
     forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
     pl.LightningModule.__init__(forecaster)
-    forecaster.multi_step = multi_step
-    forecaster.multi_out = multi_out
+    forecaster.n_step_input = n_step_input
+    forecaster.n_step_output = n_step_output
     forecaster.output_mask = {"data": NoOutputMask()}
     forecaster.data_indices = {"data": data_indices}
     forecaster.grid_shard_slice = {"data": None}
 
     b, e, g, v = 1, 1, 2, len(name_to_index)
-    x = torch.zeros((b, forecaster.multi_step, e, g, v), dtype=torch.float32)
-    for step in range(forecaster.multi_step):
+    x = torch.zeros((b, forecaster.n_step_input, e, g, v), dtype=torch.float32)
+    for step in range(forecaster.n_step_input):
         x[:, step] = float(step + 1)
     y_pred = torch.stack(
         [
-            torch.full((b, e, g, v), float(forecaster.multi_step + step), dtype=torch.float32)
-            for step in range(1, forecaster.multi_out + 1)
+            torch.full((b, e, g, v), float(forecaster.n_step_input + step), dtype=torch.float32)
+            for step in range(1, forecaster.n_step_output + 1)
         ],
         dim=1,
     )
-    batch = torch.zeros((b, forecaster.multi_step + forecaster.multi_out, e, g, v), dtype=torch.float32)
+    batch = torch.zeros((b, forecaster.n_step_input + forecaster.n_step_output, e, g, v), dtype=torch.float32)
 
     updated = forecaster._advance_dataset_input(
         x,
@@ -354,9 +354,11 @@ def test_rollout_advance_input_keeps_latest_steps(
     )
     kept_steps = updated[0, :, 0, 0, 0].tolist()
     expected_next_input = expected
-    assert kept_steps == expected_next_input, (
+    error_msg = (
         "Next input steps (used for the next forecast) "
-        f"(multi_step={multi_step}, multi_out={multi_out}) should be {expected_next_input}, got {kept_steps}."
+        f"(n_step_input={n_step_input}, n_step_output={n_step_output}) "
+        f"should be {expected_next_input}, got {kept_steps}."
     )
+    assert kept_steps == expected_next_input, error_msg
     for idx, value in enumerate(expected):
         assert torch.all(updated[:, idx] == value)

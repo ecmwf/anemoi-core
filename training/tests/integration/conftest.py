@@ -231,7 +231,9 @@ def multidatasets_config(
 
 
 @pytest.fixture
-def multi_out_multidatasets_config(multidatasets_config: tuple[DictConfig, list[str]]) -> tuple[DictConfig, list[str]]:
+def n_step_output_multidatasets_config(
+    multidatasets_config: tuple[DictConfig, list[str]],
+) -> tuple[DictConfig, list[str]]:
     cfg, urls = multidatasets_config
 
     cfg.training.multistep_input = 3
@@ -258,7 +260,7 @@ def multi_out_multidatasets_config(multidatasets_config: tuple[DictConfig, list[
         ),
     ],
 )
-def multi_out_multidatasets_diffusion_config(
+def n_step_output_multidatasets_diffusion_config(
     request: pytest.FixtureRequest,
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
@@ -376,7 +378,7 @@ def ensemble_config(
 
 
 @pytest.fixture
-def multi_out_ens_config(ensemble_config: tuple[DictConfig, str]) -> tuple[DictConfig, str]:
+def n_step_output_ens_config(ensemble_config: tuple[DictConfig, str]) -> tuple[DictConfig, str]:
 
     cfg, url = ensemble_config
 
@@ -424,7 +426,7 @@ def autoencoder_config(
 
 
 @pytest.fixture
-def multi_out_autoencoder_config(autoencoder_config: tuple[OmegaConf, list[str]]) -> tuple[OmegaConf, list[str]]:
+def n_step_output_autoencoder_config(autoencoder_config: tuple[OmegaConf, list[str]]) -> tuple[OmegaConf, list[str]]:
 
     cfg, url = autoencoder_config
 
@@ -452,7 +454,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 
 
 @pytest.fixture
-def multi_out_config(gnn_config: tuple[DictConfig, str]) -> tuple[DictConfig, str]:
+def n_step_output_config(gnn_config: tuple[DictConfig, str]) -> tuple[DictConfig, str]:
     cfg, url = gnn_config
 
     cfg.training.multistep_input = 3
@@ -617,7 +619,7 @@ def interpolator_config(
     return cfg, dataset_urls[0]
 
 
-def multi_out_interpolator_config(
+def n_step_output_interpolator_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str]:

@@ -61,16 +61,16 @@ class BaseDiffusionForecaster(BaseGraphModule):
         x = {}
         for dataset_name, dataset_batch in batch.items():
             msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {self.multi_step + self.multi_out}"
+                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {self.n_step_input + self.n_step_output}"
             )
-            assert dataset_batch.shape[1] >= self.multi_step + self.multi_out, msg
+            assert dataset_batch.shape[1] >= self.n_step_input + self.n_step_output, msg
             x[dataset_name] = dataset_batch[
                 :,
-                0 : self.multi_step,
+                0 : self.n_step_input,
                 ...,
                 self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
+            ]  # (bs, n_step_input, latlon, nvar)
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
@@ -78,10 +78,10 @@ class BaseDiffusionForecaster(BaseGraphModule):
         """Get target tensor shape for diffusion model."""
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            start = self.multi_step
-            y_time = dataset_batch.narrow(1, start, self.multi_out)
+            start = self.n_step_input
+            y_time = dataset_batch.narrow(1, start, self.n_step_output)
             var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = y_time.index_select(-1, var_idx)  # (bs, multi_out, ens, latlon, nvar)
+            y[dataset_name] = y_time.index_select(-1, var_idx)  # (bs, n_step_output, ens, latlon, nvar)
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
@@ -206,8 +206,8 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
+        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -278,8 +278,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             lead_times = dataset_stats.get("lead_times") if isinstance(dataset_stats, dict) else None
             assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
             assert (
-                len(lead_times) == self.multi_out
-            ), f"Expected {self.multi_out} tendency statistics entries, got {len(lead_times)}."
+                len(lead_times) == self.n_step_output
+            ), f"Expected {self.n_step_output} tendency statistics entries, got {len(lead_times)}."
             assert all(
                 lead_time in dataset_stats for lead_time in lead_times
             ), "Missing tendency statistics for one or more output steps."
@@ -294,8 +294,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             pre_tend = pre_processors_tendencies[dataset_name]
             post_tend = post_processors_tendencies[dataset_name]
             assert (
-                len(pre_tend) == self.multi_out and len(post_tend) == self.multi_out
-            ), "Per-step tendency processors must match multistep_output."
+                len(pre_tend) == self.n_step_output and len(post_tend) == self.n_step_output
+            ), "Per-step tendency processors must match n_step_output."
             assert all(
                 proc is not None for proc in pre_tend
             ), "Missing tendency pre-processors for one or more output steps."
@@ -444,8 +444,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         """
         # batch is already normalized in BaseGraphModule._normalize_batch
         # x: data.input.full (normalized), y: data.output.full (normalized)
-        x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
+        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:

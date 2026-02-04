@@ -79,7 +79,7 @@ class GraphInterpolator(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
-        assert self.multi_out == 1, "For multiple outputs, use GraphMultiOutInterpolator"
+        assert self.n_step_output == 1, "For multiple outputs, use GraphMultiOutInterpolator"
 
         target_forcing_config = get_multiple_datasets_config(config.training.target_forcing)
         self.target_forcing_indices, self.use_time_fraction = {}, {}
@@ -101,7 +101,7 @@ class GraphInterpolator(BaseGraphModule):
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
-        self.multi_step = 1
+        self.n_step_input = 1
         self.rollout = 1
 
     def get_target_forcing(self, batch: dict[str, torch.Tensor], interp_step: int) -> dict[str, torch.Tensor]:
@@ -236,11 +236,11 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
-        self.multi_out = len(self.interp_times)
+        self.n_step_output = len(self.interp_times)
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
 
-        self.multi_step = 1
+        self.n_step_input = 1
         self.rollout = 1
 
     def _step(

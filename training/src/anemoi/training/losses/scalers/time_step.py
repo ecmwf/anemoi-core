@@ -61,11 +61,12 @@ class UniformTimeStepScaler(TimeStepScaler):
 
         Parameters
         ----------
-        multistep_out : int
+        multistep_output : int
             Number of time steps to apply uniform weights to.
         """
         del kwargs
-        weights = [1.0] * multistep_output
+        n_step_output = multistep_output
+        weights = [1.0] * n_step_output
         super().__init__(weights=weights, norm="unit-sum")
 
 

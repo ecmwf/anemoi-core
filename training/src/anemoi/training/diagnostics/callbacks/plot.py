@@ -485,7 +485,7 @@ class LongRolloutPlots(BasePlotCallback):
             self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
             self.latlons = np.rad2deg(self.latlons.cpu().numpy())
 
-        assert batch.shape[1] >= self.max_rollout + pl_module.multi_step, (
+        assert batch.shape[1] >= self.max_rollout + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
             f"Set `dataloader.validation_rollout` to at least {max(self.rollout)}"
         )
@@ -495,7 +495,7 @@ class LongRolloutPlots(BasePlotCallback):
         input_tensor_0 = (
             batch[
                 :,
-                pl_module.multi_step - 1,
+                pl_module.n_step_input - 1,
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
@@ -576,7 +576,7 @@ class LongRolloutPlots(BasePlotCallback):
         input_tensor_rollout_step = (
             input_batch[
                 :,
-                pl_module.multi_step + rollout_step,  # (pl_module.multi_step - 1) + (rollout_step + 1)
+                pl_module.n_step_input + rollout_step,  # (pl_module.n_step_input - 1) + (rollout_step + 1)
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
@@ -1022,8 +1022,8 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             for rollout_step in range(output_times[0]):
                 y_hat = outputs[1][rollout_step][dataset_name]
-                start = pl_module.multi_step + rollout_step * pl_module.multi_out
-                y_time = batch[dataset_name].narrow(1, start, pl_module.multi_out)
+                start = pl_module.n_step_input + rollout_step * pl_module.n_step_output
+                y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
                 var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
                 y_true = y_time.index_select(-1, var_idx)
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
@@ -1100,12 +1100,12 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         total_targets = output_times[0]
         if output_times[1] == "forecast":
-            total_targets *= pl_module.multi_out
+            total_targets *= pl_module.n_step_output
 
         input_tensor = (
             batch[dataset_name][
                 :,
-                pl_module.multi_step - 1 : pl_module.multi_step + total_targets + 1,
+                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
                 ...,
                 pl_module.data_indices[dataset_name].data.output.full,
             ]
@@ -1223,14 +1223,14 @@ class PlotSample(BasePlotAdditionalMetrics):
             local_rank = pl_module.local_rank
 
             if output_times[1] == "forecast":
-                max_out_steps = pl_module.multi_out
+                max_out_steps = pl_module.n_step_output
                 output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
                 if output_steps_limit is not None:
                     max_out_steps = min(max_out_steps, output_steps_limit)
                 for rollout_step in range(output_times[0]):
                     init_step = self._get_init_step(rollout_step, output_times[1])
                     for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.multi_out + out_step + 1
+                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_predicted_multilevel_flat_sample(
                             plot_parameters_dict,
                             self.per_sample,
@@ -1353,14 +1353,14 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             }
 
             if output_times[1] == "forecast":
-                max_out_steps = pl_module.multi_out
+                max_out_steps = pl_module.n_step_output
                 output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
                 if output_steps_limit is not None:
                     max_out_steps = min(max_out_steps, output_steps_limit)
                 for rollout_step in range(output_times[0]):
                     init_step = self._get_init_step(rollout_step, output_times[1])
                     for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.multi_out + out_step + 1
+                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_power_spectrum(
                             plot_parameters_dict_spectrum,
                             self.latlons[dataset_name],
@@ -1484,14 +1484,14 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             }
 
             if output_times[1] == "forecast":
-                max_out_steps = pl_module.multi_out
+                max_out_steps = pl_module.n_step_output
                 output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
                 if output_steps_limit is not None:
                     max_out_steps = min(max_out_steps, output_steps_limit)
                 for rollout_step in range(output_times[0]):
                     init_step = self._get_init_step(rollout_step, output_times[1])
                     for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.multi_out + out_step + 1
+                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_histogram(
                             plot_parameters_dict_histogram,
                             data[init_step, ...].squeeze(),

@@ -177,7 +177,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
             batch=batch_size,
             ensemble=ensemble_size,
-            time=self.multi_out,
+            time=self.n_step_output,
         ).to(dtype=dtype)
 
         return x_out
@@ -480,7 +480,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        multi_step: int,
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[tuple[dict[str, torch.Tensor]], dict[str, Optional[list]]]:
@@ -492,7 +492,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             Input batch after pre-processing
         pre_processors : dict[str, nn.Module]
             Pre-processing module (already applied)
-        multi_step : int
+        n_step_input : int
             Number of input timesteps
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
@@ -510,7 +510,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x = x[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+            x = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
 
             if model_comm_group is not None:
                 shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
@@ -574,7 +574,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
         post_processors: dict[str, nn.Module],
-        multi_step: int,
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         noise_scheduler_params: Optional[dict] = None,
@@ -593,7 +593,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             Pre-processing module
         post_processors : dict[str, nn.Module],
             Post-processing module
-        multi_step : int,
+        n_step_input : int,
             Number of input timesteps
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
@@ -629,7 +629,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             before_sampling_data, grid_shard_shapes = self._before_sampling(
                 batch,
                 pre_processors,
-                multi_step,
+                n_step_input,
                 model_comm_group,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
@@ -720,7 +720,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
             # Initialize output with noise
             batch_size, ensemble_size, grid_size = x_data.shape[0], x_data.shape[2], x_data.shape[-2]
-            shape = (batch_size, self.multi_out, ensemble_size, grid_size, self.num_output_channels[dataset_name])
+            shape = (batch_size, self.n_step_output, ensemble_size, grid_size, self.num_output_channels[dataset_name])
             y_init[dataset_name] = torch.randn(shape, device=x_data.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
@@ -762,15 +762,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": self.multi_step,
+                "input_timesteps": self.n_step_input,
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
             md_dict["metadata_inference"][dataset]["shapes"] = shapes
 
             rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
-            input_rel_date_indices = rel_date_indices[: self.multi_step]
-            output_rel_date_indices = rel_date_indices[-self.multi_out :]
+            input_rel_date_indices = rel_date_indices[: self.n_step_input]
+            output_rel_date_indices = rel_date_indices[-self.n_step_output :]
             md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
             md_dict["metadata_inference"][dataset]["timesteps"][
                 "output_relative_date_indices"
@@ -801,7 +801,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
         if self.condition_on_residual:
-            input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.multi_out
+            input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output
         return input_dim
 
     @staticmethod
@@ -831,7 +831,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=bse)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group, multi_out=self.multi_out)[
+        x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group, n_step_output=self.n_step_output)[
             ..., self._internal_input_idx[dataset_name]
         ]
         assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
@@ -1013,7 +1013,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        multi_step: int,
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]], dict[str, Optional[list]]]:
@@ -1027,7 +1027,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x_in = x[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+            x_in = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
             x_t0 = x[:, -1, None, ...]  # add dummy ensemble dimension
 
             if model_comm_group is not None:
@@ -1116,7 +1116,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name, in_x in x.items():
             x_skip = self.residual[dataset_name](
-                in_x, grid_shard_shapes[dataset_name], model_comm_group, multi_out=self.multi_out
+                in_x, grid_shard_shapes[dataset_name], model_comm_group, n_step_output=self.n_step_output
             )
             assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             # x_skip.shape: (bs, time, ens, latlon, nvar)

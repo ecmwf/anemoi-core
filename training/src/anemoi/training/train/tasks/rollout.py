@@ -95,7 +95,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         Supports model outputs shaped like:
         - (B, T, E, G, V)
         """
-        keep_steps = min(self.multi_out, self.multi_step)
+        keep_steps = min(self.n_step_output, self.n_step_input)
 
         x = x.roll(-keep_steps, dims=1)
 
@@ -109,7 +109,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
                 self.data_indices[dataset_name].model.output.prognostic,
             ]
 
-            batch_time_index = self.multi_step + (rollout_step + 1) * self.multi_out - (i + 1)
+            batch_time_index = self.n_step_input + (rollout_step + 1) * self.n_step_output - (i + 1)
 
             x[:, -(i + 1)] = self.output_mask[dataset_name].rollout_boundary(
                 x[:, -(i + 1)],
