@@ -80,8 +80,9 @@ class TestScalerFilteringWithTargetOnlyVariables:
         assert isinstance(loss, FilteringLossWrapper)
 
         # Verify scaler shapes are filtered correctly
-        pressure_scaler = loss.scaler.tensors["pressure_level"][1]
-        general_scaler = loss.scaler.tensors["general_variable"][1]
+        # Scalers are forwarded to the inner loss, so access them there
+        pressure_scaler = loss.loss.scaler.tensors["pressure_level"][1]
+        general_scaler = loss.loss.scaler.tensors["general_variable"][1]
 
         assert pressure_scaler.shape[0] == 10, f"Expected 10 variables, got {pressure_scaler.shape[0]}"
         assert general_scaler.shape[0] == 10, f"Expected 10 variables, got {general_scaler.shape[0]}"
@@ -114,7 +115,8 @@ class TestScalerFilteringWithTargetOnlyVariables:
 
         assert isinstance(loss, FilteringLossWrapper)
 
-        pressure_scaler = loss.scaler.tensors["pressure_level"][1]
+        # Scalers are forwarded to the inner loss, so access them there
+        pressure_scaler = loss.loss.scaler.tensors["pressure_level"][1]
 
         assert pressure_scaler.shape[0] == 1
         # var_5 is at index 5, so value should be 0.6
@@ -142,7 +144,8 @@ class TestScalerFilteringWithTargetOnlyVariables:
             data_indices=data_indices_with_target_only,
         )
 
-        pressure_scaler = loss.scaler.tensors["pressure_level"][1]
+        # Scalers are forwarded to the inner loss, so access them there
+        pressure_scaler = loss.loss.scaler.tensors["pressure_level"][1]
 
         # Values should be in reverse order: 1.0, 0.9, 0.8, ..., 0.1
         expected = torch.tensor([0.1 * (i + 1) for i in range(9, -1, -1)])
@@ -170,7 +173,8 @@ class TestScalerFilteringWithTargetOnlyVariables:
             data_indices=data_indices_with_target_only,
         )
 
-        pressure_scaler = loss.scaler.tensors["pressure_level"][1]
+        # Scalers are forwarded to the inner loss, so access them there
+        pressure_scaler = loss.loss.scaler.tensors["pressure_level"][1]
 
         assert pressure_scaler.shape[0] == 5
         # Values for indices 0, 2, 4, 6, 8 -> 0.1, 0.3, 0.5, 0.7, 0.9
@@ -252,12 +256,13 @@ class TestCombinedLossWithTargetOnlyVariables:
         assert isinstance(loss.losses[0], FilteringLossWrapper)
         assert isinstance(loss.losses[1], FilteringLossWrapper)
 
+        # Scalers are forwarded to the inner loss, so access them there
         # First loss: 5 variables
-        first_loss_scaler = loss.losses[0].scaler.tensors["pressure_level"][1]
+        first_loss_scaler = loss.losses[0].loss.scaler.tensors["pressure_level"][1]
         assert first_loss_scaler.shape[0] == 5
 
         # Second loss: 1 variable (tp)
-        second_loss_scaler = loss.losses[1].scaler.tensors["pressure_level"][1]
+        second_loss_scaler = loss.losses[1].loss.scaler.tensors["pressure_level"][1]
         assert second_loss_scaler.shape[0] == 1
 
     def test_combined_loss_forward_pass(self, data_indices_with_imerg: IndexCollection, scalers_custom: dict) -> None:
@@ -560,12 +565,16 @@ class TestFilteringLossWrapperForward:
         Fixture layout:
         - data.output.full = [0, 1, 4, 5, 8, 9] (tensor size 6)
         - model.output prognostic variables: var_0=0, var_1=1, var_2=2, var_3=3, var_4=4
+
+        This test also verifies that scalers are actually applied during loss computation
+        by comparing loss values with and without scalers.
         """
         # First loss: MSE on prognostic variables
         # Second loss: MSE on var_0 predicted vs imerg target
         prognostic_variables = ["var_0", "var_1", "var_2", "var_3", "var_4"]
 
-        loss = get_loss_function(
+        # First, compute loss WITHOUT scalers
+        loss_no_scalers = get_loss_function(
             DictConfig(
                 {
                     "_target_": "anemoi.training.losses.CombinedLoss",
@@ -587,19 +596,51 @@ class TestFilteringLossWrapperForward:
             data_indices=data_indices_with_target_only,
         )
 
-        assert isinstance(loss, CombinedLoss)
-        assert len(loss.losses) == 2
-        assert isinstance(loss.losses[0], FilteringLossWrapper)
-        assert isinstance(loss.losses[1], FilteringLossWrapper)
+        # Now compute loss WITH scalers (2x weight for all variables)
+        n_vars = len(data_indices_with_target_only.name_to_index)
+        scalers = {"double_weight": (3, torch.ones(n_vars) * 2.0)}
+
+        loss_with_scalers = get_loss_function(
+            DictConfig(
+                {
+                    "_target_": "anemoi.training.losses.CombinedLoss",
+                    "losses": [
+                        {
+                            "_target_": "anemoi.training.losses.MSELoss",
+                            "predicted_variables": prognostic_variables,
+                            "target_variables": prognostic_variables,
+                            "scalers": ["double_weight"],
+                        },
+                        {
+                            "_target_": "anemoi.training.losses.MSELoss",
+                            "predicted_variables": ["var_0"],
+                            "target_variables": ["imerg"],
+                            "scalers": ["double_weight"],
+                        },
+                    ],
+                    "loss_weights": [1.0, 1.0],
+                    "scalers": ["*"],
+                },
+            ),
+            scalers=scalers,
+            data_indices=data_indices_with_target_only,
+        )
+
+        assert isinstance(loss_no_scalers, CombinedLoss)
+        assert isinstance(loss_with_scalers, CombinedLoss)
+        assert len(loss_no_scalers.losses) == 2
+        assert len(loss_with_scalers.losses) == 2
+        assert isinstance(loss_no_scalers.losses[0], FilteringLossWrapper)
+        assert isinstance(loss_with_scalers.losses[0], FilteringLossWrapper)
 
         # Verify first loss uses 5 prognostic variables
-        assert loss.losses[0].predicted_indices == [0, 1, 2, 3, 4]
-        assert loss.losses[0].target_indices == [0, 1, 4, 5, 8]
-        assert len(loss.losses[0].predicted_indices) == len(prognostic_variables)
+        assert loss_no_scalers.losses[0].predicted_indices == [0, 1, 2, 3, 4]
+        assert loss_no_scalers.losses[0].target_indices == [0, 1, 4, 5, 8]
+        assert len(loss_no_scalers.losses[0].predicted_indices) == len(prognostic_variables)
 
         # Verify indices for second loss
-        assert loss.losses[1].predicted_indices == [0]
-        assert loss.losses[1].target_indices == [9]
+        assert loss_no_scalers.losses[1].predicted_indices == [0]
+        assert loss_no_scalers.losses[1].target_indices == [9]
 
         # Create tensors with controlled values
         # Shape: (batch=2, ensemble=1, grid=4, variables=6) - 6 variables in data.output
@@ -617,8 +658,8 @@ class TestFilteringLossWrapperForward:
         # Set imerg target for second loss
         target[..., 9] = 5.0  # imerg target
 
-        # Compute combined loss
-        loss_value = loss(pred, target, squash_mode="sum")
+        # Compute combined loss without scalers
+        loss_value_no_scalers = loss_no_scalers(pred, target, squash_mode="sum")
 
         # First loss: MSE on prognostic variables
         # (1-2)² + (2-2)² + (3-2)² + (4-2)² + (5-2)² = 1 + 0 + 1 + 4 + 9 = 15 per grid point
@@ -626,4 +667,10 @@ class TestFilteringLossWrapperForward:
         # Second loss: MSE on var_0 vs imerg
         # (1-5)² = 16 per grid point, summed = 16 * 4 = 64
         # Combined (weight 1.0 each): 60 + 64 = 124
-        torch.testing.assert_close(loss_value, torch.tensor(124.0))
+        torch.testing.assert_close(loss_value_no_scalers, torch.tensor(124.0))
+
+        # Compute combined loss WITH scalers
+        loss_value_with_scalers = loss_with_scalers(pred, target, squash_mode="sum")
+
+        # With 2x scaler applied, loss should be 2x: 124 * 2 = 248
+        torch.testing.assert_close(loss_value_with_scalers, torch.tensor(248.0))
