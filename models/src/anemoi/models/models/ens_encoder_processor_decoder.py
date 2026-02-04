@@ -145,8 +145,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
-        # TODO(dieter): verify if this is needed or can be solved alternatively
-        x_out = x_out.contiguous()  # necessary after expand()
         return x_out
 
     def forward(
