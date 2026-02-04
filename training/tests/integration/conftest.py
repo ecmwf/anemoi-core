@@ -252,56 +252,6 @@ def multidatasets_config(
     return cfg, dataset_urls
 
 
-@pytest.fixture(
-    params=[
-        pytest.param(
-            [
-                "model=graphtransformer_diffusion",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
-            ],
-            id="diffusion",
-        ),
-        pytest.param(
-            [
-                "model=graphtransformer_diffusiontend",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
-            ],
-            id="diffusiontend",
-        ),
-    ],
-    ids=["diffusion", "diffusiontend"],
-)
-def multidatasets_diffusion_config(
-    request: pytest.FixtureRequest,
-    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
-    get_tmp_paths: GetTmpPaths,
-) -> tuple[DictConfig, list[str]]:
-    overrides = request.param
-    is_tendency = any("graphtransformer_diffusiontend" in override for override in overrides)
-
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multi_diffusion"):
-        template = compose(config_name="multi", overrides=overrides)
-
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
-    assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "dataset_b"])
-    dataset, dataset_b = rel_paths
-    use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
-    use_case_modifications.system.input.dataset_b = str(Path(tmp_dir, dataset_b))
-
-    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
-    if is_tendency:
-        cfg.training.multistep_input = 3
-        cfg.training.multistep_output = 2
-    else:
-        cfg.training.multistep_input = 2
-        cfg.training.multistep_output = 1
-    OmegaConf.resolve(cfg)
-    assert isinstance(cfg, DictConfig)
-    return cfg, dataset_urls
-
-
 @pytest.fixture
 def lam_config(
     testing_modifications_callbacks_on_with_temp_dir: DictConfig,
@@ -638,6 +588,56 @@ def diffusion_config(
     cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, dataset_urls[0]
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(
+            [
+                "model=graphtransformer_diffusion",
+                "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
+            ],
+            id="diffusion",
+        ),
+        pytest.param(
+            [
+                "model=graphtransformer_diffusiontend",
+                "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+            ],
+            id="diffusiontend",
+        ),
+    ],
+    ids=["diffusion", "diffusiontend"],
+)
+def multidatasets_diffusion_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, list[str]]:
+    overrides = request.param
+    is_tendency = any("graphtransformer_diffusiontend" in override for override in overrides)
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multi_diffusion"):
+        template = compose(config_name="multi", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "dataset_b"])
+    dataset, dataset_b = rel_paths
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
+    use_case_modifications.system.input.dataset_b = str(Path(tmp_dir, dataset_b))
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    if is_tendency:
+        cfg.training.multistep_input = 3
+        cfg.training.multistep_output = 2
+    else:
+        cfg.training.multistep_input = 2
+        cfg.training.multistep_output = 1
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls
 
 
 @pytest.fixture
