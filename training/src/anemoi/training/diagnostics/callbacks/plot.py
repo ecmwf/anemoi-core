@@ -1397,12 +1397,19 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            for rollout_step in range(output_times[0]):
-                # Build dictionary of inidicies and parameters to be plotted
-                diagnostics = (
-                    []
-                    if self.config.data.datasets[dataset_name].diagnostic is None
-                    else self.config.data.datasets[dataset_name].diagnostic
+        for dataset_name in dataset_names:
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+
+            # Build dictionary of inidicies and parameters to be plotted
+            diagnostics = (
+                []
+                if self.config.data.datasets[dataset_name].diagnostic is None
+                else self.config.data.datasets[dataset_name].diagnostic
+            )
+            plot_parameters_dict_spectrum = {
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
+                    name,
+                    name not in diagnostics,
                 )
                 for name in self.parameters
             }
