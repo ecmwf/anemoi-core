@@ -14,11 +14,19 @@ import pytest
 import torch
 
 from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
 
 
 class TestNativeGridDataset:
     """Test NativeGridDataset instantiation and properties."""
+
+    @pytest.fixture
+    def dataset_path(self, test_dataset: tuple[str, str], get_test_archive: GetTestArchive) -> str:
+        """Fixture to provide dataset path."""
+        path, url_archive = test_dataset
+        get_test_archive(url_archive)
+        return path
 
     @skip_if_offline
     @pytest.mark.parametrize("start", [None, 2017])

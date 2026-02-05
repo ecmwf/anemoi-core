@@ -17,7 +17,6 @@ from hydra import initialize
 from omegaconf import DictConfig
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
 
@@ -30,17 +29,13 @@ def config(request: SubRequest) -> DictConfig:
 
 
 @pytest.fixture(scope="module")
-def dataset_path(
-    temporary_directory_for_test_data: TemporaryDirectoryForTestData,
-    get_test_archive: GetTestArchive,
-) -> str:
+def test_dataset(temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> tuple[str, str]:
     """Get path to test dataset."""
     test_ds = "anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
     name_dataset = Path(test_ds).name
     url_archive = test_ds + ".tgz"
     tmp_path = temporary_directory_for_test_data(url_archive, archive=True)
-    get_test_archive(url_archive)
-    return str(Path(tmp_path, name_dataset))
+    return str(Path(tmp_path, name_dataset)), url_archive
 
 
 @pytest.fixture
