@@ -286,10 +286,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.shard_shapes = {}
+        self.shard_shapes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
+            self.grid_sizes[dataset_name] = graph_data[dataset_name]["data"].num_nodes  # TODO(Mario): Replace by dataset.grid_size
             self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
-                graph_data[dataset_name]["data"].num_nodes, # TODO(Mario): Replace by dataset.grid_size
+                self.grids_sizes[dataset_name],
                 reader_group_size,
             )
 
@@ -718,19 +719,22 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = {}
         self.grid_shard_slice = {}
 
-        for dataset_name in self.grid_indices:
+        for dataset_name in self.dataset_names:
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
-                self.grid_shard_shapes[dataset_name] = self.grid_indices[dataset_name].shard_shapes
-                self.grid_shard_slice[dataset_name] = self.grid_indices[dataset_name].get_shard_slice(
-                    self.reader_group_rank,
+                self.grid_shard_shapes[dataset_name] = self.shard_shapes[dataset_name]
+                start, end = get_partition_range(
+                    partition_sizes=self.grid_shard_shapes[dataset_name],
+                    partition_id=self.reader_group_rank,
                 )
+                self.grid_shard_slice[dataset_name] = slice(start, end)
             else:
                 self.grid_shard_shapes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = None
                 batch[dataset_name] = self.allgather_batch(
                     batch[dataset_name],
-                    self.grid_indices[dataset_name],
-                    self.grid_dim,
+                    grid_size=self.grid_sizes[dataset_name],
+                    grid_shard_shapes=self.shard_shapes[dataset_name],
+                    grid_dim=self.grid_dim,
                 )
         return batch
 
@@ -784,15 +788,23 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ) -> tuple[dict[str, torch.Tensor], Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         pass
 
-    def allgather_batch(self, batch: torch.Tensor, grid_indices: dict, grid_dim: int) -> torch.Tensor:
+    def allgather_batch(
+        self,
+        batch: torch.Tensor,
+        grid_size: int,
+        grid_shard_shapes: list,
+        grid_dim: int,
+    ) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
 
         Parameters
         ----------
         batch : torch.Tensor
             Batch-shard of current reader rank
-        grid_indices :
-            Grid indices object with shard_shapes and grid_size
+        grid_size : int
+            Size of the full grid dimension
+        grid_shard_shapes : list
+            Shapes of the shards along the grid dimension
         grid_dim : int
             Grid dimension
 
@@ -801,9 +813,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Allgathered (full) batch
         """
-        grid_shard_shapes = grid_indices.shard_shapes
-        grid_size = grid_indices.grid_size
-
         if grid_size == batch.shape[grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
