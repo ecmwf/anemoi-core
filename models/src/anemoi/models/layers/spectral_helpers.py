@@ -120,6 +120,11 @@ class SphericalHarmonicTransform(Module):
         # Set padding for each latitude so every rFFT output ring has the same length
         self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
 
+        # Use more efficient batched rfft for regular grids
+        self.rfft_rings = (
+            self.rfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.rfft_rings_regular
+        )
+
         # Compute Gaussian latitudes and quadrature weights
         theta, weight = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
@@ -134,7 +139,7 @@ class SphericalHarmonicTransform(Module):
 
         self.register_buffer("weight", weight, persistent=False)
 
-    def rfft_rings(self, x: Tensor) -> Tensor:
+    def rfft_rings_reduced(self, x: Tensor) -> Tensor:
 
         rfft = [
             torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
@@ -149,6 +154,11 @@ class SphericalHarmonicTransform(Module):
         return torch.stack(
             tensors=rfft,
             dim=-2,
+        )
+
+    def rfft_rings_regular(self, x: Tensor) -> Tensor:
+        return torch.fft.rfft(
+            x.reshape(*x.shape[:-1], self.nlat, self.lons_per_lat[0]), norm="forward"
         )
 
     def forward(self, x: Tensor) -> Tensor:
@@ -188,6 +198,12 @@ class InverseSphericalHarmonicTransform(Module):
 
         self.nlat = nlat
         self.lons_per_lat = lons_per_lat
+        self.n_grid_points = sum(self.lons_per_lat)
+
+        # Use more efficient batched rfft for regular grids
+        self.irfft_rings = (
+            self.irfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.irfft_rings_regular
+        )
 
         # Compute Gaussian latitudes (don't need quadrature weights for the inverse)
         theta, _ = legendre_gauss_weights(nlat)
@@ -199,7 +215,7 @@ class InverseSphericalHarmonicTransform(Module):
 
         self.register_buffer("pct", pct, persistent=False)
 
-    def irfft_rings(self, x: Tensor) -> Tensor:
+    def irfft_rings_reduced(self, x: Tensor) -> Tensor:
 
         irfft = [torch.fft.irfft(x[..., t, :], nlon, norm="forward") for t, nlon in enumerate(self.lons_per_lat)]
 
@@ -207,6 +223,10 @@ class InverseSphericalHarmonicTransform(Module):
             tensors=irfft,
             dim=-1,
         )
+
+    def irfft_rings_regular(self, x: Tensor) -> Tensor:
+
+        return torch.fft.irfft(x, self.lons_per_lat[0], norm="forward").reshape(*x.shape[:-2], self.n_grid_points)
 
     def forward(self, x: Tensor) -> Tensor:
         """Performs inverse SHT transform (inverse Legendre transform followed by inverse Fourier transform).
