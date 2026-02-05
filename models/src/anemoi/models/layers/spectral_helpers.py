@@ -39,8 +39,10 @@ def legpoly(
     can be turned off optionally.
 
     Method of computation follows
-    [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3: Geochemistry, Geophysics, Geosystems.
-    [2] Rapp, R.H.; A Fortran Program for the Computation of Gravimetric Quantities from High Degree Spherical Harmonic Expansions, Ohio State University Columbus; report; 1982; https://apps.dtic.mil/sti/citations/ADA123406.
+    [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3:
+    Geochemistry, Geophysics, Geosystems.
+    [2] Rapp, R.H.; A Fortran Program for the Computation of Gravimetric Quantities from High Degree Spherical Harmonic
+    Expansions, Ohio State University Columbus; report; 1982; https://apps.dtic.mil/sti/citations/ADA123406.
     [3] Schrama, E.; Orbit integration based upon interpolated gravitational gradients.
     """
 
@@ -94,8 +96,10 @@ def precompute_legpoly(
     can be turned off optionally.
 
     Method of computation follows
-    [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3: Geochemistry, Geophysics, Geosystems.
-    [2] Rapp, R.H.; A Fortran Program for the Computation of Gravimetric Quantities from High Degree Spherical Harmonic Expansions, Ohio State University Columbus; report; 1982; https://apps.dtic.mil/sti/citations/ADA123406.
+    [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3:
+    Geochemistry, Geophysics, Geosystems.
+    [2] Rapp, R.H.; A Fortran Program for the Computation of Gravimetric Quantities from High Degree Spherical Harmonic
+    Expansions, Ohio State University Columbus; report; 1982; https://apps.dtic.mil/sti/citations/ADA123406.
     [3] Schrama, E.; Orbit integration based upon interpolated gravitational gradients.
     """
 
@@ -140,6 +144,18 @@ class SphericalHarmonicTransform(Module):
         self.register_buffer("weight", weight, persistent=False)
 
     def rfft_rings_reduced(self, x: Tensor) -> Tensor:
+        """Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+        """
 
         rfft = [
             torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
@@ -157,9 +173,20 @@ class SphericalHarmonicTransform(Module):
         )
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
-        return torch.fft.rfft(
-            x.reshape(*x.shape[:-1], self.nlat, self.lons_per_lat[0]), norm="forward"
-        )
+        """Performs direct real-to-complex FFT on each latitude ring of a regular grid.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+        """
+
+        return torch.fft.rfft(x.reshape(*x.shape[:-1], self.nlat, self.lons_per_lat[0]), norm="forward")
 
     def forward(self, x: Tensor) -> Tensor:
         """Performs direct SHT transform (Fourier transform followed by Legendre transform).
@@ -216,6 +243,18 @@ class InverseSphericalHarmonicTransform(Module):
         self.register_buffer("pct", pct, persistent=False)
 
     def irfft_rings_reduced(self, x: Tensor) -> Tensor:
+        """Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+
+        Returns
+        -------
+        torch.Tensor
+            field [..., grid]
+        """
 
         irfft = [torch.fft.irfft(x[..., t, :], nlon, norm="forward") for t, nlon in enumerate(self.lons_per_lat)]
 
@@ -225,6 +264,18 @@ class InverseSphericalHarmonicTransform(Module):
         )
 
     def irfft_rings_regular(self, x: Tensor) -> Tensor:
+        """Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+
+        Returns
+        -------
+        torch.Tensor
+            field [..., grid]
+        """
 
         return torch.fft.irfft(x, self.lons_per_lat[0], norm="forward").reshape(*x.shape[:-2], self.n_grid_points)
 
@@ -233,12 +284,12 @@ class InverseSphericalHarmonicTransform(Module):
 
         Parameters
         ----------
-        torch.Tensor
+        x : torch.Tensor
             spectral representation of field [..., total wavenumber l, zonal wavenumber m]
 
         Returns
         -------
-        x : torch.Tensor
+        torch.Tensor
             field [..., grid]
         """
 
