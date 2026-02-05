@@ -14,11 +14,13 @@ import pytest
 import torch
 
 from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.utils.testing import skip_if_offline
 
 
 class TestNativeGridDataset:
     """Test NativeGridDataset instantiation and properties."""
 
+    @skip_if_offline
     @pytest.mark.parametrize("start", [None, 2017])
     @pytest.mark.parametrize("end", [None, 2017])
     def test_basic_instantiation(self, dataset_path: str, start: datetime.datetime, end: datetime.datetime) -> None:
@@ -31,6 +33,7 @@ class TestNativeGridDataset:
         assert dataset.variables is not None
         assert dataset.frequency is not None
 
+    @skip_if_offline
     @pytest.mark.parametrize("frequency", [None, "6h", "12h"])
     @pytest.mark.parametrize("drop", [None, []])
     def test_instantiation_with_frequency_and_drop(self, dataset_path: str, frequency: str, drop: list[str]) -> None:
@@ -42,6 +45,7 @@ class TestNativeGridDataset:
         assert dataset.variables is not None
         assert dataset.frequency is not None
 
+    @skip_if_offline
     def test_instantiation_with_time_range(self, dataset_path: str) -> None:
         """Test NativeGridDataset with start and end dates."""
         original = NativeGridDataset(dataset=dataset_path)
@@ -59,6 +63,7 @@ class TestNativeGridDataset:
         assert dataset.dates[0] >= start
         assert dataset.dates[-1] <= end
 
+    @skip_if_offline
     def test_instantiation_with_drop(self, dataset_path: str) -> None:
         """Test NativeGridDataset with dropped variables."""
         # Get original variables to know what to drop
@@ -75,6 +80,7 @@ class TestNativeGridDataset:
         assert drop_vars[0] not in dataset.variables
         assert len(dataset.variables) == len(original_vars) - 1
 
+    @skip_if_offline
     def test_dataset_properties(self, dataset_path: str) -> None:
         """Test that dataset properties are correctly accessible."""
         dataset = NativeGridDataset(dataset=dataset_path)
@@ -89,6 +95,7 @@ class TestNativeGridDataset:
         assert isinstance(dataset.name_to_index, dict)
         assert isinstance(dataset.statistics, dict)
 
+    @skip_if_offline
     def test_get_sample_with_slice(self, dataset_path: str) -> None:
         """Test get_sample with grid shard as slice."""
         dataset = NativeGridDataset(dataset=dataset_path)
@@ -101,6 +108,7 @@ class TestNativeGridDataset:
         assert sample.shape[0] == 3  # 3 time steps
         assert sample.shape[2] == 50  # 50 gridpoints
 
+    @skip_if_offline
     def test_get_sample_with_array_indices(self, dataset_path: str) -> None:
         """Test get_sample with grid shard as array indices."""
         dataset = NativeGridDataset(dataset=dataset_path)
