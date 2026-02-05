@@ -126,7 +126,7 @@ class BaseAnemoiReader:
     def get_sample(
         self,
         time_indices: slice | int | list[int],
-        grid_shard_indices: np.ndarray | slice| None = None,
+        grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
         if isinstance(grid_shard_indices, slice):
