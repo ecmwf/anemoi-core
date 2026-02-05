@@ -221,12 +221,14 @@ class MultiDataset(IterableDataset):
                 valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
 
             if len(valid_date_indices) == 0:
-                raise ValueError(f"No valid date indices found for dataset '{name}': \n{ds}")
+                msg = f"No valid date indices found for dataset '{name}': \n{ds}"
+                raise ValueError(msg)
 
             LOGGER.info("Dataset '%s' has %d valid indices", name, len(valid_date_indices))
 
         if len(valid_date_indices_intersection) == 0:
-            raise ValueError("No valid date indices found after intersection across all datasets.")
+            msg = "No valid date indices found after intersection across all datasets."
+            raise ValueError(msg)
 
         LOGGER.info("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
 
