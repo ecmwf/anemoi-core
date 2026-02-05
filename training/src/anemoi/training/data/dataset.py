@@ -129,7 +129,6 @@ class BaseAnemoiReader:
         grid_shard_indices: np.ndarray | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
-        grid_shard_indices = self.grid_indices.get_shard_indices(grid_shard_indices)
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory
             x = self.data[time_indices, :, :, grid_shard_indices]
