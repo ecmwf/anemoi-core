@@ -94,8 +94,18 @@ decoder:
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
+  in_lres:
+    _target_: anemoi.models.layers.residual.InterpolationConnection
+    interpolation_file_path: ${system.input.truncation}  # O96 -> O320 (upsampling)
+    step: -1
+    autocast: false
+    row_normalize: false
+  in_hres:
+    _target_: anemoi.models.layers.residual.SkipConnection
+    step: -1
+  out_hres:
+    _target_: anemoi.models.layers.residual.SkipConnection
+    step: -1
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

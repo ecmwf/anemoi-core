@@ -69,72 +69,13 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lognormal_std = config.model.model.diffusion.log_normal_std
         self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
         self.x_in_matching_channel_indices = match_tensor_channels(
-            self.data_indices.data.input[0].name_to_index,
-            {
-                k: v
-                for k, v in self.data_indices.data.output.name_to_index.items()
-                if v in self.data_indices.data.output.full
-            },
+            data_indices["in_lres"].name_to_index,
+            data_indices["out_hres"].name_to_index,
         )
         reader_group_size = self.config.dataloader.read_group_size
-        """
-        self.lres_grid_indices = instantiate(
-            self.config.model_dump(by_alias=True).dataloader.lres_grid_indices,
-            reader_group_size=reader_group_size,
-        )
-        self.lres_grid_indices.setup(graph_data)
-        self.grid_shard_shapes_in_lres = self.lres_grid_indices.shard_shapes
-
-        self.hres_grid_indices = instantiate(
-            self.config.model_dump(by_alias=True).dataloader.hres_grid_indices,
-            reader_group_size=reader_group_size,
-        )
-        self.hres_grid_indices.setup(graph_data)
-        self.grid_shard_shapes_in_hres = self.hres_grid_indices.shard_shapes
-
-        # Grid sharding shapes for distributed training
-        # These are based on PHYSICAL GRID RESOLUTION, not dataset roles:
-        # - lres_grid_shard_shapes: for low-resolution grid (o96)
-        # - hres_grid_shard_shapes: for high-resolution grid (o320)
-        # During training, in_lres is upsampled to hres, so everything ends up at hres
-        self.lres_grid_shard_shapes = None
-        self.lres_grid_shard_slice = None
-        self.hres_grid_shard_shapes = None
-        self.hres_grid_shard_slice = None
-        """
 
         fields_direct_prediction = getattr(config.data, "direct_prediction", None)
         self.indices_direct_prediction = ...
-
-    def get_inputs(self, batch: dict, sample_length: int) -> dict:
-        # start rollout of preprocessed batch
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.multi_step,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
-            msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {sample_length}"
-            )
-            assert dataset_batch.shape[1] >= sample_length, msg
-            LOGGER.info("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-        return x
-
-    def get_targets(self, batch: dict, lead_step: int) -> dict:
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[
-                :,
-                lead_step,
-                ...,
-                self.data_indices[dataset_name].data.output.full,
-            ]
-            LOGGER.info("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-        return y
 
     def forward(
         self,
@@ -156,8 +97,51 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.hres_grid_shard_shapes,  # All data at hres
+            grid_shard_shapes=None,
         )
+
+    def _prepare_tensors_for_loss(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        validation_mode: bool = False,
+        dataset_name: str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
+        """Prepare tensors for loss computation, squeezing time dimension.
+
+        Override base method to squeeze time dimension (always 1) before loss computation,
+        since scalers expect 4D tensors (batch, ensemble, grid, vars).
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values with shape (batch, time=1, ensemble, grid, vars)
+        y : torch.Tensor
+            Target values with shape (batch, time=1, ensemble, grid, vars)
+        validation_mode : bool
+            Whether in validation mode
+        dataset_name : str | None
+            Dataset name for multi-dataset setups
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, slice | None]
+            Prepared y_pred (4D), y (4D), and grid_shard_slice
+        """
+        # Call base class to handle sharding
+        y_pred_full, y_full, grid_shard_slice = super()._prepare_tensors_for_loss(
+            y_pred, y, validation_mode, dataset_name
+        )
+
+        # Squeeze time dimension (always 1) to get 4D tensors for loss computation
+        # (batch, time=1, ensemble, grid, vars) -> (batch, ensemble, grid, vars)
+        assert y_pred_full.shape[2] == 1, f"Expected ensemble dimension to be 1, got {y_pred_full.shape[2]}"
+        assert y_full.shape[2] == 1, f"Expected ensemble dimension to be 1, got {y_full.shape[2]}"
+
+        y_pred_full = y_pred_full.squeeze(2)  # Remove ensemble dimension
+        y_full = y_full.squeeze(2)  # Remove ensemble dimension
+
+        return y_pred_full, y_full, grid_shard_slice
 
     def _compute_loss(
         self,
@@ -165,6 +149,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         y: torch.Tensor,
         weights: torch.Tensor,
         grid_shard_slice: slice | None = None,
+        dataset_name: str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the diffusion loss with noise weighting.
@@ -177,8 +162,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
-        weights : torch.Tensor
-            Noise weights for diffusion loss computation
+        weights : dict[str, torch.Tensor]
+            Noise weights for diffusion loss computation (per dataset)
+        dataset_name : str | None
+            Dataset name for multi-dataset setups
         **_kwargs
             Additional arguments
 
@@ -187,10 +174,22 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         torch.Tensor
             Computed loss with noise weighting applied
         """
-        return self.loss(
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
+        assert (
+            weights is not None
+        ), f"weights must be provided for diffusion loss computation in {self.__class__.__name__}"
+
+        # Extract weights for this dataset (handle both dict and tensor for backwards compatibility)
+        dataset_weights = weights[dataset_name] if isinstance(weights, dict) else weights
+
+        # Handle both per-dataset losses (ModuleDict) and single loss function
+        loss_fn = self.loss[dataset_name] if isinstance(self.loss, torch.nn.ModuleDict) else self.loss
+
+        # No transpose needed - loss expects (..., grid, vars) format
+        return loss_fn(
             y_pred,
             y,
-            weights=weights,
+            weights=dataset_weights,
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )
@@ -207,29 +206,33 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """
 
         del batch_idx
-        x = self.get_inputs(batch, sample_length=self.multi_step)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_targets(batch, lead_step=self.multi_step - 1)  # (bs, multi_step, ens, latlon, nvar)
+        x_in_lres = batch["in_lres"]
+        x_in_hres = batch["in_hres"]
+        y = batch["out_hres"]
 
-        assert len(x) == 2, "Expected x to contain two elements: [low_res, high_res]"
+        if x_in_lres.ndim != 5:
+            raise ValueError(f"Expected x_in_lres to have 5 dimensions, got {x_in_lres.ndim}")
+        if x_in_hres.ndim != 5:
+            raise ValueError(f"Expected x_in_hres to have 5 dimensions, got {x_in_hres.ndim}")
+        if y.ndim != 5:
+            raise ValueError(f"Expected y to have 5 dimensions, got {y.ndim}")
 
-        x_in_lres, x_in_hres = x
-
-        # Upsample in_lres from lres (o96) to hres (o320) resolution
-        # After this, ALL data is at hres resolution
-        x_in_lres_upsampled = self.model.model.apply_interpolate_to_high_res(
-            x_in_lres[:, 0, ...],
-            grid_shard_shapes=self.lres_grid_shard_shapes,  # lres sharding for upsampling
+        # Interpolate in_lres from lres to hres resolution
+        x_in_lres_upsampled = self.model.model.residual["in_lres"](
+            x_in_lres,  # (batch, multistep, ensemble, grid, features)
+            grid_shard_shapes=None,
             model_comm_group=self.model_comm_group,
-        )[:, None, ...]
+        )[
+            :, :, None, :, :
+        ]  # Add ensemble back: (batch, time, ensemble=1, grid, features)
 
-        resid = self.model.model.compute_residuals(
-            y,
-            x_in_lres_upsampled[..., self.x_in_matching_channel_indices.to(x_in_lres_upsampled.device)],
-        )
+        # Compute residuals: high-res target minus upsampled low-res input
+        # Select only the matching channels from upsampled lres
+        resid = y - x_in_lres_upsampled[..., self.x_in_matching_channel_indices.to(x_in_lres_upsampled.device)]
 
-        x_in_lres_upsampled = self.model.pre_processors(x_in_lres_upsampled, dataset="in_lres")
-        x_in_hres = self.model.pre_processors(x_in_hres, dataset="in_hres")
-        resid = self.model.pre_processors(resid, dataset="output")
+        x_in_lres_upsampled = self.model.pre_processors["in_lres"](x_in_lres_upsampled)
+        x_in_hres = self.model.pre_processors["in_hres"](x_in_hres)
+        resid = self.model.pre_processors["out_hres"](resid)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
@@ -244,28 +247,44 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         # get targets and noised targets
         resid_noised = self._noise_target(resid, sigma)
 
+        # All inputs keep time dimension for future multi-step support
         y_pred = self(
             x_in_lres_upsampled,
             x_in_hres,
             resid_noised,
             sigma,
-        )  # shape is (bs, ens, latlon, nvar)
+        )  # shape is (bs, time, ens, latlon, nvar)
 
-        # Use checkpoint for compute_loss_metrics
-        loss, metrics_next = checkpoint(
+        # Wrap tensors in dictionaries for multi-dataset compute_loss_metrics
+        y_pred_dict = {"out_hres": y_pred}
+        resid_dict = {"out_hres": resid}
+        weights_dict = {"out_hres": noise_weights}
+
+        # Compute loss and metrics with checkpoint (keeping time dimension)
+        loss, metrics_next, y_pred_denorm_dict = checkpoint(
             self.compute_loss_metrics,
-            y_pred=y_pred[:, 0, ...],
-            y=resid[:, 0, ...],  # removing time dim for loss computation,
-            training_mode=training_mode,
+            y_pred_dict,
+            resid_dict,
             validation_mode=validation_mode,
-            weights=noise_weights,
+            weights=weights_dict,
             use_reentrant=False,
         )
 
-        denorm_x_in_lres_upsampled = self.model.post_processors(x_in_lres_upsampled, dataset="in_lres")
-        denorm_y_pred = self.model.post_processors(y_pred, dataset="output")
+        # Extract denormalized prediction from dictionary
+        y_pred_denorm = y_pred_denorm_dict["out_hres"]  # (bs, time, ens, latlon, nvar)
 
-        y_preds = [denorm_x_in_lres_upsampled + denorm_y_pred, denorm_y_pred]
+        # Reconstruct full prediction: baseline (upsampled lres) + predicted residual
+        # Denormalize baseline (upsampled lres)
+        x_in_lres_upsampled_denorm = self.model.post_processors["in_lres"](x_in_lres_upsampled)
+
+        # Full prediction = baseline + residual
+        y_pred_full = (
+            x_in_lres_upsampled_denorm[..., self.x_in_matching_channel_indices.to(x_in_lres_upsampled_denorm.device)]
+            + y_pred_denorm
+        )
+
+        # Return predictions: [full_prediction, residual_only]
+        y_preds = [y_pred_full, y_pred_denorm]
 
         return loss, metrics_next, y_preds
 

@@ -86,9 +86,9 @@ metrics:
       - v_850
 
 rollout:
-  start: 1
+  start: 0
   epoch_increment: 0
-  max: 1
+  max: 0
 
 max_epochs: null
 max_steps: 1000000

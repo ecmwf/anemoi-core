@@ -97,7 +97,7 @@ training:
         end:  ${dataloader.training_date}
         steps: ${dataloader.steps}       
 
-validation_rollout: 1 # number of rollouts to use for validation
+validation_rollout: 0 # number of rollouts to use for validation
 
 # Multi-dataset validation with same datasets, different time period
 validation:

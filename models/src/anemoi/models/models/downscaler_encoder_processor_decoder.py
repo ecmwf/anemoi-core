@@ -55,6 +55,52 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             graph_data=graph_data,
         )
 
+    def _build_residual(self, residual_config):
+        """Build residual connections with per-dataset configs.
+
+        Overrides parent to properly handle dictionary of per-dataset residual configs.
+        """
+        from hydra.utils import instantiate
+        import torch.nn as nn
+
+        if isinstance(residual_config, dict) and "_target_" not in residual_config:
+            # Per-dataset configs provided
+            self.residual = nn.ModuleDict()
+            for dataset_name in self._graph_data.keys():
+                if dataset_name in residual_config:
+                    self.residual[dataset_name] = instantiate(
+                        residual_config[dataset_name], graph=self._graph_data[dataset_name]
+                    )
+                else:
+                    # Use default SkipConnection if not specified
+                    from anemoi.models.layers.residual import SkipConnection
+
+                    self.residual[dataset_name] = SkipConnection(step=-1)
+        else:
+            # Single config for all datasets - use parent implementation
+            super()._build_residual(residual_config)
+
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        """Calculate input dimension for downscaler.
+
+        For downscaler, the encoder input concatenates:
+        - x_in_lres (upsampled): multi_step * num_channels_in_lres
+        - x_in_hres (forcings): multi_step * num_channels_in_hres
+        - y_noised (target): multi_step * num_channels_out_hres
+        - node_attributes (lat/lon etc)
+        """
+        num_channels_in_lres = len(self.data_indices["in_lres"].model.input)
+        num_channels_in_hres = len(self.data_indices["in_hres"].model.input)
+        num_channels_out_hres = len(self.data_indices["out_hres"].model.output)
+
+        input_dim = (
+            self.multi_step * num_channels_in_lres
+            + self.multi_step * num_channels_in_hres
+            + self.multi_step * num_channels_out_hres
+            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+        )
+        return input_dim
+
     def forward(
         self,
         x_in_lres: torch.Tensor,
@@ -168,7 +214,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             model_comm_group=model_comm_group,
         )
 
-        _, x_out = self.decoder[dataset_name](
+        x_out = self.decoder[dataset_name](
             (x_latent_proc, x_data_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
@@ -241,6 +287,25 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         return D_x
 
+    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
+        """Assemble output with time dimension preserved.
+
+        Overrides parent method to reshape with time dimension.
+        Output format: (batch, time, ensemble, grid, vars)
+        """
+        import einops
+
+        # Reshape from flat to structured format
+        x_out = einops.rearrange(
+            x_out,
+            "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
+            batch=batch_size,
+            ensemble=ensemble_size,
+            time=1,  # Currently single-step, but supports future multi-step
+        ).to(dtype=dtype)
+
+        return x_out
+
     def _assemble_input(
         self,
         x_in_lres: torch.Tensor,
@@ -260,7 +325,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_in_hres : torch.Tensor
             High-resolution forcings, shape (batch, time, ensemble, grid, vars)
         y_noised : torch.Tensor
-            Noised target, shape (batch, ensemble, grid, vars)
+            Noised target, shape (batch, time, ensemble, grid, vars)
         bse : int
             Batch size * ensemble size
         grid_shard_shapes : dict | None
@@ -302,8 +367,10 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             x_in_hres, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
         )
 
-        # y_noised: noised target
-        y_noised_reshaped = einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars")
+        # y_noised: noised target (with time dimension)
+        y_noised_reshaped = einops.rearrange(
+            y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
+        )
 
         # Concatenate all inputs along feature dimension:
         # [in_lres upsampled, in_hres forcings, noised target, node attributes (lat/lon)]
