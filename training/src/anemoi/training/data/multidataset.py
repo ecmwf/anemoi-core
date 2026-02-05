@@ -342,19 +342,16 @@ class MultiDataset(IterableDataset):
         )
 
     @cached_property
-    def shard_shapes(self) -> dict[str, list]:
+    def shard_shapes(self) -> dict[str, list[int]]:
         """Return shard shapes for all datasets."""
         shard_shapes = {}
         for name, dataset in self.datasets.items():
             shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
         return shard_shapes
 
-    def get_shard_slice(self, dataset_name: str, reader_group_rank: int) -> slice:
+    def get_shard_slice(self, shard_shape: list[int], reader_group_rank: int) -> slice:
         """Get the grid shard slice according to the reader rank."""
-        start, end = get_partition_range(
-            partition_sizes=self.shard_shapes[dataset_name],
-            partition_id=reader_group_rank,
-        )
+        start, end = get_partition_range(partition_sizes=shard_shape, partition_id=reader_group_rank)
         return slice(start, end)
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
@@ -368,7 +365,7 @@ class MultiDataset(IterableDataset):
 
         x = {}
         for name, dataset in self.datasets.items():
-            grid_shard_indices = self.get_shard_slice(name, self.reader_group_rank)
+            grid_shard_indices = self.get_shard_slice(self.shard_shapes[name], self.reader_group_rank)
             x[name] = dataset.get_sample(time_indices, grid_shard_indices)
 
         return x
