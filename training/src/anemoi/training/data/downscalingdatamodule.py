@@ -33,9 +33,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
 
         # Check if residual statistics are configured
         if not hasattr(self.config.system.input, "residual_statistics"):
-            LOGGER.warning(
-                "No residual_statistics path configured, using base statistics only"
-            )
+            LOGGER.warning("No residual_statistics path configured, using base statistics only")
             return tuple(statistics)
 
         # Load residual statistics from file
@@ -45,40 +43,32 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         ).item()
 
         # Get the name_to_index mapping for the high-res dataset (index 2)
-        reduced_name_to_index = self.ds_train.name_to_index["hres"].keys()
+        reduced_name_to_index = self.ds_train.name_to_index["out_hres"].keys()
 
         # Get list of variables that should use residual normalization
         # If not specified, default to ALL variables (backward compatible)
-        use_residual_for = getattr(
-            self.config.data, "use_residual_normalization_for", None
-        )
+        use_residual_for = getattr(self.config.data, "use_residual_normalization_for", None)
 
         if use_residual_for is None:
             # Backward compatible: use residual stats for ALL variables
-            LOGGER.info(
-                "Using residual statistics for ALL variables (no filter specified)"
-            )
+            LOGGER.info("Using residual statistics for ALL variables (no filter specified)")
             variables_to_use_residual = reduced_name_to_index
         else:
             # Only use residual stats for specified variables
-            variables_to_use_residual = [
-                var for var in use_residual_for if var in reduced_name_to_index
-            ]
+            variables_to_use_residual = [var for var in use_residual_for if var in reduced_name_to_index]
             LOGGER.info(
                 f"Using residual statistics for {len(variables_to_use_residual)} variables: {variables_to_use_residual}"
             )
 
             # Log variables that were specified but not found
-            missing_vars = [
-                var for var in use_residual_for if var not in reduced_name_to_index
-            ]
+            missing_vars = [var for var in use_residual_for if var not in reduced_name_to_index]
             if missing_vars:
                 LOGGER.warning(
                     f"Variables specified for residual normalization but not found in dataset: {missing_vars}"
                 )
 
         # Build statistics arrays, selectively using residual stats
-        base_stats = statistics["hres"]  # Original high-res statistics
+        base_stats = statistics["out_hres"]  # Original high-res statistics
         field_names_ordered = list(reduced_name_to_index)
 
         mean_array = []
@@ -109,5 +99,5 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             "minimum": np.array(minimum_array),
         }
 
-        statistics["hres"] = combined_statistics
-        return tuple(statistics)
+        statistics["out_hres"] = combined_statistics
+        return statistics

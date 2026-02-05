@@ -13,6 +13,7 @@ import warnings
 from typing import Callable
 from typing import Optional
 from typing import Union
+import time
 
 import einops
 import torch
@@ -26,9 +27,8 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec
+from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
 
@@ -55,209 +55,23 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             graph_data=graph_data,
         )
 
-    def forward(
-        self,
-        x_in_lres: torch.Tensor,
-        x_in_hres: torch.Tensor,
-        y_noised: torch.Tensor,
-        sigma: torch.Tensor,
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict[str, list]] = None,
-        **kwargs,
-    ) -> torch.Tensor:
-        """Forward pass for downscaling with two separate inputs.
-
-        Parameters
-        ----------
-        x_in_lres : torch.Tensor
-            Low-resolution input (already upsampled to hres during training)
-        x_in_hres : torch.Tensor
-            High-resolution forcings
-        y_noised : torch.Tensor
-            Noised target
-        sigma : torch.Tensor
-            Noise level
-        model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
-        grid_shard_shapes : Optional[dict[str, list]]
-            Grid shard shapes for distributed processing
-        **kwargs
-            Additional arguments
-
-        Returns
-        -------
-        torch.Tensor
-            Model prediction
-        """
-        # Multi-dataset case - use "out_hres" as the output dataset name
-        dataset_name = "out_hres"
-
-        # Extract and validate batch & ensemble sizes
-        batch_size = x_in_lres.shape[0]
-        ensemble_size = x_in_lres.shape[2]
-
-        bse = batch_size * ensemble_size
-        in_out_sharded = grid_shard_shapes is not None
-        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
-
-        # Prepare noise conditioning
-        c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
-            sigma, dataset_name=dataset_name, edge_conditioning=False
-        )
-        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
-        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
-
-        c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
-        c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
-
-        fwd_mapper_kwargs = {"cond": (c_data, c_hidden)}
-        processor_kwargs = {"cond": c_hidden}
-        bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
-
-        # Assemble input with two separate inputs
-        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x_in_lres, x_in_hres, y_noised, bse, grid_shard_shapes, model_comm_group, dataset_name
-        )
-
-        x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
-
-        encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
-            dataset_name
-        ].get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
-
-        x_data_latent, x_latent = self.encoder[dataset_name](
-            (x_data_latent, x_hidden_latent),
-            batch_size=bse,
-            shard_shapes=(shard_shapes_data, shard_shapes_hidden),
-            edge_attr=encoder_edge_attr,
-            edge_index=encoder_edge_index,
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=in_out_sharded,
-            x_dst_is_sharded=False,
-            keep_x_dst_sharded=True,
-            edge_shard_shapes=enc_edge_shard_shapes,
-            **fwd_mapper_kwargs,
-        )
-
-        # Processor
-        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
-
-        x_latent_proc = self.processor(
-            x=x_latent,
-            batch_size=bse,
-            shard_shapes=shard_shapes_hidden,
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
-            model_comm_group=model_comm_group,
-            edge_shard_shapes=proc_edge_shard_shapes,
-            **processor_kwargs,
-        )
-
-        # Decoder
-        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
-            dataset_name
-        ].get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
-
-        _, x_out = self.decoder[dataset_name](
-            (x_latent_proc, x_data_latent),
-            batch_size=bse,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_data),
-            edge_attr=decoder_edge_attr,
-            edge_index=decoder_edge_index,
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=True,
-            x_dst_is_sharded=in_out_sharded,
-            edge_shard_shapes=dec_edge_shard_shapes,
-            **bwd_mapper_kwargs,
-        )
-
-        # Assemble output
-        dtype = x_in_lres.dtype
-        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, dtype)
-
-        return x_out
-
-    def fwd_with_preconditioning(
-        self,
-        x_in_lres: torch.Tensor,
-        x_in_hres: torch.Tensor,
-        y_noised: torch.Tensor,
-        sigma: torch.Tensor,
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict[str, list]] = None,
-    ) -> torch.Tensor:
-        """Forward pass with pre-conditioning for downscaling.
-
-        Parameters
-        ----------
-        x_in_lres : torch.Tensor
-            Low-resolution input (already upsampled to hres during training)
-        x_in_hres : torch.Tensor
-            High-resolution forcings
-        y_noised : torch.Tensor
-            Noised target
-        sigma : torch.Tensor
-            Noise level
-        model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
-        grid_shard_shapes : Optional[dict[str, list]]
-            Grid shard shapes for distributed processing
-
-        Returns
-        -------
-        torch.Tensor
-            Preconditioned model prediction
-        """
-        # Compute preconditioning factors
-        # For downscaler, we use a dict with single dataset "out_hres"
-        sigma_dict = {"out_hres": sigma}
-        c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma_dict, self.sigma_data)
-
-        # Apply preconditioning to noised input
-        y_noised_precond = c_in["out_hres"] * y_noised
-
-        # Forward pass
-        pred = self(
-            x_in_lres,
-            x_in_hres,
-            y_noised_precond,
-            c_noise["out_hres"],
-            model_comm_group=model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
-        )
-
-        # Apply output preconditioning
-        D_x = c_skip["out_hres"] * y_noised + c_out["out_hres"] * pred
-
-        return D_x
-
     def _assemble_input(
         self,
-        x_in_lres: torch.Tensor,
-        x_in_hres: torch.Tensor,
+        x_lres: torch.Tensor,
+        x_hres_forcings: torch.Tensor,
         y_noised: torch.Tensor,
         bse: int,
         grid_shard_shapes: dict | None = None,
         model_comm_group=None,
-        dataset_name="out_hres",
+        dataset_name="hres",
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[list]]:
-        """Assemble inputs for downscaling: concatenate in_lres (upsampled) + in_hres.
+        """Assemble inputs for downscaling: concatenate lres (upsampled) + hres_forcings.
 
         Parameters
         ----------
-        x_in_lres : torch.Tensor
+        x_lres : torch.Tensor
             Low-resolution input, already upsampled to hres grid, shape (batch, time, ensemble, grid, vars)
-        x_in_hres : torch.Tensor
+        x_hres_forcings : torch.Tensor
             High-resolution forcings, shape (batch, time, ensemble, grid, vars)
         y_noised : torch.Tensor
             Noised target, shape (batch, ensemble, grid, vars)
@@ -268,7 +82,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_comm_group : ProcessGroup
             Communication group
         dataset_name : str
-            Name of the output dataset (default "out_hres")
+            Name of the output dataset (default "hres")
 
         Returns
         -------
@@ -282,7 +96,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         grid_shard_shapes_data = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         # Compute skip connection (for residual prediction)
-        x_skip = self.residual[dataset_name](x_in_lres, grid_shard_shapes_data, model_comm_group)
+        x_skip = self.residual[dataset_name](x_lres, grid_shard_shapes_data, model_comm_group)
 
         # Shard node attributes if grid sharding is enabled
         if grid_shard_shapes_data is not None:
@@ -292,25 +106,23 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # Reshape inputs: combine batch and ensemble dimensions
-        # x_in_lres: low-res input (already upsampled to hres)
-        x_in_lres_reshaped = einops.rearrange(
-            x_in_lres, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
-        )
+        # x_lres: low-res input (already upsampled to hres)
+        x_lres_reshaped = einops.rearrange(x_lres, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
 
-        # x_in_hres: high-res forcings
-        x_in_hres_reshaped = einops.rearrange(
-            x_in_hres, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
+        # x_hres_forcings: high-res forcings
+        x_hres_forcings_reshaped = einops.rearrange(
+            x_hres_forcings, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
         )
 
         # y_noised: noised target
         y_noised_reshaped = einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars")
 
         # Concatenate all inputs along feature dimension:
-        # [in_lres upsampled, in_hres forcings, noised target, node attributes (lat/lon)]
+        # [lres upsampled, hres forcings, noised target, node attributes (lat/lon)]
         x_data_latent = torch.cat(
             (
-                x_in_lres_reshaped,
-                x_in_hres_reshaped,
+                x_lres_reshaped,
+                x_hres_forcings_reshaped,
                 y_noised_reshaped,
                 node_attributes_data,
             ),
@@ -375,6 +187,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         Parameters
         ----------
+
         y : torch.Tensor
             The high-resolution target tensor with shape (bs, ens, latlon, nvar)
         x_in_interp_to_hres : torch.Tensor
@@ -446,13 +259,13 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     ) -> tuple[tuple[torch.Tensor, torch.Tensor], dict]:
         """Prepare batch before sampling (prediction/inference mode).
 
-        During prediction, in_lres comes at low resolution and needs upsampling.
-        During training, in_lres is already upsampled in the training code.
+        During prediction, lres comes at low resolution and needs upsampling.
+        During training, lres is already upsampled in the training code.
 
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
-            Input batch dictionary with keys "in_lres", "in_hres", "out_hres"
+            Input batch dictionary with keys "lres", "hres_forcings", "hres"
             Each tensor has shape (batch, timesteps, grid, variables)
         pre_processors : dict[str, nn.Module]
             Dictionary of pre-processing modules per dataset
@@ -466,78 +279,62 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         Returns
         -------
         tuple[tuple[torch.Tensor, torch.Tensor], dict]
-            Tuple of (x_in_lres_upsampled, x_in_hres) and grid shard shapes dict
+            Tuple of (x_lres_upsampled, x_hres_forcings) and grid shard shapes dict
         """
         # Extract inputs from batch
-        x_in_lres = batch.get("in_lres")  # Low-res input
-        x_in_hres = batch.get("in_hres")  # High-res forcings
+        x_lres = batch.get("lres")  # Low-res input
+        x_hres_forcings = batch.get("hres_forcings")  # High-res forcings
 
-        if x_in_lres is None or x_in_hres is None:
-            raise ValueError("Batch must contain 'in_lres' and 'in_hres' keys")
+        if x_lres is None or x_hres_forcings is None:
+            raise ValueError("Batch must contain 'lres' and 'hres_forcings' keys")
 
         # Add dummy ensemble dimension as 3rd index if not present
         # Expected shape: (batch, timesteps, ensemble, grid, variables)
-        if x_in_lres.ndim == 4:
-            x_in_lres = x_in_lres[:, 0:multi_step, None, ...]
-        if x_in_hres.ndim == 4:
-            x_in_hres = x_in_hres[:, 0:multi_step, None, ...]
+        if x_lres.ndim == 4:
+            x_lres = x_lres[:, 0:multi_step, None, ...]
+        if x_hres_forcings.ndim == 4:
+            x_hres_forcings = x_hres_forcings[:, 0:multi_step, None, ...]
 
-        # ============================================================================
-        # GRID SHARDING SETUP
-        # ============================================================================
-        # Grid sharding is based on PHYSICAL GRID RESOLUTION (lres vs hres)
-        # NOT on dataset roles (input vs output)
-        #
-        # Flow:
-        # 1. in_lres starts at lres resolution -> gets upsampled -> becomes hres
-        # 2. in_hres starts at hres resolution -> stays hres
-        # 3. Result: ALL data is at hres resolution after upsampling
-        # ============================================================================
+        # Grid sharding setup
+        grid_shard_shapes = {}
 
-        # Step 1: Shard in_lres at its native LOW resolution for upsampling
+        # Shard lres input
         lres_grid_shard_shapes = None
         if model_comm_group is not None:
-            lres_shard_shapes = get_shard_shapes(x_in_lres, -2, model_comm_group=model_comm_group)
+            lres_shard_shapes = get_shard_shapes(x_lres, -2, model_comm_group=model_comm_group)
             lres_grid_shard_shapes = [shape[-2] for shape in lres_shard_shapes]
-            x_in_lres = shard_tensor(x_in_lres, -2, lres_shard_shapes, model_comm_group)
+            x_lres = shard_tensor(x_lres, -2, lres_shard_shapes, model_comm_group)
 
-        # Step 2: Upsample in_lres from lres -> hres (prediction only; training pre-upsamples)
-        x_in_lres_upsampled = self.apply_interpolate_to_high_res(
-            x_in_lres[:, :, 0, ...],  # Remove ensemble dim temporarily
+        # Upsample lres to hres grid (only during prediction - training already has it upsampled)
+        x_lres_upsampled = self.apply_interpolate_to_high_res(
+            x_lres[:, :, 0, ...],  # Remove ensemble dim temporarily for interpolation
             grid_shard_shapes=lres_grid_shard_shapes,
             model_comm_group=model_comm_group,
         )
-        x_in_lres_upsampled = x_in_lres_upsampled[:, :, None, ...]  # Add ensemble dim back
+        # Add ensemble dimension back
+        x_lres_upsampled = x_lres_upsampled[:, :, None, ...]
 
-        # Step 3: Now ALL data is at HRES - set up hres grid sharding for everything
+        # Now both should be at hres grid - setup hres grid sharding
         hres_grid_shard_shapes = None
         if model_comm_group is not None:
-            # Shard in_hres at native hres resolution
-            hres_shard_shapes = get_shard_shapes(x_in_hres, -2, model_comm_group=model_comm_group)
+            hres_shard_shapes = get_shard_shapes(x_hres_forcings, -2, model_comm_group=model_comm_group)
             hres_grid_shard_shapes = [shape[-2] for shape in hres_shard_shapes]
-            x_in_hres = shard_tensor(x_in_hres, -2, hres_shard_shapes, model_comm_group)
+            x_hres_forcings = shard_tensor(x_hres_forcings, -2, hres_shard_shapes, model_comm_group)
 
-            # Reshard upsampled in_lres to match hres grid sharding
-            x_in_lres_upsampled_shard_shapes = get_shard_shapes(
-                x_in_lres_upsampled, -2, model_comm_group=model_comm_group
-            )
-            x_in_lres_upsampled = shard_tensor(
-                x_in_lres_upsampled, -2, x_in_lres_upsampled_shard_shapes, model_comm_group
-            )
+            # Also shard the upsampled lres to match hres sharding
+            x_lres_upsampled_shard_shapes = get_shard_shapes(x_lres_upsampled, -2, model_comm_group=model_comm_group)
+            x_lres_upsampled = shard_tensor(x_lres_upsampled, -2, x_lres_upsampled_shard_shapes, model_comm_group)
 
-        # Step 4: Apply preprocessing (dataset-specific normalization)
-        x_in_lres_upsampled = pre_processors["in_lres"](x_in_lres_upsampled, in_place=False)
-        x_in_hres = pre_processors["in_hres"](x_in_hres, in_place=False)
+        # Apply preprocessing
+        x_lres_upsampled = pre_processors["lres"](x_lres_upsampled, in_place=False)
+        x_hres_forcings = pre_processors["hres_forcings"](x_hres_forcings, in_place=False)
 
-        # Step 5: Build grid_shard_shapes dict for model
-        # Key = dataset name, Value = actual grid shard shapes (all hres after upsampling)
-        grid_shard_shapes = {
-            "in_lres": hres_grid_shard_shapes,  # upsampled lres -> now at hres
-            "in_hres": hres_grid_shard_shapes,  # native hres input
-            "out_hres": hres_grid_shard_shapes,  # native hres output/target
-        }
+        # Store hres grid shard shapes for all datasets
+        grid_shard_shapes["lres"] = hres_grid_shard_shapes
+        grid_shard_shapes["hres_forcings"] = hres_grid_shard_shapes
+        grid_shard_shapes["hres"] = hres_grid_shard_shapes
 
-        return (x_in_lres_upsampled, x_in_hres), grid_shard_shapes
+        return (x_lres_upsampled, x_hres_forcings), grid_shard_shapes
 
     def predict_step(
         self,
@@ -558,7 +355,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
-            Input batched data dictionary (before pre-processing) with keys "in_lres", "in_hres"
+            Input batched data dictionary (before pre-processing) with keys "lres", "hres_forcings"
         pre_processors : dict[str, nn.Module]
             Dictionary of pre-processing modules per dataset
         post_processors : dict[str, nn.Module]
@@ -611,7 +408,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         with torch.no_grad():
 
-            # Before sampling hook - will upsample in_lres and preprocess both inputs
+            # Before sampling hook - will upsample lres and preprocess both inputs
             before_sampling_data, grid_shard_shapes = self._before_sampling(
                 batch,
                 pre_processors,
@@ -622,18 +419,18 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 **kwargs,
             )
 
-            x_in_lres_upsampled = before_sampling_data[0]
-            x_in_hres = before_sampling_data[1]
+            x_lres_upsampled = before_sampling_data[0]
+            x_hres_forcings = before_sampling_data[1]
 
             out = self.sample(
-                x_in_lres_upsampled,
-                x_in_hres,
+                x_lres_upsampled,
+                x_hres_forcings,
                 model_comm_group,
                 grid_shard_shapes=grid_shard_shapes,
                 noise_scheduler_params=noise_scheduler_params,
                 sampler_params=sampler_params,
                 **kwargs,
-            ).to(x_in_lres_upsampled.dtype)
+            ).to(x_lres_upsampled.dtype)
 
             # After sampling hook
             out = self._after_sampling(
@@ -652,10 +449,10 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
     def sample(
         self,
-        x_in_lres_upsampled: torch.Tensor,
+        x_in_interp_to_hres: torch.Tensor,
         x_in_hres: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict] = None,
+        grid_shard_shapes: Optional[list] = None,
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
@@ -664,13 +461,11 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         Parameters
         ----------
-        x_in_lres_upsampled : torch.Tensor
-            Low-res input (upsampled), shape (batch, time, ensemble, grid, vars)
-        x_in_hres : torch.Tensor
-            High-res forcings, shape (batch, time, ensemble, grid, vars)
+        x : torch.Tensor
+            Input conditioning data with shape (batch, time, ensemble, grid, vars)
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
-        grid_shard_shapes : Optional[dict]
+        grid_shard_shapes : Optional[list]
             Grid shard shapes for distributed processing
         noise_scheduler_params : Optional[dict]
             Dictionary of noise scheduler parameters (schedule_type, num_steps, sigma_max, etc.) to override defaults
@@ -703,13 +498,13 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
         scheduler = scheduler_cls(**noise_scheduler_config)
-        sigmas = scheduler.get_schedule(x_in_lres_upsampled.device, torch.float64)
+        sigmas = scheduler.get_schedule(x_in_interp_to_hres.device, torch.float64)
 
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = (
-            x_in_lres_upsampled.shape[0],
-            x_in_lres_upsampled.shape[2],
-            x_in_lres_upsampled.shape[-2],
+            x_in_interp_to_hres.shape[0],
+            x_in_interp_to_hres.shape[2],
+            x_in_interp_to_hres.shape[-2],
         )
         time_size = 1
         shape = (
@@ -719,7 +514,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             grid_size,
             self.num_output_channels,
         )
-        y_init = torch.randn(shape, device=x_in_lres_upsampled.device, dtype=sigmas.dtype) * sigmas[0]
+        y_init = torch.randn(shape, device=x_in_interp_to_hres.device, dtype=sigmas.dtype) * sigmas[0]
 
         print("sigmas", sigmas)
 
@@ -742,7 +537,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
 
         return sampler_instance.sample(
-            x_in_lres_upsampled,
+            x_in_interp_to_hres,
             x_in_hres,
             y_init,
             sigmas,
@@ -771,7 +566,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to post-process the state variables.
         post_processors_tendencies : callable
             Function to post-process the tendency variables.
-            Not used for downscaling but kept for compatibility
+            Not used for dowsncaling but kept for compatibility
         output_pre_processor : Optional[Callable], optional
             Function to pre-process the output state. If provided,
             the output state will be pre-processed before returning.
@@ -786,7 +581,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         state_outp += post_processors_state(
             state_inp,
-            dataset="input_in_lres",
+            dataset="input_lres",
             in_place=False,
         )
         return state_outp
@@ -806,7 +601,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         post_processors: nn.Module,
         before_sampling_data: Union[torch.Tensor, tuple[torch.Tensor, ...]],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict] = None,
+        grid_shard_shapes: Optional[list] = None,
         gather_out: bool = True,
         post_processors_tendencies: Optional[nn.Module] = None,
         **kwargs,
@@ -839,7 +634,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             out = gather_tensor(
                 out,
                 -2,
-                apply_shard_shapes(out, -2, grid_shard_shapes["out_hres"]),
+                apply_shard_shapes(out, -2, grid_shard_shapes),
                 model_comm_group,
             )
 

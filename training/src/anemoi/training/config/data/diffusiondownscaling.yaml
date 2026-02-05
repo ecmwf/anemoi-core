@@ -3,7 +3,7 @@ frequency: 1h
 timestep: ${data.frequency}
 
 datasets:
-  lres:
+  in_lres:
     forcing:
     diagnostic: [] # [tp, cp]
     processors:
@@ -12,25 +12,11 @@ datasets:
         config:
           default: "mean-std"
           std:
-          - "tp"
           min-max:
           max:
-          - "sdor"
-          - "slor"
-          - "z"
           none:
-          - "cos_latitude"
-          - "cos_longitude"
-          - "sin_latitude"
-          - "sin_longitude"
-          - "cos_julian_day"
-          - "cos_local_time"
-          - "sin_julian_day"
-          - "sin_local_time"
-          - "insolation"
-          - "lsm"
 
-  hres_forcings:
+  in_hres:
     forcing:
     - "cos_latitude"
     - "cos_longitude"
@@ -47,7 +33,6 @@ datasets:
         config:
           default: "mean-std"
           std:
-          - "tp"
           min-max:
           max:
           none:
@@ -59,11 +44,8 @@ datasets:
           - "cos_local_time"
           - "sin_julian_day"
           - "sin_local_time"
-      const_imputer:
-        _target_: anemoi.models.preprocessing.imputer.InputImputer
-        config:
-          default: "mean"
-  hres:
+
+  out_hres:
     forcing:
     diagnostic: []
     processors:
@@ -72,22 +54,10 @@ datasets:
         config:
           default: "mean-std"
           std:
-          - "tp"
           min-max:
           max:
           none:
-          - "cos_latitude"
-          - "cos_longitude"
-          - "sin_latitude"
-          - "sin_longitude"
-          - "cos_julian_day"
-          - "cos_local_time"
-          - "sin_julian_day"
-          - "sin_local_time"
-      const_imputer:
-        _target_: anemoi.models.preprocessing.imputer.InputImputer
-        config:
-          default: "mean"          
+          
 
 
 # Values set in the code

@@ -1,7 +1,0 @@
----
-overwrite: False
-
-data: "data"
-hidden: "hidden"
-lres: "lres"
-# This config file can be used to load a graph from your local filesystem

@@ -36,18 +36,21 @@ limit_batches:
   test: 20
 
 # Dataset-specific grid indices configurations
-# If not specified, all datasets will use the default grid_indices above
+# Each dataset samples from the "data" nodes in its respective graph
+# Graph structure: dict with keys "lres", "hres_forcings", "hres"
+# Each graph contains: HeteroData(data=..., hidden=...)
+# All datasets use nodes_name="data" to sample from the data nodes
 grid_indices:
   datasets:
-    lres:
+    in_lres:
       _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: "lres"
-    hres_forcings:
+      nodes_name: "data"  # Samples from "data" nodes in "in_lres" graph
+    in_hres:
       _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: "data"
-    hres:
+      nodes_name: "data"  # Samples from "data" nodes in "in_hres" graph
+    out_hres:
       _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: "data"
+      nodes_name: "data"  # Samples from "data" nodes in "out_hres" graph
 
 
 # ============
@@ -66,8 +69,8 @@ training:
   start: 1900
   end: 1910
   datasets:
-    lres:
-      dataset: ${system.input.dataset_lres}
+    in_lres:
+      dataset: ${system.input.dataset_in_lres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
@@ -75,8 +78,8 @@ training:
       fake_hindcasts: 
         end:  ${dataloader.training_date}
         steps: ${dataloader.steps}       
-    hres_forcings:
-      dataset: ${system.input.dataset_hres_forcings}
+    in_hres:
+      dataset: ${system.input.dataset_in_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
@@ -84,8 +87,8 @@ training:
         end:  ${dataloader.training_date}
         steps: ${dataloader.steps}       
       drop: []
-    hres:
-      dataset: ${system.input.dataset_hres}
+    out_hres:
+      dataset: ${system.input.dataset_out_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
@@ -101,8 +104,8 @@ validation:
   start: 1900
   end: 1910
   datasets:
-    lres:
-      dataset: ${system.input.dataset_lres}
+    in_lres:
+      dataset: ${system.input.dataset_in_lres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
@@ -111,8 +114,8 @@ validation:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
         steps: ${dataloader.steps}       
-    hres_forcings:
-      dataset: ${system.input.dataset_hres_forcings}
+    in_hres:
+      dataset: ${system.input.dataset_in_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
@@ -121,8 +124,8 @@ validation:
         end:  ${dataloader.valid_date}
         steps: ${dataloader.steps}       
       drop: []
-    hres:
-      dataset: ${system.input.dataset_hres}
+    out_hres:
+      dataset: ${system.input.dataset_out_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
@@ -137,8 +140,8 @@ test:
   start: 1900
   end: 1910
   datasets:
-    lres:
-      dataset: ${system.input.dataset_lres}
+    in_lres:
+      dataset: ${system.input.dataset_in_lres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
@@ -147,8 +150,8 @@ test:
         start: ${dataloader.test_date}
         end:  ${dataloader.test_date}
         steps: ${dataloader.steps}       
-    hres_forcings:
-      dataset: ${system.input.dataset_hres_forcings}
+    in_hres:
+      dataset: ${system.input.dataset_in_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
@@ -157,8 +160,8 @@ test:
         end:  ${dataloader.test_date}
         steps: ${dataloader.steps}       
       drop: []
-    hres:
-      dataset: ${system.input.dataset_hres}
+    out_hres:
+      dataset: ${system.input.dataset_out_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}

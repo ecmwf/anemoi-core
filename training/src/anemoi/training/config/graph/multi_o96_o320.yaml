@@ -3,31 +3,23 @@ overwrite: False
 
 # Node names for downscaling
 data: "data"  # High-resolution output/target nodes
-hidden:
- - "hidden"
-lres: "lres"  # Low-resolution input nodes
+hidden: "hidden"
 
 nodes:
   # High-resolution data nodes (output/target)
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: /home/mlx/ai-ml/datasets/downscaling-od-cf-enfh-0001-mars-o320-2003-2023-12h-v3.zarr
-    attributes: ${attributes.nodes}
+      dataset: null
+    attributes: ${graph.attributes.nodes}
   
   # Hidden/latent nodes for processing
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.TriNodes
       resolution: 6
-    attributes: ${attributes.nodes}
-  
-  # Low-resolution data nodes (input)
-  lres:
-    node_builder:
-      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: /home/mlx/ai-ml/datasets/downscaling-od-cf-eefh-0001-mars-o96-2003-2023-12h-v3.zarr
-    attributes: ${attributes.nodes}
+    attributes: ${graph.attributes.nodes}
+
 
 edges:
   # Encoder: Upsampled low res + hres input to hidden
@@ -38,7 +30,7 @@ edges:
       cutoff_factor: 0.7
       source_mask_attr_name: null
       target_mask_attr_name: null
-    attributes: ${attributes.edges}
+    attributes: ${graph.attributes.edges}
 
   # Decoder: Hidden to high-res output
   - source_name: "hidden"
@@ -48,7 +40,7 @@ edges:
       num_nearest_neighbours: 3
       source_mask_attr_name: null
       target_mask_attr_name: null
-    attributes: ${attributes.edges}
+    attributes: ${graph.attributes.edges}
 
   # Processor: Hidden to hidden (self-connections)
   - source_name: "hidden"
@@ -59,7 +51,7 @@ edges:
       scale_resolutions: [6]
       source_mask_attr_name: null
       target_mask_attr_name: null
-    attributes: ${attributes.edges}
+    attributes: ${graph.attributes.edges}
 
 attributes:
   nodes:

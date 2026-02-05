@@ -40,7 +40,8 @@ loss_gradient_scaling: False
 
 training_loss:
   datasets:
-    data:
+
+    out_hres:
       _target_: anemoi.training.losses.WeightedMSELoss
       # port your intent: include nan mask weighting if that scaler still exists in this branch
       scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
@@ -48,7 +49,9 @@ training_loss:
 
 validation_metrics:
   datasets:
-    data:
+    in_lres: null  # No metrics on input
+    in_hres: null  # No metrics on input
+    out_hres:
       mse:
         _target_: anemoi.training.losses.MSELoss
         scalers: ["node_weights"]
@@ -59,14 +62,24 @@ training_approach: probabilistic_low_noise
 
 variable_groups:
   datasets:
-    data:
+    in_lres:
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
+    in_hres:
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
+    out_hres:
       default: sfc
       pl:
         param: [q, t, u, v, w, z]
 
 metrics:
   datasets:
-    data:
+    in_lres: []  # No metrics for input dataset
+    in_hres: []  # No metrics for input dataset
+    out_hres:
       - z_500
       - t_850
       - u_850

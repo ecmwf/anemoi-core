@@ -5,6 +5,7 @@ logs:
   root: ${system.output.root}/logs/
   wandb: ${system.output.logs.root}/wandb/
   mlflow: ${system.output.logs.root}/mlflow/
+  tensorboard: ${system.output.logs.root}/tensorboard/
 
 checkpoints:
   root: ${system.output.root}/checkpoint/

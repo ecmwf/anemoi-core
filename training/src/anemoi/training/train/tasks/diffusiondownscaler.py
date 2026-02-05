@@ -46,7 +46,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        truncation_data: dict,
+        # truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -57,7 +57,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             statistics=statistics,
             statistics_tendencies=None,
             data_indices=data_indices,
@@ -68,9 +67,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.rho = config.model.model.diffusion.rho
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
-        self.training_approach = getattr(
-            config.training, "training_approach", "probabilistic_low_noise"
-        )
+        self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
         self.x_in_matching_channel_indices = match_tensor_channels(
             self.data_indices.data.input[0].name_to_index,
             {
@@ -95,6 +92,11 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.hres_grid_indices.setup(graph_data)
         self.grid_shard_shapes_in_hres = self.hres_grid_indices.shard_shapes
 
+        # Grid sharding shapes for distributed training
+        # These are based on PHYSICAL GRID RESOLUTION, not dataset roles:
+        # - lres_grid_shard_shapes: for low-resolution grid (o96)
+        # - hres_grid_shard_shapes: for high-resolution grid (o320)
+        # During training, in_lres is upsampled to hres, so everything ends up at hres
         self.lres_grid_shard_shapes = None
         self.lres_grid_shard_slice = None
         self.hres_grid_shard_shapes = None
@@ -119,9 +121,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                 f", {dataset_batch.shape[1]} !>= {sample_length}"
             )
             assert dataset_batch.shape[1] >= sample_length, msg
-            LOGGER.info(
-                "SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape)
-            )
+            LOGGER.info("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
     def get_targets(self, batch: dict, lead_step: int) -> dict:
@@ -133,9 +133,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                 ...,
                 self.data_indices[dataset_name].data.output.full,
             ]
-            LOGGER.info(
-                "SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape)
-            )
+            LOGGER.info("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
     def forward(
@@ -145,13 +143,20 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         y_noised: torch.Tensor,
         sigma: torch.Tensor,
     ) -> torch.Tensor:
+        """Forward pass for training.
+
+        Note: All inputs are at HRES resolution at this point:
+        - x_in_lres_interp_hres: upsampled from lres to hres
+        - x_in_hres: native hres forcings
+        - y_noised: native hres target (noised)
+        """
         return self.model.model.fwd_with_preconditioning(
             x_in_lres_interp_hres,
             x_in_hres,
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.hres_grid_shard_shapes,
+            grid_shard_shapes=self.hres_grid_shard_shapes,  # All data at hres
         )
 
     def _compute_loss(
@@ -202,34 +207,28 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """
 
         del batch_idx
-        x = self.get_inputs(
-            batch, sample_length=self.multi_step
-        )  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_targets(
-            batch, lead_step=self.multi_step - 1
-        )  # (bs, multi_step, ens, latlon, nvar)
+        x = self.get_inputs(batch, sample_length=self.multi_step)  # (bs, multi_step, ens, latlon, nvar)
+        y = self.get_targets(batch, lead_step=self.multi_step - 1)  # (bs, multi_step, ens, latlon, nvar)
 
         assert len(x) == 2, "Expected x to contain two elements: [low_res, high_res]"
 
-        x_lres, x_hres = x
+        x_in_lres, x_in_hres = x
 
-        x_lres_upsampled = self.model.model.apply_interpolate_to_high_res(
-            x_lres[:, 0, ...],
-            grid_shard_shapes=self.lres_grid_shard_shapes,
+        # Upsample in_lres from lres (o96) to hres (o320) resolution
+        # After this, ALL data is at hres resolution
+        x_in_lres_upsampled = self.model.model.apply_interpolate_to_high_res(
+            x_in_lres[:, 0, ...],
+            grid_shard_shapes=self.lres_grid_shard_shapes,  # lres sharding for upsampling
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
 
         resid = self.model.model.compute_residuals(
             y,
-            x_lres_upsampled[
-                ..., self.x_in_matching_channel_indices.to(x_lres_upsampled.device)
-            ],
+            x_in_lres_upsampled[..., self.x_in_matching_channel_indices.to(x_in_lres_upsampled.device)],
         )
 
-        x_lres_upsampled = self.model.pre_processors(
-            x_lres_upsampled, dataset="input_lres"
-        )
-        x_hres = self.model.pre_processors(x_hres, dataset="input_hres")
+        x_in_lres_upsampled = self.model.pre_processors(x_in_lres_upsampled, dataset="in_lres")
+        x_in_hres = self.model.pre_processors(x_in_hres, dataset="in_hres")
         resid = self.model.pre_processors(resid, dataset="output")
 
         # get noise level and associated loss weights
@@ -246,8 +245,8 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         resid_noised = self._noise_target(resid, sigma)
 
         y_pred = self(
-            x_lres_upsampled,
-            x_hres,
+            x_in_lres_upsampled,
+            x_in_hres,
             resid_noised,
             sigma,
         )  # shape is (bs, ens, latlon, nvar)
@@ -263,12 +262,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             use_reentrant=False,
         )
 
-        denorm_x_lres_upsampled = self.model.post_processors(
-            x_lres_upsampled, dataset="input_lres"
-        )
+        denorm_x_in_lres_upsampled = self.model.post_processors(x_in_lres_upsampled, dataset="in_lres")
         denorm_y_pred = self.model.post_processors(y_pred, dataset="output")
 
-        y_preds = [denorm_x_lres_upsampled + denorm_y_pred, denorm_y_pred]
+        y_preds = [denorm_x_in_lres_upsampled + denorm_y_pred, denorm_y_pred]
 
         return loss, metrics_next, y_preds
 
@@ -289,8 +286,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         if self.training_approach == "probabilistic_high_noise":
             rnd_uniform = torch.rand(shape, device=device)
             sigma = (
-                sigma_max ** (1.0 / rho)
-                + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
             ) ** rho
 
         elif self.training_approach == "probabilistic_low_noise":
@@ -335,19 +331,13 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             validation metrics and predictions
         """
         metrics = {}
-        y_postprocessed = self.model.post_processors(
-            y, in_place=False, dataset="output"
-        )
-        y_pred_postprocessed = self.model.post_processors(
-            y_pred, in_place=False, dataset="output"
-        )
+        y_postprocessed = self.model.post_processors(y, in_place=False, dataset="output")
+        y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False, dataset="output")
 
         for metric_name, metric in self.metrics.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(
-                    y_pred_postprocessed, y_postprocessed
-                )
+                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():

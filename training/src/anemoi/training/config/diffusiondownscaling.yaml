@@ -3,11 +3,11 @@ defaults:
 - dataloader: hindcast_o320
 - diagnostics: evaluation
 - system: diffusiondownscaling
-- graph: existing
+- graph: multi_o96_o320
 - model: graphtransformer_diffusiondownscaling
 - training: diffusiondownscaling
 - _self_
 
 
 # set to true to switch on config validation
-config_validation: True
+config_validation: False

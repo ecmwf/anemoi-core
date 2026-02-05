@@ -1,5 +1,7 @@
 datasets:
-  data:
+  in_lres: {}  # No scalers needed for input dataset
+  in_hres: {}  # No scalers needed for input dataset
+  out_hres:
     # Several scalers can be added here. In order to be applied their names must be included in the loss.
     # scaler name must be included in `scalers` in the losses for this to be applied.
     general_variable:
