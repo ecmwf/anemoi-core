@@ -248,6 +248,7 @@ def test_after_sampling_reinserts_nans() -> None:
     post_processors = torch.nn.ModuleDict({"data": Processors([["imputer", imputer]], inverse=True)})
 
     model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+    model.n_step_output = 1
 
     def _identity_ref(x, *_args, **_kwargs):
         return x
@@ -268,7 +269,7 @@ def test_after_sampling_reinserts_nans() -> None:
         model_comm_group=None,
         grid_shard_shapes={"data": None},
         gather_out=False,
-        post_processors_tendencies={"data": [Processors([["imputer", imputer]], inverse=True)]},
+        post_processors_tendencies={"data": Processors([["imputer", imputer]], inverse=True)},
     )["data"]
 
     expected = imputer.inverse_transform(out["data"], in_place=False)
