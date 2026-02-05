@@ -24,6 +24,7 @@ processor:
   num_chunks: 2
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
 encoder:
@@ -33,6 +34,7 @@ encoder:
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
 decoder:
@@ -42,6 +44,7 @@ decoder:
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
 residual:
