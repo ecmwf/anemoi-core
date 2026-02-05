@@ -26,14 +26,7 @@ dataloader:
       - dataset: ${system.input.forcing_dataset}
     adjust: all
     min_distance_km: 0
-  training:
-    datasets:
-      data:
-        lam_mask_radius_km: 300
-  validation:
-    datasets:
-      data:
-        lam_mask_radius_km: 300
+    max_distance_km: 300
 model:
   output_mask:
     _target_: anemoi.training.utils.masks.Boolean1DMask
