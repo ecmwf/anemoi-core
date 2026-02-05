@@ -14,6 +14,7 @@ import pytest
 import torch
 
 from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.utils.testing import GetTestArchive
 
 
 class TestNativeGridDataset:
@@ -21,8 +22,16 @@ class TestNativeGridDataset:
 
     @pytest.mark.parametrize("start", [None, 2017])
     @pytest.mark.parametrize("end", [None, 2017])
-    def test_basic_instantiation(self, dataset_path: str, start: datetime.datetime, end: datetime.datetime) -> None:
+    def test_basic_instantiation(
+        self,
+        get_test_archive: GetTestArchive,
+        extract_dataset_path: tuple[str, str],
+        start: datetime.datetime,
+        end: datetime.datetime,
+    ) -> None:
         """Test basic instantiation of NativeGridDataset."""
+        dataset_path, url_archive = extract_dataset_path
+        get_test_archive(url_archive)
         dataset = NativeGridDataset(dataset=dataset_path, start=start, end=end)
 
         assert dataset.data is not None
@@ -33,7 +42,15 @@ class TestNativeGridDataset:
 
     @pytest.mark.parametrize("frequency", [None, "6h", "12h"])
     @pytest.mark.parametrize("drop", [None, []])
-    def test_instantiation_with_frequency_and_drop(self, dataset_path: str, frequency: str, drop: list[str]) -> None:
+    def test_instantiation_with_frequency_and_drop(
+        self,
+        get_test_archive: GetTestArchive,
+        extract_dataset_path: tuple[str, str],
+        frequency: str,
+        drop: list[str],
+    ) -> None:
+        dataset_path, url_archive = extract_dataset_path
+        get_test_archive(url_archive)
         dataset = NativeGridDataset(dataset=dataset_path, frequency=frequency, drop=drop)
 
         assert dataset.data is not None
@@ -42,8 +59,14 @@ class TestNativeGridDataset:
         assert dataset.variables is not None
         assert dataset.frequency is not None
 
-    def test_instantiation_with_time_range(self, dataset_path: str) -> None:
+    def test_instantiation_with_time_range(
+        self,
+        extract_dataset_path: tuple[str, str],
+        get_test_archive: GetTestArchive,
+    ) -> None:
         """Test NativeGridDataset with start and end dates."""
+        dataset_path, url_archive = extract_dataset_path
+        get_test_archive(url_archive)
         original = NativeGridDataset(dataset=dataset_path)
         dates = original.dates
 
@@ -59,8 +82,14 @@ class TestNativeGridDataset:
         assert dataset.dates[0] >= start
         assert dataset.dates[-1] <= end
 
-    def test_instantiation_with_drop(self, dataset_path: str) -> None:
+    def test_instantiation_with_drop(
+        self,
+        extract_dataset_path: tuple[str, str],
+        get_test_archive: GetTestArchive,
+    ) -> None:
         """Test NativeGridDataset with dropped variables."""
+        dataset_path, url_archive = extract_dataset_path
+        get_test_archive(url_archive)
         # Get original variables to know what to drop
         original = NativeGridDataset(dataset=dataset_path)
         original_vars = original.variables.copy()
@@ -75,8 +104,10 @@ class TestNativeGridDataset:
         assert drop_vars[0] not in dataset.variables
         assert len(dataset.variables) == len(original_vars) - 1
 
-    def test_dataset_properties(self, dataset_path: str) -> None:
+    def test_dataset_properties(self, extract_dataset_path: tuple[str, str], get_test_archive: GetTestArchive) -> None:
         """Test that dataset properties are correctly accessible."""
+        dataset_path, url_archive = extract_dataset_path
+        get_test_archive(url_archive)
         dataset = NativeGridDataset(dataset=dataset_path)
 
         assert isinstance(dataset.dates, np.ndarray)
@@ -89,8 +120,14 @@ class TestNativeGridDataset:
         assert isinstance(dataset.name_to_index, dict)
         assert isinstance(dataset.statistics, dict)
 
-    def test_get_sample_with_slice(self, dataset_path: str) -> None:
+    def test_get_sample_with_slice(
+        self,
+        extract_dataset_path: tuple[str, str],
+        get_test_archive: GetTestArchive,
+    ) -> None:
         """Test get_sample with grid shard as slice."""
+        dataset_path, url_archive = extract_dataset_path
+        get_test_archive(url_archive)
         dataset = NativeGridDataset(dataset=dataset_path)
 
         # Get a sample
@@ -101,8 +138,14 @@ class TestNativeGridDataset:
         assert sample.shape[0] == 3  # 3 time steps
         assert sample.shape[2] == 50  # 50 gridpoints
 
-    def test_get_sample_with_array_indices(self, dataset_path: str) -> None:
+    def test_get_sample_with_array_indices(
+        self,
+        extract_dataset_path: tuple[str, str],
+        get_test_archive: GetTestArchive,
+    ) -> None:
         """Test get_sample with grid shard as array indices."""
+        dataset_path, url_archive = extract_dataset_path
+        get_test_archive(url_archive)
         dataset = NativeGridDataset(dataset=dataset_path)
 
         grid_indices = np.array([0, 10, 20, 30])
