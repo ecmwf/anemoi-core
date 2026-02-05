@@ -20,7 +20,6 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.dataset import create_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
