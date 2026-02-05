@@ -290,22 +290,8 @@ class PlotSchema(BaseModel):
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
-    datasets_to_plot: list[str] = Field(default_factory=list, example=["data"])
-    "Default dataset names to use in the plot callbacks"
-    frequency: PlottingFrequency
-    "Frequency of the plotting."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    precip_and_related_fields: list[str]
-    "List of precipitation related fields from the parameters list."
-    colormaps: dict[str, ColormapSchema] = Field(default_factory=dict)
-    "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
-    focus_areas: dict[str, FocusAreaSchema]
-    "List of regions of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class TimeLimitSchema(BaseModel):
