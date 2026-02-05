@@ -22,6 +22,7 @@ from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.utils.schemas import BaseModel
+from pydantic import BaseModel as PydanticBaseModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -285,7 +286,7 @@ class PlottingFrequency(BaseModel):
     "Frequency of the plotting in number of epochs."
 
 
-class PlotSchema(BaseModel):
+class PlotSchema(PydanticBaseModel):
     asynchronous: bool
     "Handle plotting tasks without blocking the model training."
     datashader: bool
