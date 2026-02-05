@@ -83,7 +83,7 @@ class TestNativeGridDataset:
         assert len(dataset.dates) > 0
         assert isinstance(dataset.variables, list)
         assert len(dataset.variables) > 0
-        assert isinstance(dataset.missing, np.ndarray)
+        assert isinstance(dataset.missing, set)
         assert isinstance(dataset.frequency, datetime.timedelta)
         assert isinstance(dataset.resolution, str)
         assert isinstance(dataset.name_to_index, dict)

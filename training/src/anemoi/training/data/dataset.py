@@ -68,7 +68,7 @@ class BaseAnemoiReader:
         return self.data.variables
 
     @property
-    def missing(self) -> np.ndarray:
+    def missing(self) -> set[int]:
         """Return dataset missing values mask."""
         return self.data.missing
 
