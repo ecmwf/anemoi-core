@@ -24,6 +24,7 @@ from timm.scheduler import CosineLRScheduler
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
@@ -732,12 +733,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             else:
                 self.grid_shard_shapes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = None
-                batch[dataset_name] = self.allgather_batch(
-                    batch[dataset_name],
-                    grid_size=self.grid_sizes[dataset_name],
-                    grid_shard_shapes=self.shard_shapes[dataset_name],
-                    grid_dim=self.grid_dim,
-                )
+                batch[dataset_name] = self.allgather_batch(batch[dataset_name], dataset_name)
         return batch
 
     def transfer_batch_to_device(
@@ -790,35 +786,28 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ) -> tuple[dict[str, torch.Tensor], Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         pass
 
-    def allgather_batch(
-        self,
-        batch: torch.Tensor,
-        grid_size: int,
-        grid_shard_shapes: list,
-        grid_dim: int,
-    ) -> torch.Tensor:
+    def allgather_batch(self, batch: torch.Tensor, dataset_name: str) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
 
         Parameters
         ----------
         batch : torch.Tensor
             Batch-shard of current reader rank
-        grid_size : int
-            Size of the full grid dimension
-        grid_shard_shapes : list
-            Shapes of the shards along the grid dimension
-        grid_dim : int
-            Grid dimension
+        dataset_name : str
+            Dataset name
 
         Returns
         -------
         torch.Tensor
             Allgathered (full) batch
         """
-        if grid_size == batch.shape[grid_dim] or self.reader_group_size == 1:
+        grid_size = self.grid_sizes[dataset_name]
+        grid_shard_shapes = self.shard_shapes[dataset_name]
+
+        if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
-        shard_shapes = apply_shard_shapes(batch, grid_dim, grid_shard_shapes)
+        shard_shapes = apply_shard_shapes(batch, self.grid_dim, grid_shard_shapes)
         tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
 
         torch.distributed.all_gather(
@@ -827,7 +816,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             group=self.reader_groups[self.reader_group_id],
         )
 
-        return torch.cat(tensor_list, dim=grid_dim)
+        return torch.cat(tensor_list, dim=self.grid_dim)
 
     def calculate_val_metrics(
         self,
