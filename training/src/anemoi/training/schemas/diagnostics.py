@@ -14,6 +14,7 @@ from typing import Any
 from typing import Literal
 
 from omegaconf import OmegaConf
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
@@ -22,7 +23,6 @@ from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.utils.schemas import BaseModel
-from pydantic import BaseModel as PydanticBaseModel
 
 LOGGER = logging.getLogger(__name__)
 
