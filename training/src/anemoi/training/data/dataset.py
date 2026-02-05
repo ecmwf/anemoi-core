@@ -115,7 +115,7 @@ class BaseAnemoiReader:
 
     @cached_property
     def boundary_mask(self) -> np.ndarray:
-        """Return boundary mask."""
+        """Return boundary mask, defined as the complement of the cutout mask."""
         return ~self.cutout_mask
 
     @property
