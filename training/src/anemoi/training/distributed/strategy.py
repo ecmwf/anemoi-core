@@ -135,13 +135,15 @@ class DDPGroupStrategy(DDPStrategy):
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
+        self.shard_shapes: dict | None = None
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
 
         super().setup(trainer)
 
-        seed_rnd(model_comm_group_id, self.global_rank)
+        self.shard_shapes = trainer.model.shard_shapes
+        seed_rnd(model_comm_group_id, self.global_rank)        
 
     def configure_ddp(self) -> None:
         """Configure DDP with custom gradient hooks."""
@@ -261,9 +263,8 @@ class DDPGroupStrategy(DDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
+            self.shard_shapes,
         )
-
-        dataloader.dataset.compute_shard_shapes()
 
         return dataloader
 
@@ -299,6 +300,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
 
         super().setup(trainer)
 
+        self.shard_shapes = trainer.model.shard_shapes
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
@@ -499,9 +501,8 @@ class DDPEnsGroupStrategy(DDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
+            self.shard_shapes,
         )
-
-        dataloader.dataset.compute_shard_shapes()
 
         dataloader.dataset.set_ens_comm_group_info(
             ens_comm_group_id,

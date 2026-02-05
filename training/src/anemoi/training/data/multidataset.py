@@ -222,6 +222,7 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
+        shard_shapes: dict[str, list[int]],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -239,6 +240,8 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
+        shard_shapes : dict[str, list[int]]
+            Shard shapes for all datasets
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -249,6 +252,8 @@ class MultiDataset(IterableDataset):
 
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
+
+        self.shard_shapes = shard_shapes
 
         assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 
@@ -342,12 +347,6 @@ class MultiDataset(IterableDataset):
             base_seed,
             sanity_rnd,
         )
-
-    def compute_shard_shapes(self) -> None:
-        """Set shard shapes for all datasets."""
-        self.shard_shapes = {}
-        for name, dataset in self.datasets.items():
-            self.shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         start = index + self.data_relative_date_indices[0]

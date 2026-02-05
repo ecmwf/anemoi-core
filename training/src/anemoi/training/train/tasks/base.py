@@ -23,6 +23,7 @@ from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
@@ -285,14 +286,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.grid_indices = {}
-        grid_indices_configs = get_multiple_datasets_config(self.config.dataloader.grid_indices)
+        self.shard_shapes = {}
         for dataset_name in self.dataset_names:
-            self.grid_indices[dataset_name] = instantiate(
-                grid_indices_configs[dataset_name],
-                reader_group_size=reader_group_size,
+            self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
+                graph_data[dataset_name]["data"].num_nodes, # TODO(Mario): Replace by dataset.grid_size
+                reader_group_size,
             )
-            self.grid_indices[dataset_name].setup(graph_data[dataset_name])
+
         self.grid_dim = -2
 
         # check sharding support
