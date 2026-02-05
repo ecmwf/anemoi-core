@@ -56,12 +56,18 @@ class DummyGraphModule(BaseGraphModule):
         raise NotImplementedError
 
 
-def _make_dummy_module(model: torch.nn.Module, update_stats: bool) -> DummyGraphModule:
+def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
+    return SimpleNamespace(states=states, tendencies=tendencies)
+
+
+def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyGraphModule:
     module = DummyGraphModule.__new__(DummyGraphModule)
     torch.nn.Module.__init__(module)
     module.model = model
     module._device = torch.device("cpu")
-    module.config = SimpleNamespace(training=SimpleNamespace(update_ds_stats_on_ckpt_load=update_stats))
+    module.config = SimpleNamespace(
+        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(update_states, update_tendencies)),
+    )
     return module
 
 
@@ -81,7 +87,9 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
     module = DummyGraphModule.__new__(DummyGraphModule)
     torch.nn.Module.__init__(module)
     module.model = new_model
-    module.config = SimpleNamespace(training=SimpleNamespace(update_ds_stats_on_ckpt_load=True))
+    module.config = SimpleNamespace(
+        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, True)),
+    )
 
     BaseGraphModule.on_load_checkpoint(module, checkpoint)
 
@@ -91,17 +99,13 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
     ), "Extra tendency processors from the checkpoint should be dropped."
 
     new_state = new_model.state_dict()
+    old_state = old_model.state_dict()
     for key, value in new_state.items():
         full_key = f"model.{key}"
-        if full_key.startswith(
-            (
-                "model.pre_processors.",
-                "model.post_processors.",
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            ),
-        ):
+        if full_key.startswith(("model.pre_processors_tendencies.", "model.post_processors_tendencies.")):
             assert torch.equal(state_dict[full_key], value)
+        elif full_key.startswith(("model.pre_processors.", "model.post_processors.")):
+            assert torch.equal(state_dict[full_key], old_state[key])
 
 
 def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
@@ -116,7 +120,9 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
     module = DummyGraphModule.__new__(DummyGraphModule)
     torch.nn.Module.__init__(module)
     module.model = new_model
-    module.config = SimpleNamespace(training=SimpleNamespace(update_ds_stats_on_ckpt_load=False))
+    module.config = SimpleNamespace(
+        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
+    )
 
     BaseGraphModule.on_load_checkpoint(module, checkpoint)
 
@@ -145,8 +151,8 @@ def test_transfer_learning_loading_updates_processors_when_enabled(
     old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
     new_model = DummyModel(["6h", "12h"], offset=1.0)
 
-    old_module = _make_dummy_module(old_model, update_stats=False)
-    new_module = _make_dummy_module(new_model, update_stats=True)
+    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
+    new_module = _make_dummy_module(new_model, update_states=True, update_tendencies=True)
     new_state_before = new_module.state_dict()
 
     checkpoint = {
@@ -178,8 +184,8 @@ def test_transfer_learning_loading_preserves_checkpoint_processors_when_disabled
     old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
     new_model = DummyModel(["6h", "12h"], offset=1.0)
 
-    old_module = _make_dummy_module(old_model, update_stats=False)
-    new_module = _make_dummy_module(new_model, update_stats=False)
+    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
+    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
 
     checkpoint = {
         "state_dict": old_module.state_dict(),
