@@ -50,7 +50,6 @@ training:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
-      lam_mask_radius_km: null
     cerra:
       dataset: ${system.input.dataset_b}  # Using same dataset as duplicate for testing
       start: 1985
@@ -58,7 +57,6 @@ training:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
-      lam_mask_radius_km: null
 
 validation_rollout: 1 # number of rollouts to use for validation
 
@@ -72,7 +70,6 @@ validation:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
-      lam_mask_radius_km: null
     cerra:
       dataset: ${system.input.dataset_b}
       start: 2021
@@ -80,7 +77,6 @@ validation:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
-      lam_mask_radius_km: null
 
 # Multi-dataset test with same datasets, different time period
 test:
@@ -92,7 +88,6 @@ test:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
-      lam_mask_radius_km: null
     cerra:
       dataset: ${system.input.dataset_b}
       start: 2022
@@ -100,4 +95,3 @@ test:
       frequency: ${data.frequency}
       drop: []
       trajectory: null
-      lam_mask_radius_km: null
