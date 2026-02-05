@@ -98,6 +98,8 @@ class MultiDataset(IterableDataset):
         self.ens_comm_num_groups = 1
         self.ens_comm_group_id = 0
 
+        self.shard_shapes = None
+
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
         self.chunk_index_range: np.ndarray | None = None
@@ -341,18 +343,11 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    @cached_property
-    def shard_shapes(self) -> dict[str, list[int]]:
-        """Return shard shapes for all datasets."""
-        shard_shapes = {}
+    def compute_shard_shapes(self) -> None:
+        """Set shard shapes for all datasets."""
+        self.shard_shapes = {}
         for name, dataset in self.datasets.items():
-            shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
-        return shard_shapes
-
-    def get_shard_slice(self, shard_shape: list[int], reader_group_rank: int) -> slice:
-        """Get the grid shard slice according to the reader rank."""
-        start, end = get_partition_range(partition_sizes=shard_shape, partition_id=reader_group_rank)
-        return slice(start, end)
+            self.shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         start = index + self.data_relative_date_indices[0]
@@ -365,8 +360,8 @@ class MultiDataset(IterableDataset):
 
         x = {}
         for name, dataset in self.datasets.items():
-            grid_shard_indices = self.get_shard_slice(self.shard_shapes[name], self.reader_group_rank)
-            x[name] = dataset.get_sample(time_indices, grid_shard_indices)
+            start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+            x[name] = dataset.get_sample(time_indices, slice(start, end))
 
         return x
 

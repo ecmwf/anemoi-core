@@ -263,6 +263,8 @@ class DDPGroupStrategy(DDPStrategy):
             self.read_group_size,
         )
 
+        dataloader.dataset.compute_shard_shapes()
+
         return dataloader
 
     def register_parameter_hooks(self) -> None:
@@ -290,6 +292,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.ens_comm_group_size = num_gpus_per_ensemble
+        self.shard_shapes: dict | None = None
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
@@ -497,6 +500,8 @@ class DDPEnsGroupStrategy(DDPStrategy):
             reader_group_rank,
             self.read_group_size,
         )
+
+        dataloader.dataset.compute_shard_shapes()
 
         dataloader.dataset.set_ens_comm_group_info(
             ens_comm_group_id,
