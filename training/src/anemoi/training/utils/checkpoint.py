@@ -102,8 +102,24 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
     # Load the filtered st-ate_dict into the model
     model.load_state_dict(state_dict, strict=False)
-    # Needed for data indices check
-    model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
+
+    ## Needed for data indices check
+    # Handle both single-dataset and multi-dataset checkpoints
+    data_indices = checkpoint["hyper_parameters"]["data_indices"]
+
+    if isinstance(data_indices, dict):
+        # Multi-dataset checkpoint: data_indices is a dict of {dataset_name: IndexCollection}
+        # Store name_to_index for each dataset
+        LOGGER.info("Loading multi-dataset checkpoint with datasets: %s", list(data_indices.keys()))
+        model._ckpt_model_name_to_index = {
+            dataset_name: indices.name_to_index for dataset_name, indices in data_indices.items()
+        }
+    else:
+        # Single-dataset checkpoint: data_indices is an IndexCollection object
+        # Backward compatibility for single-dataset checkpoints
+        LOGGER.info("Loading single-dataset checkpoint")
+        model._ckpt_model_name_to_index = data_indices.name_to_index
+
     return model
 
 
