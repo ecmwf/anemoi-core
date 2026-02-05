@@ -290,7 +290,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for dataset_name in self.dataset_names:
             self.grid_sizes[dataset_name] = graph_data[dataset_name]["data"].num_nodes  # TODO(Mario): Replace by dataset.grid_size
             self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
-                self.grids_sizes[dataset_name],
+                self.grid_sizes[dataset_name],
                 reader_group_size,
             )
 
