@@ -143,7 +143,7 @@ class DDPGroupStrategy(DDPStrategy):
         super().setup(trainer)
 
         self.shard_shapes = trainer.model.shard_shapes
-        seed_rnd(model_comm_group_id, self.global_rank)        
+        seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
         """Configure DDP with custom gradient hooks."""
