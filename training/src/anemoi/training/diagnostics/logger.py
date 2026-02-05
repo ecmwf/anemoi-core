@@ -23,16 +23,16 @@ def get_mlflow_logger(
     fork_run_id: str,
     paths: DictConfig,
     logger_config: DictConfig,
-    **kwargs,
 ) -> None:
-    del kwargs
     mlflow_config = logger_config.mlflow
     if not mlflow_config.enabled:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
-    mlflow_config = OmegaConf.to_container(mlflow_config)
-    del mlflow_config["enabled"]
+    mlflow_config = OmegaConf.to_container(mlflow_config, resolve=True)
+    EXTRA_KEYS = ['enabled']
+    for key in EXTRA_KEYS:
+        mlflow_config.pop(key, None)
 
     # backward compatibility to not break configs
     mlflow_config["_target_"] = mlflow_config.get(
@@ -58,7 +58,6 @@ def get_wandb_logger(
     paths: DictConfig,
     model: pl.LightningModule,
     logger_config: DictConfig,
-    **kwargs,
 ) -> pl.loggers.WandbLogger | None:
     """Setup Weights & Biases experiment logger.
 
@@ -80,7 +79,6 @@ def get_wandb_logger(
         If `wandb` is not installed
 
     """
-    del kwargs
 
     save_dir = paths.logs.wandb
     wandb_config = logger_config.wandb
@@ -94,11 +92,10 @@ def get_wandb_logger(
         LOGGER.debug("Weights & Biases logging is disabled.")
         return None
 
-    wandb_config = OmegaConf.to_container(wandb_config)
-    del wandb_config["gradients"]
-    del wandb_config["parameters"]
-    del wandb_config["enabled"]
-    del wandb_config["interval"]
+    wandb_config = OmegaConf.to_container(wandb_config, resolve=True)
+    EXTRA_KEYS = ["gradients", "parameters", "interval",'enabled']
+    for key in EXTRA_KEYS:
+        wandb_config.pop(key, None)
 
     try:
         logger = instantiate(
