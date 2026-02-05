@@ -20,9 +20,6 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
-from anemoi.training.data.grid_indices import BaseIndices
-from anemoi.training.data.grid_indices import FullGrid
-from anemoi.training.data.grid_indices import MaskedGrid
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
@@ -38,9 +35,8 @@ class BaseAnemoiReader:
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
-        lam_mask_radius_km: int | None = None,
     ):
-        """Initialize Anemoi data reader."""
+        """Initialise Anemoi data reader."""
         ds_kwargs = {}
         if drop is not None:
             ds_kwargs["drop"] = drop
@@ -49,19 +45,6 @@ class BaseAnemoiReader:
             ds_kwargs["frequency"] = frequency
 
         self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
-        self.lam_mask_radius_km = lam_mask_radius_km
-
-    @cached_property
-    def grid_indices(self) -> BaseIndices:
-        if self.lam_mask_radius_km is None:
-            return FullGrid()
-
-        return MaskedGrid(
-            latitudes=self.data.latitudes,
-            longitudes=self.data.longitudes,
-            mask=self.cutout_mask,
-            mask_radius_km=self.lam_mask_radius_km,
-        )
 
     @property
     def dates(self) -> list[datetime.datetime]:
@@ -108,7 +91,7 @@ class BaseAnemoiReader:
     @property
     def supporting_arrays(self) -> dict:
         """Return dataset supporting_arrays."""
-        return self.data.supporting_arrays() | self.grid_indices.supporting_arrays
+        return self.data.supporting_arrays()
 
     @property
     def name_to_index(self) -> dict[str, int]:
@@ -197,15 +180,14 @@ class TrajectoryDataset(BaseAnemoiReader):
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
-        lam_mask_radius_km: int | None = None,
     ):
+        """Initialise trajectory dataset."""
         super().__init__(
             dataset,
             start=start,
             end=end,
             frequency=frequency,
             drop=drop,
-            lam_mask_radius_km=lam_mask_radius_km,
         )
         self.trajectory_start = trajectory_start
         self.trajectory_length = trajectory_length
