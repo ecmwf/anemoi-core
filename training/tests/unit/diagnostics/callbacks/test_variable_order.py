@@ -235,8 +235,7 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
     """Test that on_load_checkpoint correctly restores _ckpt_model_name_to_index."""
     model = GraphForecaster.__new__(GraphForecaster)
     dataset_name = "test_dataset"
-
-    model.on_load_checkpoint = types.MethodType(GraphForecaster.on_load_checkpoint, GraphForecaster)
+    model.config = types.SimpleNamespace(training=types.SimpleNamespace(update_ds_stats_on_ckpt_load=False))
 
     mock_name_to_index = {"var1": 0, "var2": 1}
     mock_checkpoint = {

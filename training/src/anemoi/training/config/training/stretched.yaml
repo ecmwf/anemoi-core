@@ -6,6 +6,8 @@ defaults:
 run_id: null
 fork_run_id: null
 load_weights_only: False # only load model weights, do not restore optimiser states etc.
+update_ds_stats_on_ckpt_load: False # rebuild processors from current dataset when loading a checkpoint
+
 transfer_learning: False # activate to perform transfer learning
 
 # run in deterministic mode ; slows down
