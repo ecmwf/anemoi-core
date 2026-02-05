@@ -17,8 +17,8 @@ from hydra import initialize
 from omegaconf import DictConfig
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.utils.testing import TemporaryDirectoryForTestData
 from anemoi.utils.testing import GetTestArchive
+from anemoi.utils.testing import TemporaryDirectoryForTestData
 
 
 @pytest.fixture
