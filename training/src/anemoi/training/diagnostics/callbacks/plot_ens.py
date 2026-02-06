@@ -281,7 +281,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name not in diagnostics)
-                for name in self.config.diagnostics.plot.parameters
+                for name in self.parameters
             }
 
             data, output_tensor = self.process(
