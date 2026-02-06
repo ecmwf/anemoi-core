@@ -1,4 +1,4 @@
-# Modifications for the basic template "config.yaml"
+# Modifications for the crps template "ensemble_crps.yaml"
 system:
   input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
@@ -29,6 +29,7 @@ dataloader:
 
 diagnostics:
   plot:
+    parameters: [tp]
     callbacks:
       # Add plot callbacks here.
       - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample

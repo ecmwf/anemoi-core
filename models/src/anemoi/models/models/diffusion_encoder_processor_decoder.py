@@ -28,6 +28,7 @@ from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models.base import BaseGraphModel
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
 
@@ -1067,7 +1068,12 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name, out_dataset in out.items():
             post_tend = post_processors_tendencies[dataset_name]
-            assert post_tend is not None, "Per-step tendency processors must be provided per dataset."
+            assert post_tend is not None, "Tendency processors must be provided per dataset."
+            if not isinstance(post_tend, StepwiseProcessors):
+                assert (
+                    self.n_step_output == 1
+                ), "Per-step tendency processors must be provided for multiple output steps."
+                post_tend = [post_tend]
             assert (
                 len(post_tend) == out_dataset.shape[1]
             ), "Per-step tendency processors must match the number of output steps."

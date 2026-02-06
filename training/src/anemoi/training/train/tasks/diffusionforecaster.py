@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.preprocessing import StepwiseProcessors
+
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -272,6 +274,27 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             pre_processors_tendencies is not None and post_processors_tendencies is not None
         ), "Per-step tendency processors are required for multi-output diffusion tendency models."
 
+        def _wrap_if_needed(
+            kind: str,
+            proc: object,
+            dataset_name: str,
+            lead_times: list[str],
+        ) -> StepwiseProcessors:
+            if isinstance(proc, StepwiseProcessors):
+                return proc
+            assert (
+                self.n_step_output == 1
+            ), "Per-step tendency processors are required for multi-output diffusion tendency models."
+            lead_time = lead_times[0]
+            wrapped = StepwiseProcessors([lead_time])
+            wrapped.set(lead_time, proc)
+            LOGGER.warning(
+                "Wrapping flat tendency %s-processor for dataset '%s' into stepwise (single-step).",
+                kind,
+                dataset_name,
+            )
+            return wrapped
+
         for dataset_name in self.dataset_names:
             dataset_stats = stats.get(dataset_name) if isinstance(stats, dict) else None
             assert dataset_stats is not None, f"Tendency statistics are required for dataset '{dataset_name}'."
@@ -293,6 +316,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
             pre_tend = pre_processors_tendencies[dataset_name]
             post_tend = post_processors_tendencies[dataset_name]
+            pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
+            post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
             assert (
                 len(pre_tend) == self.n_step_output and len(post_tend) == self.n_step_output
             ), "Per-step tendency processors must match n_step_output."

@@ -7,6 +7,9 @@ run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
 load_weights_only: False # only load model weights, do not restore optimiser states etc.
+update_ds_stats_on_ckpt_load:
+  states: False # rebuild state processors from current dataset when loading a checkpoint
+  tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
 
 # run in deterministic mode ; slows down
 deterministic: False
