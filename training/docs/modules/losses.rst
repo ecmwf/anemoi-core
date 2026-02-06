@@ -112,25 +112,105 @@ The config for the multiscale loss functions is the following:
                alpha: 1.0
 
 ************************
- Spatial Loss Functions
+Spectral loss functions
 ************************
 
-The following spatial loss functions are available (**to be used only
-with regular 2D fields, i.e. fields that can be written as [`n_lat`,
-`n_lon`]**):
+Some loss functions operate in spectral space rather than directly in grid-point space.
+This is useful when the error characteristics are better expressed by scale (wavenumber)
+than by location, or when the loss should emphasise/regularise specific ranges of scales.
 
--  ``LogFFT2Distance``: log spectral distance from the 2D fast Fourier
-   transform.
+In Anemoi, spectral losses follow the same API as other losses (scalars/node weights, reduction,
+etc.), but they additionally require a *spectral transform* configuration.
 
--  ``FourierCorrelationLoss``: Fourier correlation loss, also computed
-   from the 2D fast Fourier transform see `Yan et al. (2024)
-   <https://arxiv.org/pdf/2410.23159.pdf>`_.
+Spectral transforms
+-------------------
 
-Both of these loss functions are defined in the
-``anemoi.training.losses.spatial`` module, and can be configured in the
-config file at ``config.training.training_loss`` in the same way as the
-deterministic loss functions with additional kwargs `x_dim` and `y_dim`
-specifying the field shape of the input tensors.
+Spectral losses rely on a transform that maps grid-point fields to spectral coefficients.
+
+Supported transforms include:
+
+* ``FFT2D``: 2D FFT for regular latitude/longitude grids (or any regular 2D field) with
+  known ``x_dim`` and ``y_dim``.
+* ``DCT2D``: 2D Discrete Cosine Transform for regular 2D fields. This transform requires
+  the optional dependency ``torch-dct``.
+* ``EcTransOctahedralSHT``: Spherical Harmonic Transform (SHT) on the *octahedral reduced
+  Gaussian grid* using ecTrans assets (via precomputed ``npz`` assets, or generated with
+  ``ectrans4py`` if available).
+
+.. note::
+
+   SHT-based transforms expect a flattened reduced-grid ordering:
+   ``[batch, ensemble, grid_points, variables]`` and return spectral coefficients with
+   shape ``[batch, ensemble, l, m, variables]`` where ``l = truncation + 1``.
+
+Spectral kernel CRPS
+--------------------
+
+``SpectralCRPSLoss`` computes a CRPS-style probabilistic loss in spectral space.
+Conceptually, it applies a spectral transform to both forecast ensemble and target,
+then evaluates a kernel-CRPS over the resulting spectral representation (typically
+interpreted as scale-dependent coefficients).
+
+This loss is intended for *ensemble* training (``ensemble > 1``). For deterministic
+training, consider spectral distance losses instead.
+
+Example configuration (FFT2D)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use this for limited-area or other regular 2D fields that can be reshaped to
+``[y_dim, x_dim]``:
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
+         # Transform selection / geometry
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+
+Example configuration (octahedral SHT via ecTrans assets)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use this for global models on the octahedral reduced grid:
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
+         transform: ectrans_octahedral_sht
+         truncation: 127
+         # Path to precomputed Legendre polynomials / weights.
+         # If the file does not exist, assets can optionally be generated when `ectrans4py`
+         # is installed and the path is writable.
+         filepath: /path/to/ectrans_assets_T127.npz
+         # Optional: control transform dtype
+         dtype: float32
+
+Combining spectral and grid-point losses
+----------------------------------------
+
+Spectral losses can be combined with standard grid-point losses through
+``CombinedLoss``:
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.combined.CombinedLoss
+         losses:
+           - _target_: anemoi.training.losses.mse.WeightedMSELoss
+           - _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
+             transform: fft2d
+             x_dim: 256
+             y_dim: 128
+         loss_weights: [1.0, 0.1]
+
 
 *********
  Scalers

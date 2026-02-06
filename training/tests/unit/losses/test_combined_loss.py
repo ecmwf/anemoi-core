@@ -16,7 +16,9 @@ from omegaconf import DictConfig
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
+from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
+from anemoi.training.losses.spectral import SpectralCRPSLoss
 
 
 def test_combined_loss() -> None:
@@ -103,3 +105,36 @@ def test_combined_loss_seperate_scalers() -> None:
     assert isinstance(loss.losses[1], MAELoss)
     assert "test" not in loss.losses[1].scaler
     assert "test2" in loss.losses[1].scaler
+
+
+def test_combined_loss_with_spectral_crps_backward() -> None:
+    # Use a tiny regular 2D field so we can use FFT2D-based spectral loss without extra assets.
+    batch = 2
+    ensemble = 4  # SpectralCRPSLoss is intended for ensemble training
+    y_dim = 8
+    x_dim = 6
+    points = x_dim * y_dim
+    variables = 3
+
+    # Match the typical tensor layout used by Anemoi losses:
+    pred = torch.randn(batch, ensemble, points, variables, requires_grad=True)
+    target = torch.randn(batch, 1, points, variables)  # allow broadcasting over ensemble if supported
+
+    # Node weights are commonly required by the weighted loss base class; keep them neutral.
+    node_weights = torch.ones(points)
+
+    mse = WeightedMSELoss()
+    spectral = SpectralCRPSLoss(node_weights=node_weights, transform="fft2d", x_dim=x_dim, y_dim=y_dim)
+
+    loss = CombinedLoss(
+        losses=[mse, spectral],
+        loss_weights=[1.0, 0.25],
+    )
+
+    out = loss(pred, target)
+    assert out.ndim == 0
+    assert torch.isfinite(out).all()
+
+    out.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
