@@ -102,7 +102,7 @@ def test_ensemble_plot_mixin_handle_batch_and_output():
 
     # Mock lightning module and allgather_batch method
     pl_module = MagicMock()
-    pl_module.allgather_batch.side_effect = lambda x, _y, _z: x
+    pl_module.allgather_batch.side_effect = lambda x, _y: x
 
     # Mock ensemble output
     loss = torch.tensor(0.5)

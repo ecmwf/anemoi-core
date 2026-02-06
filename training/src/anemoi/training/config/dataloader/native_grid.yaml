@@ -37,14 +37,6 @@ limit_batches:
   validation: null
   test: 20
 
-# set a custom mask for grid points.
-# Useful for LAM (dropping unconnected nodes from forcing dataset)
-grid_indices:
-  datasets:
-    data: # user-defined name for the dataset
-      _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: ${graph.data}
-
 # ============
 # Dataloader definitions
 # These follow the anemoi-datasets patterns
@@ -52,8 +44,8 @@ grid_indices:
 # See https://anemoi-datasets.readthedocs.io
 # ============
 
+# Pointers to datasets and model run info
 dataset: ${system.input.dataset}
-
 model_run_info: null  # Add for non-analysis training
 
 training:
