@@ -13,6 +13,7 @@ from .area_weights import MaskedPlanarAreaWeights
 from .area_weights import PlanarAreaWeights
 from .area_weights import SphericalAreaWeights
 from .area_weights import UniformWeights
+from .area_weights import AnemoiDatasetVariableWeights
 from .boolean_op import BooleanAndMask
 from .boolean_op import BooleanNot
 from .boolean_op import BooleanOrMask
@@ -35,4 +36,5 @@ __all__ = [
     "BooleanOrMask",
     "CosineLatWeightedAttribute",
     "IsolatitudeAreaWeights",
+    "AnemoiDatasetVariableWeights",
 ]

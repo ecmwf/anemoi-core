@@ -422,3 +422,26 @@ class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
         # Compute the area of each node
         area_km = dict(zip(unique_lats, ring_area_km / lat_counts))
         return np.array([area_km[lat] for lat in latitudes])
+
+class AnemoiDatasetVariableWeights(BaseNodeAttribute):
+    """
+    Load area weights from a variable in the dataset.
+
+    Attributes
+    ----------
+    variable : str
+        Name of the variable to use as weights.
+    norm : str, optional
+        Method to use to normalise the weights.
+    """
+
+    def __init__(self, variable: str, norm: str | None = None, dtype: str = "float32") -> None:
+        super().__init__(norm, dtype)
+        self.variable = variable
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        """
+        
+        """
+        assert self.variable in nodes, f"Variable '{self.variable} not found."
+        return nodes[self.variable]
