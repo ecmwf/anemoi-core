@@ -15,6 +15,7 @@ from pytest_mock import MockFixture
 from anemoi.training.data.multidataset import MultiDataset
 
 
+
 class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
 
@@ -23,6 +24,7 @@ class TestMultiDataset:
         """Fixture to provide dataset configuration."""
         return {
             "timestep": "6h",
+            "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h
             "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h
             "shuffle": True,
         }
@@ -64,6 +66,7 @@ class TestMultiDataset:
         # data (3h) -> data_relative_time_indices: [0, 2, 6]
         # dataset_a|b has dates [0, 1, 2, ..., 29]
         # dataset_a has indices [0, 1, 2, 3, 4, ..., 22, 23], where 23 = 29 - max(data_relative_time_indices)
+        # dataset_b has missing indices {7, 8, 9, 10}
         # dataset_b has missing indices {7, 8, 9, 10}
         # dataset_b has indices [0, 11, 12, 13, ..., 22, 23]
         # intersection should be [0, 11, 12, 13, ..., 22, 23]
