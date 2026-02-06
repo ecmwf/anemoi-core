@@ -12,9 +12,9 @@ from .diffusionforecaster import GraphDiffusionTendForecaster
 from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
+from .interpolator import GraphMultiOutInterpolator
 from .single_step import GraphAutoEncoder
 from .single_step import GraphDownscaler
-from .interpolator import GraphMultiOutInterpolator
 
 __all__ = [
     "GraphAutoEncoder",

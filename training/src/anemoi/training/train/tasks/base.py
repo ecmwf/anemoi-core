@@ -19,7 +19,8 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.models.data_indices.collection import IndexCollection
