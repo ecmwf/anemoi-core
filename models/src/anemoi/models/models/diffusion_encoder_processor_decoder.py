@@ -231,11 +231,11 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self,
         x: dict[str, torch.Tensor],
         y_noised: dict[str, torch.Tensor],
-        sigma: torch.Tensor,
+        sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[dict[str, list]] = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         # Multi-dataset case
         dataset_names = list(x.keys())
 

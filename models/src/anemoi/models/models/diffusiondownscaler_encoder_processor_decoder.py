@@ -563,8 +563,19 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_in_lres_upsampled = pre_processors["in_lres"](x_in_lres_upsampled, in_place=False)
         x_in_hres = pre_processors["in_hres"](x_in_hres, in_place=False)
 
-        # Return None for grid_shard_shapes (no sharding for single-device inference)
+        # Setup grid sharding if distributed
         grid_shard_shapes = None
+        if model_comm_group is not None:
+            # Shard along grid dimension (-2)
+            shard_shapes_lres = get_shard_shapes(x_in_lres_upsampled, -2, model_comm_group=model_comm_group)
+            shard_shapes_hres = get_shard_shapes(x_in_hres, -2, model_comm_group=model_comm_group)
+            grid_shard_shapes = {
+                "in_lres": [shape[-2] for shape in shard_shapes_lres],
+                "in_hres": [shape[-2] for shape in shard_shapes_hres],
+                "out_hres": [shape[-2] for shape in shard_shapes_hres],  # output matches hres grid
+            }
+            x_in_lres_upsampled = shard_tensor(x_in_lres_upsampled, -2, shard_shapes_lres, model_comm_group)
+            x_in_hres = shard_tensor(x_in_hres, -2, shard_shapes_hres, model_comm_group)
 
         return (x_in_lres_upsampled, x_in_hres), grid_shard_shapes
 
@@ -609,7 +620,9 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         post_processors_tendencies : Optional[nn.Module]
             Post-processing module for tendencies (used by subclasses)
         **kwargs
-            Additional sampling parameters
+            Additional sampling parameters - can pass individual noise scheduler or sampler parameters:
+            - Noise scheduler: num_steps, sigma_max, sigma_min, rho, schedule_type
+            - Sampler: sampler, S_churn, S_min, S_max, S_noise
 
         Returns
         -------
@@ -617,27 +630,33 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Sampled output (after post-processing)
         """
 
-        # Use provided parameters or fall back to defaults
-        if noise_scheduler_params is None:
-            noise_scheduler_params = {
-                "schedule_type": "karras",
-                "sigma_max": 100000,
-                "sigma_min": 0.03,
-                "rho": 7.0,
-                "num_steps": 80,
-            }
+        # Start with defaults from config, then apply any user overrides
+        # This allows users to override individual parameters without specifying all
+        noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
+        sampler_config = dict(self.inference_defaults.diffusion_sampler)
 
-        if sampler_params is None:
-            sampler_params = {
-                "sampler": "heun",
-                "S_churn": 2.5,
-                "S_min": 0.75,
-                "S_max": 100000,
-                "S_noise": 1.05,
-            }
+        # Apply dict-based overrides first
+        if noise_scheduler_params is not None:
+            noise_scheduler_config.update(noise_scheduler_params)
+        if sampler_params is not None:
+            sampler_config.update(sampler_params)
 
-        print("noise_scheduler_params:", noise_scheduler_params)
-        print("sampler_params:", sampler_params)
+        # Extract individual parameter overrides from kwargs
+        noise_scheduler_keys = {"num_steps", "sigma_max", "sigma_min", "rho", "schedule_type"}
+        sampler_keys = {"sampler", "S_churn", "S_min", "S_max", "S_noise"}
+
+        # Separate kwargs into noise_scheduler, sampler, and other kwargs
+        remaining_kwargs = {}
+        for key, value in kwargs.items():
+            if key in noise_scheduler_keys:
+                noise_scheduler_config[key] = value
+            elif key in sampler_keys:
+                sampler_config[key] = value
+            else:
+                remaining_kwargs[key] = value
+
+        print("noise_scheduler_params (after config merge):", noise_scheduler_config)
+        print("sampler_params (after config merge):", sampler_config)
 
         with torch.no_grad():
 
@@ -656,7 +675,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 model_comm_group,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
-                **kwargs,
+                **remaining_kwargs,
             )
 
             x_in_lres_upsampled = before_sampling_data[0]
@@ -672,9 +691,9 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 x_in_hres,
                 model_comm_group,
                 grid_shard_shapes=grid_shard_shapes,
-                noise_scheduler_params=noise_scheduler_params,
-                sampler_params=sampler_params,
-                **kwargs,
+                noise_scheduler_params=noise_scheduler_config,
+                sampler_params=sampler_config,
+                **remaining_kwargs,
             ).to(x_in_lres_upsampled.dtype)
 
             # After sampling hook
@@ -687,7 +706,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 gather_out,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
-                **kwargs,
+                **remaining_kwargs,
             )
 
         return out
@@ -866,7 +885,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
 
         # Gather if needed
-        if gather_out and model_comm_group is not None:
+        if gather_out and model_comm_group is not None and grid_shard_shapes is not None:
             out = gather_tensor(
                 out,
                 -2,
