@@ -677,6 +677,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                     f"Sigma schedules differ between datasets! Dataset '{dataset_name}' has a different schedule."
                 )
 
+        # Get dtype from first input tensor
+        x_dtype = next(iter(x.values())).dtype
+
         return sampler_instance.sample(
             x,
             y_init,
@@ -684,6 +687,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             self.fwd_with_preconditioning,
             model_comm_group,
             grid_shard_shapes=grid_shard_shapes,
+            dtype=x_dtype,
         )
 
     def fill_metadata(self, md_dict) -> None:

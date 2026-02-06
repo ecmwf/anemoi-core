@@ -101,14 +101,14 @@ class InterpolationConnection(BaseResidualConnection):
         batch_size = x.shape[0]
         x = x[:, self.step, ...]  # pick timestep
 
-        # Reshape: (batch, ensemble, grid, features) → (batch*ensemble, grid, features)
-        x = einops.rearrange(x, "batch ensemble grid features -> (batch ensemble) grid features")
+        # Reshape: (batch, time, grid, features) → (batch*time, grid, features)
+        x = einops.rearrange(x, "batch time grid features -> (batch time) grid features")
 
         # Apply single interpolation projection
         x = self.projector(x, self.provider.get_edges(device=x.device))
 
-        # Reshape back: (batch*ensemble, grid, features) → (batch, ensemble, grid, features)
-        x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
+        # Reshape back: (batch*time, grid, features) → (batch, time, grid, features)
+        x = einops.rearrange(x, "(batch time) grid features -> batch time grid features", batch=batch_size)
 
         return x
 

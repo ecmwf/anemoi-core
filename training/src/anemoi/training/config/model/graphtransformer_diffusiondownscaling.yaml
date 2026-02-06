@@ -4,7 +4,7 @@ cpu_offload: False
 keep_batch_sharded: False
 
 model:
-  _target_: anemoi.models.models.AnemoiDownscalingModelEncProcDec
+  _target_: anemoi.models.models.AnemoiD2ModelEncProcDec
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0

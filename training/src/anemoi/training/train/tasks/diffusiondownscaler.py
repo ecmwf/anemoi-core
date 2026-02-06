@@ -91,14 +91,20 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         - x_in_hres: native hres forcings
         - y_noised: native hres target (noised)
         """
-        return self.model.model.fwd_with_preconditioning(
-            x_in_lres_interp_hres,
-            x_in_hres,
-            y_noised,
-            sigma,
+        # Wrap inputs as dicts for model interface
+        x_dict = {"in_lres": x_in_lres_interp_hres, "in_hres": x_in_hres}
+        y_dict = {"out_hres": y_noised}
+        sigma_dict = {"out_hres": sigma}
+
+        result = self.model.model.fwd_with_preconditioning(
+            x_dict,
+            y_dict,
+            sigma_dict,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=None,
         )
+
+        return result["out_hres"]
 
     def _prepare_tensors_for_loss(
         self,
@@ -247,6 +253,11 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         # get targets and noised targets
         resid_noised = self._noise_target(resid, sigma)
 
+        # Validate input dimensions
+        assert (
+            x_in_lres_upsampled.ndim == x_in_hres.ndim == resid_noised.ndim == 5
+        ), f"Expected 5D tensors, got shapes {x_in_lres_upsampled.shape}, {x_in_hres.shape}, {resid_noised.shape}"
+
         # All inputs keep time dimension for future multi-step support
         y_pred = self(
             x_in_lres_upsampled,
@@ -283,8 +294,8 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             + y_pred_denorm
         )
 
-        # Return predictions: [full_prediction, residual_only]
-        y_preds = [y_pred_full, y_pred_denorm]
+        # Return predictions as dictionary: full prediction and residual-only
+        y_preds = {"full": y_pred_full, "residual": y_pred_denorm}
 
         return loss, metrics_next, y_preds
 
@@ -300,9 +311,37 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         sigma_data: float,
         rho: float,
         device: torch.device,
+        sigma_override: float | None = None,
     ) -> tuple[torch.Tensor]:
+        """Get noise level for diffusion training.
 
-        if self.training_approach == "probabilistic_high_noise":
+        Parameters
+        ----------
+        shape : torch.shape
+            Shape for the noise tensor
+        sigma_max : float
+            Maximum noise level
+        sigma_min : float
+            Minimum noise level
+        sigma_data : float
+            Data scaling factor
+        rho : float
+            Distribution parameter
+        device : torch.device
+            Device for tensor creation
+        sigma_override : float | None
+            If provided, use this fixed sigma instead of sampling. Useful for testing.
+
+        Returns
+        -------
+        tuple[torch.Tensor]
+            Sigma and weight tensors
+        """
+
+        if sigma_override is not None:
+            # Use fixed sigma for testing/debugging
+            sigma = torch.full(shape, fill_value=sigma_override, device=device)
+        elif self.training_approach == "probabilistic_high_noise":
             rnd_uniform = torch.rand(shape, device=device)
             sigma = (
                 sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))

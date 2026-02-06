@@ -561,47 +561,25 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         # 3. Result: ALL data is at hres resolution after upsampling
         # ============================================================================
 
-        # Step 1: Shard in_lres at its native LOW resolution for upsampling
-        lres_grid_shard_shapes = None
-        if model_comm_group is not None:
-            lres_shard_shapes = get_shard_shapes(x_in_lres, -2, model_comm_group=model_comm_group)
-            lres_grid_shard_shapes = [shape[-2] for shape in lres_shard_shapes]
-            x_in_lres = shard_tensor(x_in_lres, -2, lres_shard_shapes, model_comm_group)
-
-        # Step 2: Upsample in_lres from lres -> hres (prediction only; training pre-upsamples)
-        x_in_lres_upsampled = self.apply_interpolate_to_high_res(
-            x_in_lres[:, :, 0, ...],  # Remove ensemble dim temporarily
-            grid_shard_shapes=lres_grid_shard_shapes,
+        # Upsample in_lres from lres -> hres using residual connection
+        # Follow the same pattern as training: residual removes ensemble, we add it back
+        x_in_lres_upsampled = self.residual["in_lres"](
+            x_in_lres,  # (batch, multistep, ensemble, grid, features)
+            grid_shard_shapes=None,
             model_comm_group=model_comm_group,
-        )
-        x_in_lres_upsampled = x_in_lres_upsampled[:, :, None, ...]  # Add ensemble dim back
+        )[
+            :, :, None, :, :
+        ]  # Add ensemble back: (batch, time, ensemble=1, grid, features)
 
-        # Step 3: Now ALL data is at HRES - set up hres grid sharding for everything
-        hres_grid_shard_shapes = None
-        if model_comm_group is not None:
-            # Shard in_hres at native hres resolution
-            hres_shard_shapes = get_shard_shapes(x_in_hres, -2, model_comm_group=model_comm_group)
-            hres_grid_shard_shapes = [shape[-2] for shape in hres_shard_shapes]
-            x_in_hres = shard_tensor(x_in_hres, -2, hres_shard_shapes, model_comm_group)
-
-            # Reshard upsampled in_lres to match hres grid sharding
-            x_in_lres_upsampled_shard_shapes = get_shard_shapes(
-                x_in_lres_upsampled, -2, model_comm_group=model_comm_group
-            )
-            x_in_lres_upsampled = shard_tensor(
-                x_in_lres_upsampled, -2, x_in_lres_upsampled_shard_shapes, model_comm_group
-            )
-
-        # Step 4: Apply preprocessing (dataset-specific normalization)
+        # Apply preprocessing (dataset-specific normalization)
         x_in_lres_upsampled = pre_processors["in_lres"](x_in_lres_upsampled, in_place=False)
         x_in_hres = pre_processors["in_hres"](x_in_hres, in_place=False)
 
-        # Step 5: Build grid_shard_shapes dict for model
-        # Key = dataset name, Value = actual grid shard shapes (all hres after upsampling)
+        # Build grid_shard_shapes dict for model (all None for single-device inference)
         grid_shard_shapes = {
-            "in_lres": hres_grid_shard_shapes,  # upsampled lres -> now at hres
-            "in_hres": hres_grid_shard_shapes,  # native hres input
-            "out_hres": hres_grid_shard_shapes,  # native hres output/target
+            "in_lres": None,
+            "in_hres": None,
+            "out_hres": None,
         }
 
         return (x_in_lres_upsampled, x_in_hres), grid_shard_shapes
@@ -773,12 +751,16 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         sigmas = scheduler.get_schedule(x_in_lres_upsampled.device, torch.float64)
 
         # Initialize output with noise
-        batch_size, ensemble_size, grid_size = (
-            x_in_lres_upsampled.shape[0],
-            x_in_lres_upsampled.shape[2],
-            x_in_lres_upsampled.shape[-2],
-        )
+        print(f"DEBUG: x_in_lres_upsampled.shape = {x_in_lres_upsampled.shape}")
+        batch_size = x_in_lres_upsampled.shape[0]
+        ensemble_size = x_in_lres_upsampled.shape[2]
+        grid_size = x_in_lres_upsampled.shape[-2]
         time_size = 1
+
+        print(
+            f"DEBUG: batch_size={batch_size}, time_size={time_size}, ensemble_size={ensemble_size}, grid_size={grid_size}, num_output_channels={self.num_output_channels}"
+        )
+
         shape = (
             batch_size,
             time_size,
@@ -786,6 +768,9 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             grid_size,
             self.num_output_channels,
         )
+        print(f"DEBUG: shape = {shape}")
+        print(f"DEBUG: shape types = {[type(s) for s in shape]}")
+
         y_init = torch.randn(shape, device=x_in_lres_upsampled.device, dtype=sigmas.dtype) * sigmas[0]
 
         print("sigmas", sigmas)
