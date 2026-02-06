@@ -68,8 +68,6 @@ class NativeDatasetSchema(PydanticBaseModel):
     "Temporal resolution, frequency must be >= to dataset frequency."
     drop: list | None = Field(default=None)
     "List of variables to drop from dataset"
-    lam_mask_radius_km: int | None = Field(default=None)
-    "Radius in kilometers for LAM mask."
 
 
 class TrajectorySchema(PydanticBaseModel):
