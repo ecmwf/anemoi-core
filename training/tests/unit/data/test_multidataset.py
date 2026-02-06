@@ -13,6 +13,7 @@ import pytest
 
 from anemoi.training.data.multidataset import MultiDataset
 
+
 class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
 
@@ -21,7 +22,7 @@ class TestMultiDataset:
         """Fixture to provide dataset configuration."""
         return {
             "timestep": "6h",
-            "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h 
+            "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h
             "shuffle": True,
         }
 
@@ -62,7 +63,7 @@ class TestMultiDataset:
         # data (3h) -> data_relative_time_indices: [0, 2, 6]
         # dataset_a|b has dates [0, 1, 2, ..., 29]
         # dataset_a has indices [0, 1, 2, 3, 4, ..., 22, 23], where 23 = 29 - max(data_relative_time_indices)
-        # dataset_b has missing indices {7, 8, 9, 10}
+        # dataset_b has missing indices {7, 8, 9, 10}
         # dataset_b has indices [0, 11, 12, 13, ..., 22, 23]
         # intersection should be [0, 11, 12, 13, ..., 22, 23]
 
@@ -72,7 +73,6 @@ class TestMultiDataset:
         # Should return intersection [0, 11, 12, 13, ..., 22, 23]
         expected_indices = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
         assert np.array_equal(valid_indices, expected_indices)
-
 
     def test_valid_date_indices_empty_dataset(self, multi_dataset: MultiDataset, mocker):
         """Test that MultiDataset raises ValueError when a dataset has no valid indices."""
@@ -92,7 +92,6 @@ class TestMultiDataset:
         # Accessing valid_date_indices should raise ValueError
         with pytest.raises(ValueError, match="No valid date indices found for dataset 'dataset_b'"):
             _ = multi_dataset.valid_date_indices
-
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset, mocker):
         """Test that MultiDataset raises ValueError when intersection of valid indices is empty."""
