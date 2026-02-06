@@ -1,0 +1,9 @@
+---
+# Reusable self-smoothing projection parameters (KNN=32, sigma~60km).
+
+node_name: smooth
+reference_node_name: ${graph.data}
+edge_weight_attribute: gauss_weight
+gaussian_norm: l1
+num_nearest_neighbours: 32
+sigma: 0.00942

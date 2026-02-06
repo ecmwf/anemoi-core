@@ -1,14 +1,12 @@
+.. _residual-connections:
+
 ######################
  Residual connections
 ######################
 
-Residual connections are a key architectural feature in Anemoi's
-encoder-processor-decoder models, enabling more effective information
-flow and gradient propagation across network layers. Residual
-connections help mitigate issues such as vanishing gradients and support
-the training of deeper, and more expressive models.
+The configurable residual connections link input data to output data.
 
-In Anemoi, the type of residual connection used in a model is specified
+The type of residual connection used in a model is specified
 under the `residual` key in the model configuration YAML. This modular
 approach allows users to select and customize the residual strategy best
 suited for their forecasting task, whether it be a standard skip
@@ -34,3 +32,42 @@ in Anemoi.
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+****************
+ Configuration
+****************
+
+``TruncatedConnection`` supports two configuration styles:
+
+- **Graph-based**: reference projection edges defined in
+  ``config.graph.projections`` and build sparse matrices at runtime.
+- **File-based**: load precomputed ``.npz`` matrices from disk.
+Choose one style; do not mix graph-based and file-based settings in the
+same config.
+
+Graph-based example:
+
+.. code:: yaml
+
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       truncation_down_edges_name: ${graph.projections.residual.down_edges_name}
+       truncation_up_edges_name: ${graph.projections.residual.up_edges_name}
+       edge_weight_attribute: ${graph.projections.residual.edge_weight_attribute}
+
+Gaussian distance weights computed with ``norm: l1`` should be used as
+``edge_weight_attribute`` (commonly ``gauss_weight`` in the projection
+graph). ``src_node_weight_attribute`` is optional and can be omitted for
+truncation graphs.
+
+File-based example:
+
+.. code:: yaml
+
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       truncation_down_file_path: ${system.input.truncation}
+       truncation_up_file_path: ${system.input.truncation_inv}
+       row_normalize: false

@@ -1,4 +1,8 @@
 ---
+defaults:
+  - projections: none
+  - _self_
+
 overwrite: True
 
 data: "data"

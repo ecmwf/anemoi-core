@@ -1,0 +1,10 @@
+---
+# Reusable truncation projection parameters (o32 truncation grid, KNN=32).
+
+data_nodes: ${graph.data}
+truncation_nodes: truncation
+truncation_grid: o32
+edge_weight_attribute: gauss_weight
+gaussian_norm: l1
+num_nearest_neighbours: 32
+sigma: 0.03139
