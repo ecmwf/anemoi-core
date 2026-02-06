@@ -35,10 +35,18 @@ class BaseAnemoiReader:
         frequency: str | None = None,
         drop: list[str] | None = None,
     ):
-        self.data = open_dataset(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        """Initialize Anemoi data reader."""
+        ds_kwargs = {}
+        if drop is not None:
+            ds_kwargs["drop"] = drop
+
+        if frequency is not None:
+            ds_kwargs["frequency"] = frequency
+
+        self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
 
     @property
-    def dates(self) -> list[datetime.datetime]:
+    def dates(self) -> np.ndarray:
         """Return dataset dates."""
         return self.data.dates
 
@@ -60,7 +68,7 @@ class BaseAnemoiReader:
         return self.data.variables
 
     @property
-    def missing(self) -> np.ndarray:
+    def missing(self) -> set[int]:
         """Return dataset missing values mask."""
         return self.data.missing
 
