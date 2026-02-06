@@ -15,7 +15,6 @@ from pytest_mock import MockFixture
 from anemoi.training.data.multidataset import MultiDataset
 
 
-
 class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
 
