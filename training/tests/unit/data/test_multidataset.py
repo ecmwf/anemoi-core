@@ -51,6 +51,11 @@ class TestMultiDataset:
 
         return MultiDataset(data_readers=data_readers, grid_indices=grid_indices, **dataset_config)
 
+    def test_timeincrement(self, multi_dataset: MultiDataset):
+        """Test that timeincrement is correctly computed from timestep."""
+        expected_timeincrement = 2  # 6H (timestep) in 3h steps (frequency)
+        assert multi_dataset.timeincrement == expected_timeincrement
+
     def test_valid_date_indices(self, multi_dataset: MultiDataset):
         """Test that valid_date_indices returns the intersection of indices from all datasets."""
         # relative_date_indices: [0, 1, 3] (for 6H timestep)
