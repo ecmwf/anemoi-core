@@ -54,7 +54,7 @@ class RolloutEval(Callback):
     def _eval(
         self,
         pl_module: pl.LightningModule,
-        batch: torch.Tensor | dict[str, torch.Tensor],
+        batch: dict[str, torch.Tensor],
     ) -> None:
         batch_tensor = batch
         if isinstance(batch, dict):
