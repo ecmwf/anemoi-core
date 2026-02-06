@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -197,8 +198,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.statistics_tendencies = statistics_tendencies
 
-        self.logger_enabled = self.trainer.logger is not None
-
         # Initialize components for multi-dataset
         self.target_dataset_names = []  # list of dataset names used for loss computation
         self.scalers = {}  # dict of dict of tensors
@@ -357,6 +356,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 "This may lead to increased memory usage and slower training.",
                 ", ".join(unsupported_metrics),
             )
+
+    @cached_property
+    def logger_enabled(self) -> bool:
+        return self.trainer.logger is not None
 
     def _build_metrics_for_dataset(
         self,
