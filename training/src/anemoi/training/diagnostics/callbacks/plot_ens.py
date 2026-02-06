@@ -248,6 +248,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         members: list | None = None,
+        focus_area: list[dict] | None = None,
         **kwargs: Any,
     ) -> None:
         # Initialize PlotSample first
@@ -262,6 +263,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             per_sample,
             every_n_batches,
             dataset_names,
+            focus_area,
             **kwargs,
         )
         self.plot_members = members
@@ -304,6 +306,14 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 members=self.plot_members,
             )
 
+            # Apply spatial mask
+            _, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
+
             local_rank = pl_module.local_rank
             for rollout_step in range(output_times[0]):
                 fig = plot_predicted_ensemble(
@@ -322,8 +332,8 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                    exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}",
+                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                 )
 
 
@@ -361,9 +371,19 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback."""
-        _PlotSpectrum.__init__(self, config, sample_idx, parameters, min_delta, every_n_batches, dataset_names)
+        _PlotSpectrum.__init__(
+            self,
+            config,
+            sample_idx,
+            parameters,
+            min_delta,
+            every_n_batches,
+            dataset_names,
+            focus_area,
+        )
 
 
 class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
@@ -380,6 +400,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback."""
@@ -394,6 +415,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
             per_sample,
             every_n_batches,
             dataset_names,
+            focus_area,
             **kwargs,
         )
 
@@ -410,6 +432,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         log_scale: bool = False,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback."""
         _PlotHistogram.__init__(
@@ -421,6 +444,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
             log_scale,
             every_n_batches,
             dataset_names,
+            focus_area,
         )
 
 
