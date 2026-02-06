@@ -352,6 +352,7 @@ LossSchemas = (
     | SpectralLossSchema
     | MultiScaleLossSchema
     | None
+    | None
 )
 
 
@@ -496,6 +497,13 @@ class AutoencoderSchema(ForecasterSchema):
     "Training objective."
 
 
+class DownscalingSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDownscaler"] = Field(..., alias="model_task")
+    "Training objective."
+    multistep_input: PositiveInt = Field(example=1)
+    "Number of input steps for the model. E.g. 1 = single step scheme, X(t) used to predict Y(t)."
+
+
 class InterpolationMultiSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
     "Training objective."
@@ -512,6 +520,7 @@ TrainingSchema = Annotated[
     | InterpolationMultiSchema
     | DiffusionForecasterSchema
     | DiffusionTendForecasterSchema
-    | AutoencoderSchema,
+    | AutoencoderSchema
+    | DownscalingSchema,
     Discriminator("model_task"),
 ]

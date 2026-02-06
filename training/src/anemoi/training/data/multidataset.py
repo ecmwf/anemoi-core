@@ -368,8 +368,8 @@ class MultiDataset(IterableDataset):
         end = index + self.data_relative_date_indices[-1] + 1
         if len(self.data_relative_date_indices) > 1:
             timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
-        else:
-            timeincrement = 1  # single time step
+        else:  # single time step: autoencoder & downscaling
+            timeincrement = 1
         time_indices = slice(start, end, timeincrement)
 
         x = {}
