@@ -267,6 +267,39 @@ def test_transform_with_nan_inference(imputer_fixture, data_fixture, request):
     ), "Inverse transform does not restore NaNs correctly in inference."
 
 
+def test_transform_with_subset_data_index_is_noop(non_default_input_imputer, non_default_input_data) -> None:
+    """Subset transforms should be a no-op when skip_imputation is provided."""
+    x, _, _ = non_default_input_data
+    imputer = non_default_input_imputer
+
+    imputer.transform(x, in_place=False)
+    saved_mask = imputer.nan_locations.clone()
+
+    prog_index = imputer.data_indices.data.input.prognostic
+    x_subset = x[..., prog_index]
+    transformed = imputer.transform(x_subset, in_place=False, data_index=prog_index, skip_imputation=True)
+
+    assert torch.allclose(
+        transformed, x_subset, equal_nan=True
+    ), "Subset transform should not modify the input when data_index is provided."
+    assert torch.equal(imputer.nan_locations, saved_mask), "Subset transform should not update the saved NaN mask."
+
+
+def test_inverse_transform_skip_imputation_is_noop(non_default_input_imputer, non_default_input_data) -> None:
+    """Inverse transform should be a no-op when skip_imputation is set."""
+    x, expected, _ = non_default_input_data
+    imputer = non_default_input_imputer
+
+    imputer.transform(x, in_place=False)
+    data_index = imputer.data_indices.data.input.prognostic
+    expected_prog = expected[..., data_index]
+
+    restored = imputer.inverse_transform(expected_prog, in_place=False, skip_imputation=True, data_index=data_index)
+    assert torch.allclose(
+        restored, expected_prog, equal_nan=True
+    ), "Inverse transform should not modify the input when skip_imputation is set."
+
+
 @pytest.mark.parametrize(
     ("imputer_fixture", "data_fixture"),
     fixture_combinations,
