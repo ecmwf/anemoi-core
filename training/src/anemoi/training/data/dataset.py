@@ -47,7 +47,7 @@ class BaseAnemoiReader:
         self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
 
     @property
-    def dates(self) -> list[datetime.datetime]:
+    def dates(self) -> np.ndarray:
         """Return dataset dates."""
         return self.data.dates
 
@@ -74,7 +74,7 @@ class BaseAnemoiReader:
         return self.data.variables
 
     @property
-    def missing(self) -> np.ndarray:
+    def missing(self) -> set[int]:
         """Return dataset missing values mask."""
         return self.data.missing
 
