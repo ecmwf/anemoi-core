@@ -144,6 +144,8 @@ class PlotSampleSchema(BaseModel):
     "Number of plots per sample, by default 6."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -159,6 +161,8 @@ class PlotSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -174,6 +178,8 @@ class PlotHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
@@ -199,6 +205,8 @@ class PlotEnsSampleSchema(BaseModel):
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
@@ -229,6 +237,8 @@ class PlotEnsSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -244,6 +254,8 @@ class PlotEnsHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
