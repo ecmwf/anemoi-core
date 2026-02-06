@@ -29,7 +29,7 @@ def config(request: SubRequest) -> DictConfig:
 
 
 @pytest.fixture(scope="module")
-def test_dataset(temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> tuple[str, str]:
+def extract_dataset_path(temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> tuple[str, str]:
     """Get path to test dataset."""
     test_ds = "anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
     name_dataset = Path(test_ds).name

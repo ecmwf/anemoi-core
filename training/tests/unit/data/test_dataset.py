@@ -22,16 +22,21 @@ class TestNativeGridDataset:
     """Test NativeGridDataset instantiation and properties."""
 
     @pytest.fixture
-    def dataset_path(self, test_dataset: tuple[str, str], get_test_archive: GetTestArchive) -> str:
+    def dataset_path(self, extract_dataset_path: tuple[str, str], get_test_archive: GetTestArchive) -> str:
         """Fixture to provide dataset path."""
-        path, url_archive = test_dataset
+        path, url_archive = extract_dataset_path
         get_test_archive(url_archive)
         return path
 
     @skip_if_offline
     @pytest.mark.parametrize("start", [None, 2017])
     @pytest.mark.parametrize("end", [None, 2017])
-    def test_basic_instantiation(self, dataset_path: str, start: datetime.datetime, end: datetime.datetime) -> None:
+    def test_basic_instantiation(
+            self,
+            dataset_path: str,
+        start: datetime.datetime,
+        end: datetime.datetime,
+    ) -> None:
         """Test basic instantiation of NativeGridDataset."""
         dataset = NativeGridDataset(dataset=dataset_path, start=start, end=end)
 
@@ -44,7 +49,12 @@ class TestNativeGridDataset:
     @skip_if_offline
     @pytest.mark.parametrize("frequency", [None, "6h", "12h"])
     @pytest.mark.parametrize("drop", [None, []])
-    def test_instantiation_with_frequency_and_drop(self, dataset_path: str, frequency: str, drop: list[str]) -> None:
+    def test_instantiation_with_frequency_and_drop(
+        self,
+        dataset_path: str,
+        frequency: str,
+        drop: list[str],
+    ) -> None:
         dataset = NativeGridDataset(dataset=dataset_path, frequency=frequency, drop=drop)
 
         assert dataset.data is not None
