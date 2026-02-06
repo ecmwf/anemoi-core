@@ -197,7 +197,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.statistics_tendencies = statistics_tendencies
 
-        self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
+        self.logger_enabled = self.trainer.logger is not None
 
         # Initialize components for multi-dataset
         self.target_dataset_names = []  # list of dataset names used for loss computation

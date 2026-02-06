@@ -30,8 +30,8 @@ def get_mlflow_logger(
         return None
 
     mlflow_config = OmegaConf.to_container(mlflow_config, resolve=True)
-    EXTRA_KEYS = ["enabled"]
-    for key in EXTRA_KEYS:
+    extra_keys = ["enabled"]
+    for key in extra_keys:
         mlflow_config.pop(key, None)
 
     # backward compatibility to not break configs
@@ -92,8 +92,8 @@ def get_wandb_logger(
         return None
 
     wandb_config = OmegaConf.to_container(wandb_config, resolve=True)
-    EXTRA_KEYS = ["gradients", "parameters", "interval", "enabled"]
-    for key in EXTRA_KEYS:
+    extra_keys = ["gradients", "parameters", "interval", "enabled"]
+    for key in extra_keys:
         wandb_config.pop(key, None)
 
     try:
