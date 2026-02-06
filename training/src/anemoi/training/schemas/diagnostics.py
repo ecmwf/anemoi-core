@@ -383,21 +383,6 @@ class WandbSchema(BaseModel):
             values["entity"] = None
         return values
 
-    # @model_validator(mode="after")
-    # def check_valid_extras(self) -> Any:
-    #     # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-    #     allowed_extras = {"interval": int}
-    #     extras = getattr(self, "__pydantic_extra__", {}) or {}
-    #     for extra_field, value in extras.items():
-    #         if extra_field not in allowed_extras:
-    #             msg = f"Extra field '{extra_field}' is not allowed. Allowed fields are: {list(allowed_extras.keys())}."
-    #             raise ValueError(msg)
-    #         if not isinstance(value, allowed_extras[extra_field]):
-    #             msg = f"Extra field '{extra_field}' must be of type {allowed_extras[extra_field].__name__}."
-    #             raise TypeError(msg)
-
-    #     return self
-
 
 class MlflowSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
@@ -467,10 +452,15 @@ class AzureMlflowSchema(MlflowSchema):
 
 
 class LoggingSchema(BaseModel):
-    wandb: WandbSchema
+    wandb: WandbSchema | None = None
     "W&B logging schema."
-    mlflow: Annotated[MlflowSchema | AzureMlflowSchema, Field(discriminator="target_")]
+
+    mlflow: Annotated[
+        MlflowSchema | AzureMlflowSchema | None,
+        Field(discriminator="target_"),
+    ] = None
     "MLflow logging schema."
+
     interval: PositiveInt
     "Logging frequency in batches."
 
