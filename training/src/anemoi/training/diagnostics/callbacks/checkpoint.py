@@ -16,7 +16,6 @@ from pathlib import Path
 import pytorch_lightning as pl
 import torch
 import torchinfo
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 
@@ -29,20 +28,17 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiCheckpoint(ModelCheckpoint):
     """A checkpoint callback that saves the model after every validation epoch."""
 
-    def __init__(self, config: OmegaConf, **kwargs: dict) -> None:
+    def __init__(self, **kwargs: dict) -> None:
         """Initialise the AnemoiCheckpoint callback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
         kwargs : dict
             Additional keyword arguments for Pytorch ModelCheckpoint
 
         """
         super().__init__(**kwargs)
 
-        self.config = config
         self.start = time.time()
         self._model_metadata = None
         self._tracker_metadata = None
@@ -105,8 +101,8 @@ class AnemoiCheckpoint(ModelCheckpoint):
         if self._tracker_metadata is not None:
             return {self._tracker_name: self._tracker_metadata}
 
-        if getattr(self.config.diagnostics.log.wandb, "enabled", False):
-            self._tracker_name = "wand"
+        self._tracker_name = trainer.logger.logger_name
+        if self._tracker_name == "wandb":
             import wandb
 
             run = wandb.run
@@ -117,10 +113,8 @@ class AnemoiCheckpoint(ModelCheckpoint):
                     "url": run.url,
                     "project": run.project,
                 }
-            return {self._tracker_name: self._tracker_metadata}
 
-        if getattr(self.config.diagnostics.log.mlflow, "enabled", False):
-            self._tracker_name = "mlflow"
+        if self._tracker_name == "mlflow":
 
             from anemoi.training.diagnostics.mlflow.logger import BaseAnemoiMLflowLogger
 
@@ -135,9 +129,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
                     "url": run.info.artifact_uri,
                     "project": run.info.experiment_id,
                 }
-            return {self._tracker_name: self._tracker_metadata}
-
-        return {}
+        return {self._tracker_name: self._tracker_metadata}
 
     def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         """Calls the strategy to remove the checkpoint file."""

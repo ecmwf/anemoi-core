@@ -375,20 +375,19 @@ class AnemoiTrainer(ABC):
         return get_wandb_logger(**kwargs)
 
     @cached_property
-    def loggers(self) -> list:
-        """Lazily build all enabled loggers."""
-        diagnostics_config = self.config.diagnostics
-        loggers = []
+    def logger(self) -> list[pl.loggers.LightningLoggerBase] | None:
+        """Lazily build all enabled logger."""
+        diagnostics_log = self.config.diagnostics.log
 
-        if getattr(diagnostics_config.log.wandb, "enabled", False):
-            LOGGER.info("W&B logger enabled")
-            loggers.append(self.wandb_logger)
+        logger_types = ("wandb", "mlflow")
 
-        if getattr(diagnostics_config.log.mlflow, "enabled", False):
-            LOGGER.info("MLFlow logger enabled")
-            loggers.append(self.mlflow_logger)
+        for logger_type in logger_types:
+            logger_cfg = getattr(diagnostics_log, logger_type, None)
+            if getattr(logger_cfg, "enabled", False):
+                LOGGER.info("%s logger enabled", logger_type.upper())
+                return getattr(self, f"{logger_type}_logger")
 
-        return loggers
+        return None
 
     @cached_property
     def accelerator(self) -> str:
@@ -547,7 +546,7 @@ class AnemoiTrainer(ABC):
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
-            logger=self.loggers,
+            logger=self.logger,
             profiler=self.profiler,
             log_every_n_steps=self.config.diagnostics.log.interval,
             # run a fixed no of batches per epoch (helpful when debugging)

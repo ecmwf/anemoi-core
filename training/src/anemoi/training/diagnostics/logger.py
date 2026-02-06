@@ -50,6 +50,7 @@ def get_mlflow_logger(
     if logger.log_system:
         logger.log_system_metrics()
 
+    logger.logger_name = "mlflow"
     return logger
 
 
@@ -116,4 +117,5 @@ def get_wandb_logger(
             log_ = "parameters"
         logger.watch(model, log=log_, log_freq=interval, log_graph=False)
 
+    logger.logger_name = "wandb"
     return logger
