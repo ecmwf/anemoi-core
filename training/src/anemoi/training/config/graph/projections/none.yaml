@@ -1,10 +1,5 @@
 ---
-multiscale:
-  matrices: [null]
-
-residual:
-  data_nodes: ${graph.data}
-  truncation_nodes: null
-  down_edges_name: null
-  up_edges_name: null
-  edge_weight_attribute: null
+defaults:
+  - multiscale: none
+  - residual: none
+  - _self_

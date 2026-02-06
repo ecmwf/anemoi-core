@@ -1,0 +1,40 @@
+---
+defaults:
+  - /graph/projections@truncation: truncation_o32_knn32
+  - _self_
+
+data_nodes: ${graph.projections.residual.truncation.data_nodes}
+truncation_nodes: ${graph.projections.residual.truncation.truncation_nodes}
+down_edges_name: ["${graph.projections.residual.data_nodes}", "to", "${graph.projections.residual.truncation_nodes}"]
+up_edges_name: ["${graph.projections.residual.truncation_nodes}", "to", "${graph.projections.residual.data_nodes}"]
+edge_weight_attribute: ${graph.projections.residual.truncation.edge_weight_attribute}
+truncation_grid: ${graph.projections.residual.truncation.truncation_grid}
+
+nodes:
+  truncation:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+      grid: ${graph.projections.residual.truncation_grid}
+
+edges:
+  - source_name: ${graph.projections.residual.data_nodes}
+    target_name: ${graph.projections.residual.truncation_nodes}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: ${graph.projections.residual.truncation.num_nearest_neighbours}
+    attributes:
+      gauss_weight:
+        _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+        norm: ${graph.projections.residual.truncation.gaussian_norm}
+        sigma: ${graph.projections.residual.truncation.sigma}
+
+  - source_name: ${graph.projections.residual.truncation_nodes}
+    target_name: ${graph.projections.residual.data_nodes}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: ${graph.projections.residual.truncation.num_nearest_neighbours}
+    attributes:
+      gauss_weight:
+        _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+        norm: ${graph.projections.residual.truncation.gaussian_norm}
+        sigma: ${graph.projections.residual.truncation.sigma}
