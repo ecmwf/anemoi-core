@@ -36,7 +36,6 @@ class DatasetContextStatic:
     data_indices: IndexCollection
     output_mask: Any
     grid_indices: Any
-    latlons_data: torch.Tensor
 
 
 @dataclass(frozen=True, slots=True)
