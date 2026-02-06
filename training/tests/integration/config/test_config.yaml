@@ -21,6 +21,7 @@ diagnostics:
   #! adding section here to overwrite plotting settings - deactivate PlotSpectrum callback until fix for
   plot:
     asynchronous: False # Whether to plot asynchronously
+    parameters: [tp, 2t]
     callbacks:
       # Add plot callbacks here
       - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
