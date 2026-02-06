@@ -203,15 +203,12 @@ class GraphDiffusionDownscaler(BaseGraphModule):
     def _step(
         self,
         batch: list[torch.Tensor],
-        batch_idx: int,
         training_mode: bool = True,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         """Process batch size of len 3 with each item of dimensions:
         [batch_size, dates, ensemble, gridpoints, variables].
         """
-
-        del batch_idx
         x_in_lres = batch["in_lres"]
         x_in_hres = batch["in_hres"]
         y = batch["out_hres"]
@@ -294,10 +291,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             + y_pred_denorm
         )
 
-        # Return predictions as dictionary: full prediction and residual-only
-        y_preds = {"full": y_pred_full, "residual": y_pred_denorm}
-
-        return loss, metrics_next, y_preds
+        return loss, metrics_next, [y_pred_full, y_pred_denorm]
 
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Add noise to the state."""

@@ -48,12 +48,104 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         graph_data: HeteroData,
     ) -> None:
 
+        # careful: actually model_config is config
+        self._encoder_datasets = None
+        self._decoder_datasets = None
+        self._encoder_datasets = model_config["model"]["model"].get("encoder_datasets", None)
+        self._decoder_datasets = model_config["model"]["model"].get("decoder_datasets", None)
+
+        LOGGER.info(f"Encoder datasets configured: {self._encoder_datasets}")
+        LOGGER.info(f"Decoder datasets configured: {self._decoder_datasets}")
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
         )
+
+    def _build_networks(self, model_config: DotDict) -> None:
+        """Builds the model components with optional dataset filtering for encoder/decoder."""
+        from anemoi.models.layers.graph_provider import create_graph_provider
+
+        # Determine which datasets should have encoders/decoders
+        all_datasets = list(self._graph_data.keys())
+        LOGGER.info(f"Building encoders for datasets: {self._encoder_datasets}")
+        LOGGER.info(f"Building decoders for datasets: {self._decoder_datasets}")
+
+        # Encoder data -> hidden (only for specified datasets)
+        self.encoder_graph_provider = torch.nn.ModuleDict()
+        self.encoder = torch.nn.ModuleDict()
+        for dataset_name in self._encoder_datasets:
+            if dataset_name not in all_datasets:
+                raise ValueError(
+                    f"encoder_datasets contains unknown dataset '{dataset_name}'. Available: {all_datasets}"
+                )
+
+            # Create graph providers
+            self.encoder_graph_provider[dataset_name] = create_graph_provider(
+                graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
+                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            )
+
+            self.encoder[dataset_name] = instantiate(
+                model_config.model.encoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.input_dim[dataset_name],
+                in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
+                hidden_dim=self.num_channels,
+                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
+            )
+
+        # Processor hidden -> hidden (shared across all datasets)
+        first_dataset_name = next(iter(self._graph_data.keys()))
+        processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
+        processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
+
+        # Processor hidden -> hidden
+        self.processor_graph_provider = create_graph_provider(
+            graph=processor_graph,
+            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_size=processor_grid_size,
+            dst_size=processor_grid_size,
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+        )
+
+        self.processor = instantiate(
+            model_config.model.processor,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            num_channels=self.num_channels,
+            edge_dim=self.processor_graph_provider.edge_dim,
+        )
+
+        # Decoder hidden -> data (only for specified datasets)
+        self.decoder_graph_provider = torch.nn.ModuleDict()
+        self.decoder = torch.nn.ModuleDict()
+        for dataset_name in self._decoder_datasets:
+            if dataset_name not in all_datasets:
+                raise ValueError(
+                    f"decoder_datasets contains unknown dataset '{dataset_name}'. Available: {all_datasets}"
+                )
+
+            self.decoder_graph_provider[dataset_name] = create_graph_provider(
+                graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
+                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            )
+            self.decoder[dataset_name] = instantiate(
+                model_config.model.decoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.num_channels,
+                in_channels_dst=self.input_dim[dataset_name],
+                hidden_dim=self.num_channels,
+                out_channels_dst=self.num_output_channels[dataset_name],
+                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+            )
 
     def _build_residual(self, residual_config):
         """Build residual connections with per-dataset configs.

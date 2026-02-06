@@ -5,6 +5,10 @@ keep_batch_sharded: False
 
 model:
   _target_: anemoi.models.models.AnemoiD2ModelEncProcDec
+  # Specify which datasets should have encoders/decoders
+  # For downscaling: only in_hres needs encoder, only out_hres needs decoder
+  encoder_datasets: [out_hres]
+  decoder_datasets: [out_hres]
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0
@@ -57,7 +61,7 @@ processor:
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
-  num_chunks: 4
+  num_chunks: 2
   mlp_hidden_ratio: 4
   num_heads: 4
   qk_norm: True
@@ -69,7 +73,7 @@ encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
+  num_chunks: 1
   mlp_hidden_ratio: 4
   num_heads: 4
   qk_norm: True
@@ -83,7 +87,7 @@ decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
+  num_chunks: 1
   mlp_hidden_ratio: 4 
   num_heads: 4
   initialise_data_extractor_zero: False
