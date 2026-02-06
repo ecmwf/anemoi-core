@@ -105,7 +105,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
         if self._tracker_metadata is not None:
             return {self._tracker_name: self._tracker_metadata}
 
-        if self.config.diagnostics.log.wandb.enabled:
+        if getattr(self.config.diagnostics.log.wandb, "enabled", False):
             self._tracker_name = "wand"
             import wandb
 
@@ -119,7 +119,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 }
             return {self._tracker_name: self._tracker_metadata}
 
-        if self.config.diagnostics.log.mlflow.enabled:
+        if getattr(self.config.diagnostics.log.mlflow, "enabled", False):
             self._tracker_name = "mlflow"
 
             from anemoi.training.diagnostics.mlflow.logger import BaseAnemoiMLflowLogger

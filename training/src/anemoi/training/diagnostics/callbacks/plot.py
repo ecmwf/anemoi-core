@@ -128,11 +128,11 @@ class BasePlotCallback(Callback, ABC):
             fig.canvas.draw()
             image_array = np.array(fig.canvas.renderer.buffer_rgba())
             plt.imsave(save_path, image_array, dpi=100)
-            if self.config.diagnostics.log.wandb.enabled:
+            if getattr(self.config.diagnostics.log.wandb, "enabled", False):
                 import wandb
 
                 logger.experiment.log({exp_log_tag: wandb.Image(fig)})
-            if self.config.diagnostics.log.mlflow.enabled:
+            if getattr(self.config.diagnostics.log.mlflow, "enabled", False):
                 run_id = logger.run_id
                 logger.experiment.log_artifact(run_id, str(save_path))
 

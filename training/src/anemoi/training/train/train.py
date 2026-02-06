@@ -380,11 +380,11 @@ class AnemoiTrainer(ABC):
         diagnostics_config = self.config.diagnostics
         loggers = []
 
-        if diagnostics_config.log.wandb.enabled:
+        if getattr(diagnostics_config.log.wandb, "enabled", False):
             LOGGER.info("W&B logger enabled")
             loggers.append(self.wandb_logger)
 
-        if self.mlflow_logger:
+        if getattr(diagnostics_config.log.mlflow, "enabled", False):
             LOGGER.info("MLFlow logger enabled")
             loggers.append(self.mlflow_logger)
 
