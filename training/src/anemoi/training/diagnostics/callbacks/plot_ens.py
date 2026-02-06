@@ -247,6 +247,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
+        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
@@ -263,6 +264,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             sample_idx,
             parameters,
             accumulation_levels_plot,
+            output_steps,
             precip_and_related_fields,
             colormaps,
             per_sample,
@@ -321,10 +323,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
             local_rank = pl_module.local_rank
             if output_times[1] == "forecast" and pl_module.n_step_output > 1:
-                max_out_steps = pl_module.n_step_output
-                output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
-                if output_steps_limit is not None:
-                    max_out_steps = min(max_out_steps, output_steps_limit)
+                max_out_steps = min(pl_module.n_step_output, self.output_steps)
                 for rollout_step in range(output_times[0]):
                     for out_step in range(max_out_steps):
                         truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
@@ -412,6 +411,7 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         config: DictConfig,
         sample_idx: int,
         parameters: list[str],
+        output_steps: int,
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
@@ -423,6 +423,7 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
             config,
             sample_idx,
             parameters,
+            output_steps,
             min_delta,
             every_n_batches,
             dataset_names,
@@ -439,6 +440,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
+        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
@@ -454,6 +456,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
             sample_idx,
             parameters,
             accumulation_levels_plot,
+            output_steps,
             precip_and_related_fields,
             colormaps,
             per_sample,
@@ -472,6 +475,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         config: DictConfig,
         sample_idx: int,
         parameters: list[str],
+        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         every_n_batches: int | None = None,
@@ -484,6 +488,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
             config,
             sample_idx,
             parameters,
+            output_steps,
             precip_and_related_fields,
             log_scale,
             every_n_batches,

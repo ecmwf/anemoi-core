@@ -1182,6 +1182,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
+        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
@@ -1202,6 +1203,8 @@ class PlotSample(BasePlotAdditionalMetrics):
             Parameters to plot
         accumulation_levels_plot : list[float]
             Accumulation levels to plot
+        output_steps : int
+            Max number of output steps to plot per rollout in forecast mode
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
         colormaps : dict[str, Colormap] | None, optional
@@ -1218,6 +1221,7 @@ class PlotSample(BasePlotAdditionalMetrics):
 
         self.precip_and_related_fields = precip_and_related_fields
         self.accumulation_levels_plot = accumulation_levels_plot
+        self.output_steps = output_steps
         self.per_sample = per_sample
         self.colormaps = colormaps
 
@@ -1268,10 +1272,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
 
             if output_times[1] == "forecast":
-                max_out_steps = pl_module.n_step_output
-                output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
-                if output_steps_limit is not None:
-                    max_out_steps = min(max_out_steps, output_steps_limit)
+                max_out_steps = min(pl_module.n_step_output, self.output_steps)
                 for rollout_step in range(output_times[0]):
                     init_step = self._get_init_step(rollout_step, output_times[1])
                     for out_step in range(max_out_steps):
@@ -1343,6 +1344,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         config: OmegaConf,
         sample_idx: int,
         parameters: list[str],
+        output_steps: int,
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
@@ -1358,12 +1360,15 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             Sample to plot
         parameters : list[str]
             Parameters to plot
+        output_steps : int
+            Max number of output steps to plot per rollout in forecast mode
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
         """
         super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
         self.sample_idx = sample_idx
         self.parameters = parameters
+        self.output_steps = output_steps
         self.min_delta = min_delta
 
     @rank_zero_only
@@ -1410,10 +1415,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             }
 
             if output_times[1] == "forecast":
-                max_out_steps = pl_module.n_step_output
-                output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
-                if output_steps_limit is not None:
-                    max_out_steps = min(max_out_steps, output_steps_limit)
+                max_out_steps = min(pl_module.n_step_output, self.output_steps)
                 for rollout_step in range(output_times[0]):
                     init_step = self._get_init_step(rollout_step, output_times[1])
                     for out_step in range(max_out_steps):
@@ -1475,6 +1477,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         config: OmegaConf,
         sample_idx: int,
         parameters: list[str],
+        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         every_n_batches: int | None = None,
@@ -1491,6 +1494,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             Sample to plot
         parameters : list[str]
             Parameters to plot
+        output_steps : int
+            Max number of output steps to plot per rollout in forecast mode
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
         every_n_batches : int | None, optional
@@ -1500,6 +1505,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
         self.sample_idx = sample_idx
         self.parameters = parameters
+        self.output_steps = output_steps
         self.precip_and_related_fields = precip_and_related_fields
         self.log_scale = log_scale
 
@@ -1551,10 +1557,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             }
 
             if output_times[1] == "forecast":
-                max_out_steps = pl_module.n_step_output
-                output_steps_limit = getattr(self.config.diagnostics.plot, "output_steps", None)
-                if output_steps_limit is not None:
-                    max_out_steps = min(max_out_steps, output_steps_limit)
+                max_out_steps = min(pl_module.n_step_output, self.output_steps)
                 for rollout_step in range(output_times[0]):
                     init_step = self._get_init_step(rollout_step, output_times[1])
                     for out_step in range(max_out_steps):

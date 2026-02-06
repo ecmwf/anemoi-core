@@ -74,9 +74,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.datasets.items():
-            stats_by_lead = {
-                lead_time: dataset.statistics_tendencies_for_timestep(lead_time) for lead_time in lead_times
-            }
+            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
                 continue

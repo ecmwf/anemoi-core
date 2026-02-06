@@ -274,6 +274,7 @@ def test_ensemble_plot_callbacks_instantiation():
         sample_idx=0,
         parameters=["temperature", "pressure"],
         accumulation_levels_plot=[0.1, 0.5, 0.9],
+        output_steps=1,
     )
     assert plot_ens_sample is not None
 
@@ -282,6 +283,7 @@ def test_ensemble_plot_callbacks_instantiation():
         sample_idx=0,
         parameters=["temperature"],
         accumulation_levels_plot=[0.5],
+        output_steps=1,
     )
     assert plot_sample is not None
 
@@ -289,6 +291,7 @@ def test_ensemble_plot_callbacks_instantiation():
         config=config,
         sample_idx=0,
         parameters=["temperature"],
+        output_steps=1,
     )
     assert plot_spectrum is not None
 
@@ -296,6 +299,7 @@ def test_ensemble_plot_callbacks_instantiation():
         config=config,
         sample_idx=0,
         parameters=["temperature"],
+        output_steps=1,
     )
     assert plot_histogram is not None
 
