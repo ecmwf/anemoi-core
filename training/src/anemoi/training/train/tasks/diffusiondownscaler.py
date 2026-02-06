@@ -68,7 +68,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
         self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
-        self.x_in_matching_channel_indices = match_tensor_channels(
+        self.x_in_matching_channel_indices = self._match_tensor_channels(
             data_indices["in_lres"].name_to_index,
             data_indices["out_hres"].name_to_index,
         )
@@ -332,6 +332,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         y: torch.Tensor,
         rollout_step: int = 0,
         grid_shard_slice: slice | None = None,
+        dataset_name: str | None = None,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
 
@@ -343,6 +344,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             Ground truth (target).
         rollout_step: int
             Rollout step
+        grid_shard_slice: slice | None
+            Grid shard slice for distributed training
+        dataset_name: str | None
+            Dataset name for multi-dataset setups
 
         Returns
         -------
@@ -350,16 +355,23 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             validation metrics and predictions
         """
         metrics = {}
-        y_postprocessed = self.model.post_processors(y, in_place=False, dataset="output")
-        y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False, dataset="output")
 
-        for metric_name, metric in self.metrics.items():
+        # Use dataset_name for multi-dataset support
+        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+
+        y_postprocessed = self.model.post_processors[dataset_name](y, in_place=False)
+        y_pred_postprocessed = self.model.post_processors[dataset_name](y_pred, in_place=False)
+
+        metrics_dict = self.metrics[dataset_name]
+        val_metric_ranges = self.val_metric_ranges[dataset_name]
+
+        for metric_name, metric in metrics_dict.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
                 metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
-            for mkey, indices in self.val_metric_ranges.items():
+            for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{mkey}/{rollout_step + 1}"
                 if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
                     exception_msg = (
@@ -378,46 +390,53 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         return metrics
 
+    def _match_tensor_channels(self, input_name_to_index, output_name_to_index):
+        """Reorder and select channels from input tensor to match output tensor structure.
 
-def match_tensor_channels(input_name_to_index, output_name_to_index):
-    """
-    Reorders and selects channels from input tensor to match output tensor structure.
-    x_in: Input tensor of shape [batch, n_grid_points, channels]
-    """
+        Parameters
+        ----------
+        input_name_to_index : dict
+            Mapping from variable names to indices in input tensor
+        output_name_to_index : dict
+            Mapping from variable names to indices in output tensor
 
-    common_channels = set(input_name_to_index.keys()) & set(output_name_to_index.keys())
+        Returns
+        -------
+        torch.Tensor
+            Tensor of indices for channel selection
+        """
+        common_channels = set(input_name_to_index.keys()) & set(output_name_to_index.keys())
 
-    # for each output channel, look for corresponding input channel
-    channel_mapping = []
-    for channel_name in output_name_to_index.keys():
-        if channel_name in common_channels:
-            input_pos = input_name_to_index[channel_name]
-            channel_mapping.append(input_pos)
+        # for each output channel, look for corresponding input channel
+        channel_mapping = []
+        for channel_name in output_name_to_index.keys():
+            if channel_name in common_channels:
+                input_pos = input_name_to_index[channel_name]
+                channel_mapping.append(input_pos)
 
-    # Convert to tensor for indexing
-    channel_indices = torch.tensor(channel_mapping)
+        # Convert to tensor for indexing
+        channel_indices = torch.tensor(channel_mapping)
 
-    return channel_indices
+        return channel_indices
+
+    def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
+        """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
 
-def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
-    """Assemble batch after transfer to GPU by gathering the batch shards if needed.
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to transfer
 
+        Returns
+        -------
+        torch.Tensor
+            Batch after transfer
+        """
+        # Gathering/sharding of batch
+        batch = self._setup_batch_sharding(batch)
 
-    Parameters
-    ----------
-    batch : torch.Tensor
-        Batch to transfer
+        # Prepare scalers, e.g. init delayed scalers and update scalers
+        self._prepare_loss_scalers()
 
-    Returns
-    -------
-    torch.Tensor
-        Batch after transfer
-    """
-    # Gathering/sharding of batch
-    batch = self._setup_batch_sharding(batch)
-
-    # Prepare scalers, e.g. init delayed scalers and update scalers
-    self._prepare_loss_scalers()
-
-    return batch
+        return batch
