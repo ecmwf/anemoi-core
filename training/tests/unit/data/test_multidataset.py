@@ -24,7 +24,6 @@ class TestMultiDataset:
         return {
             "timestep": "6h",
             "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h
-            "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h
             "shuffle": True,
         }
 
