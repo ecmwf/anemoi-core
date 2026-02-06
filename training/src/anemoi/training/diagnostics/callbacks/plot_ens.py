@@ -52,22 +52,12 @@ class EnsemblePlotMixin:
             Processed batch and predictions
         """
         # For ensemble models, batch is a tuple - allgather the full batch first
-        batch = {
-            dataset: pl_module.allgather_batch(batch[dataset], pl_module.grid_indices[dataset], pl_module.grid_dim)
-            for dataset in batch
-        }
+        batch = {ds_name: pl_module.allgather_batch(batch[ds_name], ds_name) for ds_name in batch}
+
         # Extract ensemble predictions
         loss, y_preds = output
         y_preds = [
-            {
-                dataset: pl_module.allgather_batch(
-                    pred[dataset],
-                    pl_module.grid_indices[dataset],
-                    pl_module.grid_dim,
-                )
-                for dataset in pred
-            }
-            for pred in y_preds
+            {ds_name: pl_module.allgather_batch(pred[ds_name], ds_name) for ds_name in pred} for pred in y_preds
         ]
 
         # Return batch (normalized data) and structured output like regular forecaster
@@ -182,9 +172,8 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                 for post_processor in self.post_processors[dataset_name].processors.values():
                     if hasattr(post_processor, "nan_locations"):
                         post_processor.nan_locations = pl_module.allgather_batch(
-                            post_processor.nan_locations,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
+                            post_processor.nan_locations, 
+                            dataset_name,
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 

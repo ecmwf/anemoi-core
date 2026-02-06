@@ -1071,8 +1071,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 ):
                     self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(
                         self.loss[dataset].scaler.nan_mask_weights,
-                        pl_module.grid_indices[dataset],
-                        pl_module.grid_dim,
+                        dataset,
                     )
 
             super().on_validation_batch_end(
