@@ -32,8 +32,8 @@ class TestNativeGridDataset:
     @pytest.mark.parametrize("start", [None, 2017])
     @pytest.mark.parametrize("end", [None, 2017])
     def test_basic_instantiation(
-            self,
-            dataset_path: str,
+        self,
+        dataset_path: str,
         start: datetime.datetime,
         end: datetime.datetime,
     ) -> None:
