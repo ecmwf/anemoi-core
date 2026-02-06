@@ -56,9 +56,7 @@ class EnsemblePlotMixin:
 
         # Extract ensemble predictions
         loss, y_preds = output
-        y_preds = [
-            {ds_name: pl_module.allgather_batch(pred[ds_name], ds_name) for ds_name in pred} for pred in y_preds
-        ]
+        y_preds = [{ds_name: pl_module.allgather_batch(pred[ds_name], ds_name) for ds_name in pred} for pred in y_preds]
 
         # Return batch (normalized data) and structured output like regular forecaster
         return batch, [loss, y_preds]
@@ -172,7 +170,7 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                 for post_processor in self.post_processors[dataset_name].processors.values():
                     if hasattr(post_processor, "nan_locations"):
                         post_processor.nan_locations = pl_module.allgather_batch(
-                            post_processor.nan_locations, 
+                            post_processor.nan_locations,
                             dataset_name,
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
