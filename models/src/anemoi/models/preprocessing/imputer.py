@@ -130,7 +130,7 @@ class BaseImputer(BasePreprocessor, ABC):
             Tensor with NaN locations of shape (batch, time, ..., grid)
         """
         idx = [slice(None), slice(None)] + [0] * (x.ndim - 4) + [slice(None), slice(None)]
-        return torch.isnan(x[idx])
+        return torch.isnan(x[tuple(idx)])
 
     def _expand_subset_mask(self, x: torch.Tensor, idx_src: int, nan_locations: torch.Tensor) -> torch.Tensor:
         """Expand the subset of the nan location mask to the correct shape.
