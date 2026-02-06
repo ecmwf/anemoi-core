@@ -189,7 +189,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
                 in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
-                out_channels_dst=self.num_output_channels[dataset_name],
+                out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
