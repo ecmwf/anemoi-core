@@ -14,6 +14,7 @@ from typing import Any
 from typing import Literal
 
 from omegaconf import OmegaConf
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
@@ -143,6 +144,8 @@ class PlotSampleSchema(BaseModel):
     "Number of plots per sample, by default 6."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -158,6 +161,8 @@ class PlotSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -173,6 +178,8 @@ class PlotHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
@@ -198,6 +205,8 @@ class PlotEnsSampleSchema(BaseModel):
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
@@ -228,6 +237,8 @@ class PlotEnsSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -243,6 +254,8 @@ class PlotEnsHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
@@ -285,27 +298,13 @@ class PlottingFrequency(BaseModel):
     "Frequency of the plotting in number of epochs."
 
 
-class PlotSchema(BaseModel):
+class PlotSchema(PydanticBaseModel):
     asynchronous: bool
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
-    datasets_to_plot: list[str] = Field(default_factory=list, example=["data"])
-    "Default dataset names to use in the plot callbacks"
-    frequency: PlottingFrequency
-    "Frequency of the plotting."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    precip_and_related_fields: list[str]
-    "List of precipitation related fields from the parameters list."
-    colormaps: dict[str, ColormapSchema] = Field(default_factory=dict)
-    "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
-    focus_areas: dict[str, FocusAreaSchema]
-    "List of regions of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class TimeLimitSchema(BaseModel):
