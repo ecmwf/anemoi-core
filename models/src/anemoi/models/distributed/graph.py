@@ -285,7 +285,7 @@ class _ShardParallelSection(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.comm_group:
+        if ctx.comm_group and ctx.gather_in_backward:
             return (
                 _gather(
                     grad_output, ctx.dim, ctx.shapes, gather_in_backward=ctx.gather_in_backward, group=ctx.comm_group
