@@ -195,23 +195,36 @@ class MultiDataset(IterableDataset):
         """Return valid date indices.
 
         A date t is valid if we can sample the elements t + i
-        for every relative_date_index i.
+        for every relative_date_index i across all datasets.
+
+        Returns the intersection of valid indices from all datasets.
         """
-        valid_date_indices_ref = None
-        for ds in self.datasets.values():
+        valid_date_indices_intersection = None
+        for name, ds in self.datasets.items():
             valid_date_indices = get_usable_indices(
                 ds.missing,
                 len(ds.dates),
                 self.data_relative_date_indices,
                 ds.trajectory_ids if ds.has_trajectories else None,
             )
-            if valid_date_indices_ref is None:
-                valid_date_indices_ref = valid_date_indices
+            if valid_date_indices_intersection is None:
+                valid_date_indices_intersection = valid_date_indices
+            else:
+                valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
 
-            err_msg = "Datasets have different valid_date_indices, cannot synchronize samples"
-            assert np.array_equal(valid_date_indices_ref, valid_date_indices), err_msg
+            if len(valid_date_indices) == 0:
+                msg = f"No valid date indices found for dataset '{name}': \n{ds}"
+                raise ValueError(msg)
 
-        return valid_date_indices_ref
+            LOGGER.info("Dataset '%s' has %d valid indices", name, len(valid_date_indices))
+
+        if len(valid_date_indices_intersection) == 0:
+            msg = "No valid date indices found after intersection across all datasets."
+            raise ValueError(msg)
+
+        LOGGER.info("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
+
+        return valid_date_indices_intersection
 
     def set_comm_group_info(
         self,
