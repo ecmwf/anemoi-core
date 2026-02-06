@@ -14,6 +14,7 @@ from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
 from .single_step import GraphAutoEncoder
 from .single_step import GraphDownscaler
+from .interpolator import GraphMultiOutInterpolator
 
 __all__ = [
     "GraphAutoEncoder",
@@ -23,4 +24,5 @@ __all__ = [
     "GraphEnsForecaster",
     "GraphForecaster",
     "GraphInterpolator",
+    "GraphMultiOutInterpolator",
 ]
