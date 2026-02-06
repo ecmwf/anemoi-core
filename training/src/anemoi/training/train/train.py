@@ -240,6 +240,7 @@ class AnemoiTrainer(ABC):
                 )
 
             model.data_indices = self.data_indices
+            model.refresh_dataset_context_static()  # update data_indices in context
             # check data indices in original checkpoint and current data indices are the same
             for data_indices in self.data_indices.values():
                 data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
