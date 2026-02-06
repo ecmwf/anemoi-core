@@ -25,6 +25,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from packaging import version
+from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
@@ -375,7 +376,7 @@ class AnemoiTrainer(ABC):
         return get_wandb_logger(**kwargs)
 
     @cached_property
-    def logger(self) -> list[pl.loggers.LightningLoggerBase] | None:
+    def logger(self) -> Logger | None:
         """Lazily build all enabled logger."""
         diagnostics_log = self.config.diagnostics.log
 
