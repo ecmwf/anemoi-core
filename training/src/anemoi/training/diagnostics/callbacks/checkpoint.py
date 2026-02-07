@@ -101,7 +101,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
         if self._tracker_metadata is not None:
             return {self._tracker_name: self._tracker_metadata}
 
-        self._tracker_name = trainer.logger.logger_name
+        self._tracker_name = trainer.logger.logger_name if trainer.logger else None
         if self._tracker_name == "wandb":
             import wandb
 
@@ -116,11 +116,8 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         if self._tracker_name == "mlflow":
 
-            from anemoi.training.diagnostics.mlflow.logger import BaseAnemoiMLflowLogger
-
-            mlflow_logger = next(logger for logger in trainer.loggers if isinstance(logger, BaseAnemoiMLflowLogger))
-            run_id = mlflow_logger.run_id
-            run = mlflow_logger._mlflow_client.get_run(run_id)
+            run_id = trainer.logger.run_id
+            run = trainer.logger._mlflow_client.get_run(run_id)
 
             if run is not None:
                 self._tracker_metadata = {
