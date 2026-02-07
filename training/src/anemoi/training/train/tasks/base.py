@@ -914,7 +914,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 metrics[metric_step_name] = metric(
                     y_pred_postprocessed,
                     y_postprocessed,
-                    scaler_indices=[..., indices],
+                    scaler_indices=(..., indices),
                     grid_shard_slice=grid_shard_slice,
                     group=self.model_comm_group,
                     model_comm_group_size=self.model_comm_group_size,
