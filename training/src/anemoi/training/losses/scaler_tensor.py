@@ -550,7 +550,8 @@ class ScaleTensor(nn.Module):
         grid_shard_slice : slice | None, optional
             Slice to apply to the grid dimension, by default None
         """
-        x_subset = x[subset_indices] if subset_indices is not None else x
+        subset_tuple = tuple(subset_indices) if subset_indices is not None else None
+        x_subset = x[subset_tuple] if subset_tuple is not None else x
         out = x_subset.clone()
         ndim = x.ndim
         tensors = self.resolve(ndim).tensors
@@ -572,8 +573,8 @@ class ScaleTensor(nn.Module):
 
             reshaped_scaler = reshaped_scaler.expand_as(x)
 
-            if subset_indices is not None:
-                reshaped_scaler = reshaped_scaler[subset_indices]
+            if subset_tuple is not None:
+                reshaped_scaler = reshaped_scaler[subset_tuple]
 
             out = out * reshaped_scaler
 
@@ -598,7 +599,8 @@ class ScaleTensor(nn.Module):
         torch.Tensor
             Scaled tensor
         """
-        x_subset = x[subset_indices] if subset_indices is not None else x
+        subset_tuple = tuple(subset_indices) if subset_indices is not None else None
+        x_subset = x[subset_tuple] if subset_tuple is not None else x
         scaler = self.get_scaler(x_subset.ndim)
         if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:
             slices = [slice(None)] * x_subset.ndim

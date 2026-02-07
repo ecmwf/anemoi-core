@@ -101,8 +101,7 @@ class BaseLoss(nn.Module, ABC):
         torch.Tensor
             Scaled error tensor
         """
-        if subset_indices is None:
-            subset_indices = [Ellipsis]
+        subset_indices = (Ellipsis,) if subset_indices is None else tuple(subset_indices)
 
         if len(self.scaler) == 0:
             return x[subset_indices]
