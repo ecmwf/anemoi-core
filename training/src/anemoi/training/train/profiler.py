@@ -285,7 +285,7 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        self.config.diagnostics.progress_bar.target_ = (
+        self.config.diagnostics.progress_bar["_target_"] = (
             ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
         )
         callbacks = super().callbacks

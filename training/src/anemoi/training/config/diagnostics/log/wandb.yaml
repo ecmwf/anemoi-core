@@ -1,0 +1,12 @@
+wandb:
+  enabled: False
+  _target_: pytorch_lightning.loggers.wandb.WandbLogger
+  offline: False
+  log_model: False
+  project: 'Anemoi'
+  entity: example
+  # logger options (these probably come with some overhead)
+  gradients: False
+  parameters: False
+  interval: ${diagnostics.log.interval}
+interval: 100 # passed to trainer.log_every_n_steps
