@@ -76,6 +76,7 @@ model:
     hidden2data: 0
     hidden2hidden: 0
 
+  condition_on_residual: True
   num_channels: 1024
 
   processor:
@@ -97,10 +98,14 @@ training:
     pre_processors.processors: pre_processors.era_meps_sg.processors
     post_processors.processors: post_processors.era_meps_sg.processors
     encoder.proc: encoder.era_meps_sg.proc
+    model.encoder.emb_nodes_dst: model.encoder.era_meps_sg.emb_nodes_dst
+    model.encoder.emb_nodes_src: model.encoder.era_meps_sg.emb_nodes_src
     decoder.proc: decoder.era_meps_sg.proc
+    decoder.node_data_extractor: decoder.era_meps_sg.node_data_extractor
+    decoder.emb_nodes_dst: decoder.era_meps_sg.emb_nodes_dst
 
   submodules_to_freeze: ["era_meps_sg", "processor", "noise_injector"]
-  max_steps: 5000
+  max_steps: 1000
 
   lr:
     warmup: 20

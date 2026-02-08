@@ -56,7 +56,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def _calculate_input_dim(self, dataset_name: str) -> int:
         base_input_dim = super()._calculate_input_dim(dataset_name)
         base_input_dim += 1  # for forecast step (fcstep)
-        if self.condition_on_residual:
+        if self.condition_on_residual and self.use_residual[dataset_name]:
             base_input_dim += self.num_input_channels_prognostic[dataset_name]
         return base_input_dim
 
@@ -87,24 +87,24 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
-            ),
-            dim=-1,  # feature dimension
-        )
-
-        # TODO: Figure out how to handle this, probably set self.condition_on_residual false if 
-        # use_residual is false for this dataset
         if self.condition_on_residual and x_skip is not None:
             x_data_latent = torch.cat(
                 (
-                    x_data_latent,
-                    einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars"),
+                    einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                    einops.rearrange(x_skip[..., self._internal_input_idx[dataset_name]], "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                    node_attributes_data,
+                    torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
                 ),
-                dim=-1,
+                dim=-1,  # feature dimension
+            )
+        else:
+            x_data_latent = torch.cat(
+                (
+                    einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                    node_attributes_data,
+                    torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
+                ),
+                dim=-1,  # feature dimension
             )
 
         shard_shapes_data = get_or_apply_shard_shapes(

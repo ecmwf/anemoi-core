@@ -103,7 +103,7 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     # Load the filtered state_dict into the model
     model.load_state_dict(state_dict, strict=False)
     # Needed for data indices check
-    model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
+    #model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
     return model
 
 def transfer_learning_loading_with_rename(model: torch.nn.Module, ckpt_path: Path | str, rename_map: dict[str, str]) -> nn.Module:

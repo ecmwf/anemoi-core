@@ -21,6 +21,7 @@ from .spectral import FourierCorrelationLoss
 from .spectral import LogSpectralDistance
 from .spectral import SpectralL2Loss
 from .weighted_mse import WeightedMSELoss
+from .afcrps_fft import AFCRPSFFTLoss
 
 __all__ = [
     "AlmostFairKernelCRPS",
@@ -36,5 +37,6 @@ __all__ = [
     "RMSELoss",
     "SpectralL2Loss",
     "WeightedMSELoss",
+    "AFCRPSFFTLoss",
     "get_loss_function",
 ]
