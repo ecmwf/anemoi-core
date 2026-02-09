@@ -14,6 +14,7 @@ from typing import Any
 from typing import Literal
 
 from omegaconf import OmegaConf
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
@@ -33,6 +34,22 @@ class GraphTrainableFeaturesPlotSchema(BaseModel):
     "List of dataset names to plot."
     every_n_epochs: int | None
     "Epoch frequency to plot at."
+
+
+class FocusAreaSchema(BaseModel):
+    name: str | None = Field(default=None)
+    "Name of the focus_area, will be used for plot naming."
+    mask_attr_name: str | None = Field(default=None)
+    "Name of the node attribute to use as masking. eg. cutout_mask"
+    latlon_bbox: list[float] | None = Field(default=None, min_items=4, max_items=4)
+    "Latitude and longitude bounds as [lat_min, lon_min, lat_max, lon_max]."
+
+    @model_validator(mode="after")
+    def exactly_one_present(self) -> "FocusAreaSchema":
+        if (self.mask_attr_name is None) == (self.latlon_bbox is None):
+            msg = "Provide exactly one of 'mask_attr_name' or 'latlon_bbox' (not both)."
+            raise ValueError(msg)
+        return self
 
 
 class PlotLossSchema(BaseModel):
@@ -127,8 +144,12 @@ class PlotSampleSchema(BaseModel):
     "Number of plots per sample, by default 6."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotSpectrumSchema(BaseModel):
@@ -140,8 +161,12 @@ class PlotSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotHistogramSchema(BaseModel):
@@ -153,10 +178,14 @@ class PlotHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotEnsSampleSchema(BaseModel):
@@ -176,12 +205,16 @@ class PlotEnsSampleSchema(BaseModel):
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
     members: list[int] | None = Field(default=None)
     "List of ensemble members to plot. If None, plots all members."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotEnsLossSchema(BaseModel):
@@ -204,8 +237,12 @@ class PlotEnsSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class PlotEnsHistogramSchema(BaseModel):
@@ -217,10 +254,14 @@ class PlotEnsHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
+    output_steps: PositiveInt = Field(example=1)
+    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
 class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
@@ -257,23 +298,11 @@ class PlottingFrequency(BaseModel):
     "Frequency of the plotting in number of epochs."
 
 
-class PlotSchema(BaseModel):
+class PlotSchema(PydanticBaseModel):
     asynchronous: bool
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
-    datasets_to_plot: list[str] = Field(default_factory=list, example=["data"])
-    "Default dataset names to use in the plot callbacks"
-    frequency: PlottingFrequency
-    "Frequency of the plotting."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    precip_and_related_fields: list[str]
-    "List of precipitation related fields from the parameters list."
-    colormaps: dict[str, ColormapSchema] = Field(default_factory=dict)
-    "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
 

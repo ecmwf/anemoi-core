@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 
     import torch
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -56,8 +55,7 @@ class GraphForecaster(BaseRolloutGraphModule):
         """
         x = self.task.get_inputs(batch, self.data_indices)
 
-        for rollout_step in range(rollout or self.rollout):
-            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
+        for rollout_step in range(rollout_steps):
             y_pred = self(x)
 
             y = self.task.get_targets(batch, self.data_indices, step=rollout_step)

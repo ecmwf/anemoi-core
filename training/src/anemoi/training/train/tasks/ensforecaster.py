@@ -17,6 +17,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
+from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -37,7 +38,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         *,
         config: DictConfig,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
@@ -149,13 +150,13 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         step: int | None = None,
-        dataset_name: str | None = None,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
-            dim=1,
+            dim=TensorDim.ENSEMBLE_DIM,
             shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
             mgroup=self.ens_comm_subgroup,
         )
@@ -184,7 +185,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
     def _rollout_step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         rollout: int | None = None,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
@@ -219,8 +220,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             y_pred = self(x, fcstep=rollout_step)   # shape = (bs, latlon, nvar)
 
             y = self.task.get_targets(batch, self.data_indices, step=rollout_step)
-
-            # y includes the auxiliary variables, so we must leave those out when computing the loss
 
             loss, metrics_next, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,

@@ -95,11 +95,13 @@ class ForecastingTask(BaseTask):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
-    def get_targets(self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection], step) -> dict[str, torch.Tensor]:
-        timesteps = self.num_input_steps # slice(self.num_input_steps, self.num_input_steps + self.num_output_steps)
+    def get_targets(self, batch: dict[str, torch.Tensor], data_indices: dict[str, IndexCollection], step: int) -> dict[str, torch.Tensor]:
+        start = self.num_input_steps + self.num_output_steps * step
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[:, timesteps, ..., data_indices[dataset_name].data.output.full]
+            y_time = dataset_batch.narrow(1, start, self.num_output_steps)
+            var_indices = data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+            y[dataset_name] = y_time.index_select(-1, var_indices)
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
