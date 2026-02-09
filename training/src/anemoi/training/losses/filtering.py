@@ -102,7 +102,7 @@ class FilteringLossWrapper(BaseLoss):
     def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs) -> torch.Tensor:
         pred_filtered = pred[..., self.predicted_indices]
         target_filtered = target[..., self.target_indices]
-        
+
         squash = kwargs.get("squash", True)
         if squash:
             return self.loss(pred_filtered, target_filtered, **kwargs)
