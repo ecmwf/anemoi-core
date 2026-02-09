@@ -25,11 +25,8 @@ def get_mlflow_logger(
     logger_config: DictConfig,
 ) -> None:
     mlflow_config = logger_config.mlflow
-    if not mlflow_config.enabled:
-        LOGGER.debug("MLFlow logging is disabled.")
-        return None
-
     mlflow_config = OmegaConf.to_container(mlflow_config, resolve=True)
+
     extra_keys = ["enabled"]
     for key in extra_keys:
         mlflow_config.pop(key, None)
@@ -87,10 +84,6 @@ def get_wandb_logger(
 
     # backward compatibility to not break configs
     interval = getattr(wandb_config, "interval", 100)
-
-    if not wandb_config.enabled:
-        LOGGER.debug("Weights & Biases logging is disabled.")
-        return None
 
     wandb_config = OmegaConf.to_container(wandb_config, resolve=True)
     extra_keys = ["gradients", "parameters", "interval", "enabled"]

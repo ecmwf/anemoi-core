@@ -268,7 +268,7 @@ class AnemoiTrainer(ABC):
             return self.config.training.run_id
 
         # When we rely on mlflow to create a new run ID
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.logger and self.logger.logger_name == "mlflow":
             # if using mlflow with a new run get the run_id from mlflow
             return self.mlflow_logger.run_id
 
@@ -388,7 +388,7 @@ class AnemoiTrainer(ABC):
                 LOGGER.info("%s logger enabled", logger_type.upper())
                 return getattr(self, f"{logger_type}_logger")
 
-        return None
+        return False  # No logger enabled
 
     @cached_property
     def accelerator(self) -> str:
@@ -446,7 +446,7 @@ class AnemoiTrainer(ABC):
         """Get the server2server lineage."""
         self.parent_run_server2server = None
         self.fork_run_server2server = None
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.logger and self.logger.logger_name == "mlflow":
             self.parent_run_server2server = self.mlflow_logger._parent_run_server2server
             LOGGER.info("Parent run server2server: %s", self.parent_run_server2server)
             self.fork_run_server2server = self.mlflow_logger._fork_run_server2server
@@ -484,7 +484,7 @@ class AnemoiTrainer(ABC):
         This is used to check the run can be restarted from the checkpoint.
         """
         self.dry_run = False
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.logger and self.logger.logger_name == "mlflow":
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
                 self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints.root).is_dir()
