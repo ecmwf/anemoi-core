@@ -194,7 +194,17 @@ class BaseLoss(nn.Module, ABC):
 
         # here the grid dimension is summed because the normalisation is handled in the node weighting
         grid_dim = -2 if not squash else -1
-        grid_summed = self.sum_function(out, dim=(grid_dim))
+        # here the grid and time dimension are summed because
+        # 1. the normalisation over grid points is handled in the node weighting
+        # 2. the normalization over output steps is handled by the time_step scaler
+        space_time_summed = self.sum_function(
+            out,
+            dim=(
+                TensorDim.TIME,
+                TensorDim.GRID,
+            ),
+            keepdim=True,
+        )
         out = self.avg_function(
             space_time_summed,
             dim=(
