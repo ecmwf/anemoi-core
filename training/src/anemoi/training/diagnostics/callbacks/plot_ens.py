@@ -79,7 +79,7 @@ class EnsemblePlotMixin:
         if isinstance(pl_module.model.model, AnemoiModelEncProcDecInterpolator):
             output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
-            # Diffusion forecasters do not define `rollout`; use a single forecast step for plotting.
+            # In case `rollout` is not defined, default to a single forecast step for plotting.
             rollout = getattr(pl_module, "rollout", None)
             rollout = 1 if rollout is None else int(rollout)
             output_times = (max(1, rollout), "forecast")
