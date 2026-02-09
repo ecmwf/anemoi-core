@@ -125,23 +125,17 @@ class DCT2D(SpectralTransform):
             from torch_dct import dct_2d
         except ImportError:
             raise ImportError("torch_dct is required for DCT2D transform. ")
-        b, e, points, v = data.shape
+        b, t, e, points, v = data.shape
         assert points == self.x_dim * self.y_dim
 
         x = einops.rearrange(
             data,
-            "b e (y x) v -> (b e v) y x",
+            "b t e (y x) v -> (b t e v) y x",
             x=self.x_dim,
             y=self.y_dim,
         )
         x = dct_2d(x)
-        return einops.rearrange(
-            x,
-            "(b e v) y x -> b e y x v",
-            b=b,
-            e=e,
-            v=v,
-        )
+        return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, e=e, v=v, t=t)
 
 
 class RegularSHT(SpectralTransform):
@@ -164,13 +158,13 @@ class RegularSHT(SpectralTransform):
         self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
-        b, e, p, v = data.shape
+        b, t, e, p, v = data.shape
         assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
-        x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.nlat, x=self.nlon)
+        x = einops.rearrange(data, "b t e (y x) v -> (b t e v) y x", y=self.nlat, x=self.nlon)
         coeffs = self._sht(x)
 
-        # -> [b,e,L,M,v] == [b,e,y_freq,x_freq,v]
-        return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+        # -> [b,t,e,L,M,v] == [b,t,e,y_freq,x_freq,v]
+        return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
 class ReducedSHT(SpectralTransform):
@@ -196,13 +190,13 @@ class ReducedSHT(SpectralTransform):
         self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
-        b, e, p, v = data.shape
+        b, t, e, p, v = data.shape
         assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
-        x = einops.rearrange(data, "b e (y x) v -> (b e v) y x", y=self.nlat, x=self.nlon)
+        x = einops.rearrange(data, "b t e (y x) v -> (b t e v) y x", y=self.nlat, x=self.nlon)
         coeffs = self._sht(x)
 
-        # -> [b,e,L,M,v] == [b,e,y_freq,x_freq,v]
-        return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+        # -> [b,t,e,L,M,v] == [b,t,e,y_freq,x_freq,v]
+        return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
 class OctahedralSHT(SpectralTransform):
@@ -224,12 +218,12 @@ class OctahedralSHT(SpectralTransform):
         self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
-        b, e, p, v = data.shape
+        b, t, e, p, v = data.shape
         assert (
             p == self._sht.n_grid_points
         ), f"Input points={p} does not match expected octahedral flattened rings={self._sht.n_grid_points}"
 
         # expects [..., points] where points is flattened spatial dim
-        x = einops.rearrange(data, "b e p v -> (b e v) p")
-        coeffs = self._sht(x)  # complex: (b*e*v, L, M)
-        return einops.rearrange(coeffs, "(b e v) yF xF -> b e yF xF v", b=b, e=e, v=v)
+        x = einops.rearrange(data, "b t e p v -> (b t e v) p")
+        coeffs = self._sht(x)  # complex: (b*t*e*v, L, M)
+        return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, t=t, e=e, v=v)

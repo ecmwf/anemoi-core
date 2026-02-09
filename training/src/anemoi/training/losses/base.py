@@ -171,7 +171,6 @@ class BaseLoss(nn.Module, ABC):
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
 
-        grid_dim = -2 if not squash else -1
         # here the grid and time dimension are summed because
         # 1. the normalisation over grid points is handled in the node weighting
         # 2. the normalization over output steps is handled by the time_step scaler

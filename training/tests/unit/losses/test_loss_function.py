@@ -457,13 +457,13 @@ def test_octahedral_sht_loss() -> None:
             },
         ),
     )
-    pred = torch.zeros((2, 1, expected_points, nvars))
+    pred = torch.zeros((2, 1, 1, expected_points, nvars))
     target = torch.zeros_like(pred)
     out = loss(pred, target, squash=False)
     assert out.shape == (nvars,), "squash=False should return per-variable loss"
     out_total = loss(pred, target, squash=True)
     assert out_total.numel() == 1, "squash=True should return a single aggregated loss"
-    pred_wrong = torch.zeros((2, 1, expected_points + 1, nvars))
+    pred_wrong = torch.zeros((2, 1, 1, expected_points + 1, nvars))
     target_wrong = torch.zeros_like(pred_wrong)
     with pytest.raises(AssertionError):
         _ = loss(pred_wrong, target_wrong, squash=True)
@@ -481,8 +481,8 @@ def test_spectral_crps_fft_and_dct() -> None:
     x_dim, y_dim = 8, 6
     grid = x_dim * y_dim
 
-    pred = torch.randn(bs, ens, grid, nvars)
-    target = torch.randn(bs, 1, grid, nvars)
+    pred = torch.randn(bs, 1, ens, grid, nvars)
+    target = torch.randn(bs, 1, 1, grid, nvars)
 
     for transform in ["fft2d", "dct2d"]:
         loss = get_loss_function(
