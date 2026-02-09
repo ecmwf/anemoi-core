@@ -22,6 +22,7 @@ from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
+from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot
 from anemoi.training.diagnostics.callbacks.plot_ens import EnsemblePlotMixin
 from anemoi.training.diagnostics.callbacks.plot_ens import PlotEnsSample
 from anemoi.training.diagnostics.callbacks.plot_ens import PlotHistogram
@@ -302,6 +303,52 @@ def test_ensemble_plot_callbacks_instantiation():
         output_steps=1,
     )
     assert plot_histogram is not None
+
+
+def test_get_output_times_defaults_to_single_step_for_non_interpolator():
+    config = omegaconf.OmegaConf.create(
+        {
+            "system": {"output": {"plots": None}},
+            "diagnostics": {
+                "plot": {
+                    "datashader": False,
+                    "asynchronous": False,
+                    "frequency": {"epoch": 1},
+                },
+            },
+        },
+    )
+    callback = GraphTrainableFeaturesPlot(config=config)
+
+    pl_module = MagicMock()
+    pl_module.model.model = object()
+
+    assert callback._get_output_times(config, pl_module) == (1, "forecast")
+
+
+def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
+    config = omegaconf.OmegaConf.create(
+        {
+            "system": {"output": {"plots": None}},
+            "diagnostics": {
+                "plot": {
+                    "datashader": False,
+                    "asynchronous": False,
+                    "frequency": {"epoch": 1},
+                },
+            },
+        },
+    )
+    callback = GraphTrainableFeaturesPlot(config=config)
+
+    model = MagicMock()
+    model._graph_name_data = "data"
+    model._graph_name_hidden = "hidden"
+    model.processor_graph_provider = MagicMock(trainable=None)
+
+    edge_modules = callback.get_edge_trainable_modules(model, dataset_name="data")
+
+    assert edge_modules == {}
 
 
 # Progress bar callback tests
