@@ -179,7 +179,7 @@ class BaseLoss(nn.Module, ABC):
             out,
             dim=(
                 TensorDim.TIME,
-                grid_dim,
+                TensorDim.GRID,
             ),
             keepdim=True,
         )
