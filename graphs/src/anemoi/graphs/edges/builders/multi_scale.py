@@ -80,7 +80,10 @@ class MultiScaleEdges(BaseEdgeBuilder):
         node_cls = getattr(module, node_type, None)
 
         if node_cls is None:
-            raise ValueError(f"Invalid node_type, {node_type}, for building multi scale edges.")
+            module = importlib.import_module("anemoi.graphs.nodes.builders.from_concentric")
+            node_cls = getattr(module, node_type, None)
+            if node_cls is None:
+                raise ValueError(f"Invalid node_type, {node_type}, for building multi scale edges.")
 
         # Instantiate the BaseIcosahedronEdgeStrategy based on the node type
         module_name = ".".join(node_cls.multi_scale_edge_cls.split(".")[:-1])

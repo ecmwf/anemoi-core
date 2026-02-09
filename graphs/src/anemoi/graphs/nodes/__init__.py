@@ -23,6 +23,8 @@ from .builders.from_refined_icosahedron import LimitedAreaTriNodes
 from .builders.from_refined_icosahedron import StretchedTriNodes
 from .builders.from_refined_icosahedron import TriNodes
 from .builders.from_vectors import LatLonNodes
+from .builders.from_concentric import ConcentricNodes
+from .builders.from_concentric import StretchedConcentricNodes
 
 __all__ = [
     "AnemoiDatasetNodes",
@@ -41,4 +43,6 @@ __all__ = [
     "ICONCellGridNodes",
     "TextNodes",
     "XArrayNodes",
+    "ConcentricNodes",
+    "StretchedConcentricNodes"
 ]
