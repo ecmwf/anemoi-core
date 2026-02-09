@@ -137,7 +137,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             self.A_down = self.A_down.to(x.device)
             x = self._truncate_fields(x, self.A_down)  # back to high resolution
         else:
-            raise ValueError("A_up not defined at model level.")
+            raise ValueError("A_down not defined at model level.")
 
         if grid_shard_shapes is not None:
             # back to grid-sharding as before
