@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.4...graphs-0.8.5) (2026-02-09)
+
+
+### Bug Fixes
+
+* **models, graphs:** Models and graphs tests on gpu ([#854](https://github.com/ecmwf/anemoi-core/issues/854)) ([62f43ec](https://github.com/ecmwf/anemoi-core/commit/62f43ece38fceb9e3bf2a7d10fd769dde2dadc8d))
+
 ## [0.8.4](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.3...graphs-0.8.4) (2026-01-28)
 
 
