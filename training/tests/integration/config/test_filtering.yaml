@@ -21,7 +21,20 @@ diagnostics:
   log:
     mlflow:
       enabled: False
-  callbacks: []
+  plot:
+    parameters: [tp]
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+        parameters: [tp]
+        dataset_names: ${diagnostics.plot.datasets_to_plot} #TODO can make this a default in pydantic and remove here
+        sample_idx: ${diagnostics.plot.sample_idx}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+        dataset_names: ${diagnostics.plot.datasets_to_plot} #TODO can make this a default in pydantic and remove here
+        sample_idx: ${diagnostics.plot.sample_idx}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+        parameters: [tp]
 
 training:
   max_epochs: 1

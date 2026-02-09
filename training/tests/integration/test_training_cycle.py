@@ -291,7 +291,7 @@ def test_training_cycle_mlflow_dry_run(
 
 
 @skip_if_offline
-@pytest.mark.slow
+# @pytest.mark.slow
 def test_training_cycle_imerg_target(
     imerg_target_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,

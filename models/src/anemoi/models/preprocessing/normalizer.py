@@ -107,7 +107,7 @@ class InputNormalizer(BasePreprocessor):
         self.register_buffer("_output_idx", self.data_indices.data.output.full, persistent=True)
 
         # We need some special handling when target variables are defined.
-        model_output_names = set(self.data_indices.model.output.name_to_index.keys())
+        model_output_names = list(self.data_indices.model.output.name_to_index.keys())
         data_output_names = list(self.data_indices.data.output.name_to_index.keys())
 
         # Create a boolean mask with same length as _output_idx
