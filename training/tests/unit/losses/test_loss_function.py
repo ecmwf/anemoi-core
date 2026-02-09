@@ -55,10 +55,10 @@ def functionalloss() -> type[FunctionalLoss]:
 @pytest.fixture
 def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs."""
-    tensor_shape = [1, 1, 4, 2]
+    tensor_shape = [1, 1, 1, 4, 2]
 
     pred = torch.zeros(tensor_shape)
-    pred[0, 0, 0] = torch.tensor([1.0, 1.0])
+    pred[0, 0, 0, 0] = torch.tensor([1.0, 1.0])
     target = torch.zeros(tensor_shape)
 
     # With only one "grid point" differing by 1 in all
@@ -216,12 +216,13 @@ def test_grid_invariance(
     loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
 ) -> None:
     """Test for batch invariance."""
+    gdim = TensorDim.GRID
     pred_coarse, target_coarse, _ = loss_inputs
-    pred_fine = torch.cat([pred_coarse, pred_coarse], dim=2)
-    target_fine = torch.cat([target_coarse, target_coarse], dim=2)
+    pred_fine = torch.cat([pred_coarse, pred_coarse], dim=gdim)
+    target_fine = torch.cat([target_coarse, target_coarse], dim=gdim)
 
-    num_points_coarse = pred_coarse.shape[2]
-    num_points_fine = pred_fine.shape[2]
+    num_points_coarse = pred_coarse.shape[gdim]
+    num_points_fine = pred_fine.shape[gdim]
 
     functionalloss_with_scaler.update_scaler("test", torch.ones((num_points_coarse,)) / num_points_coarse)
     functionalloss_with_scaler_fine.update_scaler("test", torch.ones((num_points_fine,)) / num_points_fine)
@@ -383,8 +384,8 @@ def test_logfft2dist_loss() -> None:
     assert hasattr(loss.transform, "y_dim")
 
     # pred/target are (batch, steps, grid, vars)
-    # TODO (Ophelia): edit this when multi ouptuts get merged
-    right = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    # TODO (Ophelia): check this Dieter merged this into multi outputs
+    right = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
 
     # squash=False -> per-variable loss
     loss_value = loss(*right, squash=False)
@@ -397,7 +398,7 @@ def test_logfft2dist_loss() -> None:
     assert loss_total.numel() == 1, "Expected a single aggregated loss value"
 
     # wrong grid size should fail (FFT2D reshape/assert)
-    wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    wrong = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
     with pytest.raises(einops.EinopsError):
         _ = loss(*wrong, squash=True)
 
@@ -421,7 +422,7 @@ def test_fcl_loss() -> None:
     assert hasattr(loss.transform, "x_dim")
     assert hasattr(loss.transform, "y_dim")
 
-    right = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    right = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
 
     loss_value = loss(*right, squash=False)
     assert isinstance(loss_value, torch.Tensor)
@@ -431,7 +432,7 @@ def test_fcl_loss() -> None:
     assert isinstance(loss_total, torch.Tensor)
     assert loss_total.numel() == 1, "Expected a single aggregated loss value"
 
-    wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    wrong = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
     with pytest.raises(einops.EinopsError):
         _ = loss(*wrong, squash=True)
 

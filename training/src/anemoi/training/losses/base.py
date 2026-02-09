@@ -164,23 +164,33 @@ class BaseLoss(nn.Module, ABC):
         """
         if squash:
             if squash_mode == "avg":
-                out = self.avg_function(out, dim=TensorDim.VARIABLE)
+                out = self.avg_function(out, dim=TensorDim.VARIABLE, keepdim=True)
             elif squash_mode == "sum":
-                out = self.sum_function(out, dim=TensorDim.VARIABLE)
+                out = self.sum_function(out, dim=TensorDim.VARIABLE, keepdim=True)
             else:
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
 
-        # here the grid dimension is summed because the normalisation is handled in the node weighting
         grid_dim = -2 if not squash else -1
-        grid_summed = self.sum_function(out, dim=(grid_dim))
+        # here the grid and time dimension are summed because
+        # 1. the normalisation over grid points is handled in the node weighting
+        # 2. the normalization over output steps is handled by the time_step scaler
+        space_time_summed = self.sum_function(
+            out,
+            dim=(
+                TensorDim.TIME,
+                grid_dim,
+            ),
+            keepdim=True,
+        )
         out = self.avg_function(
-            grid_summed,
+            space_time_summed,
             dim=(
                 TensorDim.BATCH_SIZE,
+                TensorDim.TIME,
                 TensorDim.ENSEMBLE_DIM,
             ),
-        )
+        ).squeeze()
 
         return out if group is None else reduce_tensor(out, group)
 
@@ -207,9 +217,9 @@ class BaseLoss(nn.Module, ABC):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
         squash : bool, optional
             Average last dimension, by default True
         scaler_indices: tuple[int,...], optional
