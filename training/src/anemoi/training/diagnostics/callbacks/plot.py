@@ -104,7 +104,13 @@ class BasePlotCallback(Callback, ABC):
         if isinstance(pl_module.model.model, AnemoiModelEncProcDecInterpolator):
             output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
-            output_times = (getattr(pl_module, "rollout", 0), "forecast")
+            # Diffusion forecasters do not define `rollout`; use a single forecast step for plotting.
+            rollout = getattr(pl_module, "rollout", None)
+            try:
+                rollout = int(rollout) if rollout is not None else 1
+            except (TypeError, ValueError):
+                rollout = 1
+            output_times = (max(1, rollout), "forecast")
         return output_times
 
     @rank_zero_only
@@ -801,12 +807,14 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             ]
 
         # Check processor
+        processor_provider = getattr(model, "processor_graph_provider", None)
+        processor_trainable = getattr(processor_provider, "trainable", None)
         if (
-            hasattr(model, "processor_graph_provider")
-            and model.processor_graph_provider.trainable is not None
-            and model.processor_graph_provider.trainable.trainable is not None
+            processor_provider is not None
+            and processor_trainable is not None
+            and getattr(processor_trainable, "trainable", None) is not None
         ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = model.processor_graph_provider
+            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = processor_provider
 
         return trainable_modules
 
