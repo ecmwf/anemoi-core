@@ -232,6 +232,8 @@ class BaseLossSchema(BaseModel):
     "Scalars to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
+    predicted_variables: list[str] | None = None
+    target_variables: list[str] | None = None
 
 
 class KernelCRPSSchema(BaseLossSchema):

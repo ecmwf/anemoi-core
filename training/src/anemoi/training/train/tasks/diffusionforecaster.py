@@ -203,18 +203,19 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
         # prediction, fwd_with_preconditioning
         y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
+        target = {d: data[:, self.multi_step] for d, data in batch.items()}
 
         # Use checkpoint for compute_loss_metrics
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
-            batch[:, self.multi_step],
+            target,
             validation_mode=validation_mode,
             weights=noise_weights,
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]
 
 
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
@@ -350,8 +351,9 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             self.model.pre_processors_tendencies,
             input_post_processor=self.model.post_processors,
         )
-        tendency_target_full = batch[:, self.multi_step]
-        tendency_target_full[..., self.data_indices.data.output.full] = tendency_target
+        tendency_target_full = {d: data[:, self.multi_step] for d, data in batch.items()}
+        for d in batch:
+            tendency_target_full[d][..., self.data_indices[d].data.output.full] = tendency_target[d]
 
         # get noise level and associated loss weights
         shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 2) for k, x_ in x.items()}
@@ -379,6 +381,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 self.model.post_processors_tendencies,
                 output_pre_processor=self.model.pre_processors,
             )
+        target = {d: data[:, self.multi_step] for d, data in batch.items()}
 
         # compute_loss_metrics
         loss, metrics, y_pred = checkpoint(
@@ -386,10 +389,10 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             tendency_pred,
             tendency_target_full,
             y_pred_state=y_pred,
-            y_state=batch[:, self.multi_step],
+            y_state=target,
             validation_mode=validation_mode,
             weights=noise_weights,
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]

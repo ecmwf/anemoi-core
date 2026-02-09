@@ -1,0 +1,69 @@
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+
+data:
+  datasets:
+    data:
+      forcing: []
+      diagnostic: []
+      target: [imerg]
+      processors:
+        normalizer:
+          config:
+            std: ["tp", "imerg"]
+            max: []
+            min-max: []
+            mean-std: []
+            none: []
+
+diagnostics:
+  log:
+    mlflow:
+      enabled: False
+  callbacks: []
+
+training:
+  max_epochs: 1
+  max_steps: 2
+
+  training_loss:
+    datasets:
+      data:
+        _target_: anemoi.training.losses.combined.CombinedLoss
+        losses:
+          # Prognostic term: tp -> tp
+          - _target_: anemoi.training.losses.WeightedMSELoss
+            predicted_variables: [tp]
+            target_variables: [tp]
+
+          # Target-only term: model predicts tp, but loss compares to imerg
+          - _target_: anemoi.training.losses.WeightedMSELoss
+            predicted_variables: [tp]
+            target_variables: [imerg]
+        loss_weights: [1.0, 1.0]  # add a 3rd value if you enable the spectral term
+
+dataloader:
+  dataset:
+  - dataset: ${system.input.dataset}   # dataset A
+    select: [tp]
+  - dataset: ${system.input.dataset}   # dataset B (same file)
+    select: [tp]
+    rename:
+      tp: imerg
+  batch_size:
+    training: 1
+    validation: 1
+  limit_batches:
+    training: 1
+    validation: 1
+  training:
+    datasets:
+      data:
+        start: null
+        end: 2017-01-08 12:00:00
+  validation:
+    datasets:
+      data:
+        start: null
+        end: 2017-01-08 12:00:00
