@@ -45,10 +45,7 @@ def test_instantiation_with_filtering() -> None:
 
     assert loss.predicted_variables == ["tp"]
     # tensors are of size (batch, output_steps, ens, latlon, vars)
-    right_shaped_pred_output_pair = (
-        torch.ones((6, 1, 710 * 640, 2)),
-        torch.zeros((6, 1, 710 * 640, 2)),
-    )
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
     loss_value = loss(*right_shaped_pred_output_pair, squash=False)
     assert loss_value.shape[0] == len(
         name_to_index.keys(),
