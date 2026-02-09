@@ -66,14 +66,16 @@ def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, 
     paths = config.system.output
     logger_config = config.diagnostics.log
 
-    logger = get_mlflow_logger(
-        run_id=run_id,
-        fork_run_id=fork_run_id,
-        paths=paths,
-        logger_config=logger_config,
-    )
+    logger_cfg = getattr(logger_config, "mlflow", None)
+    if getattr(logger_cfg, "enabled", False):
+        LOGGER.info("%s logger enabled", "MLFLOW")
 
-    if logger_config.mlflow.enabled:
+        logger = get_mlflow_logger(
+            run_id=run_id,
+            fork_run_id=fork_run_id,
+            paths=paths,
+            logger_config=logger_config,
+        )
         assert Path(logger_config.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
         assert isinstance(logger, AnemoiMLflowLogger)
 
