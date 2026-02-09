@@ -300,7 +300,6 @@ class AnemoiProfiler(AnemoiTrainer):
                 callbacks.append(MemorySnapshotRecorder(self.config))
         return callbacks
 
-    @cached_property
     def get_example_input_array(self) -> dict[str, torch.Tensor]:
         batch = next(iter(self.datamodule.train_dataloader()))
         if type(batch) in [list, tuple]:
