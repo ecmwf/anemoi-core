@@ -46,7 +46,7 @@ class TimeStepScaler(BaseScaler):
     def get_scaling_values(self) -> torch.Tensor:
         if isinstance(self.weights, torch.Tensor):
             return self.weights.to(dtype=torch.float32)
-        return torch.tensor(self.weights, dtype=torch.float32)
+        return torch.as_tensor(self.weights, dtype=torch.float32)
 
 
 class UniformTimeStepScaler(TimeStepScaler):
