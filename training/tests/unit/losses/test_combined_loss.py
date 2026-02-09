@@ -112,7 +112,7 @@ def test_combined_loss_with_data_indices_and_filtering() -> None:
     data_config = {"data": {"forcing": [], "diagnostic": []}}
     name_to_index = {"tp": 0, "other_var": 1}
     data_indices = IndexCollection(DictConfig(data_config), name_to_index)
-    tensordim = (2, 1, 4, 2)
+    tensordim = (2, 1, 1, 4, 2)
     # now filtering inside the CombinedLoss
     loss = get_loss_function(
         DictConfig(
@@ -165,8 +165,8 @@ def test_combined_loss_filtered_and_unfiltered_with_scalers() -> None:
     data_indices = IndexCollection(DictConfig(data_config), name_to_index)
 
     # Create scalers with variable dimension
-    scaler_pressure = (3, torch.ones(n_vars) * 2.0)  # shape [3], dim 3 is VARIABLE
-    scaler_general = (3, torch.ones(n_vars) * 0.5)
+    scaler_pressure = (4, torch.ones(n_vars) * 2.0)  # shape [3], dim 4 is VARIABLE
+    scaler_general = (4, torch.ones(n_vars) * 0.5)
 
     loss = get_loss_function(
         DictConfig(
@@ -200,8 +200,8 @@ def test_combined_loss_filtered_and_unfiltered_with_scalers() -> None:
 
     # Test forward pass with compatible tensor shapes
     batch_size, ensemble, grid_points = 1, 1, 4
-    pred = torch.ones(batch_size, ensemble, grid_points, n_vars)
-    target = torch.zeros(batch_size, ensemble, grid_points, n_vars)
+    pred = torch.ones(batch_size, 1, ensemble, grid_points, n_vars)
+    target = torch.zeros(batch_size, 1, ensemble, grid_points, n_vars)
 
     # Should not raise shape mismatch errors
     loss_value = loss(pred, target, squash_mode="sum")

@@ -80,8 +80,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         """Get target tensor shape for diffusion model."""
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            start = self.n_step_input
-            y_time = dataset_batch.narrow(1, start, self.n_step_output)
+            y_time = dataset_batch.narrow(1, self.n_step_input, self.n_step_output)
             var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
             y[dataset_name] = y_time.index_select(-1, var_idx)  # (bs, n_step_output, ens, latlon, nvar)
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
@@ -225,7 +224,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         y_noised = self._noise_target(y, sigma)
         # prediction, fwd_with_preconditioning
         y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
-        target = {d: data[:, self.multi_step] for d, data in batch.items()}
+        target = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
 
         # Use checkpoint for compute_loss_metrics
         loss, metrics, y_pred = checkpoint(
@@ -492,7 +491,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
         tendency_target = self._compute_tendency_target(y, x_ref)
-        tendency_target_full = {d: data[:, self.multi_step] for d, data in batch.items()}
+        tendency_target_full = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
         for d in batch:
             tendency_target_full[d][..., self.data_indices[d].data.output.full] = tendency_target[d]
 
@@ -515,7 +514,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         y_pred = None
         if validation_mode:
             y_pred = self._reconstruct_state(x_ref, tendency_pred)
-            target = {d: data[:, self.multi_step] for d, data in batch.items()}
+            target = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
 
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,

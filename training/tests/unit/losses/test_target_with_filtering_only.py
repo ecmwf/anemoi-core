@@ -51,8 +51,8 @@ class TestScalerFilteringWithTargetOnlyVariables:
         general_variable_values = torch.tensor([1.0 * (i + 1) for i in range(n_variables)])
 
         return {
-            "pressure_level": (3, pressure_level_values),  # dim 3 is VARIABLE
-            "general_variable": (3, general_variable_values),
+            "pressure_level": (4, pressure_level_values),  # dim 4 is VARIABLE
+            "general_variable": (4, general_variable_values),
         }
 
     def test_scaler_filtering_many_variables(
@@ -211,8 +211,8 @@ class TestCombinedLossWithTargetOnlyVariables:
         """Create scalers with custom values per variable."""
         n_variables = 6
         return {
-            "pressure_level": (3, torch.ones(n_variables) * 2.0),
-            "general_variable": (3, torch.tensor([1.0, 0.5, 0.5, 0.5, 0.8, 10.0])),
+            "pressure_level": (4, torch.ones(n_variables) * 2.0),
+            "general_variable": (4, torch.tensor([1.0, 0.5, 0.5, 0.5, 0.8, 10.0])),
         }
 
     def test_combined_loss_with_target_only_variable(
@@ -296,8 +296,8 @@ class TestCombinedLossWithTargetOnlyVariables:
 
         # Create test tensors: batch=2, ensemble=1, grid=100, variables=6
         n_variables = 6  # data.output size (includes imerg)
-        pred = torch.randn(2, 1, 100, n_variables)
-        target = torch.randn(2, 1, 100, n_variables)
+        pred = torch.randn(2, 1, 1, 100, n_variables)
+        target = torch.randn(2, 1, 1, 100, n_variables)
 
         # Should not raise any errors
         loss_value = loss(pred, target, squash_mode="sum")
@@ -541,8 +541,8 @@ class TestFilteringLossWrapperForward:
 
         # Create tensors with zeros, then set specific values
         # Shape: (batch=2, ensemble=1, grid=8, variables=6) - 6 variables in data.output
-        pred = torch.zeros(2, 1, 8, 6)
-        target = torch.zeros(2, 1, 8, len(data_indices_with_target_only.name_to_index))
+        pred = torch.zeros(2, 1, 1, 8, 6)
+        target = torch.zeros(2, 1, 1, 8, len(data_indices_with_target_only.name_to_index))
 
         # Set values only in the variables we expect to be used
         pred[..., 0] = 1.0  # var_0 in predictions (position 0)
@@ -598,7 +598,7 @@ class TestFilteringLossWrapperForward:
 
         # Now compute loss WITH scalers (2x weight for all variables)
         n_vars = len(data_indices_with_target_only.name_to_index)
-        scalers = {"double_weight": (3, torch.ones(n_vars) * 2.0)}
+        scalers = {"double_weight": (4, torch.ones(n_vars) * 2.0)}
 
         loss_with_scalers = get_loss_function(
             DictConfig(
@@ -644,8 +644,8 @@ class TestFilteringLossWrapperForward:
 
         # Create tensors with controlled values
         # Shape: (batch=2, ensemble=1, grid=4, variables=6) - 6 variables in data.output
-        pred = torch.zeros(2, 1, 4, 6)
-        target = torch.zeros(2, 1, 4, len(data_indices_with_target_only.name_to_index))
+        pred = torch.zeros(2, 1, 1, 4, 6)
+        target = torch.zeros(2, 1, 1, 4, len(data_indices_with_target_only.name_to_index))
 
         # Set prediction values for prognostic variables
         for j, i in enumerate(data_indices_with_target_only.model.output.full):
