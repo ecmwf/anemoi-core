@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+import warnings
+
 import einops
 import pytest
 import torch
@@ -91,6 +93,59 @@ def test_assert_of_grid_dim(functionalloss: type[FunctionalLoss]) -> None:
 
     with pytest.raises(RuntimeError):
         loss.scale(torch.ones((4, 2)))
+
+
+@pytest.mark.parametrize("add_grid_scaler", [False, True])
+def test_scale_subset_indices_list_normalization(
+    functionalloss: type[FunctionalLoss],
+    add_grid_scaler: bool,
+) -> None:
+    """List-based multidimensional selectors should be normalized to tuple indexing."""
+    loss = functionalloss()
+    if add_grid_scaler:
+        loss.add_scaler(TensorDim.GRID, torch.tensor([1.0, 2.0, 3.0, 4.0]), name="grid_test")
+
+    x = torch.arange(1 * 1 * 1 * 4 * 5, dtype=torch.float32).reshape(1, 1, 1, 4, 5)
+    deprecation_message = "Using a non-tuple sequence for multidimensional indexing is deprecated"
+    selector_list = [Ellipsis, [1, 3]]
+    selector_tuple = (Ellipsis, [1, 3])
+
+    with warnings.catch_warnings(record=True) as list_warnings:
+        warnings.simplefilter("always")
+        list_out = loss.scale(x, subset_indices=selector_list)
+
+    with warnings.catch_warnings(record=True) as tuple_warnings:
+        warnings.simplefilter("always")
+        tuple_out = loss.scale(x, subset_indices=selector_tuple)
+
+    assert all(deprecation_message not in str(w.message) for w in list_warnings)
+    assert all(deprecation_message not in str(w.message) for w in tuple_warnings)
+    torch.testing.assert_close(list_out, tuple_out)
+
+
+@pytest.mark.parametrize("add_grid_scaler", [False, True])
+@pytest.mark.parametrize(
+    ("subset_indices", "message"),
+    [
+        ((slice(None),) * 6, "too many indices"),
+        ([Ellipsis, [1, 6]], "out of bounds"),
+    ],
+)
+def test_scale_subset_indices_invalid_raises(
+    functionalloss: type[FunctionalLoss],
+    add_grid_scaler: bool,
+    subset_indices: object,
+    message: str,
+) -> None:
+    """Invalid subset selectors should fail instead of returning a tensor with wrong shapes."""
+    loss = functionalloss()
+    if add_grid_scaler:
+        loss.add_scaler(TensorDim.GRID, torch.tensor([1.0, 2.0, 3.0, 4.0]), name="grid_test")
+
+    x = torch.arange(1 * 1 * 1 * 4 * 5, dtype=torch.float32).reshape(1, 1, 1, 4, 5)
+
+    with pytest.raises(IndexError, match=message):
+        loss.scale(x, subset_indices=subset_indices)
 
 
 @pytest.fixture
