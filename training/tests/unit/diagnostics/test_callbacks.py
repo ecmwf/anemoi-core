@@ -170,10 +170,7 @@ def test_ensemble_plot_mixin_process():
     # Set post_processors on the mixin instance
     mixin.post_processors = {"data": mock_post_processors}
 
-    if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-        output_times = (len(config.training.explicit_times.target), "time_interp")
-    else:
-        output_times = (getattr(pl_module, "rollout", 0), "forecast")
+    output_times = mixin._get_output_times(config, pl_module)
 
     data, result_output_tensor = mixin.process(pl_module, "data", outputs, batch, output_times=output_times, members=0)
 
@@ -189,6 +186,42 @@ def test_ensemble_plot_mixin_process():
         100,
         5,
     ), f"Expected output_tensor shape (3, 1, 100, 5), got {result_output_tensor.shape}"
+
+
+def test_ensemble_plot_mixin_output_times_defaults_to_single_step():
+    """Test EnsemblePlotMixin._get_output_times fallback for missing rollout."""
+    mixin = EnsemblePlotMixin()
+
+    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
+    pl_module = MagicMock()
+    pl_module.model = MagicMock()
+
+    output_times = mixin._get_output_times(config, pl_module)
+
+    assert output_times == (1, "forecast")
+
+
+def test_ensemble_plot_mixin_output_times_interpolator_mode(monkeypatch):
+    """Test EnsemblePlotMixin._get_output_times in interpolator mode."""
+    import anemoi.training.diagnostics.callbacks.plot_ens as plot_ens
+
+    class FakeInterpolator:
+        pass
+
+    monkeypatch.setattr(plot_ens, "AnemoiModelEncProcDecInterpolator", FakeInterpolator)
+
+    mixin = EnsemblePlotMixin()
+    config = omegaconf.OmegaConf.create(
+        {
+            "training": {"explicit_times": {"target": ["2025-01-01T00", "2025-01-01T06"]}},
+        },
+    )
+    pl_module = MagicMock()
+    pl_module.model.model = FakeInterpolator()
+
+    output_times = mixin._get_output_times(config, pl_module)
+
+    assert output_times == (2, "time_interp")
 
 
 def test_rollout_eval_ens_eval():
@@ -341,10 +374,87 @@ def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
     )
     callback = GraphTrainableFeaturesPlot(config=config)
 
-    model = MagicMock()
+    class DummyModel:
+        pass
+
+    class NoOpGraphProvider:
+        trainable = None
+
+    model = DummyModel()
     model._graph_name_data = "data"
     model._graph_name_hidden = "hidden"
-    model.processor_graph_provider = MagicMock(trainable=None)
+    model.encoder_graph_provider = None
+    model.decoder_graph_provider = None
+    model.processor_graph_provider = NoOpGraphProvider()
+
+    edge_modules = callback.get_edge_trainable_modules(model, dataset_name="data")
+
+    assert edge_modules == {}
+
+
+def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
+    config = omegaconf.OmegaConf.create(
+        {
+            "system": {"output": {"plots": None}},
+            "diagnostics": {
+                "plot": {
+                    "datashader": False,
+                    "asynchronous": False,
+                    "frequency": {"epoch": 1},
+                },
+            },
+        },
+    )
+    callback = GraphTrainableFeaturesPlot(config=config)
+
+    class NoOpGraphProvider:
+        trainable = None
+
+    class DummyModel:
+        pass
+
+    model = DummyModel()
+    model._graph_name_data = "data"
+    model._graph_name_hidden = "hidden"
+    model.encoder_graph_provider = NoOpGraphProvider()
+    model.decoder_graph_provider = NoOpGraphProvider()
+    model.processor_graph_provider = NoOpGraphProvider()
+
+    edge_modules = callback.get_edge_trainable_modules(model, dataset_name="data")
+
+    assert edge_modules == {}
+
+
+def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_map():
+    config = omegaconf.OmegaConf.create(
+        {
+            "system": {"output": {"plots": None}},
+            "diagnostics": {
+                "plot": {
+                    "datashader": False,
+                    "asynchronous": False,
+                    "frequency": {"epoch": 1},
+                },
+            },
+        },
+    )
+    callback = GraphTrainableFeaturesPlot(config=config)
+
+    class TrainableTensor:
+        trainable = object()
+
+    class TrainableProvider:
+        trainable = TrainableTensor()
+
+    class DummyModel:
+        pass
+
+    model = DummyModel()
+    model._graph_name_data = "data"
+    model._graph_name_hidden = "hidden"
+    model.encoder_graph_provider = {"other": TrainableProvider()}
+    model.decoder_graph_provider = {"other": TrainableProvider()}
+    model.processor_graph_provider = None
 
     edge_modules = callback.get_edge_trainable_modules(model, dataset_name="data")
 

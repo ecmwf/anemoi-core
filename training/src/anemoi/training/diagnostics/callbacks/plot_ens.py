@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.models.models import AnemoiModelEncProcDecInterpolator
 from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot as _GraphTrainableFeaturesPlot
 from anemoi.training.diagnostics.callbacks.plot import PlotHistogram as _PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss as _PlotLoss
@@ -75,10 +76,13 @@ class EnsemblePlotMixin:
 
     def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
         """Return times outputted by the model."""
-        if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
+        if isinstance(pl_module.model.model, AnemoiModelEncProcDecInterpolator):
             output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
-            output_times = (getattr(pl_module, "rollout", 0), "forecast")
+            # Diffusion forecasters do not define `rollout`; use a single forecast step for plotting.
+            rollout = getattr(pl_module, "rollout", None)
+            rollout = 1 if rollout is None else int(rollout)
+            output_times = (max(1, rollout), "forecast")
         return output_times
 
     def process(

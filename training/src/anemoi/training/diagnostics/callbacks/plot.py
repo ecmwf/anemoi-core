@@ -106,10 +106,7 @@ class BasePlotCallback(Callback, ABC):
         else:
             # Diffusion forecasters do not define `rollout`; use a single forecast step for plotting.
             rollout = getattr(pl_module, "rollout", None)
-            try:
-                rollout = int(rollout) if rollout is not None else 1
-            except (TypeError, ValueError):
-                rollout = 1
+            rollout = 1 if rollout is None else int(rollout)
             output_times = (max(1, rollout), "forecast")
         return output_times
 
@@ -767,6 +764,28 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             if tt.trainable is not None
         }
 
+    @staticmethod
+    def _resolve_edge_provider(provider: Any, dataset_name: str) -> Any:
+        if provider is None:
+            return None
+        if isinstance(provider, (dict, torch.nn.ModuleDict)):
+            if dataset_name in provider:
+                return provider[dataset_name]
+            return None
+        return provider
+
+    @staticmethod
+    def _has_trainable_edge_params(provider: Any) -> bool:
+        if provider is None:
+            return False
+        trainable_module = getattr(provider, "trainable", None)
+        if trainable_module is None:
+            return False
+        # Graph providers has TrainableTensor -> .trainable;
+        # parameter is nested as .trainable.trainable.
+        trainable_parameter = getattr(trainable_module, "trainable", None)
+        return trainable_parameter is not None
+
     def get_edge_trainable_modules(
         self,
         model: torch.nn.Module,
@@ -782,39 +801,15 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         # but only for the modules (encoder/processor/decoder).
         trainable_modules = {}
 
-        # Check encoder
-        if (
-            hasattr(model, "encoder_graph_provider")
-            and dataset_name in model.encoder_graph_provider
-            and hasattr(model.encoder_graph_provider[dataset_name], "trainable")
-            and model.encoder_graph_provider[dataset_name].trainable is not None
-            and model.encoder_graph_provider[dataset_name].trainable.trainable is not None
-        ):
-            trainable_modules[(model._graph_name_data, model._graph_name_hidden)] = model.encoder_graph_provider[
-                dataset_name
-            ]
-
-        # Check decoder
-        if (
-            hasattr(model, "decoder_graph_provider")
-            and dataset_name in model.decoder_graph_provider
-            and hasattr(model.decoder_graph_provider[dataset_name], "trainable")
-            and model.decoder_graph_provider[dataset_name].trainable is not None
-            and model.decoder_graph_provider[dataset_name].trainable.trainable is not None
-        ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_data)] = model.decoder_graph_provider[
-                dataset_name
-            ]
-
-        # Check processor
-        processor_provider = getattr(model, "processor_graph_provider", None)
-        processor_trainable = getattr(processor_provider, "trainable", None)
-        if (
-            processor_provider is not None
-            and processor_trainable is not None
-            and getattr(processor_trainable, "trainable", None) is not None
-        ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = processor_provider
+        provider_specs = (
+            ("encoder_graph_provider", (model._graph_name_data, model._graph_name_hidden)),
+            ("decoder_graph_provider", (model._graph_name_hidden, model._graph_name_data)),
+            ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
+        )
+        for provider_name, edge_key in provider_specs:
+            provider = self._resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
+            if self._has_trainable_edge_params(provider):
+                trainable_modules[edge_key] = provider
 
         return trainable_modules
 
