@@ -514,7 +514,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         y_pred = None
         if validation_mode:
             y_pred = self._reconstruct_state(x_ref, tendency_pred)
-            target = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
+        target = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
 
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,

@@ -561,7 +561,7 @@ def multi_output_interpolator_config(
 
 @pytest.fixture
 def imerg_target_config(
-    testing_modifications_callbacks_on_with_temp_dir: DictConfig,
+    testing_modifications_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, list[str]]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_filtering"):
@@ -577,7 +577,7 @@ def imerg_target_config(
         template.training.training_loss.datasets.data,
         False,
     )  # allow new keys under data (e.g. target)
-    cfg = OmegaConf.merge(template, testing_modifications_callbacks_on_with_temp_dir, use_case_modifications)
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls
