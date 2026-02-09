@@ -37,11 +37,24 @@ from profiling import benchmark as run_benchmark
 LOGGER = logging.getLogger(__name__)
 
 
+class GraphConfig_n320_to_o96:
+    """Configuration for the graph used in benchmarks."""
+    num_src_nodes: int = 542080  
+    num_dst_nodes: int = 40320
+    num_edges: int = 748348  
+
+class GraphConfig_o96_to_n320:
+    """Configuration for the graph used in benchmarks."""
+    num_src_nodes: int = 40320
+    num_dst_nodes: int = 542080
+    num_edges: int = 1.62624e+06
+
 @dataclass
 class MapperBenchmarkConfig:
     """Configuration for mapper benchmarks."""
     in_channels_src: int = 1024
     in_channels_dst: int = 1024
+    trainable_size: int = 256 #TODO is this right?
     hidden_dim: int = 256
     num_chunks: int = 4
     num_heads: int = 16
@@ -53,11 +66,6 @@ class MapperBenchmarkConfig:
     graph_attention_backend: str = "triton"
     edge_dim: int = None
     edge_pre_mlp: bool = False
-    
-    # Graph configuration
-    num_src_nodes: int = 40320  # Realistic number of grid points
-    num_dst_nodes: int = 40320
-    num_edges: int = 500000  # Realistic number of edges
     
     # Benchmark settings
     warmup_iter: int = 10
@@ -74,46 +82,59 @@ def mapper_benchmark_config():
     """Fixture providing benchmark configuration."""
     return MapperBenchmarkConfig()
 
-
-@pytest.fixture
-def benchmark_graph(mapper_benchmark_config, device="cuda:0") -> HeteroData:
+def benchmark_graph(graph_config, device="cuda:0") -> HeteroData:
     """Create a realistic graph for benchmarking."""
-    config = mapper_benchmark_config
+    config = graph_config
     graph = HeteroData()
     
-    # Create edge indices
+    # Create edge indices (ensure int types)
+    num_src = int(config.num_src_nodes)
+    num_dst = int(config.num_dst_nodes)
+    num_edges = int(config.num_edges)
+    
     graph[("nodes", "to", "nodes")].edge_index = torch.concat(
         [
-            torch.randint(0, config.num_src_nodes, (1, config.num_edges), device=device),
-            torch.randint(0, config.num_dst_nodes, (1, config.num_edges), device=device),
+            torch.randint(0, num_src, (1, num_edges), device=device),
+            torch.randint(0, num_dst, (1, num_edges), device=device),
         ],
         axis=0,
     )
     
     # Add edge attributes (simulating real edge features)
-    graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((config.num_edges, 1), device=device)
-    graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((config.num_edges, 32), device=device)
+    # TODO fix
+    #   Source │ Target │  Num. edges │ Isolated Source │ Isolated Target │ Attribute dim │                     Attributes
+   #───────┼────────┼─────────────┼─────────────────┼─────────────────┼───────────────┼───────────────────────────────
+   #data   │ hidden │      748348 │            3064 │               0 │             3 │ edge_length(1D), edge_dirs(2D)
+   #hidden │ data   │ 1.62624e+06 │               0 │               0 │             3 │ edge_length(1D), edge_dirs(2D)
+   #───────┴────────┴─────────────┴─────────────────┴─────────────────┴───────────────┴───────────────────────────────
+    graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((num_edges, 1), device=device)
+    graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((num_edges, 32), device=device)
     
     return graph
 
 
 @pytest.fixture
-def benchmark_graph_provider(benchmark_graph, mapper_benchmark_config, device="cuda:0"):
+def benchmark_graph_provider(graph_config, mapper_benchmark_config, device="cuda:0"):
     """Create graph provider for benchmarking."""
-    config = mapper_benchmark_config
+    
+    mapper_benchmark_config
+    
+    graph = benchmark_graph(graph_config, device)
     provider = create_graph_provider(
-        graph=benchmark_graph[("nodes", "to", "nodes")],
+        graph=graph[("nodes", "to", "nodes")],
         edge_attributes=["edge_attr1", "edge_attr2"],
-        src_size=config.num_src_nodes,
-        dst_size=config.num_dst_nodes,
-        trainable_size=6,
+        src_size=graph_config.num_src_nodes,
+        dst_size=graph_config.num_dst_nodes,
+        trainable_size=mapper_benchmark_config.trainable_size,
     )
     return provider.to(device)
 
 
 @pytest.mark.gpu
 @pytest.mark.slow
-def test_benchmark_forward_mapper(mapper_benchmark_config, benchmark_graph_provider):
+@pytest.mark.parametrize("graph_config", [GraphConfig_n320_to_o96()])
+@pytest.mark.parametrize("mode", ["fwd", "bwd", "both"])
+def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode):
     """Benchmark the GraphTransformerForwardMapper."""
     config = mapper_benchmark_config
     device = "cuda:0"
@@ -132,8 +153,8 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, benchmark_graph_provi
     mapper = GraphTransformerForwardMapper(**mapper_config).to(device)
     
     # Create input tensors
-    x_src = torch.rand(config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
-    x_dst = torch.rand(config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
+    x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
+    x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
     x = (x_src, x_dst)
     
     shard_shapes = ([list(x_src.shape)], [list(x_dst.shape)])
@@ -144,10 +165,10 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, benchmark_graph_provi
         return mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
     
     # Run benchmark
-    LOGGER.info("Running forward+backward benchmark...")
+    LOGGER.info(f"Running {mode} benchmark...")
     run_time, peak_memory = run_benchmark(
         forward_fn,
-        mode="both",
+        mode=mode,
         warmup_iter=config.warmup_iter,
         run_iter=config.run_iter
     )
@@ -156,14 +177,11 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, benchmark_graph_provi
     LOGGER.info(f"  Time per iteration: {run_time:.2f} ms")
     LOGGER.info(f"  Peak memory usage: {peak_memory:.2f} MB")
     
-    # Assertions to ensure benchmark ran successfully
-    assert run_time > 0, "Benchmark time should be positive"
-    assert peak_memory > 0, "Peak memory should be positive"
-
-
 @pytest.mark.gpu
 @pytest.mark.slow
-def test_benchmark_backward_mapper(mapper_benchmark_config, benchmark_graph_provider):
+@pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
+@pytest.mark.parametrize("mode", ["fwd", "bwd", "both"])
+def test_benchmark_backward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode):
     """Benchmark the GraphTransformerBackwardMapper."""
     config = mapper_benchmark_config
     device = "cuda:0"
@@ -186,8 +204,8 @@ def test_benchmark_backward_mapper(mapper_benchmark_config, benchmark_graph_prov
     ).to(device)
     
     # Create input tensors (note: backward mapper has different input channel requirements)
-    x_src = torch.rand(config.num_src_nodes, config.hidden_dim, device=device, requires_grad=True)
-    x_dst = torch.rand(config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
+    x_src = torch.rand(graph_config.num_src_nodes, config.hidden_dim, device=device, requires_grad=True)
+    x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
     x = (x_src, x_dst)
     
     shard_shapes = ([list(x_src.shape)], [list(x_dst.shape)])
@@ -198,10 +216,10 @@ def test_benchmark_backward_mapper(mapper_benchmark_config, benchmark_graph_prov
         return mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
     
     # Run benchmark
-    LOGGER.info("Running forward+backward benchmark...")
+    LOGGER.info(f"Running {mode} benchmark...")
     run_time, peak_memory = run_benchmark(
         forward_fn,
-        mode="both",
+        mode=mode,
         warmup_iter=config.warmup_iter,
         run_iter=config.run_iter
     )
@@ -210,108 +228,24 @@ def test_benchmark_backward_mapper(mapper_benchmark_config, benchmark_graph_prov
     LOGGER.info(f"  Time per iteration: {run_time:.2f} ms")
     LOGGER.info(f"  Peak memory usage: {peak_memory:.2f} MB")
     
-    # Assertions to ensure benchmark ran successfully
-    assert run_time > 0, "Benchmark time should be positive"
-    assert peak_memory > 0, "Peak memory should be positive"
-
-
 @pytest.mark.gpu
 @pytest.mark.slow
-@pytest.mark.parametrize("backend", ["triton", "pyg"])
-def test_benchmark_mapper_backends(mapper_benchmark_config, benchmark_graph_provider, backend):
-    """Compare performance across different backends."""
-    config = mapper_benchmark_config
-    config.graph_attention_backend = backend
-    device = "cuda:0"
+@pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
+@pytest.mark.parametrize("mode", ['both'])
+@pytest.mark.parametrize("backend", ['pyg', 'triton'])
+def test_benchmark_forward_mapper_different_backends(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, backend):
+    """Benchmark the GraphTransformerForwardMapper with different attention backends."""
+    LOGGER.info(f"Benchmarking with {backend} backend...")
+    mapper_benchmark_config.graph_attention_backend = backend
+    test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode)
     
-    LOGGER.info(f"Benchmarking ForwardMapper with backend: {backend}")
-    
-    # Reset memory stats
-    reset_peak_memory_stats()
-    empty_cache()
-    gc.collect()
-    
-    # Create mapper
-    mapper_config = asdict(config)
-    mapper_config["edge_dim"] = benchmark_graph_provider.edge_dim
-    mapper = GraphTransformerForwardMapper(**mapper_config).to(device)
-    
-    # Create input tensors
-    x_src = torch.rand(config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
-    x_dst = torch.rand(config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
-    x = (x_src, x_dst)
-    
-    shard_shapes = ([list(x_src.shape)], [list(x_dst.shape)])
-    edge_attr, edge_index, _ = benchmark_graph_provider.get_edges(batch_size=config.batch_size)
-    
-    # Define forward function for benchmarking
-    def forward_fn():
-        return mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
-    
-    # Run benchmark
-    run_time, peak_memory = run_benchmark(
-        forward_fn,
-        mode="both",
-        warmup_iter=config.warmup_iter,
-        run_iter=config.run_iter
-    )
-    
-    LOGGER.info(f"{backend} backend benchmark complete:")
-    LOGGER.info(f"  Time per iteration: {run_time:.2f} ms")
-    LOGGER.info(f"  Peak memory usage: {peak_memory:.2f} MB")
-    
-    # Assertions
-    assert run_time > 0, "Benchmark time should be positive"
-    assert peak_memory > 0, "Peak memory should be positive"
-
-
 @pytest.mark.gpu
 @pytest.mark.slow
-@pytest.mark.parametrize("num_chunks", [1, 2, 4, 8])
-def test_benchmark_mapper_chunking(mapper_benchmark_config, benchmark_graph_provider, num_chunks):
-    """Benchmark mapper with different chunking strategies."""
-    config = mapper_benchmark_config
-    config.num_chunks = num_chunks
-    device = "cuda:0"
-    
-    LOGGER.info(f"Benchmarking ForwardMapper with num_chunks: {num_chunks}")
-    
-    # Reset memory stats
-    reset_peak_memory_stats()
-    empty_cache()
-    gc.collect()
-    
-    # Create mapper
-    mapper_config = asdict(config)
-    mapper_config["edge_dim"] = benchmark_graph_provider.edge_dim
-    mapper = GraphTransformerForwardMapper(**mapper_config).to(device)
-    
-    # Create input tensors
-    x_src = torch.rand(config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
-    x_dst = torch.rand(config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
-    x = (x_src, x_dst)
-    
-    shard_shapes = ([list(x_src.shape)], [list(x_dst.shape)])
-    edge_attr, edge_index, _ = benchmark_graph_provider.get_edges(batch_size=config.batch_size)
-    
-    # Define forward function for benchmarking
-    def forward_fn():
-        return mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
-    
-    # Run benchmark
-    run_time, peak_memory = run_benchmark(
-        forward_fn,
-        mode="both",
-        warmup_iter=config.warmup_iter,
-        run_iter=config.run_iter
-    )
-    
-    LOGGER.info(f"Chunking={num_chunks} benchmark complete:")
-    LOGGER.info(f"  Time per iteration: {run_time:.2f} ms")
-    LOGGER.info(f"  Peak memory usage: {peak_memory:.2f} MB")
-    
-    # Assertions
-    assert run_time > 0, "Benchmark time should be positive"
-    assert peak_memory > 0, "Peak memory should be positive"
-
-
+@pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
+@pytest.mark.parametrize("mode", ['both'])
+@pytest.mark.parametrize("num_chunks", [1,2,4,8])
+def test_benchmark_forward_mapper_different_num_chunks(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, num_chunks):
+    """Benchmark the GraphTransformerForwardMapper with different num_chunks."""
+    LOGGER.info(f"Benchmarking with num_chunks={num_chunks}...")
+    mapper_benchmark_config.num_chunks = num_chunks
+    test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode)

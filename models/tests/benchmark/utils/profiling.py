@@ -36,6 +36,7 @@ def benchmark(f, *inputs, mode="both", warmup_iter=100, run_iter=100):
             elif isinstance(i, tuple):
                 reset_grad(*i)
     
+    out=None
     if mode == "bwd":
         out = f(*inputs)
     for _ in range(warmup_iter):
@@ -44,7 +45,7 @@ def benchmark(f, *inputs, mode="both", warmup_iter=100, run_iter=100):
             out = f(*inputs)
         if mode == "bwd" or mode == "both":
             loss = dummy_loss(out)
-            loss.backward()
+            loss.backward(retain_graph=(mode == "bwd"))
             reset_grad(*inputs)
         cache_filler_1.zero_()
     
@@ -57,7 +58,7 @@ def benchmark(f, *inputs, mode="both", warmup_iter=100, run_iter=100):
             out = f(*inputs)
         if mode == "bwd" or mode == "both":
             loss = dummy_loss(out)
-            loss.backward()
+            loss.backward(retain_graph=(mode == "bwd"))
             reset_grad(*inputs)
         cache_filler_1.zero_()
     end.record()
