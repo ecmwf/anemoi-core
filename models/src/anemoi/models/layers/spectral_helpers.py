@@ -125,9 +125,7 @@ class SphericalHarmonicTransform(Module):
         self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
 
         # Use more efficient batched rfft for regular grids
-        self.rfft_rings = (
-            self.rfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.rfft_rings_regular
-        )
+        self.rfft_rings = self.rfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.rfft_rings_regular
 
         # Compute Gaussian latitudes and quadrature weights
         theta, weight = legendre_gauss_weights(nlat)
@@ -228,9 +226,7 @@ class InverseSphericalHarmonicTransform(Module):
         self.n_grid_points = sum(self.lons_per_lat)
 
         # Use more efficient batched rfft for regular grids
-        self.irfft_rings = (
-            self.irfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.irfft_rings_regular
-        )
+        self.irfft_rings = self.irfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.irfft_rings_regular
 
         # Compute Gaussian latitudes (don't need quadrature weights for the inverse)
         theta, _ = legendre_gauss_weights(nlat)
