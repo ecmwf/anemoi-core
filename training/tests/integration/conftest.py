@@ -86,39 +86,19 @@ def get_tmp_path(temporary_directory_for_test_data: TemporaryDirectoryForTestDat
     ],
     ids=["pydantic_MLflow", "pydantic_no_MLflow", "no_pydantic_MLflow", "no_pydantic_no_MLflow"],
 )
-def global_config_mlflow(
+def gnn_config_mlflow(
     request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    gnn_config: tuple[DictConfig, str],
 ) -> tuple[DictConfig, str, str]:
     overrides = request.param
-    model_architecture = overrides[0].split("=")[1]
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
-        template = compose(
-            config_name="config",
-            overrides=overrides,
-        )  # apply architecture overrides to template since they override a default
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
-    assert isinstance(use_case_modifications, DictConfig)
+    config, _ = gnn_config
 
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-
-    # Add the imputer here as it's not part of the default config
-    imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
-
-    OmegaConf.set_struct(template.data, False)  # allow adding new keys to the template to add the imputer
     cfg = OmegaConf.merge(
-        template,
-        testing_modifications_with_temp_dir,
-        use_case_modifications,
-        imputer_modifications,
+        config,
         OmegaConf.from_dotlist(overrides),
     )
-
-    OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, url_dataset, model_architecture
+    return cfg
 
 
 def build_global_config(
@@ -132,7 +112,7 @@ def build_global_config(
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(config_name="config", overrides=overrides)
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
 
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
@@ -329,7 +309,7 @@ def hierarchical_config(
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_hierarchical"):
         template = compose(config_name="hierarchical")
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
@@ -363,7 +343,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(config_name="config")
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)

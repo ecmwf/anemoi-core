@@ -43,11 +43,11 @@ def test_config_validation_global_config(global_config: tuple[DictConfig, str, s
     BaseSchema(**cfg)
 
 
-def test_config_validation_mlflow_configs(global_config_mlflow: tuple[DictConfig, str, str]) -> None:
+def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:
     from anemoi.training.diagnostics.logger import get_mlflow_logger
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
-    config, _, _ = global_config_mlflow
+    config = gnn_config_mlflow
     if config.config_validation:
         OmegaConf.resolve(config)
         config = BaseSchema(**config)
