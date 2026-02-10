@@ -103,9 +103,7 @@ class GraphAutoEncoder(BaseGraphModule):
         y = {}
 
         for dataset_name, dataset_batch in batch.items():
-            y_time = dataset_batch.narrow(1, 0, self.n_step_output)
-            var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = y_time.index_select(-1, var_idx)
+            y[dataset_name] = dataset_batch.narrow(1, 0, self.n_step_output)
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         loss, metrics, y_pred = checkpoint(
