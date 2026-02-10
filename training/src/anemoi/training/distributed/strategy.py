@@ -9,6 +9,7 @@
 
 
 import logging
+from abc import abstractmethod
 
 import numpy as np
 import pytorch_lightning as pl
@@ -116,11 +117,11 @@ def get_my_reader_group(model_comm_group_rank: int, read_group_size: int, global
     return reader_group_id, reader_group_rank, reader_group_size, reader_group_root
 
 
-class DDPGroupStrategy(DDPStrategy):
-    """Distributed Data Parallel strategy with group communication."""
+class BaseDDPStrategy(DDPStrategy):
+    """Base DDP strategy with common functionality for group communication strategies."""
 
     def __init__(self, num_gpus_per_model: int, read_group_size: int, **kwargs: dict) -> None:
-        """Initialize the distributed strategy.
+        """Initialise the distributed strategy.
 
         Parameters
         ----------
@@ -130,12 +131,22 @@ class DDPGroupStrategy(DDPStrategy):
             Number of GPUs per reader group.
         **kwargs : dict
             Additional keyword arguments.
-
         """
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.shard_shapes: dict | None = None
+
+    @abstractmethod
+    def _setup_communication_groups(self) -> int:
+        """Set up communication groups for distributed training.
+
+        Returns
+        -------
+        int
+            The model communication group ID for this rank.
+        """
+        raise NotImplementedError
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
@@ -149,6 +160,31 @@ class DDPGroupStrategy(DDPStrategy):
         """Configure DDP with custom gradient hooks."""
         self.register_parameter_hooks()
         super().configure_ddp()
+
+    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
+        """Set up shard shapes for the dataloader.
+
+        Parameters
+        ----------
+        trainer : pl.Trainer
+            The PyTorch Lightning trainer.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the shard shapes for each dataset.
+        """
+        shard_shapes = trainer.model.module.shard_shapes
+        assert shard_shapes is not None, "Shard shapes should be set after setup"
+        return shard_shapes
+
+    def register_parameter_hooks(self) -> None:
+        """Register parameter hooks for gradient reduction."""
+        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
+
+
+class DDPGroupStrategy(BaseDDPStrategy):
+    """Distributed Data Parallel strategy with group communication."""
 
     def _setup_communication_groups(self) -> int:
         """Set up model and reader communication groups.
@@ -228,23 +264,6 @@ class DDPGroupStrategy(DDPStrategy):
 
         return model_comm_group_id
 
-    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
-        """Set up shard shapes for the dataloader.
-
-        Parameters
-        ----------
-        trainer : pl.Trainer
-            The PyTorch Lightning trainer.
-
-        Returns
-        -------
-        dict
-            A dictionary containing the shard shapes for each dataset.
-        """
-        shard_shapes = trainer.model.module.shard_shapes
-        assert shard_shapes is not None, "Shard shapes should be set after setup"
-        return shard_shapes
-
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
 
@@ -285,12 +304,8 @@ class DDPGroupStrategy(DDPStrategy):
 
         return dataloader
 
-    def register_parameter_hooks(self) -> None:
-        """Register parameter hooks for gradient reduction."""
-        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
 
-
-class DDPEnsGroupStrategy(DDPStrategy):
+class DDPEnsGroupStrategy(BaseDDPStrategy):
     """Distributed Data Parallel strategy with group communication for ensembles."""
 
     def __init__(self, num_gpus_per_model: int, num_gpus_per_ensemble: int, read_group_size: int, **kwargs) -> None:
@@ -306,24 +321,8 @@ class DDPEnsGroupStrategy(DDPStrategy):
             Additional keyword arguments.
 
         """
-        super().__init__(**kwargs)
-        self.model_comm_group_size = num_gpus_per_model
-        self.read_group_size = read_group_size
+        super().__init__(num_gpus_per_model=num_gpus_per_model, read_group_size=read_group_size, **kwargs)
         self.ens_comm_group_size = num_gpus_per_ensemble
-        self.shard_shapes: dict | None = None
-
-    def setup(self, trainer: pl.Trainer) -> None:
-        model_comm_group_id = self._setup_communication_groups()
-
-        super().setup(trainer)
-
-        self.shard_shapes = self._setup_shard_shapes(trainer)
-        seed_rnd(model_comm_group_id, self.global_rank)
-
-    def configure_ddp(self) -> None:
-        """Configure DDP with custom gradient hooks."""
-        self.register_parameter_hooks()
-        super().configure_ddp()
 
     def _setup_communication_groups(self) -> int:
         """Set up model, reader, and ensemble communication groups.
@@ -478,23 +477,6 @@ class DDPEnsGroupStrategy(DDPStrategy):
 
         return model_comm_group_id
 
-    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
-        """Set up shard shapes for the dataloader.
-
-        Parameters
-        ----------
-        trainer : pl.Trainer
-            The PyTorch Lightning trainer.
-
-        Returns
-        -------
-        dict
-            A dictionary containing the shard shapes for each dataset.
-        """
-        shard_shapes = trainer.model.module.shard_shapes
-        assert shard_shapes is not None, "Shard shapes should be set after setup"
-        return shard_shapes
-
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
 
@@ -545,7 +527,3 @@ class DDPEnsGroupStrategy(DDPStrategy):
         )
 
         return dataloader
-
-    def register_parameter_hooks(self) -> None:
-        """Register parameter hooks for gradient reduction."""
-        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
