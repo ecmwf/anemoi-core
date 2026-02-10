@@ -18,12 +18,16 @@ import torch
 from torch.cuda import empty_cache
 from torch.cuda import reset_peak_memory_stats
 from torch_geometric.data import HeteroData
+from omegaconf import OmegaConf
 
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
+
+
+from anemoi.models.utils.compile import mark_for_compilation
 
 # Import the benchmark profiling function
 import sys
@@ -46,6 +50,17 @@ class GraphConfig_o96_to_n320:
     num_src_nodes: int = 40320
     num_dst_nodes: int = 542080
     num_edges: int = 1.62624e+06
+
+def compile_config():
+    return OmegaConf.create(
+        {
+            "compile": [
+                {
+                    "module": "anemoi.models.layers.conv.GraphTransformerConv",
+                },
+            ],
+        }
+    )
 
 @dataclass
 class MapperBenchmarkConfig:
@@ -73,7 +88,8 @@ class MapperBenchmarkConfig:
     def __post_init__(self):
         if self.layer_kernels is None:
             self.layer_kernels = load_layer_kernels(instance=False)
-
+        
+        
 
 @pytest.fixture
 def device():
@@ -135,7 +151,7 @@ def benchmark_graph_provider(graph_config, mapper_benchmark_config, device):
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("graph_config", [GraphConfig_n320_to_o96()])
-@pytest.mark.parametrize("mode", ["fwd", "bwd", "both"])
+@pytest.mark.parametrize("mode", ["both"])
 def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device):
     """Benchmark the GraphTransformerForwardMapper."""
     config = mapper_benchmark_config
@@ -153,6 +169,7 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchma
     mapper_config = asdict(config)
     mapper_config["edge_dim"] = benchmark_graph_provider.edge_dim
     mapper = GraphTransformerForwardMapper(**mapper_config).to(device)
+    mapper = mark_for_compilation(mapper, compile_config().compile)
     
     # Create input tensors
     x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
@@ -182,7 +199,7 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchma
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
-@pytest.mark.parametrize("mode", ["fwd", "bwd", "both"])
+@pytest.mark.parametrize("mode", ["both"])
 def test_benchmark_backward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device):
     """Benchmark the GraphTransformerBackwardMapper."""
     config = mapper_benchmark_config
@@ -204,6 +221,7 @@ def test_benchmark_backward_mapper(mapper_benchmark_config, graph_config, benchm
         **mapper_config,
         out_channels_dst=out_channels_dst
     ).to(device)
+    mapper = mark_for_compilation(mapper, compile_config().compile)
     
     # Create input tensors (note: backward mapper has different input channel requirements)
     x_src = torch.rand(graph_config.num_src_nodes, config.hidden_dim, device=device, requires_grad=True)
