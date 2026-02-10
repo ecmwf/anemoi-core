@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+
 import torch
 from torch import Tensor
 
@@ -20,14 +21,11 @@ except ImportError:
     raise ValueError(
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
-from typing import Union
 
-from torch_geometric.typing import Adj
 
 from anemoi.models.triton.norm import _rms_norm_bwd
 from anemoi.models.triton.norm import _rms_norm_fwd
 from anemoi.models.triton.utils import build_masks_and_offsets
-from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import torch_dtype_to_triton
 
 LOGGER = logging.getLogger(__name__)
@@ -456,10 +454,12 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         # Set up qk_normalisation
         ctx.qk_norm = qk_norm
-        elementwise_affine = (w_qnorm is not None and w_knorm is not None)
+        elementwise_affine = w_qnorm is not None and w_knorm is not None
         ctx.elementwise_affine = elementwise_affine
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm, elementwise_affine, w_qnorm, w_knorm)
+        _gt_fwd[(N_dst,)](
+            q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm, elementwise_affine, w_qnorm, w_knorm
+        )
 
         # Save tensors for backward
         ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_qnorm, w_knorm)
@@ -478,17 +478,31 @@ class GraphTransformerFunction(torch.autograd.Function):
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
-        
-        
+
         dW_qnorm_partial = None
         dW_knorm_partial = None
         if ctx.elementwise_affine:
-            assert w_qnorm is not None and w_knorm is not None, "Expected w_qnorm and w_knorm to be not None when elementwise_affine is True"
-            dW_qnorm_partial = torch.zeros((N_dst, C,), device=d_out.device, dtype=torch.float32)
-            dW_knorm_partial = torch.zeros((N_src, C,), device=d_out.device, dtype=torch.float32)
-            
+            assert (
+                w_qnorm is not None and w_knorm is not None
+            ), "Expected w_qnorm and w_knorm to be not None when elementwise_affine is True"
+            dW_qnorm_partial = torch.zeros(
+                (
+                    N_dst,
+                    C,
+                ),
+                device=d_out.device,
+                dtype=torch.float32,
+            )
+            dW_knorm_partial = torch.zeros(
+                (
+                    N_src,
+                    C,
+                ),
+                device=d_out.device,
+                dtype=torch.float32,
+            )
+
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
-        
 
         # Pass A: destination nodes (computes D and dQ)
         _gt_bwd_dst_pass[(N_dst,)](
@@ -539,11 +553,13 @@ class GraphTransformerFunction(torch.autograd.Function):
             w_knorm,
             dW_knorm_partial,
         )
-        
+
         dW_qnorm = None
         dW_knorm = None
         if ctx.elementwise_affine:
-            raise NotImplementedError("elementwise_affine=True is not currently supported in the backward pass due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature.")
+            raise NotImplementedError(
+                "elementwise_affine=True is not currently supported in the backward pass due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature."
+            )
 
         return dQ, dK, dV, dE, None, None, None, dW_qnorm, dW_knorm
 
@@ -553,12 +569,16 @@ class GraphTransformer(torch.nn.Module):
         super().__init__()
         self.dim = dim
         self.qk_norm = qk_norm
-        
+
         if (not qk_norm) and elementwise_affine:
-            raise ValueError("elementwise_affine=True is not supported when qk_norm=False, since there is no normalisation. Please set elementwise_affine=False if you do not want to use normalisation, or set qk_norm=True if you want to use normalisation with learnable weights.")
-        
-        elif qk_norm and  elementwise_affine:
-            raise NotImplementedError("elementwise_affine=True is not currently supported when qk_norm=True due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature.")
+            raise ValueError(
+                "elementwise_affine=True is not supported when qk_norm=False, since there is no normalisation. Please set elementwise_affine=False if you do not want to use normalisation, or set qk_norm=True if you want to use normalisation with learnable weights."
+            )
+
+        elif qk_norm and elementwise_affine:
+            raise NotImplementedError(
+                "elementwise_affine=True is not currently supported when qk_norm=True due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature."
+            )
 
         if self.qk_norm:
             LOGGER.info("Using fused QK norm in triton GT")
@@ -579,4 +599,6 @@ class GraphTransformer(torch.nn.Module):
         reverse: tuple[Tensor, Tensor, Tensor],
     ) -> torch.Tensor:
 
-        return GraphTransformerFunction.apply(query, key, value, edges_csc, csc, reverse, self.qk_norm, self.w_qnorm, self.w_knorm)
+        return GraphTransformerFunction.apply(
+            query, key, value, edges_csc, csc, reverse, self.qk_norm, self.w_qnorm, self.w_knorm
+        )
