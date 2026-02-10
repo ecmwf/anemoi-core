@@ -10,7 +10,6 @@
 import datetime
 import logging
 from abc import abstractmethod
-from typing import Optional
 from functools import cached_property
 
 import numpy as np
@@ -23,7 +22,6 @@ from rich.tree import Tree
 from anemoi.datasets import open_dataset
 from anemoi.utils.dates import frequency_to_seconds
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -35,6 +33,7 @@ def latlon_to_3d(lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
     y = np.cos(lat_rad) * np.sin(lon_rad)
     z = np.sin(lat_rad)
     return np.vstack((x, y, z)).T
+
 
 class BaseAnemoiReader:
     """Anemoi data reader for native grid datasets."""
@@ -172,9 +171,11 @@ class MaskedGridDataset(BaseAnemoiReader):
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
-        mask_lam_radius_km: Optional[int] = None,
+        mask_lam_radius_km: int | None = None,
     ):
-        assert "cutout" in dataset, "MaskedGridDataset requires a limited area in the dataset configuration (e.g., 'cutout' keyword)."
+        assert (
+            "cutout" in dataset
+        ), "MaskedGridDataset requires a limited area in the dataset configuration (e.g., 'cutout' keyword)."
         super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
         self.mask_radius = mask_lam_radius_km / 6371.0
 
@@ -194,7 +195,7 @@ class MaskedGridDataset(BaseAnemoiReader):
 
         # Check which points are within the radius of any LAM point
         tree = cKDTree(coords[self.cutout_mask])
-        dists, _ = tree.query(coords[self.data.grids[0]:], k=1, distance_upper_bound=self.mask_radius)
+        dists, _ = tree.query(coords[self.data.grids[0] :], k=1, distance_upper_bound=self.mask_radius)
 
         grid_mask = np.concatenate([self.cutout_mask, np.isfinite(dists)])
         return np.where(grid_mask)[0].astype(np.int64)

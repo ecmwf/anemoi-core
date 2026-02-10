@@ -21,7 +21,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.protocols.base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

@@ -18,8 +18,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.train.tasks.base import BaseGraphModule
-from anemoi.training.train.training_task import BaseTask
+from anemoi.training.train.protocols.base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.train.training_task.base import BaseTask
 
 
 LOGGER = logging.getLogger(__name__)

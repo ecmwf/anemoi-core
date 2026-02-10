@@ -458,24 +458,24 @@ class BaseTrainingSchema(BaseModel):
 
 
 class ForecasterSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphForecaster",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.protocols.GraphForecaster",] = Field(..., alias="model_task")
     "Training objective."
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
 
 
 class ForecasterEnsSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.protocols.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
 
 
 class DiffusionForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.protocols.GraphDiffusionForecaster"] = Field(..., alias="model_task")
     "Training objective."
 
 
 class DiffusionTendForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
+    model_task: Literal["anemoi.training.train.protocols.GraphDiffusionTendForecaster"] = Field(
         ...,
         alias="model_task",
     )
@@ -483,7 +483,7 @@ class DiffusionTendForecasterSchema(ForecasterSchema):
 
 
 class InterpolationSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.protocols.GraphInterpolator"] = Field(..., alias="model_task")
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
@@ -492,12 +492,12 @@ class InterpolationSchema(BaseTrainingSchema):
 
 
 class AutoencoderSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.protocols.GraphAutoEncoder",] = Field(..., alias="model_task")
     "Training objective."
 
 
 class InterpolationMultiSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.protocols.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."

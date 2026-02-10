@@ -106,6 +106,8 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Graph configuration."""
     model: ModelSchema
     """Model configuration."""
+    task: Any
+    """Task configuration."""
     training: TrainingSchema
     """Training configuration."""
     config_validation: bool = True

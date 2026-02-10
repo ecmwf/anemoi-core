@@ -364,6 +364,7 @@ class AnemoiTrainer(ABC):
             "config": convert_to_omegaconf(self.config),
             "seed": self.initial_seed,
             "run_id": self.run_id,
+            "task": None,  # will be populated in Task
             "dataset": None,  # will be populated in DataModule
             "data_indices": None,  # will be populated in DataModule
             "provenance_training": gather_provenance_info(),
@@ -372,6 +373,7 @@ class AnemoiTrainer(ABC):
             "uuid": None,  # will be populated in checkpoint callback
         }
         self.datamodule.fill_metadata(md_dict)
+        self.task.fill_metadata(md_dict)
         return map_config_to_primitives(md_dict)
 
     @cached_property

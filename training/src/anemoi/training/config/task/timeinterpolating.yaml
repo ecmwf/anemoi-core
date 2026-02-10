@@ -1,5 +1,5 @@
 training_task:
-  _target_: anemoi.training.train.training_tasks.TimeInterpolationTask
+  _target_: anemoi.training.train.training_task.TimeInterpolationTask
   explicit_times:
     input: [0, 6]
     target: [1, 2, 3, 4, 5]

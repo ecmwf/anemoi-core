@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
+from anemoi.training.train.protocols.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator

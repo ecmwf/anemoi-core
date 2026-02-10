@@ -16,7 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
+from anemoi.training.train.protocols.rollout import BaseRolloutGraphModule
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -125,7 +125,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_subgroup_rank = ens_comm_subgroup_rank
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
-    
+
     def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
         x = {}
@@ -217,7 +217,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step,
-            y_pred = self(x, fcstep=rollout_step)   # shape = (bs, latlon, nvar)
+            y_pred = self(x, fcstep=rollout_step)  # shape = (bs, latlon, nvar)
 
             y = self.task.get_targets(batch, self.data_indices, step=rollout_step)
 

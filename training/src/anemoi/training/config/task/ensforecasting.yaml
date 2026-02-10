@@ -1,5 +1,5 @@
 training_task:
-  _target_: anemoi.training.train.training_tasks.ForecastingTask
+  _target_: anemoi.training.train.training_task.ForecastingTask
   multistep_input: ${training.multistep_input}
   multistep_output: 1
   rollout:
