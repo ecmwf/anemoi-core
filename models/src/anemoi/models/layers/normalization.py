@@ -14,6 +14,7 @@ from typing import Union
 from torch import Size
 from torch import Tensor
 from torch import nn
+from torch import compile
 
 
 class AutocastLayerNorm(nn.LayerNorm):
@@ -31,6 +32,14 @@ class AutocastLayerNorm(nn.LayerNorm):
         return super().forward(x).type_as(x)
 
 
+class CompiledAutocastLayerNorm(AutocastLayerNorm):
+    """Compiled version of the AutoCastLayerNorm"""
+
+    def forward(self, x: Tensor) -> Tensor:
+        fn = compile(super().forward)  # dynamic=False)
+        return fn(x)
+
+
 class ConditionalLayerNorm(nn.Module):
     """Conditional Layer Normalization.
 
@@ -46,9 +55,7 @@ class ConditionalLayerNorm(nn.Module):
         autocast: bool = True,
     ):
         super().__init__()
-        self.norm = nn.LayerNorm(
-            normalized_shape, elementwise_affine=False
-        )  # no learnable parameters
+        self.norm = nn.LayerNorm(normalized_shape, elementwise_affine=False)  # no learnable parameters
         self.scale = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.bias = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.autocast = autocast
@@ -81,3 +88,11 @@ class ConditionalLayerNorm(nn.Module):
 
         out = out * (scale + 1.0) + bias
         return out.type_as(x) if self.autocast else out
+
+
+class CompiledConditionalLayerNorm(ConditionalLayerNorm):
+    """Compiled version of the ConditionalLayerNorm"""
+
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
+        fn = compile(super().forward)  # dynamic=False)
+        return fn(x, cond)

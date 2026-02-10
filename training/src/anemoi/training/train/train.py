@@ -107,9 +107,7 @@ class AnemoiTrainer:
             self.graph_data,
         )
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
-        LOGGER.info(
-            "Number of data variables: %s", str(len(datamodule.ds_train.data.variables))
-        )
+        LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
         LOGGER.info("Variables: %s", str(datamodule.ds_train.data.variables))
         return datamodule
 
@@ -202,18 +200,15 @@ class AnemoiTrainer:
         """Provide the model instance."""
         assert (
             not (
-                "GLU"
-                in self.config.model.processor.layer_kernels["Activation"]["_target_"]
+                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
                 and ".Transformer" in self.config.model.processor.target_
             )
             and not (
-                "GLU"
-                in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
+                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
                 and ".Transformer" in self.config.model.encoder.target_
             )
             and not (
-                "GLU"
-                in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
+                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
                 and ".Transformer" in self.config.model.decoder.target_
             )
         ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
@@ -243,16 +238,12 @@ class AnemoiTrainer:
                 )
                 model = transfer_learning_loading(model, self.last_checkpoint)
             else:
-                LOGGER.info(
-                    "Restoring only model weights from %s", self.last_checkpoint
-                )
+                LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
                 LOGGER.info("loading with kwargs:", self.last_checkpoint, kwargs)
-                model = model_task.load_from_checkpoint(
-                    self.last_checkpoint, **kwargs, strict=False
-                )
+                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
@@ -318,9 +309,7 @@ class AnemoiTrainer:
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
-        warm_start_dir = getattr(
-            self.config.hardware.paths, "warm_start", None
-        )  # avoid breaking change
+        warm_start_dir = getattr(self.config.hardware.paths, "warm_start", None)  # avoid breaking change
         warm_start_file = self.config.hardware.files.warm_start
         warm_start_path = None
 
@@ -353,9 +342,7 @@ class AnemoiTrainer:
             return None
 
         fork_id = self.fork_run_server2server or self.config.training.fork_run_id
-        checkpoint = (
-            self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id)
-        )
+        checkpoint = self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id)
 
         # Check if the last checkpoint exists
         if checkpoint.exists():
@@ -443,9 +430,7 @@ class AnemoiTrainer:
         }, f"Invalid accelerator ({self.config.hardware.accelerator}) in hardware config."
 
         if self.config.hardware.accelerator == "cpu":
-            LOGGER.info(
-                "WARNING: Accelerator set to CPU, this should only be used for debugging."
-            )
+            LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
         return self.config.hardware.accelerator
 
     def _log_information(self) -> None:
@@ -474,10 +459,7 @@ class AnemoiTrainer:
             int(total_number_of_model_instances) * self.config.training.lr.rate,
         )
 
-        if (
-            self.config.training.max_epochs is not None
-            and self.config.training.max_steps not in (None, -1)
-        ):
+        if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
             LOGGER.info(
                 "Training limits: max_epochs=%d, max_steps=%d. "
                 "Training will stop when either limit is reached first. "
@@ -500,27 +482,17 @@ class AnemoiTrainer:
     def _update_paths(self) -> None:
         """Update the paths in the configuration."""
         self.lineage_run = None
-        if (
-            self.run_id
-        ):  # when using mlflow only rank0 will have a run_id except when resuming runs
+        if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.lineage_run = self.parent_run_server2server or self.run_id
-            self.config.hardware.paths.checkpoints = Path(
-                self.config.hardware.paths.checkpoints, self.lineage_run
-            )
-            self.config.hardware.paths.plots = Path(
-                self.config.hardware.paths.plots, self.lineage_run
-            )
+            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.lineage_run)
+            self.config.hardware.paths.plots = Path(self.config.hardware.paths.plots, self.lineage_run)
         elif self.config.training.fork_run_id:
             # WHEN USING MANY NODES/GPUS
-            self.lineage_run = (
-                self.parent_run_server2server or self.config.training.fork_run_id
-            )
+            self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
-            self.config.hardware.paths.checkpoints = Path(
-                self.config.hardware.paths.checkpoints, self.lineage_run
-            )
+            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.lineage_run)
 
         LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
         LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
@@ -536,13 +508,10 @@ class AnemoiTrainer:
         if self.config.diagnostics.log.mlflow.enabled:
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
-                self.mlflow_logger._parent_dry_run
-                and not Path(self.config.hardware.paths.checkpoints).is_dir()
+                self.mlflow_logger._parent_dry_run and not Path(self.config.hardware.paths.checkpoints).is_dir()
             )
             self.start_from_checkpoint = (
-                False
-                if (self.dry_run and not bool(self.config.training.fork_run_id))
-                else self.start_from_checkpoint
+                False if (self.dry_run and not bool(self.config.training.fork_run_id)) else self.start_from_checkpoint
             )
             LOGGER.info("Dry run: %s", self.dry_run)
 
@@ -581,12 +550,12 @@ class AnemoiTrainer:
             use_distributed_sampler=False,
             profiler=self.profiler,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
-            check_val_every_n_epoch=getattr(
-                self.config.diagnostics, "check_val_every_n_epoch", 1
-            ),
+            check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
         LOGGER.debug("Starting training..")
+        torch._dynamo.config.cache_size_limit = 32
+        torch._dynamo.config.accumulated_cache_size_limit = max(8 * 32, 256)
 
         trainer.fit(
             self.model,

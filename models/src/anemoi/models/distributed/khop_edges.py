@@ -100,6 +100,7 @@ def sort_edges_1hop_sharding(
     return edge_attr, edge_index, [], []
 
 
+@torch.compile()
 def sort_edges_1hop_chunks(
     num_nodes: Union[int, tuple[int, int]],
     edge_attr: Tensor,
@@ -155,6 +156,7 @@ def sort_edges_1hop_chunks(
     return edge_attr_list, edge_index_list
 
 
+@torch.compile()
 def drop_unconnected_src_nodes(
     x_src: Tensor, edge_index: Adj, num_nodes: tuple[int, int]
 ) -> tuple[Tensor, Adj, Tensor]:

@@ -71,9 +71,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         """
 
         inverse_indices = [
-            i
-            for i in self.data_indices.data.output.full
-            if i not in set(list_indices_direct_prediction)
+            i for i in self.data_indices.data.output.full if i not in set(list_indices_direct_prediction)
         ]
 
         mask = y.new_zeros(y.shape[-1])  # dtype/device matches y
@@ -88,6 +86,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         norm_target = pre_processors_state(residuals, dataset="output", in_place=False)
         return norm_target
 
+    @torch.compile()
     def compute_residuals(
         self,
         y: torch.Tensor,
@@ -109,26 +108,20 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             The residuals tensor output from model.
         """
         residuals = (
-            y[..., self.data_indices.data.output.full]
-            - x_in_interp_to_hres[..., self.data_indices.data.output.full]
+            y[..., self.data_indices.data.output.full] - x_in_interp_to_hres[..., self.data_indices.data.output.full]
         )
 
         # to deal with residuals or direct prediction, see compute_tendency
         # in diffusion_encoder_processor_decoder.py
         return residuals
 
-    def _interpolate_to_high_res(
-        self, x, grid_shard_shapes=None, model_comm_group=None
-    ):
+    @torch.compile()
+    def _interpolate_to_high_res(self, x, grid_shard_shapes=None, model_comm_group=None):
 
         if grid_shard_shapes is not None:
-            shard_shapes = self._get_shard_shapes(
-                x, 0, grid_shard_shapes, model_comm_group
-            )
+            shard_shapes = self._get_shard_shapes(x, 0, grid_shard_shapes, model_comm_group)
             # grid-sharded input: reshard to channel-shards to apply truncation
-            x = shard_channels(
-                x, shard_shapes, model_comm_group
-            )  # we get the full sequence here
+            x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
 
         # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
         # hence we check that they are on the correct device ; copy should only happen in the first forward run
@@ -163,12 +156,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         bs, ens, _, _ = x.shape
         x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
 
-        x_trunc = self._interpolate_to_high_res(
-            x_trunc, grid_shard_shapes, model_comm_group
-        )
-        return einops.rearrange(
-            x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens
-        )
+        x_trunc = self._interpolate_to_high_res(x_trunc, grid_shard_shapes, model_comm_group)
+        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_lres_channels = len(data_indices.model.input[0])
@@ -195,16 +184,10 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         grid_shard_shapes=None,
         model_comm_group=None,
     ):
-        node_attributes_data = self.node_attributes(
-            self._graph_name_data, batch_size=bse
-        )
+        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(
-                node_attributes_data, 0, grid_shard_shapes, model_comm_group
-            )
-            node_attributes_data = shard_tensor(
-                node_attributes_data, 0, shard_shapes_nodes, model_comm_group
-            )
+            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
 
@@ -226,9 +209,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(
-            x_data_latent, 0, grid_shard_shapes, model_comm_group
-        )
+        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
         return x_data_latent, None, shard_shapes_data
 
@@ -252,9 +233,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
-        self._assert_valid_sharding(
-            batch_size, ensemble_size, in_out_sharded, model_comm_group
-        )
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # prepare noise conditionings
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(c_noise)
@@ -276,9 +255,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             grid_shard_shapes,
             model_comm_group,
         )
-        x_hidden_latent = self.node_attributes(
-            self._graph_name_hidden, batch_size=batch_size
-        )
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         # time_encoder = time.time()
@@ -320,9 +297,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
         # print("time in decoder", time.time() - time_decoder)
 
-        x_out = self._assemble_output(
-            x_out, x_skip, batch_size, ensemble_size, x_in_lres_interp_hres.dtype
-        )
+        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x_in_lres_interp_hres.dtype)
         # print("time in model forward step", time.time() - start_init)
         return x_out
 
@@ -405,9 +380,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 x_in_interp_to_hres[..., i].std().item(),
             )
 
-        x_in_interp_to_hres = pre_processors(
-            x_in_interp_to_hres, dataset="input_lres", in_place=False
-        )
+        x_in_interp_to_hres = pre_processors(x_in_interp_to_hres, dataset="input_lres", in_place=False)
         x_in_hres = pre_processors(x_in_hres, dataset="input_hres", in_place=False)
 
         return (x_in_interp_to_hres, x_in_hres), hres_grid_shard_shapes
@@ -611,12 +584,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         # torch.manual_seed(seed)
         # if torch.cuda.is_available():
         #    torch.cuda.manual_seed_all(seed)
-        y_init = (
-            torch.randn(
-                shape, device=x_in_interp_to_hres.device
-            )  # , dtype=sigmas.dtype)
-            * sigmas[0]
-        )
+        y_init = torch.randn(shape, device=x_in_interp_to_hres.device) * sigmas[0]  # , dtype=sigmas.dtype)
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
@@ -677,9 +645,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         torch.Tensor
             the de-normalised state
         """
-        denorm_residuals = post_processors_state(
-            residuals, dataset="output", in_place=False
-        )
+        denorm_residuals = post_processors_state(residuals, dataset="output", in_place=False)
 
         for i in range(6):
             LOGGER.info(
@@ -689,9 +655,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 denorm_residuals[..., i].std().item(),
             )
 
-        denorm_state_inp = post_processors_state(
-            state_inp, dataset="input_lres", in_place=False
-        )
+        denorm_state_inp = post_processors_state(state_inp, dataset="input_lres", in_place=False)
         for i in range(6):
             LOGGER.info(
                 "Input tensor statistics for index %d: mean=%f, std=%f",

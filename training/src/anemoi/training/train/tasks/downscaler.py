@@ -67,9 +67,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.rho = config.model.model.diffusion.rho
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
-        self.training_approach = getattr(
-            config.training, "training_approach", "probabilistic_low_noise"
-        )
+        self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
         LOGGER.info("Training approach: %s", self.training_approach)
         self.x_in_matching_channel_indices = match_tensor_channels(
             self.data_indices.data.input[0].name_to_index,
@@ -178,9 +176,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
 
-        self.x_in_matching_channel_indices = self.x_in_matching_channel_indices.to(
-            x_in_interp_to_hres.device
-        )
+        self.x_in_matching_channel_indices = self.x_in_matching_channel_indices.to(x_in_interp_to_hres.device)
         residuals_target = self.model.model.compute_residuals(
             y,
             x_in_interp_to_hres[..., self.x_in_matching_channel_indices],
@@ -192,9 +188,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             x_in_interp_to_hres, dataset="input_lres"
         )  # need in place ?, in_place=False)
         # x_in_interp_to_hres = x_in_interp_to_hres[  :, :, ..., self.data_indices.data.input[0].full] (see if necessary)
-        x_in_hres = self.model.pre_processors(
-            x_in_hres, dataset="input_hres"
-        )  # , in_place=False
+        x_in_hres = self.model.pre_processors(x_in_hres, dataset="input_hres")  # , in_place=False
         # x_in_hres = x_in_hres[:, :, ..., self.data_indices.data.input[1].full]
         residuals_target = self.model.pre_processors(residuals_target, dataset="output")
 
@@ -245,6 +239,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """Add noise to the state."""
         return x + torch.randn_like(x) * sigma
 
+    @torch.compile()
     def _get_noise_level(
         self,
         shape: torch.shape,
@@ -258,8 +253,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         if self.training_approach == "probabilistic_high_noise":
             rnd_uniform = torch.rand(shape, device=device)
             sigma = (
-                sigma_max ** (1.0 / rho)
-                + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
             ) ** rho
 
         elif self.training_approach == "probabilistic_low_noise":
@@ -309,9 +303,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         """
         with torch.no_grad():
-            val_loss, metrics, y_preds = self._step(
-                batch, batch_idx, training_mode=True, validation_mode=True
-            )
+            val_loss, metrics, y_preds = self._step(batch, batch_idx, training_mode=True, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",
@@ -339,9 +331,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         return val_loss, y_preds
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss, _, _ = self._step(
-            batch, batch_idx, training_mode=True, validation_mode=False
-        )
+        train_loss, _, _ = self._step(batch, batch_idx, training_mode=True, validation_mode=False)
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,
@@ -379,19 +369,13 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             validation metrics and predictions
         """
         metrics = {}
-        y_postprocessed = self.model.post_processors(
-            y, in_place=False, dataset="output"
-        )
-        y_pred_postprocessed = self.model.post_processors(
-            y_pred, in_place=False, dataset="output"
-        )
+        y_postprocessed = self.model.post_processors(y, in_place=False, dataset="output")
+        y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False, dataset="output")
 
         for metric_name, metric in self.metrics.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(
-                    y_pred_postprocessed, y_postprocessed
-                )
+                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():
@@ -431,15 +415,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             self.lres_grid_shard_shapes = self.lres_grid_indices.shard_shapes
             self.hres_grid_shard_shapes = self.hres_grid_indices.shard_shapes
             self.grid_shard_shapes = self.grid_indices.shard_shapes
-            self.lres_grid_shard_slice = self.lres_grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
-            self.hres_grid_shard_slice = self.hres_grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
-            self.grid_shard_slice = self.grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
+            self.lres_grid_shard_slice = self.lres_grid_indices.get_shard_slice(self.reader_group_rank)
+            self.hres_grid_shard_slice = self.hres_grid_indices.get_shard_slice(self.reader_group_rank)
+            self.grid_shard_slice = self.grid_indices.get_shard_slice(self.reader_group_rank)
         else:
             batch = self.allgather_batch(batch)
             self.lres_grid_shard_shapes, self.lres_grid_shard_slice = None, None
@@ -465,9 +443,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             torch.cuda.synchronize()
         self.bw_last = time.perf_counter() - self._tb
 
-    def optimizer_step(
-        self, epoch, batch_idx, optimizer, optimizer_closure=None, *a, **k
-    ):
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure=None, *a, **k):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t = time.perf_counter()
