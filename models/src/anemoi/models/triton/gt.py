@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import torch
 from torch import Tensor
 
@@ -29,6 +30,8 @@ from anemoi.models.triton.utils import build_masks_and_offsets
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import torch_dtype_to_triton
 
+LOGGER = logging.getLogger(__name__)
+
 
 @triton.jit
 def _gt_fwd(
@@ -45,8 +48,9 @@ def _gt_fwd(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
-    w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm
-    w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm
+    elementwise_affine: tl.constexpr,  # bool, whether to apply learnable elementwise affine after normalisation (only relevant if qk_norm=True)
+    w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
+    w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
 ):
     pid = tl.program_id(0)
     dst_idx = pid
@@ -77,9 +81,15 @@ def _gt_fwd(
 
     if qk_norm:
         C_pad_off = tl.arange(0, C_pad)
-        w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
-        w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
-        q = _rms_norm_fwd(q, w_q_norm, C)
+        if elementwise_affine:
+            # w_k_norm and w_q_norm should be pointers to tensors
+            assert w_k_norm_ptr is not None and w_q_norm_ptr is not None
+            w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
+            w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
+        else:
+            w_q_norm = None
+            w_k_norm = None
+        q = _rms_norm_fwd(q, w_q_norm, C, elementwise_affine)
 
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
@@ -101,7 +111,7 @@ def _gt_fwd(
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         if qk_norm:
-            k = _rms_norm_fwd(k, w_k_norm, C)
+            k = _rms_norm_fwd(k, w_k_norm, C, elementwise_affine)
 
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -163,9 +173,10 @@ def _gt_bwd_dst_pass(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
+    elementwise_affine: tl.constexpr,  # bool, whether to apply learnable elementwise affine after normalisation (only relevant if qk_norm=True)
     w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm
     w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm
-    D_w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm
+    D_w_q_norm_partial_ptr,  # ptr [C] or None, depending on qk_norm
 ):
     dst_idx = tl.program_id(0)
     if dst_idx >= N_dst:
@@ -199,14 +210,20 @@ def _gt_bwd_dst_pass(
 
     if qk_norm:
         # Q is saved unnormalised,
-        # if normalisation was done in the fwd pass, we have to normalise it here
+        # Since normalisation was done in the forward pass, we must renormalise it here
         # before we recompute elements of the attention forward pass
         q_unnorm = q  # need to save an unnormalised copy for the bwd pass later
-        C_pad_off = tl.arange(0, C_pad)
-        w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
-        # Load the weights for k_norm outside of the inner loop
-        w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
-        q = _rms_norm_fwd(q, w_q_norm, C)
+        if elementwise_affine:
+            # w_k_norm and w_q_norm should be pointers to tensors
+            assert w_k_norm_ptr is not None and w_q_norm_ptr is not None
+            C_pad_off = tl.arange(0, C_pad)
+            w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
+            # Load the weights for k_norm outside of the inner loop
+            w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
+        else:
+            w_q_norm = None
+            w_k_norm = None
+        q = _rms_norm_fwd(q, w_q_norm, C, elementwise_affine)
 
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
@@ -223,7 +240,7 @@ def _gt_bwd_dst_pass(
 
         # Normalise k if required
         if qk_norm:  # rms norm
-            k = _rms_norm_fwd(k, w_k_norm, C)
+            k = _rms_norm_fwd(k, w_k_norm, C, elementwise_affine)
 
         ke = k + e
         # score and alpha using saved M
@@ -244,10 +261,11 @@ def _gt_bwd_dst_pass(
         e_idx += 1
 
     if qk_norm:
-        # As a last step, apply the the normalisation gradient
-        dq, dw_q_norm = _rms_norm_bwd(q_unnorm, w_q_norm, dq, C)
-        C_pad_off = tl.arange(0, C_pad)
-        tl.store(D_w_q_norm_ptr + C_pad_off, dw_q_norm, mask=(C_pad_off < C_pad))
+        # Compute the backward pass of RMS norm
+        dq, dw_q_norm = _rms_norm_bwd(q_unnorm, w_q_norm, dq, C, elementwise_affine)
+        if elementwise_affine:
+            C_pad_off = tl.arange(0, C_pad)
+            tl.store(D_w_q_norm_partial_ptr + C_pad_off, dw_q_norm, mask=(C_pad_off < C))
 
     # store D_j and dQ
     tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
@@ -280,9 +298,10 @@ def _gt_bwd_src_pass(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # bool, False: no normalisation, True: rms normalisation
-    w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm
-    w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm
-    D_w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm
+    elementwise_affine: tl.constexpr,  # bool, whether to apply learnable elementwise affine after normalisation (only relevant if qk_norm=True)
+    w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
+    w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
+    D_w_k_norm_partial_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
 ):
     src_idx = tl.program_id(0)
     if src_idx >= N_src:
@@ -305,15 +324,21 @@ def _gt_bwd_src_pass(
     # src-side k, v (shared for all edges)
     src_off = src_idx * H * C + H_C_off
     k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    if qk_norm:  # rms norm
+    if qk_norm:  # perform rms normalisation on Q and K
         # K is saved unnormalised,
-        # if normalisation was done in the fwd pass, we renormalise it now
+        # Since normalisation was done in the fwd pass, we must renormalise now
         k_unnorm = k  # must save copy of unnormalised value for bwd pass later
-        C_pad_off = tl.arange(0, C_pad)
-        w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
-        # Load the weights for k_norm outside of the inner loop
-        w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C_pad)).to(tl.float32)
-        k = _rms_norm_fwd(k, w_k_norm, C)
+        if elementwise_affine:
+            # w_k_norm and w_q_norm should be pointers to tensors
+            assert w_k_norm_ptr is not None and w_q_norm_ptr is not None
+            # Load the weights for q_norm outside of the inner loop
+            C_pad_off = tl.arange(0, C_pad)
+            w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
+            w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
+        else:
+            w_q_norm = None
+            w_k_norm = None
+        k = _rms_norm_fwd(k, w_k_norm, C, elementwise_affine)
 
     v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -333,7 +358,7 @@ def _gt_bwd_src_pass(
         dst_off = dst * H * C + H_C_off
         q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         if qk_norm:
-            q = _rms_norm_fwd(q, w_q_norm, C)
+            q = _rms_norm_fwd(q, w_q_norm, C, elementwise_affine)
         d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
@@ -367,10 +392,11 @@ def _gt_bwd_src_pass(
         accV += dV_edge
 
     if qk_norm:
-        # As a last step, apply normalisation gradient if required
-        accK, dw_k_norm = _rms_norm_bwd(k_unnorm, w_k_norm, accK, C)
-        C_pad_off = tl.arange(0, C_pad)
-        tl.store(D_w_k_norm_ptr + C_pad_off, dw_k_norm, mask=(C_pad_off < C_pad))
+        # Compute the backward pass of RMS Norm
+        accK, dw_k_norm = _rms_norm_bwd(k_unnorm, w_k_norm, accK, C, elementwise_affine)
+        if elementwise_affine:
+            C_pad_off = tl.arange(0, C_pad)
+            tl.store(D_w_k_norm_partial_ptr + C_pad_off, dw_k_norm, mask=(C_pad_off < C))
 
     # write final accumulated per-src grads
     tl.store(
@@ -402,7 +428,7 @@ class GraphTransformerFunction(torch.autograd.Function):
             )
 
     @staticmethod
-    def forward(ctx, q, k, v, e, csc, reverse, qk_norm_args):
+    def forward(ctx, q, k, v, e, csc, reverse, qk_norm, w_qnorm, w_knorm):
         """Args:
         q: [N_dst, H, C]
         k: [N_src, H, C]
@@ -410,7 +436,9 @@ class GraphTransformerFunction(torch.autograd.Function):
         e: [num_edges, H, C]
         csc: (row, colptr)
         reverse: (rowptr, edge_ids, edge_dst)
-        qk_norm_args: (bool, w_qnorm_ptr, w_knorm_ptr)
+        qk_norm: bool
+        w_qnorm_ptr: [C] or None
+        w_knorm_ptr: [C] or None
         """
         row, colptr = csc
         rowptr, edge_ids, edge_dst = reverse
@@ -427,25 +455,20 @@ class GraphTransformerFunction(torch.autograd.Function):
         ctx.out_dtype = out_dtype
 
         # Set up qk_normalisation
-
-        (qk_norm, w_q_norm, w_k_norm) = (
-            qk_norm_args  # weights are either None or pointer to tensor if qk_norm is being used
-        )
         ctx.qk_norm = qk_norm
-        if qk_norm:
-            # w_k_norm and w_q_norm should be pointers to tensors
-            assert w_k_norm is not None and w_q_norm is not None
+        elementwise_affine = (w_qnorm is not None and w_knorm is not None)
+        ctx.elementwise_affine = elementwise_affine
 
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm, w_q_norm, w_k_norm)
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm, elementwise_affine, w_qnorm, w_knorm)
 
         # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_q_norm, w_k_norm)
+        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_qnorm, w_knorm)
         return out
 
     @staticmethod
     def backward(ctx, d_out):
         d_out = d_out.contiguous()
-        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_q_norm, w_k_norm = ctx.saved_tensors
+        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_qnorm, w_knorm = ctx.saved_tensors
 
         N_dst, H, C = q.shape
         N_src = k.shape[0]
@@ -455,13 +478,17 @@ class GraphTransformerFunction(torch.autograd.Function):
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
-        dW_q_norm = None
-        if w_q_norm is not None:
-            dW_q_norm = torch.empty_like(w_q_norm)
-        dW_k_norm = None
-        if w_k_norm is not None:
-            dW_k_norm = torch.empty_like(w_k_norm)
+        
+        
+        dW_qnorm_partial = None
+        dW_knorm_partial = None
+        if ctx.elementwise_affine:
+            assert w_qnorm is not None and w_knorm is not None, "Expected w_qnorm and w_knorm to be not None when elementwise_affine is True"
+            dW_qnorm_partial = torch.zeros((N_dst, C,), device=d_out.device, dtype=torch.float32)
+            dW_knorm_partial = torch.zeros((N_src, C,), device=d_out.device, dtype=torch.float32)
+            
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
+        
 
         # Pass A: destination nodes (computes D and dQ)
         _gt_bwd_dst_pass[(N_dst,)](
@@ -481,9 +508,10 @@ class GraphTransformerFunction(torch.autograd.Function):
             C,
             ctx.out_dtype,
             ctx.qk_norm,
-            w_q_norm,
-            w_k_norm,
-            dW_q_norm,
+            ctx.elementwise_affine,
+            w_qnorm,
+            w_knorm,
+            dW_qnorm_partial,
         )
 
         # Pass B: source nodes (accumulate dK, dV, dE)
@@ -506,23 +534,34 @@ class GraphTransformerFunction(torch.autograd.Function):
             C,
             ctx.out_dtype,
             ctx.qk_norm,
-            w_q_norm,
-            w_k_norm,
-            dW_k_norm,
+            ctx.elementwise_affine,
+            w_qnorm,
+            w_knorm,
+            dW_knorm_partial,
         )
+        
+        dW_qnorm = None
+        dW_knorm = None
 
-        return dQ, dK, dV, dE, None, None, None
+        return dQ, dK, dV, dE, None, None, None, dW_qnorm, dW_knorm
 
 
 class GraphTransformer(torch.nn.Module):
-    def __init__(self, dim: int, qk_norm: bool = False):
+    def __init__(self, dim: int, qk_norm: bool = False, elementwise_affine: bool = False):
         super().__init__()
         self.dim = dim
         self.qk_norm = qk_norm
+        
+        if (not qk_norm) and elementwise_affine:
+            raise ValueError("elementwise_affine=True is not supported when qk_norm=False, since there is no normalisation. Please set elementwise_affine=False if you do not want to use normalisation, or set qk_norm=True if you want to use normalisation with learnable weights.")
+        
+        elif qk_norm and  elementwise_affine:
+            raise NotImplementedError("elementwise_affine=True is not currently supported when qk_norm=True due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature.")
 
-        if self.qk_norm:
-            self.w_qnorm = torch.nn.Parameter(torch.ones(dim))
-            self.w_knorm = torch.nn.Parameter(torch.ones(dim))
+        if self.qk_norm and elementwise_affine:
+            self.w_qnorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
+            self.w_knorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
+            LOGGER.info("Using fused QK norm in triton GT")
         else:
             self.register_parameter("w_qnorm", None)
             self.register_parameter("w_knorm", None)
@@ -543,9 +582,4 @@ class GraphTransformer(torch.nn.Module):
         csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
         edges_csc = edges.index_select(0, perm)
 
-        if self.qk_norm:
-            qk_norm_args = (True, self.w_qnorm, self.w_knorm)
-        else:
-            qk_norm_args = (False, None, None)
-
-        return GraphTransformerFunction.apply(query, key, value, edges_csc, csc, reverse, qk_norm_args)
+        return GraphTransformerFunction.apply(query, key, value, edges_csc, csc, reverse, self.qk_norm, self.w_qnorm, self.w_knorm)

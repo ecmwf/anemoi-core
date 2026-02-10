@@ -20,7 +20,7 @@ if is_triton_available():
 @pytest.fixture(autouse=True)
 def setup_torch():
     """Set up torch defaults for all tests."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda"
     torch.set_default_device(device)
     torch.set_default_dtype(torch.float32)
     yield
@@ -28,28 +28,23 @@ def setup_torch():
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "h,d,elementwise_affine",
+    "b,h,d,elementwise_affine",
     [
-        (2, 4, False),
-        # (2, 6, False),
-        # (6, 4, False),
-        # (6, 6, False),
-        (2, 4, True),
+        (B,H, C, affine)
+        for B in (1, 4)
+        for H in (2, 6)
+        for C in (4, 6)
+        for affine in (False, True)
     ],
 )
-def test_rms_norm_forward(h: int, d: int, elementwise_affine: bool):
+def test_rms_norm_forward(b: int, h: int, d: int, elementwise_affine: bool):
     """Test forward pass of RMS Norm."""
 
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
-    x = torch.randn((h, d))
+    x = torch.randn((b, h, d))
 
-    # w=None
-    # if elementwise_affine:
-    #    w = torch.ones(h, d, device=x.device, dtype=torch.float32)
-    #    w[:] =torch.arange(d, device=x.device) * 0.1 + 1.0  #change weights from [1,]
-    # x_triton = RMSNormFunction.apply(x, w)
     rms_norm = RMSNorm(d, elementwise_affine=elementwise_affine).cuda()
     rms_norm_ref = torch.nn.RMSNorm(d, elementwise_affine=elementwise_affine)
 
@@ -61,10 +56,6 @@ def test_rms_norm_forward(h: int, d: int, elementwise_affine: bool):
 
     x_triton = rms_norm(x)
 
-    # change weights from [1,] for correctness testing
-    # if elementwise_affine:
-    #    with torch.no_grad():
-    #        rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
     x_ref = rms_norm_ref(x)
 
     tolerance = 1e-4
@@ -73,26 +64,22 @@ def test_rms_norm_forward(h: int, d: int, elementwise_affine: bool):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "h,d,elementwise_affine",
+    "b, h,d,elementwise_affine",
     [
-        (2, 4, False),
-        # (2, 6),
-        # (6, 4),
-        # (6, 6),
-        (
-            2,
-            4,
-            True,
-        ),
+        (B, H, C, affine)
+        for B in (1, 4)
+        for H in (2, 6)
+        for C in (4, 6)
+        for affine in (False, True)
     ],
 )
-def test_rms_norm_backward(h: int, d: int, elementwise_affine: bool):
+def test_rms_norm_backward(b: int, h: int, d: int, elementwise_affine: bool):
     """Test backward pass of RMS Norm."""
 
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
-    x = torch.randn((h, d), requires_grad=True)
+    x = torch.randn((b, h, d), requires_grad=True)
 
     rms_norm = RMSNorm(d, elementwise_affine=elementwise_affine).cuda()
     rms_norm_ref = torch.nn.RMSNorm(d, elementwise_affine=elementwise_affine)
@@ -104,23 +91,20 @@ def test_rms_norm_backward(h: int, d: int, elementwise_affine: bool):
             rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
 
     x_triton = rms_norm(x)
-
     loss_triton = x_triton.pow(2).sum()
     loss_triton.backward()
     grad_x_triton = x.grad.clone()
+    
     if elementwise_affine:
         grad_w_triton = rms_norm.weight.grad.clone()
 
     x.grad.zero_()
 
-    # change weights from [1,] for correctness testing
-    # if elementwise_affine:
-    #    with torch.no_grad():
-    #        rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
     x_ref = rms_norm_ref(x)
     loss_ref = x_ref.pow(2).sum()
     loss_ref.backward()
     grad_x_ref = x.grad.clone()
+    
     if elementwise_affine:
         grad_w_ref = rms_norm_ref.weight.grad.clone()
 
