@@ -31,7 +31,6 @@ class TestMultiDataset:
     def multi_dataset(self, mocker: MockFixture, dataset_config: dict) -> MultiDataset:
         """Fixture to provide a MultiDataset instance with mocked datasets."""
         data_readers = {"dataset_a": None, "dataset_b": None}
-        grid_indices = {"dataset_a": None, "dataset_b": None}
 
         # Mock create_dataset to return mock datasets
         mock_dataset_a = mocker.MagicMock()
@@ -51,7 +50,7 @@ class TestMultiDataset:
             side_effect=[mock_dataset_a, mock_dataset_b],
         )
 
-        return MultiDataset(data_readers=data_readers, grid_indices=grid_indices, **dataset_config)
+        return MultiDataset(data_readers=data_readers, **dataset_config)
 
     def test_timeincrement(self, multi_dataset: MultiDataset) -> None:
         """Test that timeincrement is correctly computed from timestep."""
