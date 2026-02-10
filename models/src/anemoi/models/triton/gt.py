@@ -542,6 +542,8 @@ class GraphTransformerFunction(torch.autograd.Function):
         
         dW_qnorm = None
         dW_knorm = None
+        if ctx.elementwise_affine:
+            raise NotImplementedError("elementwise_affine=True is not currently supported in the backward pass due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature.")
 
         return dQ, dK, dV, dE, None, None, None, dW_qnorm, dW_knorm
 
