@@ -86,7 +86,7 @@ def get_tmp_path(temporary_directory_for_test_data: TemporaryDirectoryForTestDat
     ],
     ids=["pydantic_MLflow", "pydantic_no_MLflow", "no_pydantic_MLflow", "no_pydantic_no_MLflow"],
 )
-def base_global_config(
+def global_config_mlflow(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
@@ -121,7 +121,7 @@ def base_global_config(
     return cfg, url_dataset, model_architecture
 
 
-def build_architecture_config(
+def build_global_config(
     overrides: list[str],
     testing_modifications: DictConfig,
     get_tmp_path: GetTmpPath,
@@ -157,12 +157,12 @@ def build_architecture_config(
         ["model=graphtransformer"],
     ],
 )
-def architecture_config(
+def global_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, str, str]:
-    cfg, url, model_architecture = build_architecture_config(
+    cfg, url, model_architecture = build_global_config(
         request.param,
         testing_modifications_with_temp_dir,
         get_tmp_path,
@@ -442,17 +442,17 @@ def migrator() -> Migrator:
         ["model=graphtransformer"],
     ],
 )
-def architecture_config_with_checkpoint(
+def global_config_with_checkpoint(
     migrator: Migrator,
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
-    # Reuse the same overrides that architecture_config gets
+    # Reuse the same overrides that global_config gets
     overrides = request.param
 
-    cfg, dataset_url, model_architecture = build_architecture_config(
+    cfg, dataset_url, model_architecture = build_global_config(
         overrides,
         testing_modifications_with_temp_dir,
         get_tmp_path,
