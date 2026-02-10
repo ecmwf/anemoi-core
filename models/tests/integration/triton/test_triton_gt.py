@@ -187,7 +187,10 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
             gt_ref.k_norm.weight[:] = torch.arange(d) * 0.2 - 1.0
     
     size = (n_src, n_dst)
-    out_triton = gt_triton(query_triton, key_triton, value, edge_attr, edge_index, size)
+    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=size, reverse=True)
+    edge_attr_csc = edge_attr[perm]
+    
+    out_triton = gt_triton(query_triton, key_triton, value, edge_attr_csc, csc, reverse,)
 
     out_ref = gt_ref.forward(
         query_ref, key_ref, value, edge_attr, edge_index, qk_norm=qk_norm, size=(value.size(0), query_ref.size(0))
@@ -234,7 +237,10 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
             gt_ref.k_norm.weight[:] = torch.arange(d) * 0.2 - 1.0
     
     size = (n_src, n_dst)
-    out_triton = gt_triton(query, key, value, edge_attr, edge_index, size)
+    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=size, reverse=True)
+    edge_attr_csc = edge_attr[perm]
+    
+    out_triton = gt_triton(query, key, value, edge_attr_csc, csc, reverse,)
 
     loss_triton = out_triton.pow(2).sum()
     loss_triton.backward()

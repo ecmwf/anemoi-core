@@ -560,28 +560,23 @@ class GraphTransformer(torch.nn.Module):
         elif qk_norm and  elementwise_affine:
             raise NotImplementedError("elementwise_affine=True is not currently supported when qk_norm=True due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature.")
 
-        if self.qk_norm and elementwise_affine:
-            self.w_qnorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
-            self.w_knorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
+        if self.qk_norm:
             LOGGER.info("Using fused QK norm in triton GT")
-        else:
-            self.register_parameter("w_qnorm", None)
-            self.register_parameter("w_knorm", None)
+            if elementwise_affine:
+                self.w_qnorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
+                self.w_knorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
+            else:
+                self.register_parameter("w_qnorm", None)
+                self.register_parameter("w_knorm", None)
 
     def forward(
         self,
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        edges: Tensor,
-        edge_index: Adj,
-        size: Union[int, tuple[int, int]],
+        edges_csc: Tensor,
+        csc: tuple[Tensor, Tensor],
+        reverse: tuple[Tensor, Tensor, Tensor],
     ) -> torch.Tensor:
-
-        # self.conv requires size to be a tuple
-        conv_size = (size, size) if isinstance(size, int) else size
-
-        csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
-        edges_csc = edges.index_select(0, perm)
 
         return GraphTransformerFunction.apply(query, key, value, edges_csc, csc, reverse, self.qk_norm, self.w_qnorm, self.w_knorm)
