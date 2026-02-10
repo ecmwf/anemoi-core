@@ -152,10 +152,8 @@ def build_global_config(
 
 
 @pytest.fixture(
-    params=[
-        ["model=gnn"],
-        ["model=graphtransformer"],
-    ],
+    params=[["model=gnn"], ["model=graphtransformer"]],
+    ids=["gnn", "graphtransformer"],
 )
 def global_config(
     request: pytest.FixtureRequest,
@@ -385,6 +383,12 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
         "stretched",
         "ensemble_crps",
     ],
+    ids=[
+        "lam",
+        "graphtransformer",
+        "stretched",
+        "ensemble_crps",
+    ],
 )
 def benchmark_config(
     request: pytest.FixtureRequest,
@@ -441,6 +445,7 @@ def migrator() -> Migrator:
         ["model=gnn"],
         ["model=graphtransformer"],
     ],
+    ids=["gnn", "graphtransformer"],
 )
 def global_config_with_checkpoint(
     migrator: Migrator,
