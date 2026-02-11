@@ -12,22 +12,11 @@ from __future__ import annotations
 
 import logging
 from abc import ABC
-from abc import abstractmethod
-from typing import TYPE_CHECKING
-
 import torch
+from torch.utils.checkpoint import checkpoint
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.protocols.base import BaseGraphModule
 
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
-    from torch_geometric.data import HeteroData
-
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
-    from anemoi.training.train.training_task.base import BaseTask
 
 
 LOGGER = logging.getLogger(__name__)
@@ -35,49 +24,6 @@ LOGGER = logging.getLogger(__name__)
 
 class BaseRolloutGraphModule(BaseGraphModule, ABC):
     """Base class for rollout tasks."""
-
-    def __init__(
-        self,
-        *,
-        config: BaseSchema,
-        task: BaseTask,
-        graph_data: dict[str, HeteroData],
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: dict[str, IndexCollection],
-        metadata: dict,
-        supporting_arrays: dict,
-    ) -> None:
-        """Initialize graph neural network forecaster.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Job configuration
-        task : BaseTask
-            Training task
-        graph_data : dict[str, HeteroData]
-            Graph objects keyed by dataset name
-        statistics : dict
-            Statistics of the training data
-        data_indices : dict[str, IndexCollection]
-            Indices of the training data,
-        metadata : dict
-            Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
-
-        """
-        super().__init__(
-            config=config,
-            task=task,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
-        )
 
     def _compute_metrics(
         self,
@@ -161,5 +107,3 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
 
-
-# task.steps()

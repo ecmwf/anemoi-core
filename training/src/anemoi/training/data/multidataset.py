@@ -186,8 +186,7 @@ class MultiDataset(IterableDataset):
 
         Returns the intersection of valid indices from all datasets.
         """
-        valid_date_indices_intersection = None
-        for name, ds in self.datasets.items():
+        for dataset_name, ds in self.datasets.items():
             valid_date_indices = get_usable_indices(
                 ds.missing,
                 len(ds.dates),
@@ -200,10 +199,10 @@ class MultiDataset(IterableDataset):
                 valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
 
             if len(valid_date_indices) == 0:
-                msg = f"No valid date indices found for dataset '{name}': \n{ds}"
+                msg = f"No valid date indices found for dataset '{dataset_name}': \n{ds}"
                 raise ValueError(msg)
 
-            LOGGER.info("Dataset '%s' has %d valid indices", name, len(valid_date_indices))
+            LOGGER.info("Dataset '%s' has %d valid indices", dataset_name, len(valid_date_indices))
 
         if len(valid_date_indices_intersection) == 0:
             msg = "No valid date indices found after intersection across all datasets."

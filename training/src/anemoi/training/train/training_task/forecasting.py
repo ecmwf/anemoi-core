@@ -15,7 +15,7 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.training_task.base import BaseTask
 
-LOGGER = logging.get_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class ForecastingTask(BaseTask):
