@@ -14,8 +14,8 @@ import torch
 from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
-    from anemoi.models.triton.norm import RMSNorm
     from anemoi.models.triton.norm import LayerNorm
+    from anemoi.models.triton.norm import RMSNorm
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,14 @@ def setup_torch():
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "b,h,d,elementwise_affine,norm_type",
-    [(B, H, C, affine, norm_type) for B in (1, 4) for H in (2, 6) for C in (4, 6) for affine in [False] for norm_type in ["rmsNorm", "layerNorm"]],
+    [
+        (B, H, C, affine, norm_type)
+        for B in (1, 4)
+        for H in (2, 6)
+        for C in (4, 6)
+        for affine in [False]
+        for norm_type in ["rmsNorm", "layerNorm"]
+    ],
 )
 def test_norm_forward(b: int, h: int, d: int, elementwise_affine: bool, norm_type: str):
     """Test forward pass of RMS Norm."""

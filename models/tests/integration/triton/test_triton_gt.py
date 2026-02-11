@@ -212,9 +212,7 @@ def test_graph_transformer_vs_reference_forward(
         reverse,
     )
 
-    out_ref = gt_ref.forward(
-        query_ref, key_ref, value, edge_attr, edge_index, size=(value.size(0), query_ref.size(0))
-    )
+    out_ref = gt_ref.forward(query_ref, key_ref, value, edge_attr, edge_index, size=(value.size(0), query_ref.size(0)))
 
     tolerance = 1e-4
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
@@ -292,9 +290,7 @@ def test_graph_transformer_vs_reference_backward(
     value.grad.zero_()
     edge_attr.grad.zero_()
 
-    out_ref = gt_ref.forward(
-        query, key, value, edge_attr, edge_index, size=(value.size(0), query.size(0))
-    )
+    out_ref = gt_ref.forward(query, key, value, edge_attr, edge_index, size=(value.size(0), query.size(0)))
     loss_ref = out_ref.pow(2).sum()
     loss_ref.backward()
     if qk_norm > 0 and elementwise_affine:

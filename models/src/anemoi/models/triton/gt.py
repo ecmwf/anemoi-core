@@ -23,7 +23,9 @@ except ImportError:
     )
 
 
-from anemoi.models.triton.norm import _layer_norm_bwd, _layer_norm_fwd, _rms_norm_bwd
+from anemoi.models.triton.norm import _layer_norm_bwd
+from anemoi.models.triton.norm import _layer_norm_fwd
+from anemoi.models.triton.norm import _rms_norm_bwd
 from anemoi.models.triton.norm import _rms_norm_fwd
 from anemoi.models.triton.utils import build_masks_and_offsets
 from anemoi.models.triton.utils import torch_dtype_to_triton
@@ -494,7 +496,7 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         N_dst, H, C = q.shape
         N_src = k.shape[0]
-        
+
         # Allocate grads and intermediates
         dQ = torch.empty_like(q)
         dK = torch.empty_like(k)
@@ -591,7 +593,11 @@ class GraphTransformer(torch.nn.Module):
         super().__init__()
         self.dim = dim
         self.qk_norm = qk_norm
-        assert qk_norm in (0, 1, 2), "qk_norm must be 0 (no normalisation), 1 (RMS normalisation) or 2 (layer normalisation)"
+        assert qk_norm in (
+            0,
+            1,
+            2,
+        ), "qk_norm must be 0 (no normalisation), 1 (RMS normalisation) or 2 (layer normalisation)"
 
         if qk_norm == 0 and elementwise_affine:
             raise ValueError(
@@ -605,7 +611,7 @@ class GraphTransformer(torch.nn.Module):
 
         if self.qk_norm > 0:
             LOGGER.info("Using fused QK norm in triton GT")
-            
+
         if elementwise_affine:
             self.w_qnorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
             self.w_knorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
