@@ -591,6 +591,7 @@ class GraphTransformer(torch.nn.Module):
         super().__init__()
         self.dim = dim
         self.qk_norm = qk_norm
+        assert qk_norm in (0, 1, 2), "qk_norm must be 0 (no normalisation), 1 (RMS normalisation) or 2 (layer normalisation)"
 
         if qk_norm == 0 and elementwise_affine:
             raise ValueError(
