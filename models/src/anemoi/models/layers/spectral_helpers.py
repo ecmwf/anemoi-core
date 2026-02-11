@@ -132,7 +132,7 @@ class SphericalHarmonicTransform(Module):
         theta = np.flip(np.arccos(theta))
 
         # Precompute associated Legendre polynomials
-        pct = precompute_legpoly(self.mmax, self.lmax, theta)
+        pct = precompute_legpoly(self.mmax, self.lmax, theta, norm="ectrans", csphase=False)
         pct = torch.from_numpy(pct)
 
         # Premultiple associated Legendre polynomials by quadrature weights
