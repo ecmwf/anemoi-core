@@ -1,0 +1,67 @@
+defaults:
+- data: zarr_cerra
+- dataloader: native_grid
+- diagnostics: evaluation_cerra
+- hardware: example
+- graph: limited_area
+- model: graphtransformer
+- training: default
+- _self_
+
+no_validation: False
+
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# hardware:
+#   num_gpus_per_node: 1
+
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.files.dataset}
+        thinning: 5
+      - dataset: ${hardware.files.forcing_dataset}
+    adjust: all
+    min_distance_km: 10
+  validation:
+    start: 2019
+  limit_batches:
+    training: 30
+    validation: 5
+  grid_indices:
+    _target_: anemoi.training.data.grid_indices.MaskedGrid
+    nodes_name: data
+    node_attribute_name: indices_connected_nodes
+training:
+  max_epochs: 5
+  run_id: null #71f8822f58b54ffa8c366bcf5424b3a2
+  fork_run_id: null
+  load_weights_only: True # only load model weights, do not restore optimiser states etc.
+  transfer_learning: True
+model:
+  output_mask: cutout_mask # it must be a node attribute of the output nodes
+diagnostics:
+  log:
+    wandb:
+      entity: a
+    mlflow:
+      enabled: True
+      offline: False
+      authentication: True
+      log_model: False
+      experiment_name: 'aifs-debug'
+      run_name: "Load ckpt file"
+      project_name: "AIFS"
+      tracking_uri: https://mlflow.ecmwf.int
+hardware:
+  paths:
+    data: /home/mlx/ai-ml/datasets/
+    output: ${oc.env:HPCPERM}/aifs/lam/
+    checkpoints: /home/ecm1924/GitRepos/anemoi
+  files:
+    graph: "debug.pt"
+    dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
+    forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+    warm_start: anemoi-by_time-epoch_063-step_260000.ckpt
