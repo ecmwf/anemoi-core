@@ -12,7 +12,7 @@ nodes:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
       dataset: null
     attributes: ${graph.attributes.nodes}
-  
+
   # Hidden/latent nodes for processing
   hidden:
     node_builder:

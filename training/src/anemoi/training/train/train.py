@@ -31,7 +31,6 @@ from torch_geometric.data import HeteroData
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
@@ -111,25 +110,17 @@ class AnemoiTrainer(ABC):
             hasattr(self.config.training, "model_task")
             and "graphdiffusiondownscaler" in self.config.training.model_task.lower()
         ):
-            from anemoi.training.data.downscalingdatamodule import (
-                DownscalingAnemoiDatasetsDataModule,
-            )
+            from anemoi.training.data.downscalingdatamodule import DownscalingAnemoiDatasetsDataModule
 
-            datamodule = DownscalingAnemoiDatasetsDataModule(
-                convert_to_omegaconf(self.config), self.graph_data
-            )
+            datamodule = DownscalingAnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
         else:
             datamodule = AnemoiDatasetsDataModule(
-                convert_to_omegaconf(self.config), self.graph_data
+                convert_to_omegaconf(self.config), self.graph_data,
             )  # Multi-dataset case: store num_features per dataset
-        self.config.data.num_features = {
-            name: len(data.variables) for name, data in datamodule.ds_train.data.items()
-        }
+        self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
         for name, data in datamodule.ds_train.data.items():
-            LOGGER.info(
-                "Dataset '%s' - Number of variables: %s", name, len(data.variables)
-            )
+            LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
             LOGGER.info("Dataset '%s' - Variables: %s", name, str(data.variables))
         return datamodule
 
@@ -160,9 +151,7 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(
-        self, dataset_path: str, dataset_name: str
-    ) -> HeteroData:
+    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
         """Create graph for a specific dataset, overriding the dataset path in config."""
         # Determine filename
         if (graph_filename := self.config.system.input.graph) is not None:
@@ -190,9 +179,7 @@ class AnemoiTrainer(ABC):
         graph_config = convert_to_omegaconf(self.config).graph
 
         # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(
-            graph_config.nodes.data.node_builder, "dataset"
-        ):
+        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
             graph_config.nodes.data.node_builder.dataset = dataset_path
 
         return GraphCreator(config=graph_config).create(
@@ -210,14 +197,10 @@ class AnemoiTrainer(ABC):
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
         graphs = {}
-        dataset_configs = get_multiple_datasets_config(
-            convert_to_omegaconf(self.config).dataloader.training
-        )
+        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
         for dataset_name, dataset_config in dataset_configs.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(
-                dataset_config.dataset, dataset_name
-            )
+            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
         return graphs
 
     @cached_property
@@ -225,18 +208,15 @@ class AnemoiTrainer(ABC):
         """Provide the model instance."""
         assert (
             not (
-                "GLU"
-                in self.config.model.processor.layer_kernels["Activation"]["_target_"]
+                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
                 and ".Transformer" in self.config.model.processor.target_
             )
             and not (
-                "GLU"
-                in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
+                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
                 and ".Transformer" in self.config.model.encoder.target_
             )
             and not (
-                "GLU"
-                in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
+                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
                 and ".Transformer" in self.config.model.decoder.target_
             )
         ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
@@ -265,9 +245,7 @@ class AnemoiTrainer(ABC):
                 )
                 model = transfer_learning_loading(model, self.last_checkpoint)
             else:
-                LOGGER.info(
-                    "Restoring only model weights from %s", self.last_checkpoint
-                )
+                LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
@@ -281,9 +259,7 @@ class AnemoiTrainer(ABC):
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
             for data_indices in self.data_indices.values():
-                data_indices.compare_variables(
-                    model._ckpt_model_name_to_index, data_indices.name_to_index
-                )
+                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -371,9 +347,7 @@ class AnemoiTrainer(ABC):
             return None
 
         fork_id = self.fork_run_server2server or self.config.training.fork_run_id
-        checkpoint = (
-            self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id)
-        )
+        checkpoint = self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id)
         # Check if the last checkpoint exists
         if checkpoint.exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
@@ -449,9 +423,7 @@ class AnemoiTrainer(ABC):
         }, f"Invalid accelerator ({self.config.system.hardware.accelerator}) in system.hardware config."
 
         if self.config.system.hardware.accelerator == "cpu":
-            LOGGER.info(
-                "WARNING: Accelerator set to CPU, this should only be used for debugging."
-            )
+            LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
@@ -486,10 +458,7 @@ class AnemoiTrainer(ABC):
             int(total_number_of_model_instances) * self.config.training.lr.rate,
         )
 
-        if (
-            self.config.training.max_epochs is not None
-            and self.config.training.max_steps not in (None, -1)
-        ):
+        if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
             LOGGER.info(
                 "Training limits: max_epochs=%d, max_steps=%d. "
                 "Training will stop when either limit is reached first. "
@@ -512,9 +481,7 @@ class AnemoiTrainer(ABC):
     def _update_paths(self) -> None:
         """Update the paths in the configuration."""
         self.lineage_run = None
-        if (
-            self.run_id
-        ):  # when using mlflow only rank0 will have a run_id except when resuming runs
+        if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.lineage_run = self.parent_run_server2server or self.run_id
@@ -522,14 +489,10 @@ class AnemoiTrainer(ABC):
                 self.config.system.output.checkpoints.root,
                 self.lineage_run,
             )
-            self.config.system.output.plots = Path(
-                self.config.system.output.plots, self.lineage_run
-            )
+            self.config.system.output.plots = Path(self.config.system.output.plots, self.lineage_run)
         elif self.config.training.fork_run_id:
             # WHEN USING MANY NODES/GPUS
-            self.lineage_run = (
-                self.parent_run_server2server or self.config.training.fork_run_id
-            )
+            self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
             self.config.system.output.checkpoints.root = Path(
                 self.config.system.output.checkpoints.root,
@@ -550,32 +513,21 @@ class AnemoiTrainer(ABC):
         if self.config.diagnostics.log.mlflow.enabled:
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
-                self.mlflow_logger._parent_dry_run
-                and not Path(self.config.system.output.checkpoints.root).is_dir()
+                self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints.root).is_dir()
             )
             self.start_from_checkpoint = (
-                False
-                if (self.dry_run and not bool(self.config.training.fork_run_id))
-                else self.start_from_checkpoint
+                False if (self.dry_run and not bool(self.config.training.fork_run_id)) else self.start_from_checkpoint
             )
             LOGGER.info("Dry run: %s", self.dry_run)
 
     def prepare_compilation(self) -> None:
 
         if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(
-                self.model, self.config.model_dump(by_alias=True).model.compile
-            )
+            self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
         if hasattr(self.config.training, "recompile_limit"):
-            torch._dynamo.config.cache_size_limit = int(
-                self.config.training.recompile_limit
-            )
-            torch._dynamo.config.accumulated_cache_size_limit = max(
-                8 * int(self.config.training.recompile_limit), 256
-            )
-            LOGGER.info(
-                "Recompile limit set to %d", torch._dynamo.config.cache_size_limit
-            )
+            torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
+            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
+            LOGGER.info("Recompile limit set to %d", torch._dynamo.config.cache_size_limit)
 
     @cached_property
     def strategy(self) -> Any:
@@ -634,9 +586,7 @@ class AnemoiTrainer(ABC):
             # we have our own DDP-compliant sampler logic baked into the dataset
             use_distributed_sampler=False,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
-            check_val_every_n_epoch=getattr(
-                self.config.diagnostics, "check_val_every_n_epoch", 1
-            ),
+            check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
         self.prepare_compilation()

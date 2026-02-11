@@ -11,22 +11,18 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
-import time
+
 import torch
 from torch.utils.checkpoint import checkpoint
+
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
-from anemoi.training.utils.enums import TensorDim
 from anemoi.training.train.tasks.base import BaseGraphModule
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
+from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
 
     from collections.abc import Mapping
-    from collections.abc import Generator
 
     from torch_geometric.data import HeteroData
 
@@ -136,7 +132,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """
         # Call base class to handle sharding
         y_pred_full, y_full, grid_shard_slice = super()._prepare_tensors_for_loss(
-            y_pred, y, validation_mode, dataset_name
+            y_pred, y, validation_mode, dataset_name,
         )
 
         # Squeeze time dimension (always 1) to get 4D tensors for loss computation
@@ -226,7 +222,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             grid_shard_shapes=None,
             model_comm_group=self.model_comm_group,
         )[
-            :, :, None, :, :
+            :, :, None, :, :,
         ]  # Add ensemble back: (batch, time, ensemble=1, grid, features)
 
         # Compute residuals: high-res target minus upsampled low-res input
@@ -331,7 +327,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         tuple[torch.Tensor]
             Sigma and weight tensors
         """
-
         if sigma_override is not None:
             # Use fixed sigma for testing/debugging
             sigma = torch.full(shape, fill_value=sigma_override, device=device)
@@ -454,7 +449,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
-
 
         Parameters
         ----------

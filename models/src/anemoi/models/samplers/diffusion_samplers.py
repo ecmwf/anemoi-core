@@ -254,7 +254,9 @@ class EDMHeunSampler(DiffusionSampler):
                 y[dataset_name] = y[dataset_name].to(x_dtype)
 
             # Wrap sigma as dict matching y's keys for denoising function
-            sigma_expanded = sigma_effective.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype)
+            sigma_expanded = (
+                sigma_effective.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype)
+            )
             sigma_dict = {key: sigma_expanded for key in y.keys()}
 
             D1 = denoising_fn(
@@ -275,7 +277,9 @@ class EDMHeunSampler(DiffusionSampler):
                 y_next[dataset_name] = y_next[dataset_name].to(x_dtype)
 
             if sigma_next > eps_prec:
-                sigma_next_expanded = sigma_next.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype)
+                sigma_next_expanded = (
+                    sigma_next.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype)
+                )
                 sigma_next_dict = {key: sigma_next_expanded for key in y.keys()}
 
                 D2 = denoising_fn(

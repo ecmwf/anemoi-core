@@ -32,7 +32,6 @@ from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffu
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -152,8 +151,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         Overrides parent to properly handle dictionary of per-dataset residual configs.
         """
-        from hydra.utils import instantiate
         import torch.nn as nn
+        from hydra.utils import instantiate
 
         if isinstance(residual_config, dict) and "_target_" not in residual_config:
             # Per-dataset configs provided
