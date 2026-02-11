@@ -233,7 +233,7 @@ class InverseSphericalHarmonicTransform(Module):
         theta = np.flip(np.arccos(theta))
 
         # Precompute associated Legendre polynomials
-        pct = precompute_legpoly(self.mmax, self.lmax, theta, inverse=True)
+        pct = precompute_legpoly(self.mmax, self.lmax, theta, inverse=True, norm="ectrans", csphase=False)
         pct = torch.from_numpy(pct)
 
         self.register_buffer("pct", pct, persistent=False)
