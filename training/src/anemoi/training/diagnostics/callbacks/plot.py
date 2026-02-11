@@ -1019,7 +1019,6 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            # !CHECK - somwhat clip for interpolator to just do one loop
             if pl_module.task_type == "temporal-interpolator":
                 output_times = [1]
 
@@ -1119,7 +1118,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         total_targets = output_times
-        total_targets *= pl_module.n_step_output
+        if pl_module.task_type == "forecaster":
+            total_targets *= pl_module.n_step_output
 
         input_tensor = (
             batch[dataset_name][
