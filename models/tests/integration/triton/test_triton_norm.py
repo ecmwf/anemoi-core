@@ -15,6 +15,7 @@ from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
     from anemoi.models.triton.norm import RMSNorm
+    from anemoi.models.triton.norm import LayerNorm
 
 
 @pytest.fixture(autouse=True)
@@ -28,29 +29,31 @@ def setup_torch():
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "b,h,d,elementwise_affine",
-    [(B, H, C, affine) for B in (1, 4) for H in (2, 6) for C in (4, 6) for affine in (False)],
+    "b,h,d,elementwise_affine,norm_type",
+    [(B, H, C, affine, norm_type) for B in (1, 4) for H in (2, 6) for C in (4, 6) for affine in [False] for norm_type in ["rmsNorm", "layerNorm"]],
 )
-def test_rms_norm_forward(b: int, h: int, d: int, elementwise_affine: bool):
+def test_norm_forward(b: int, h: int, d: int, elementwise_affine: bool, norm_type: str):
     """Test forward pass of RMS Norm."""
 
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
     x = torch.randn((b, h, d))
-
-    rms_norm = RMSNorm(d, elementwise_affine=elementwise_affine).cuda()
-    rms_norm_ref = torch.nn.RMSNorm(d, elementwise_affine=elementwise_affine)
-
+    if norm_type == "rmsNorm":
+        norm = RMSNorm(d, elementwise_affine=elementwise_affine).cuda()
+        norm_ref = torch.nn.RMSNorm(d, elementwise_affine=elementwise_affine)
+    elif norm_type == "layerNorm":
+        norm = LayerNorm(d, elementwise_affine=elementwise_affine).cuda()
+        norm_ref = torch.nn.LayerNorm(d, elementwise_affine=elementwise_affine, bias=False)
     # change weights from inital value of [1] for correctness testing
     if elementwise_affine:
         with torch.no_grad():
-            rms_norm.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
-            rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
+            norm.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
+            norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
 
-    x_triton = rms_norm(x)
+    x_triton = norm(x)
 
-    x_ref = rms_norm_ref(x)
+    x_ref = norm_ref(x)
 
     tolerance = 1e-4
     torch.testing.assert_close(x_triton, x_ref, atol=tolerance, rtol=0)
@@ -59,9 +62,9 @@ def test_rms_norm_forward(b: int, h: int, d: int, elementwise_affine: bool):
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "b, h,d,elementwise_affine",
-    [(B, H, C, affine) for B in (1, 4) for H in (2, 6) for C in (4, 6) for affine in (False)],
+    [(B, H, C, affine) for B in (1, 4) for H in (2, 6) for C in (4, 6) for affine in [False]],
 )
-def test_rms_norm_backward(b: int, h: int, d: int, elementwise_affine: bool):
+def test_norm_backward(b: int, h: int, d: int, elementwise_affine: bool):
     """Test backward pass of RMS Norm."""
 
     if not torch.cuda.is_available():
