@@ -108,30 +108,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         timestep = frequency_to_timedelta(self.config.data.timestep)
         return frequency_to_string(timestep * step)
 
-    def relative_date_indices(self, val_rollout: int = 1) -> list:
-        """Determine a list of relative time indices to load for each batch."""
-        if hasattr(self.config.training, "explicit_times"):
-            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
-
-        # Calculate indices using n_step_input, n_step_output and rollout
-        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
-
-        rollout_max = getattr(rollout_cfg, "max", None)
-        rollout_start = getattr(rollout_cfg, "start", 1)
-        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
-
-        rollout_value = rollout_start
-        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
-            rollout_value = rollout_max
-        else:
-            LOGGER.warning("Falling back rollout to: %s", rollout_value)
-
-        rollout = max(rollout_value, val_rollout)
-        n_step_input = self.config.training.multistep_input
-        n_step_output = self.config.training.multistep_output  # defaults to 1
-        time_range = n_step_input + rollout * n_step_output
-        return list(range(time_range))
-
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""

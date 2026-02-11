@@ -53,12 +53,12 @@ class GraphForecaster(BaseRolloutGraphModule):
             Loss value, metrics, and predictions (per step)
 
         """
-        x = self.task.get_inputs(batch, self.data_indices)
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)
 
-        for rollout_step in range(rollout_steps):
+        for rollout_step in range(rollout):
             y_pred = self(x)
 
-            y = self.task.get_targets(batch, self.data_indices, step=rollout_step)
+            y = self.task.get_targets(batch, data_indices=self.data_indices, step=rollout_step)
 
             loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
@@ -70,6 +70,6 @@ class GraphForecaster(BaseRolloutGraphModule):
             )
 
             # Advance input state for each dataset
-            x = self.task.advance_input(x, y_pred, batch, rollout_step=rollout_step)
+            x = self.task.advance_input(x, y_pred, batch, data_indices=self.data_indices, rollout_step=rollout_step)
 
             yield loss, metrics_next, y_pred

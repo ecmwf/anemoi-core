@@ -79,76 +79,6 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             supporting_arrays=supporting_arrays,
         )
 
-        self.rollout = config.training.rollout.start
-        self.rollout_epoch_increment = config.training.rollout.epoch_increment
-        self.rollout_max = config.training.rollout.max
-
-        LOGGER.debug("Rollout window length: %d", self.rollout)
-        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
-        LOGGER.debug("Rollout max : %d", self.rollout_max)
-
-    def _advance_dataset_input(
-        self,
-        x: torch.Tensor,
-        y_pred: torch.Tensor,
-        batch: torch.Tensor,
-        dataset_name: str,
-        rollout_step: int = 0,
-    ) -> torch.Tensor:
-        """Default implementation used by simple rollout tasks.
-
-        Supports model outputs shaped like:
-        - (B, T, E, G, V)
-        """
-        keep_steps = min(self.n_step_output, self.n_step_input)
-
-        x = x.roll(-keep_steps, dims=1)
-
-        # TODO(dieter): see if we can replace for loop with tensor operations
-        for i in range(keep_steps):
-            # Get prognostic variables
-            x[:, -(i + 1), ..., self.data_indices[dataset_name].model.input.prognostic] = y_pred[
-                :,
-                -(i + 1),
-                ...,
-                self.data_indices[dataset_name].model.output.prognostic,
-            ]
-
-            batch_time_index = self.n_step_input + (rollout_step + 1) * self.n_step_output - (i + 1)
-
-            x[:, -(i + 1)] = self.output_mask[dataset_name].rollout_boundary(
-                x[:, -(i + 1)],
-                batch[:, batch_time_index],
-                self.data_indices[dataset_name],
-                grid_shard_slice=self.grid_shard_slice[dataset_name],
-            )
-
-            # get new "constants" needed for time-varying fields
-            x[:, -(i + 1), ..., self.data_indices[dataset_name].model.input.forcing] = batch[
-                :,
-                batch_time_index,
-                ...,
-                self.data_indices[dataset_name].data.input.forcing,
-            ]
-        return x
-
-    def _advance_input(
-        self,
-        x: dict[str, torch.Tensor],
-        y_pred: dict[str, torch.Tensor],
-        batch: dict[str, torch.Tensor],
-        rollout_step: int,
-    ) -> dict[str, torch.Tensor]:
-        for dataset_name in x:
-            x[dataset_name] = self._advance_dataset_input(
-                x[dataset_name],
-                y_pred[dataset_name],
-                batch[dataset_name],
-                rollout_step=rollout_step,
-                dataset_name=dataset_name,
-            )
-        return x
-
     def _compute_metrics(
         self,
         y_pred: torch.Tensor,
@@ -184,14 +114,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         train_loss = super().training_step(batch, batch_idx)
-        self.log(
-            "rollout",
-            float(self.rollout),
-            on_step=True,
-            logger=self.logger_enabled,
-            rank_zero_only=True,
-            sync_dist=False,
-        )
+        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
         return train_loss
 
     def _step(
@@ -204,29 +127,39 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         metrics = {}
         y_preds = []
 
-        for loss_next, metrics_next, y_preds_next in self._rollout_step(
-            batch,
-            rollout=self.rollout,
-            validation_mode=validation_mode,
-        ):
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+
+        for step in self.task.steps():
+            y_pred = self(x)
+            y = self.task.get_targets(batch, data_indices=self.data_indices, step=step)
+
+            loss_next, metrics_next, y_preds_next = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
+                step=step,
+                validation_mode=validation_mode,
+                use_reentrant=False,
+            )
+
+            # Advance input state for each dataset
+            x = self.task.advance_input(
+                x,
+                y_preds_next,
+                batch,
+                data_indices=self.data_indices,
+                step=step
+            )
+
             loss = loss + loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / self.rollout
+        loss *= 1.0 / len(self.task.steps())
         return loss, metrics, y_preds
 
-    @abstractmethod
-    def _rollout_step(
-        self,
-        batch: dict[str, torch.Tensor],
-        rollout: int | None = None,
-        validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
-        pass
-
     def on_train_epoch_end(self) -> None:
-        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
-            self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
-        self.rollout = min(self.rollout, self.rollout_max)
+        self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+
+
+# task.steps()
