@@ -143,9 +143,7 @@ class MultiHeadSelfAttention(nn.Module):
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
-        assert (
-            self.attention_implementation in attn_funcs
-        ), f"{self.attention_implementation} not supported. \
+        assert self.attention_implementation in attn_funcs, f"{self.attention_implementation} not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
 
         # initalise the attn func here
@@ -201,7 +199,7 @@ class MultiHeadSelfAttention(nn.Module):
             alibi_slopes=self.alibi_slopes,
         )
 
-        out = shard_sequence(out, shapes=shapes, mgroup=model_comm_group)
+        out = shard_sequence(out, shapes=shapes, num_heads=self.num_heads, mgroup=model_comm_group)
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         out = self.projection(out)
