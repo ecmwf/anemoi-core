@@ -32,22 +32,50 @@ try:
 except BaseException:
     HAS_FLASH = False
 
+#HAS_FLASH= False
+
+"""
+def attetion_ref(q, k, v, sm_scale, causal=False, window=0, mode="fwd", dtype=torch.float16, device="cuda"):
+    M = torch.tril(torch.ones((N_CTX, N_CTX), device=device))
+    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
+
+    # Optionally mask values
+    if causal:
+        # Create causal mask
+        p[:, :, M == 0] = float("-inf")
+    if window != 0:
+        # Create sliding window mask
+        positions = torch.arange(N_CTX, device="cuda")
+        mask = abs(positions[:, None] - positions[None, :]) <= window
+        p[:, :, ~mask] = float("-inf")
+
+    p = torch.softmax(p.float(), dim=-1)
+    p = p.to(ref_dtype)
+    ref_out = torch.matmul(p, v).to(dtype)
+
+    if mode == "bwd":
+        dout = torch.randn_like(q)
+        ref_out.backward(dout)
+        ref_dq, q.grad = q.grad.clone(), None
+        ref_dv, v.grad = v.grad.clone(), None
+        ref_dk, k.grad = k.grad.clone(), None
+"""
 
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("Z", [1])
 @pytest.mark.parametrize("H", [16])
 @pytest.mark.parametrize(
-    #"N_CTX", [128, 1024, 40320] if HAS_FLASH else [128, 1024]
-    "N_CTX", [32]
+    "N_CTX", [128, 1024, 40320] if HAS_FLASH else [128, 1024]
+    #"N_CTX", [32]
     # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
-@pytest.mark.parametrize("HEAD_DIM", [128])
+@pytest.mark.parametrize("HEAD_DIM", [16, 64, 256])
 @pytest.mark.parametrize("causal", [False])  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
 @pytest.mark.parametrize(
     "window",
-    #[0, 1120] if HAS_FLASH else [0, 512],
-    [0]
+    [0, 1120] if HAS_FLASH else [0, 512],
+    #[0]
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -83,12 +111,12 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 
     # Compute reference values
     if not HAS_FLASH:
-        M = torch.tril(torch.ones((N_CTX, N_CTX), device=DEVICE))
         p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
 
         # Optionally mask values
         if causal:
             # Create causal mask
+            M = torch.tril(torch.ones((N_CTX, N_CTX), device=DEVICE))
             p[:, :, M == 0] = float("-inf")
         if window != 0:
             # Create sliding window mask
@@ -134,9 +162,17 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     # Compute triton values
     tri_out = attention(q, k, v, causal, window, sm_scale).to(dtype)
 
-    atol = 1e-3
+    # Set tolerances based on dtype precision
+    # bfloat16 has 7 mantissa bits vs float16's 10 bits, so ~8x less precision
+    if dtype == torch.bfloat16:
+        atol = 5e-3
+        rtol = 1e-2
+    else:
+        atol = 1e-3
+        rtol = 0.0
+    
     if mode == "fwd":
-        torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=0)
+        torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=rtol)
         return
 
     tri_out.backward(dout)
@@ -145,13 +181,15 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     tri_dq, q.grad = q.grad.clone(), None
 
     # compare
-    torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=0)
-    rtol = 0.0
+    torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=rtol)
+    
+    # Backward pass may have additional hardware-specific requirements
+    bwd_rtol = rtol
     # Relative tolerance workaround for known hardware limitation of CDNA2 GPU.
     # For details see https://pytorch.org/docs/stable/notes/numerical_accuracy.html#reduced-precision-fp16-and-bf16-gemms-and-convolutions-on-amd-instinct-mi200-devices
     if is_hip() and triton.runtime.driver.active.get_current_target().arch == "gfx90a":
-        rtol = 1e-2
+        bwd_rtol = max(1e-2, bwd_rtol)
 
-    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=rtol)
-    torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=rtol)
-    torch.testing.assert_close(tri_dv, ref_dv, atol=atol, rtol=rtol)
+    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=bwd_rtol)
+    torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=bwd_rtol)
+    torch.testing.assert_close(tri_dv, ref_dv, atol=atol, rtol=bwd_rtol)

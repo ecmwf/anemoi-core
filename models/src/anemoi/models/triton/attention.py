@@ -122,7 +122,6 @@ def _attn_fwd_inner(
     
     #TODO(cathal) change based on dtype
     MINUS_INF : tl.constexpr = -1.0e8
-    lse_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) + MINUS_INF
     
     iter_offset = iter_offset + lo
     # loop over k, v and update accumulator
@@ -148,7 +147,6 @@ def _attn_fwd_inner(
             qk = tl.where(mask, qk, MINUS_INF)
 
         # global attention
-        #m_ij = tl.maximum(tl.max(qk, 1), lse_i)
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         p = tl.math.exp2(qk - m_ij[:, None])
 
@@ -565,8 +563,8 @@ def _attn_bwd_dkdv(
     elif CAUSAL:
         # lo, hi = start_n, N_CTX
         # start_fixed, rounded down to lowest multiple if not even
-        lo: tl.constexpr = (start_fixed // BLOCK_ITER) * BLOCK_ITER
-        hi: tl.constexpr = N_CTX
+        lo = (start_fixed // BLOCK_ITER) * BLOCK_ITER
+        hi = N_CTX
         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
         lo = tl.multiple_of(lo, BLOCK_ITER)
         hi = tl.multiple_of(hi, BLOCK_ITER)
@@ -742,8 +740,8 @@ def _attn_bwd_dq(
         q_upper_bound: tl.constexpr = offs_fixed[:, None] + WINDOW
     elif CAUSAL:
         # hi is block after start_m, rounded up to nearest multiple of step_n
-        lo: tl.constexpr = 0
-        hi: tl.constexpr = ((start_fixed + BLOCK_FIXED) // BLOCK_ITER) * BLOCK_ITER
+        lo = 0
+        hi = ((start_fixed + BLOCK_FIXED) // BLOCK_ITER) * BLOCK_ITER
         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
         lo = tl.multiple_of(lo, BLOCK_ITER)
         hi = tl.multiple_of(hi, BLOCK_ITER)
