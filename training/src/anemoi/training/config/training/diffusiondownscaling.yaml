@@ -1,0 +1,104 @@
+defaults:
+  - scalers: diffusiondownscaling   # was global in multids; keep downscaling like your old config
+
+run_id: null
+fork_run_id: null
+transfer_learning: False
+load_weights_only: False
+
+deterministic: False
+precision: bf16-mixed
+
+multistep_input: 1          # ported from your config
+accum_grad_batches: 1
+num_sanity_val_steps: 1     # ported from your config
+
+gradient_clip:
+  val: 1.
+  algorithm: norm
+
+swa:
+  enabled: False
+  lr: 1.e-4
+
+# keep multids-style optimizer factory (do NOT revert to optimizer.kwargs unless you also revert the codepath)
+optimizer:
+  _target_: torch.optim.AdamW
+  weight_decay: 0.1
+  betas: [0.9, 0.95]
+  eps: 1e-7
+
+# switch task to downscaler
+model_task: anemoi.training.train.tasks.GraphDiffusionDownscaler
+
+strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+  read_group_size: ${dataloader.read_group_size}
+
+loss_gradient_scaling: False
+
+training_loss:
+  datasets:
+
+    out_hres:
+      _target_: anemoi.training.losses.WeightedMSELoss
+      # port your intent: include nan mask weighting if that scaler still exists in this branch
+      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+      ignore_nans: False
+
+validation_metrics:
+  datasets:
+    in_lres: null  # No metrics on input
+    in_hres: null  # No metrics on input
+    out_hres:
+      mse:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["node_weights"]
+        ignore_nans: True
+
+# if the downscaling branch still supports this key, keep it; otherwise remove (it will error if unknown)
+training_approach: probabilistic_low_noise
+
+variable_groups:
+  datasets:
+    in_lres:
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
+    in_hres:
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
+    out_hres:
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
+
+metrics:
+  datasets:
+    in_lres: []  # No metrics for input dataset
+    in_hres: []  # No metrics for input dataset
+    out_hres:
+      - z_500
+      - t_850
+      - u_850
+      - v_850
+
+rollout:
+  start: 0
+  epoch_increment: 0
+  max: 0
+
+max_epochs: null
+max_steps: 1000000
+
+lr:
+  warmup: 1000
+  rate: 10e-4            # ported from your config
+  iterations: ${training.max_steps}
+  min: 3e-7
+
+submodules_to_freeze: []
+
+recompile_limit: 32

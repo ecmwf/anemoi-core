@@ -1,18 +1,24 @@
-num_channels: 1024
+num_channels: 512
 cpu_offload: False
 
-keep_batch_sharded: True
+keep_batch_sharded: False
 
 model:
-  _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
+  _target_: anemoi.models.models.AnemoiD2ModelEncProcDec
+  # Specify which datasets should have encoders/decoders
+  # For downscaling: only in_hres needs encoder, only out_hres needs decoder
+  encoder_datasets: [out_hres]
+  decoder_datasets: [out_hres]
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0
     noise_channels: 32
     noise_cond_dim: 16
-    sigma_max: 100.0
+    sigma_max: 100000.0
     sigma_min: 0.02
     rho: 7.0
+    log_normal_mean: -1.2
+    log_normal_std: 1.2
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.diffusion.noise_channels}
@@ -20,16 +26,16 @@ model:
     inference_defaults:
       noise_scheduler:
         schedule_type: "karras"
-        sigma_max: 100.0
-        sigma_min: 0.02
+        sigma_max: 100000.0
+        sigma_min: 0.00
         rho: 7.0
-        num_steps: 50
+        num_steps: 80
       diffusion_sampler:
         sampler: "heun"
-        S_churn: 0.0
-        S_min: 0.0
-        S_max: .inf
-        S_noise: 1.0
+        S_churn: 2.5
+        S_min: 0.75
+        S_max: 100000
+        S_noise: 1.05
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
@@ -55,9 +61,9 @@ processor:
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
+  num_chunks: 2
+  mlp_hidden_ratio: 4
+  num_heads: 4
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
@@ -68,14 +74,14 @@ encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
+  num_chunks: 1
+  mlp_hidden_ratio: 4
+  num_heads: 4
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
+  shard_strategy: "heads"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 
@@ -83,30 +89,40 @@ decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
+  num_chunks: 1
+  mlp_hidden_ratio: 4
+  num_heads: 4
   initialise_data_extractor_zero: False
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
+  shard_strategy: "heads"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
+  in_lres:
+    _target_: anemoi.models.layers.residual.InterpolationConnection
+    interpolation_file_path: ${system.input.truncation}  # O96 -> O320 (upsampling)
+    step: -1
+    autocast: false
+    row_normalize: false
+  in_hres:
+    _target_: anemoi.models.layers.residual.SkipConnection
+    step: -1
+  out_hres:
+    _target_: anemoi.models.layers.residual.SkipConnection
+    step: -1
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
-  data: 8
-  hidden: 8
-  data2hidden: 8
-  hidden2data: 8
-  hidden2hidden: 8 # GNN and GraphTransformer Processor only
+  data: 0
+  hidden: 0
+  data2hidden: 0
+  hidden2data: 0
+  hidden2hidden: 0 # GNN and GraphTransformer Processor only
 
 
 attributes:

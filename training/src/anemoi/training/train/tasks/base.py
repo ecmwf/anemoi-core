@@ -816,7 +816,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+    ) -> tuple[dict[str, torch.Tensor], Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         pass
 
     def allgather_batch(self, batch: torch.Tensor, grid_indices: dict, grid_dim: int) -> torch.Tensor:

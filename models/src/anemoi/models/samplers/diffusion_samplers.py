@@ -17,7 +17,13 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 DenoisingFunction = Callable[
-    [dict[str, torch.Tensor], dict[str, torch.Tensor], torch.Tensor, Optional[ProcessGroup], dict[str, Optional[list]]],
+    [
+        dict[str, torch.Tensor],
+        dict[str, torch.Tensor],
+        dict[str, torch.Tensor],
+        Optional[ProcessGroup],
+        dict[str, Optional[list]],
+    ],
     dict[str, torch.Tensor],
 ]
 
@@ -225,6 +231,9 @@ class EDMHeunSampler(DiffusionSampler):
         batch_size, time_size, ensemble_size = y_shape[0], y_shape[1], y_shape[2]
         num_steps = len(sigmas) - 1
 
+        # Use explicit dtype for conversions
+        x_dtype = dtype
+
         # Heun sampling loop
         for i in range(num_steps):
             sigma_i = sigmas[i]
@@ -242,12 +251,18 @@ class EDMHeunSampler(DiffusionSampler):
                 sigma_effective = sigma_i
 
             for dataset_name in y:
-                y[dataset_name] = y[dataset_name].to(x[dataset_name].dtype)
+                y[dataset_name] = y[dataset_name].to(x_dtype)
+
+            # Wrap sigma as dict matching y's keys for denoising function
+            sigma_expanded = (
+                sigma_effective.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype)
+            )
+            sigma_dict = {key: sigma_expanded for key in y.keys()}
 
             D1 = denoising_fn(
                 x,
                 y,
-                sigma_effective.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype),
+                sigma_dict,
                 model_comm_group,
                 grid_shard_shapes,
             )
@@ -259,13 +274,18 @@ class EDMHeunSampler(DiffusionSampler):
             for dataset_name in y:
                 d[dataset_name] = (y[dataset_name] - D1[dataset_name]) / (sigma_effective + eps_prec)
                 y_next[dataset_name] = y[dataset_name] + (sigma_next - sigma_effective) * d[dataset_name]
-                y_next[dataset_name] = y_next[dataset_name].to(x[dataset_name].dtype)
+                y_next[dataset_name] = y_next[dataset_name].to(x_dtype)
 
             if sigma_next > eps_prec:
+                sigma_next_expanded = (
+                    sigma_next.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype)
+                )
+                sigma_next_dict = {key: sigma_next_expanded for key in y.keys()}
+
                 D2 = denoising_fn(
                     x,
                     y_next,
-                    sigma_next.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype),
+                    sigma_next_dict,
                     model_comm_group,
                     grid_shard_shapes,
                 )
@@ -297,13 +317,14 @@ class DPMpp2MSampler(DiffusionSampler):
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, Optional[list]] = None,
+        dtype: Optional[torch.dtype] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        dtype = kwargs.get("dtype", self.dtype)
+        dtype = dtype if dtype is not None else kwargs.get("dtype", self.dtype)
 
-        # DPM++ sampler converts to x.dtype
+        # DPM++ sampler converts to provided dtype
         for dataset_name in y:
-            y[dataset_name] = y[dataset_name].to(x[dataset_name].dtype)
+            y[dataset_name] = y[dataset_name].to(dtype)
         sigmas = sigmas.to(dtype)
 
         y_shape = next(iter(y.values())).shape
@@ -319,7 +340,9 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma_next = sigmas[i + 1]
 
             sigma_expanded = sigma.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1)
-            denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
+            sigma_dict = {key: sigma_expanded for key in y.keys()}
+
+            denoised = denoising_fn(x, y, sigma_dict, model_comm_group, grid_shard_shapes)
 
             if sigma_next == 0:
                 y = denoised
