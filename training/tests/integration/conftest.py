@@ -535,7 +535,7 @@ def multi_output_interpolator_config(
 @pytest.fixture
 def imerg_target_config(
     testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_paths: GetTmpPaths,
+    get_tmp_paths: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_filtering"):
         template = compose(config_name="config")
