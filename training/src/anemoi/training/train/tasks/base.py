@@ -206,7 +206,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # Initialize components for multi-dataset
         self.target_dataset_names = []  # list of dataset names used for loss computation
-        self.target_dataset_names = []  # list of dataset names used for loss computation
         self.scalers = {}  # dict of dict of tensors
         self.updating_scalars = {}  # dict of dict of objects
         self.val_metric_ranges = {}  # dict of dict of lists

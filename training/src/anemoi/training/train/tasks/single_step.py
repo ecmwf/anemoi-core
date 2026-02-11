@@ -59,7 +59,7 @@ class BaseSingleStepGraphModule(BaseGraphModule, ABC):
             assert dataset_batch.shape[1] >= sample_length, msg
         return x
 
-    def get_targets(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def get_targets(self, batch: dict[str, torch.Tensor], lead_step: int) -> dict[str, torch.Tensor]:
         y = {}
         for dataset_name, dataset_batch in batch.items():
             y_time = dataset_batch.narrow(1, 0, self.n_step_output)

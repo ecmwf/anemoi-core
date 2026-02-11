@@ -11,3 +11,7 @@ defaults:
 
 # set to true to switch on config validation
 config_validation: False
+
+diagnostics:
+  plot:
+    callbacks: []
