@@ -543,8 +543,8 @@ def imerg_target_config(
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_filtering.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir, rel_paths, dataset_urls = get_tmp_path(use_case_modifications, ["dataset"])
-    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
     OmegaConf.set_struct(template.data, False)  # allow new keys under data (e.g. target)
     OmegaConf.set_struct(
         template.training.training_loss.datasets.data,
@@ -553,7 +553,7 @@ def imerg_target_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, dataset_urls
+    return cfg, url_dataset
 
 
 @pytest.fixture(
