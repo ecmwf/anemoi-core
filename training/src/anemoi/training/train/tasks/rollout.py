@@ -82,7 +82,9 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
-        self.output_times = max(
+    @property
+    def output_times(self) -> int:
+        return max(
             1,
             self.rollout,
         )  # required for plotting callbacks, will be updated in training loop if rollout increases

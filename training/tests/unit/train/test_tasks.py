@@ -12,6 +12,7 @@ from anemoi.models.preprocessing import Processors
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
+from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -362,3 +363,81 @@ def test_rollout_advance_input_keeps_latest_steps(
     assert kept_steps == expected_next_input, error_msg
     for idx, value in enumerate(expected):
         assert torch.all(updated[:, idx] == value)
+
+
+def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyModel:
+        def __init__(self, num_output_variables: int) -> None:
+            self.num_output_variables = num_output_variables
+
+        def __call__(self, x: torch.Tensor) -> torch.Tensor:
+            # Return tensor shaped like expected forecast output
+            # x shape: (b, t, e, g, v)
+            b, _, e, g, v = x.shape
+            return torch.randn((b, 1, e, g, v), dtype=torch.float32)
+
+    def _stub_init(
+        self: BaseGraphModule,
+        *,
+        config: DictConfig,
+        graph_data: HeteroData,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: IndexCollection,
+        metadata: dict | None = None,
+        supporting_arrays: dict | None = None,
+    ) -> None:
+        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
+        pl.LightningModule.__init__(self)
+
+        self.n_step_input = config.training.multistep_input
+        self.n_step_output = config.training.multistep_output
+
+        model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
+
+        self.model = model
+        self.model_comm_group = None
+        self.model_comm_group_size = 1
+        self.grid_shard_shapes = {"data": None}
+        self.grid_shard_slice = {"data": None}
+        self.is_first_step = False
+        self.updating_scalars = {}
+        self.data_indices = data_indices
+        self.dataset_names = list(data_indices.keys())
+        self.target_dataset_names = self.dataset_names
+        self.grid_dim = -2
+        self.config = config
+        self.loss = {"data": DummyLoss()}
+        self.loss_supports_sharding = False
+        self.metrics_support_sharding = True
+
+    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
+
+    cfg = DictConfig(
+        {
+            "training": {
+                "multistep_input": 1,
+                "multistep_output": 1,
+                "rollout": {"start": 1, "epoch_increment": 1, "max": 3},
+            },
+        },
+    )
+
+    name_to_index = {"A": 0, "B": 1}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index)}
+
+    forecaster = GraphForecaster(
+        config=cfg,
+        graph_data={"data": HeteroData()},
+        statistics={"data": {}},
+        statistics_tendencies={"data": None},
+        data_indices=data_indices,
+        metadata={},
+        supporting_arrays={},
+    )
+
+    assert forecaster.output_times == 1
+    for i in range(1, cfg.training.rollout.max + 1):
+        forecaster.rollout = i
+        assert forecaster.get_init_step(i) == 0
+        assert forecaster.output_times == i

@@ -58,7 +58,9 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         self.rho = config.model.model.diffusion.rho
 
-        self.output_times = 1  # Diffusion doesn't have rollout
+    @property
+    def output_times(self) -> int:
+        return 1  # Diffusion doesn't have rollout
 
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""

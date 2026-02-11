@@ -34,6 +34,7 @@ NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigra
 default_config = """
 training:
   model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  multistep_input : 1
 
 diagnostics:
   callbacks: []
@@ -133,13 +134,12 @@ def test_ensemble_plot_mixin_process():
     pl_module = MagicMock()
     pl_module.n_step_input = 2
     pl_module.rollout = 3
+    pl_module.output_time = pl_module.rollout
     pl_module.n_step_output = 1
     data_indices = MagicMock()
     data_indices.data.output.full = slice(None)
     pl_module.data_indices = {"data": data_indices}
 
-    # Mock config
-    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
     # Create test tensors
     # batch: bs, input_steps + forecast_steps, ens, latlon, nvar
     batch = {"data": torch.randn(2, 6, 1, 100, 5)}
@@ -170,9 +170,14 @@ def test_ensemble_plot_mixin_process():
     # Set post_processors on the mixin instance
     mixin.post_processors = {"data": mock_post_processors}
 
-    output_times = mixin._get_output_times(config, pl_module)
-
-    data, result_output_tensor = mixin.process(pl_module, "data", outputs, batch, output_times=output_times, members=0)
+    data, result_output_tensor = mixin.process(
+        pl_module,
+        "data",
+        outputs,
+        batch,
+        output_times=pl_module.output_times,
+        members=0,
+    )
 
     # Check instantiation
     assert data is not None
@@ -186,42 +191,6 @@ def test_ensemble_plot_mixin_process():
         100,
         5,
     ), f"Expected output_tensor shape (3, 1, 100, 5), got {result_output_tensor.shape}"
-
-
-def test_ensemble_plot_mixin_output_times_defaults_to_single_step():
-    """Test EnsemblePlotMixin._get_output_times fallback for missing rollout."""
-    mixin = EnsemblePlotMixin()
-
-    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    pl_module = MagicMock()
-    pl_module.model = MagicMock()
-
-    output_times = mixin._get_output_times(config, pl_module)
-
-    assert output_times == (1, "forecast")
-
-
-def test_ensemble_plot_mixin_output_times_interpolator_mode(monkeypatch):
-    """Test EnsemblePlotMixin._get_output_times in interpolator mode."""
-    import anemoi.training.diagnostics.callbacks.plot_ens as plot_ens
-
-    class FakeInterpolator:
-        pass
-
-    monkeypatch.setattr(plot_ens, "AnemoiModelEncProcDecInterpolator", FakeInterpolator)
-
-    mixin = EnsemblePlotMixin()
-    config = omegaconf.OmegaConf.create(
-        {
-            "training": {"explicit_times": {"target": ["2025-01-01T00", "2025-01-01T06"]}},
-        },
-    )
-    pl_module = MagicMock()
-    pl_module.model.model = FakeInterpolator()
-
-    output_times = mixin._get_output_times(config, pl_module)
-
-    assert output_times == (2, "time_interp")
 
 
 def test_rollout_eval_ens_eval():
@@ -336,27 +305,6 @@ def test_ensemble_plot_callbacks_instantiation():
         output_steps=1,
     )
     assert plot_histogram is not None
-
-
-def test_get_output_times_defaults_to_single_step_for_non_interpolator():
-    config = omegaconf.OmegaConf.create(
-        {
-            "system": {"output": {"plots": None}},
-            "diagnostics": {
-                "plot": {
-                    "datashader": False,
-                    "asynchronous": False,
-                    "frequency": {"epoch": 1},
-                },
-            },
-        },
-    )
-    callback = GraphTrainableFeaturesPlot(config=config)
-
-    pl_module = MagicMock()
-    pl_module.model.model = object()
-
-    assert callback._get_output_times(config, pl_module) == (1, "forecast")
 
 
 def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():

@@ -243,7 +243,9 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         self.n_step_input = 1
 
-        self.output_times = len(self.interp_times)
+    @property
+    def output_times(self) -> int:
+        return len(self.interp_times)
 
     def _step(
         self,

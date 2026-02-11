@@ -330,7 +330,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
-        self.output_times = None  # required for plotting callbacks
+    @property
+    def output_times(self) -> None:
+        return None
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
