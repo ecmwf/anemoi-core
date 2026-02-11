@@ -2,7 +2,7 @@
 defaults:
   - plot: multi
   - callbacks: placeholder
-  - benchmark_profiler: detailed
+  - benchmark_profiler: None
 
 # another alternative if you don't have any callbacks is to remove it from the
 # defaults list and just use

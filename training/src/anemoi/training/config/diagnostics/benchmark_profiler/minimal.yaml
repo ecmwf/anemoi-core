@@ -1,0 +1,13 @@
+# Minimal profiler - all features disabled to reduce wandb logging overhead
+memory:
+  enabled: False
+time:
+  enabled: False
+speed:
+  enabled: False
+system:
+  enabled: False
+model_summary:
+  enabled: False
+snapshot:
+  enabled: False
