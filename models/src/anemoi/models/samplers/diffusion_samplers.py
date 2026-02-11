@@ -169,7 +169,7 @@ class DiffusionSampler(ABC):
         x : dict[str, torch.Tensor]
             Input conditioning data with shape (batch, time, ensemble, grid, vars)
         y : dict[str, torch.Tensor]
-            Initial noise tensor with shape (batch, ensemble, grid, vars)
+            Initial noise tensor with shape (batch, time, ensemble, grid, vars)
         sigmas : torch.Tensor
             Noise schedule with shape (num_steps + 1,)
         denoising_fn : Callable
@@ -184,7 +184,7 @@ class DiffusionSampler(ABC):
         Returns
         -------
         torch.Tensor
-            Sampled output with shape (batch, ensemble, grid, vars)
+            Sampled output with shape (batch, time, ensemble, grid, vars)
         """
         pass
 
@@ -227,8 +227,8 @@ class EDMHeunSampler(DiffusionSampler):
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
 
-        x_shape = next(iter(x.values())).shape
-        batch_size, ensemble_size = x_shape[0], x_shape[2]
+        y_shape = next(iter(y.values())).shape
+        batch_size, time_size, ensemble_size = y_shape[0], y_shape[1], y_shape[2]
         num_steps = len(sigmas) - 1
 
         # Use explicit dtype for conversions
@@ -254,7 +254,7 @@ class EDMHeunSampler(DiffusionSampler):
                 y[dataset_name] = y[dataset_name].to(x_dtype)
 
             # Wrap sigma as dict matching y's keys for denoising function
-            sigma_expanded = sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype)
+            sigma_expanded = sigma_effective.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype)
             sigma_dict = {key: sigma_expanded for key in y.keys()}
 
             D1 = denoising_fn(
@@ -275,7 +275,7 @@ class EDMHeunSampler(DiffusionSampler):
                 y_next[dataset_name] = y_next[dataset_name].to(x_dtype)
 
             if sigma_next > eps_prec:
-                sigma_next_expanded = sigma_next.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype)
+                sigma_next_expanded = sigma_next.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype)
                 sigma_next_dict = {key: sigma_next_expanded for key in y.keys()}
 
                 D2 = denoising_fn(
@@ -323,8 +323,8 @@ class DPMpp2MSampler(DiffusionSampler):
             y[dataset_name] = y[dataset_name].to(dtype)
         sigmas = sigmas.to(dtype)
 
-        x_shape = next(iter(x.values())).shape
-        batch_size, ensemble_size = x_shape[0], x_shape[2]
+        y_shape = next(iter(y.values())).shape
+        batch_size, time_size, ensemble_size = y_shape[0], y_shape[1], y_shape[2]
         num_steps = len(sigmas) - 1
 
         # Storage for previous denoised predictions
@@ -335,7 +335,7 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = sigma.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1)
+            sigma_expanded = sigma.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1)
             sigma_dict = {key: sigma_expanded for key in y.keys()}
 
             denoised = denoising_fn(x, y, sigma_dict, model_comm_group, grid_shard_shapes)

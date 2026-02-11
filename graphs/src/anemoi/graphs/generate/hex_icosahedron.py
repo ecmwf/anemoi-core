@@ -43,7 +43,7 @@ def create_hex_nodes(
     """
     nodes = get_nodes_at_resolution(resolution)
 
-    coords_rad = np.deg2rad(np.array([h3.h3_to_geo(node) for node in nodes]))
+    coords_rad = np.deg2rad(np.array([h3.cell_to_latlng(node) for node in nodes]))
 
     node_ordering = get_coordinates_ordering(coords_rad)
 
@@ -75,7 +75,7 @@ def create_nx_graph_from_hex_coords(nodes: list[str], node_ordering: np.ndarray)
 
     for node_pos in node_ordering:
         h3_idx = nodes[node_pos]
-        graph.add_node(h3_idx, hcoords_rad=np.deg2rad(h3.h3_to_geo(h3_idx)))
+        graph.add_node(h3_idx, hcoords_rad=np.deg2rad(h3.cell_to_latlng(h3_idx)))
 
     return graph
 
@@ -95,7 +95,7 @@ def get_nodes_at_resolution(
     nodes : list[str]
         The list of H3 indexes at the specified resolution level.
     """
-    return list(h3.uncompact(h3.get_res0_indexes(), resolution))
+    return list(h3.uncompact_cells(h3.get_res0_cells(), resolution))
 
 
 def add_edges_to_nx_graph(
@@ -143,11 +143,11 @@ def add_neighbour_edges(
 
         for idx in nodes:
             # neighbours
-            for idx_neighbour in h3.k_ring(idx, k=x_hops) & set(nodes):
+            for idx_neighbour in set(h3.grid_disk(idx, k=x_hops)) & set(nodes):
                 graph = add_edge(
                     graph,
-                    h3.h3_to_center_child(idx, max(refinement_levels)),
-                    h3.h3_to_center_child(idx_neighbour, max(refinement_levels)),
+                    h3.cell_to_center_child(idx, max(refinement_levels)),
+                    h3.cell_to_center_child(idx_neighbour, max(refinement_levels)),
                 )
 
     return graph
@@ -189,8 +189,8 @@ def add_edges_to_children(
                 for child_idx in h3.h3_to_children(parent_idx, res=resolution_child):
                     graph = add_edge(
                         graph,
-                        h3.h3_to_center_child(parent_idx, refinement_levels[-1]),
-                        h3.h3_to_center_child(child_idx, refinement_levels[-1]),
+                        h3.cell_to_center_child(parent_idx, refinement_levels[-1]),
+                        h3.cell_to_center_child(child_idx, refinement_levels[-1]),
                     )
 
     return graph
@@ -198,8 +198,8 @@ def add_edges_to_children(
 
 def select_nodes_from_graph_at_resolution(graph: nx.Graph, resolution: int) -> set[str]:
     """Select nodes from a graph at a specified resolution level."""
-    nodes_at_lower_resolution = [n for n in h3.compact(graph.nodes) if h3.h3_get_resolution(n) <= resolution]
-    nodes_at_resolution = h3.uncompact(nodes_at_lower_resolution, resolution)
+    nodes_at_lower_resolution = [n for n in h3.compact_cells(graph.nodes) if h3.get_resolution(n) <= resolution]
+    nodes_at_resolution = h3.uncompact_cells(nodes_at_lower_resolution, resolution)
     return nodes_at_resolution
 
 

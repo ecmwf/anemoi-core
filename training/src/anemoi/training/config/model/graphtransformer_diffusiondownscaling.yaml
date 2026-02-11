@@ -66,6 +66,7 @@ processor:
   num_heads: 4
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
@@ -78,6 +79,7 @@ encoder:
   num_heads: 4
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "heads"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
@@ -93,6 +95,7 @@ decoder:
   initialise_data_extractor_zero: False
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "heads"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"

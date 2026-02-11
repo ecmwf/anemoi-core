@@ -13,12 +13,17 @@ from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
 from .diffusiondownscaler import GraphDiffusionDownscaler
+from .interpolator import GraphMultiOutInterpolator
+from .single_step import GraphAutoEncoder
+from .single_step import GraphDownscaler
 
 __all__ = [
+    "GraphAutoEncoder",
     "GraphDiffusionForecaster",
     "GraphDiffusionTendForecaster",
     "GraphEnsForecaster",
     "GraphForecaster",
     "GraphInterpolator",
     "GraphDiffusionDownscaler",
+    "GraphMultiOutInterpolator",
 ]
