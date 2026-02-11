@@ -84,6 +84,8 @@ class MultiDataset(IterableDataset):
         self.ens_comm_num_groups = 1
         self.ens_comm_group_id = 0
 
+        self.shard_shapes = None
+
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
         self.chunk_index_range: np.ndarray | None = None
@@ -219,6 +221,7 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
+        shard_shapes: dict[str, list[int]],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -236,6 +239,8 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
+        shard_shapes : dict[str, list[int]]
+            Shard shapes for all datasets
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -246,6 +251,8 @@ class MultiDataset(IterableDataset):
 
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
+
+        self.shard_shapes = shard_shapes
 
         assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 
@@ -360,8 +367,8 @@ class MultiDataset(IterableDataset):
         x = {}
         for name, dataset in self.datasets.items():
             time_steps = [index + i for i in self.relative_date_indices[name]]
-            grid_shard_indices = self.get_shard_slice(name, self.reader_group_rank)
-            x[name] = dataset.get_sample(time_steps, grid_shard_indices)
+            start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+            x[name] = dataset.get_sample(time_steps, slice(start, end))
         return x
 
     def __iter__(self) -> dict[str, torch.Tensor]:

@@ -11,6 +11,7 @@ import datetime
 import logging
 from abc import abstractmethod
 from functools import cached_property
+from functools import cached_property
 
 import numpy as np
 import torch
@@ -46,7 +47,7 @@ class BaseAnemoiReader:
         frequency: str | None = None,
         drop: list[str] | None = None,
     ):
-        """Initialize Anemoi data reader."""
+        """Initialise Anemoi data reader."""
         ds_kwargs = {}
         if drop is not None:
             ds_kwargs["drop"] = drop
@@ -121,6 +122,21 @@ class BaseAnemoiReader:
         """Return dataset resolution."""
         return self.data.resolution
 
+    @cached_property
+    def cutout_mask(self) -> np.ndarray:
+        """Return cutout mask."""
+        cutout_mask = np.zeros(self.grid_size, dtype=bool)
+        if len(self.data.grids) <= 1:
+            err_msg = "Dataset `cutout_mask` property requires a cutout grid but does not have one."
+            raise ValueError(err_msg)
+        cutout_mask[: self.data.grids[0]] = True
+        return cutout_mask
+
+    @cached_property
+    def boundary_mask(self) -> np.ndarray:
+        """Return boundary mask, defined as the complement of the cutout mask."""
+        return ~self.cutout_mask
+
     @property
     @abstractmethod
     def has_trajectories(self) -> bool:
@@ -129,7 +145,7 @@ class BaseAnemoiReader:
     def get_sample(
         self,
         time_indices: slice | int | list[int],
-        grid_shard_indices: np.ndarray | None = None,
+        grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
         if isinstance(grid_shard_indices, slice):
@@ -235,7 +251,14 @@ class TrajectoryDataset(BaseAnemoiReader):
         frequency: str | None = None,
         drop: list[str] | None = None,
     ):
-        super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        """Initialise trajectory dataset."""
+        super().__init__(
+            dataset,
+            start=start,
+            end=end,
+            frequency=frequency,
+            drop=drop,
+        )
         self.trajectory_start = trajectory_start
         self.trajectory_length = trajectory_length
 
@@ -260,11 +283,6 @@ def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     if isinstance(dataset_config, DictConfig):
         dataset_config = dict(dataset_config)
-
-    mask_config = dataset_config.pop("mask", None)
-    if mask_config is not None and len(mask_config) > 0:
-        LOGGER.info("Creating MaskedGridDataset...")
-        return MaskedGridDataset(**dataset_config, mask=mask_config)
 
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):

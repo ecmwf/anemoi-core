@@ -163,6 +163,7 @@ class GraphInterpolator(BaseGraphModule):
                 y[dataset_name] = dataset_batch[
                     :,
                     self.imap[interp_step],
+                    None,
                     :,
                     :,
                     self.data_indices[dataset_name].data.output.full,
