@@ -104,6 +104,10 @@ class GraphInterpolator(BaseGraphModule):
         self.n_step_input = 1
         self.rollout = 1
 
+    @property
+    def output_times(self) -> int:
+        return len(self.interp_times)
+
     def get_target_forcing(self, batch: dict[str, torch.Tensor], interp_step: int) -> dict[str, torch.Tensor]:
         batch_size = next(iter(batch.values())).shape[0]
         ens_size = next(iter(batch.values())).shape[2]
