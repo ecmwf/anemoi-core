@@ -71,7 +71,7 @@ class BaseScaler(ABC):
         -------
         scale_dims : tuple[int, ...]
             Dimensions over which the scalers are applied.
-        scaler_values : np.ndarray
+        scaler_values : torch.Tensor
             Scaler values
         """
         scaler_values = self.get_scaling_values()
@@ -92,11 +92,11 @@ class BaseUpdatingScaler(BaseScaler):
     which are called during the training loop. These methods allow the scalers to
     update their values based on the current state of the model and the training data.
 
-    The callback methods are expected to return a np.ndarray of scaling values,
+    The callback methods are expected to return a torch.Tensor of scaling values,
     which will be normalised. If they return None, the scaler will not update its values.
 
     Override `get_scaling_values` to provide initial scaling values if needed.
-    The default implementation returns an array of ones.
+    The default implementation returns a tensor of ones.
     """
 
     def on_training_start(self, model: AnemoiModelInterface, **kwargs) -> torch.Tensor | None:  # noqa: ARG002
