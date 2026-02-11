@@ -93,6 +93,20 @@ def test_assert_of_grid_dim(functionalloss: type[FunctionalLoss]) -> None:
         loss.scale(torch.ones((4, 2)))
 
 
+@pytest.mark.parametrize("add_grid_scaler", [False, True])
+def test_scale_subset_indices_requires_tuple(
+    functionalloss: type[FunctionalLoss],
+    add_grid_scaler: bool,
+) -> None:
+    loss = functionalloss()
+    if add_grid_scaler:
+        loss.add_scaler(TensorDim.GRID, torch.tensor([1.0, 2.0, 3.0, 4.0]), name="grid_test")
+
+    x = torch.arange(1 * 1 * 1 * 4 * 5, dtype=torch.float32).reshape(1, 1, 1, 4, 5)
+    with pytest.raises(TypeError, match="must be a tuple"):
+        loss.scale(x, subset_indices=[Ellipsis, [1, 3]])
+
+
 @pytest.fixture
 def simple_functionalloss(functionalloss: type[FunctionalLoss]) -> FunctionalLoss:
     loss = functionalloss()
