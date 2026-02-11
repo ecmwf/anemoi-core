@@ -330,6 +330,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
+        self.output_times = None  # required for plotting callbacks
+
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
         # For multi-dataset, use a generic name or combine dataset names
@@ -1064,3 +1066,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)
+
+    def get_init_step(self, _rollout_step: int) -> int:
+        return 0

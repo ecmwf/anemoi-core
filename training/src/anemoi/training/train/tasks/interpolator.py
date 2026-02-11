@@ -242,7 +242,8 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
 
         self.n_step_input = 1
-        self.rollout = 1
+
+        self.output_times = len(self.interp_times)
 
     def _step(
         self,
@@ -275,3 +276,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         )
 
         return loss, metrics, y_pred
+
+    def get_init_step(self, rollout_step: int) -> int:
+        return rollout_step

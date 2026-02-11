@@ -76,6 +76,8 @@ class GraphAutoEncoder(BaseGraphModule):
             self.n_step_input == self.n_step_output
         ), "Autoencoders must have the same number of input and output steps."
 
+        self.output_times = 1  # Autoencoder doesn't have rollout
+
     def _step(
         self,
         batch: dict[str, torch.Tensor],

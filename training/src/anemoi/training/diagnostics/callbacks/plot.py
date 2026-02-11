@@ -33,7 +33,6 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.models import AnemoiModelEncProcDecInterpolator
 from anemoi.training.diagnostics.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
@@ -94,21 +93,6 @@ class BasePlotCallback(Callback, ABC):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
-
-    def _get_init_step(self, rollout_step: int, mode: tuple) -> int:
-        """Return index of initial step for plotting."""
-        return rollout_step if mode == "time_interp" else 0
-
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
-        """Return times outputted by the model."""
-        if isinstance(pl_module.model.model, AnemoiModelEncProcDecInterpolator):
-            output_times = (len(config.training.explicit_times.target), "time_interp")
-        else:
-            # Diffusion forecasters do not define `rollout`; use a single forecast step for plotting.
-            rollout = getattr(pl_module, "rollout", None)
-            rollout = 1 if rollout is None else int(rollout)
-            output_times = (max(1, rollout), "forecast")
-        return output_times
 
     @rank_zero_only
     def _output_figure(
@@ -323,8 +307,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
-            output_times = self._get_output_times(self.config, pl_module)
-
             self.plot(
                 trainer,
                 pl_module,
@@ -333,7 +315,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                output_times=output_times,
+                output_times=pl_module.output_times,
                 **kwargs,
             )
 
@@ -369,14 +351,12 @@ class BasePerEpochPlotCallback(BasePlotCallback):
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
 
-            output_times = self._get_output_times(self.config, pl_module)
-
             self.plot(
                 trainer,
                 pl_module,
                 self.dataset_names,
                 epoch=trainer.current_epoch,
-                output_times=output_times,
+                output_times=pl_module.output_times,
                 **kwargs,
             )
 
@@ -1039,10 +1019,11 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            if output_times[1] != "forecast":
+            # !CHECK - somwhat clip for interpolator to just do one loop
+            if pl_module.task_type == "temporal-interpolator":
                 output_times = [1]
 
-            for rollout_step in range(output_times[0]):
+            for rollout_step in range(output_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 start = pl_module.n_step_input + rollout_step * pl_module.n_step_output
                 y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
@@ -1137,9 +1118,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = output_times[0]
-        if output_times[1] == "forecast":
-            total_targets *= pl_module.n_step_output
+        total_targets = output_times
+        total_targets *= pl_module.n_step_output
 
         input_tensor = (
             batch[dataset_name][
@@ -1160,7 +1140,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        if output_times[1] == "time_interp" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
+        if pl_module.task_type == "time-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
             # Multi-out interpolator: rollouts are packed in the time dimension.
             output_tensor = output_tensor.squeeze(0)
         output_tensor = (
@@ -1274,10 +1254,10 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            if output_times[1] == "forecast":
+            if pl_module.task_type == "forecaster" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
                 max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     for out_step in range(max_out_steps):
                         truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_predicted_multilevel_flat_sample(
@@ -1309,9 +1289,9 @@ class PlotSample(BasePlotAdditionalMetrics):
                             ),
                         )
             else:
-                for rollout_step in range(output_times[0]):
+                for rollout_step in range(output_times):
                     interp_step = rollout_step + 1
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                    init_step = pl_module.get_init_step(rollout_step)
                     fig = plot_predicted_multilevel_flat_sample(
                         plot_parameters_dict,
                         self.per_sample,
@@ -1417,10 +1397,10 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if output_times[1] == "forecast":
+            if pl_module.task_type == "forecast":
                 max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     for out_step in range(max_out_steps):
                         truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_power_spectrum(
@@ -1448,8 +1428,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                             ),
                         )
             else:
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     interp_step = rollout_step + 1
                     fig = plot_power_spectrum(
                         plot_parameters_dict_spectrum,
@@ -1559,10 +1539,10 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if output_times[1] == "forecast":
+            if pl_module.task_type == "forecaster":
                 max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     for out_step in range(max_out_steps):
                         truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_histogram(
@@ -1590,8 +1570,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                             ),
                         )
             else:
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     interp_step = rollout_step + 1
                     fig = plot_histogram(
                         plot_parameters_dict_histogram,

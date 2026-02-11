@@ -82,6 +82,11 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
+        self.output_times = max(
+            1,
+            self.rollout,
+        )  # required for plotting callbacks, will be updated in training loop if rollout increases
+
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
