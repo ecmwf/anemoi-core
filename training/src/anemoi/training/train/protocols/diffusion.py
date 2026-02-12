@@ -38,6 +38,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
+        task,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
@@ -48,6 +49,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -58,34 +60,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         self.rho = config.model.model.diffusion.rho
 
-    def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Get input tensor shape for diffusion model."""
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            msg = (
-                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {self.n_step_input + self.n_step_output}"
-            )
-            assert dataset_batch.shape[1] >= self.n_step_input + self.n_step_output, msg
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.n_step_input,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, n_step_input, latlon, nvar)
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-        return x
-
-    def get_target(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Get target tensor shape for diffusion model."""
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            start = self.n_step_input
-            y_time = dataset_batch.narrow(1, start, self.n_step_output)
-            var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = y_time.index_select(-1, var_idx)  # (bs, n_step_output, ens, latlon, nvar)
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-        return y
 
     def forward(
         self,
@@ -183,7 +157,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         return sigma, weight
 
 
-class GraphDiffusionForecaster(BaseDiffusionForecaster):
+class DiffusionProtocol(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion."""
 
     def _step(
@@ -210,8 +184,8 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         """
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
-        x = self.task.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.task.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -239,13 +213,14 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         return loss, metrics, [y_pred]
 
 
-class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
+class DiffusionTendProtocol(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
 
     def __init__(
         self,
         *,
         config: BaseSchema,
+        task,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
@@ -255,6 +230,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     ) -> None:
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -471,8 +447,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         """
         # batch is already normalized in BaseGraphModule._normalize_batch
         # x: data.input.full (normalized), y: data.output.full (normalized)
-        x = self.task.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.task.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:

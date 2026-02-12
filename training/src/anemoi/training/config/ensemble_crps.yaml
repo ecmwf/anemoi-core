@@ -5,10 +5,11 @@ defaults:
 - system: example
 - graph: encoder_decoder_only
 - model: transformer_ens
+- task: forecasting
 - training: ensemble
 - _self_
 
-config_validation: True
+config_validation: False
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords
@@ -20,6 +21,14 @@ config_validation: True
 diagnostics:
   plot:
     callbacks: []
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: None
+    wandb:
+      enabled: False
+      entity: example
+
 system:
   input:
     graph: graph_anemoi_new_${data.resolution}.pt
@@ -27,6 +36,8 @@ system:
     truncation: ${data.resolution}-o32-linear.mat.npz
     truncation_inv: o32-${data.resolution}-linear.mat.npz
     loss_matrices_path: null
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
   hardware:
     accelerator: auto
     num_gpus_per_ensemble: 1

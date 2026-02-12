@@ -9,6 +9,8 @@
 
 from .ensemble import EnsembleProtocol
 from .single import SingleProtocol
+from .diffusion import DiffusionTendProtocol
+from .diffusion import DiffusionProtocol
 
 __all__ = [
     "EnsembleProtocol",

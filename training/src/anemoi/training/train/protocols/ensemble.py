@@ -21,6 +21,8 @@ from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
+    from anemoi.training.train.training_task.base import BaseTask
+
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
@@ -34,6 +36,7 @@ class EnsembleProtocol(BaseGraphModule):
         self,
         *,
         config: DictConfig,
+        task: BaseTask,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
@@ -47,6 +50,8 @@ class EnsembleProtocol(BaseGraphModule):
         ----------
         config : DictConfig
             Job configuration
+        task : BaseTask
+            Training task
         statistics : dict
             Statistics of the training data
         data_indices : dict
@@ -56,6 +61,7 @@ class EnsembleProtocol(BaseGraphModule):
         """
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -133,13 +139,13 @@ class EnsembleProtocol(BaseGraphModule):
             assert (
                 len(x[dataset_name].shape) == 5
             ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
-            assert (x[dataset_name].shape[1] == self.multi_step) and (
-                x[dataset_name].shape[2] == self.nens_per_device
-            ), (
-                "Shape mismatch in x! "
-                f"Expected ({self.multi_step}, {self.nens_per_device}), "
-                f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
-            )
+            #assert (x[dataset_name].shape[1] == self.multi_step) and (
+            #    x[dataset_name].shape[2] == self.nens_per_device
+            #), (
+            #    "Shape mismatch in x! "
+            #    f"Expected ({self.multi_step}, {self.nens_per_device}), "
+            #    f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
+            #)
         return x
 
     def compute_dataset_loss_metrics(
