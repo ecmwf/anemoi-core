@@ -550,6 +550,9 @@ class ScaleTensor(nn.Module):
         grid_shard_slice : slice | None, optional
             Slice to apply to the grid dimension, by default None
         """
+        if subset_indices is not None and not isinstance(subset_indices, tuple):
+            msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
+            raise TypeError(msg)
         x_subset = x[subset_indices] if subset_indices is not None else x
         out = x_subset.clone()
         ndim = x.ndim
@@ -598,6 +601,9 @@ class ScaleTensor(nn.Module):
         torch.Tensor
             Scaled tensor
         """
+        if subset_indices is not None and not isinstance(subset_indices, tuple):
+            msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
+            raise TypeError(msg)
         x_subset = x[subset_indices] if subset_indices is not None else x
         scaler = self.get_scaler(x_subset.ndim)
         if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:

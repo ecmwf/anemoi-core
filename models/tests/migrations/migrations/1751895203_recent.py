@@ -23,9 +23,3 @@ def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint."""
     ckpt["after"] = "after"
     return ckpt
-
-
-def rollback(ckpt: CkptType) -> CkptType:
-    """Rollback the migration."""
-    ckpt.pop("after")
-    return ckpt
