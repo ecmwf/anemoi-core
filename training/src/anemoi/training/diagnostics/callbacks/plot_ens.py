@@ -115,7 +115,7 @@ class EnsemblePlotMixin:
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         total_targets = output_times
-        if pl_module.task_type != "forecaster":
+        if pl_module.task_type == "forecaster":
             total_targets *= pl_module.n_step_output
 
         input_tensor = (
