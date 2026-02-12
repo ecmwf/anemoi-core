@@ -18,9 +18,9 @@ diagnostics:
       enabled: True 
       offline: False
       # on_resume_create_child: False
-      experiment_name: 'nodes_16_freq_1_maxsteps_32000_deterministic'
-      project_name: 'uncond-diffusion'
-      run_name: 'nodes_16_freq_1_maxsteps_32000_deterministic'
+      experiment_name: 'nodes_4_freq_1_maxsteps_225000_high_noise'
+      project_name: 'nodes_4_freq_1_maxsteps_225000_high_noise'
+      run_name: 'nodes_4_freq_1_maxsteps_225000_high_noise'
       tracking_uri: 'https://mlflow.ecmwf.int'
       authentication: True
       terminal: False
@@ -76,11 +76,17 @@ dataloader:
 model:
   model:
     _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDecUnconditional
-
+    diffusion:
+      sigma_max: 100.0
+      sigma_min: 0.02
+      log_normal_mean: -1.2
+      log_normal_std: 1.2
+      rho: 7.0
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
-    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/multi_nodes/nodes_16_freq_1_maxsteps_32000/deterministic/
+    # output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/outputs_incond_x_0_high_noise_rho3_125K/
+    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/multi_nodes/nodes_4_freq_1_maxsteps_225000/probabilistic_high_noise/
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
     graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
@@ -91,10 +97,11 @@ hardware:
   # devices: 1 
   num_gpus_per_node: 4
   num_gpus_per_model: 2
-  num_nodes: 32
+  num_nodes: 4
 training:
-  max_steps: 32000
+  max_steps: 225000
   max_epochs: 500
   model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
-  training_approach: deterministic
-  # run_id: 4b1bcb29-9d39-4c20-83ac-d81f1f3a1b96
+  training_approach: probabilistic_high_noise
+  run_id: d02f0bcf12a84aa5ab44d4bbbdc1d770
+ 
