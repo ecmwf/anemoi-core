@@ -17,6 +17,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
+from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -31,11 +32,13 @@ LOGGER = logging.getLogger(__name__)
 class GraphEnsForecaster(BaseRolloutGraphModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
 
+    task_type = "forecaster"
+
     def __init__(
         self,
         *,
         config: DictConfig,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
@@ -123,16 +126,17 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
-    def compute_loss_metrics(
+    def compute_dataset_loss_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         step: int | None = None,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
-            dim=1,
+            dim=TensorDim.ENSEMBLE_DIM,
             shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
             mgroup=self.ens_comm_subgroup,
         )
@@ -140,21 +144,28 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         loss = self._compute_loss(
             y_pred_ens,
             y,
-            grid_shard_slice=self.grid_shard_slice,
+            grid_shard_slice=self.grid_shard_slice[dataset_name],
             grid_dim=self.grid_dim,
             grid_shard_shape=self.grid_shard_shapes,
+            dataset_name=dataset_name,
         )
 
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(y_pred_ens, y, step=step, grid_shard_slice=self.grid_shard_slice)
+            metrics_next = self._compute_metrics(
+                y_pred_ens,
+                y,
+                step=step,
+                dataset_name=dataset_name,
+                grid_shard_slice=self.grid_shard_slice[dataset_name],
+            )
 
         return loss, metrics_next, y_pred_ens
 
     def _rollout_step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         rollout: int | None = None,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
@@ -181,37 +192,53 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         None
             None
         """
+        rollout_steps = rollout or self.rollout
+        required_time_steps = rollout_steps * self.n_step_output + self.n_step_input
+
         # Stack the analysis nens_per_device times along an ensemble dimension
-        x = batch[
-            :,
-            0 : self.multi_step,
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, ms, ens_dummy, latlon, nvar)
+        # start rollout of preprocessed batch
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.n_step_input,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, n_step_input, latlon, nvar)
+            msg = (
+                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {required_time_steps}"
+            )
+            assert dataset_batch.shape[1] >= required_time_steps, msg
 
-        x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
-        LOGGER.debug("Shapes: x.shape = %s", list(x.shape))
+        for dataset_name in self.dataset_names:
+            x[dataset_name] = torch.cat(
+                [x[dataset_name]] * self.nens_per_device,
+                dim=2,
+            )  # shape == (bs, ms, nens_per_device, latlon, nvar)
+            LOGGER.debug("Shapes: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
 
-        assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
-        assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
-            "Shape mismatch in x! "
-            f"Expected ({self.multi_step}, {self.nens_per_device}), "
-            f"got ({x.shape[1]}, {x.shape[2]})!"
-        )
+            assert (
+                len(x[dataset_name].shape) == 5
+            ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
+            assert (x[dataset_name].shape[1] == self.n_step_input) and (
+                x[dataset_name].shape[2] == self.nens_per_device
+            ), (
+                "Shape mismatch in x! "
+                f"Expected ({self.n_step_input}, {self.nens_per_device}), "
+                f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
+            )
 
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-        )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
-
-        for rollout_step in range(rollout or self.rollout):
-            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
+        for rollout_step in range(rollout_steps):
+            # prediction at rollout step rollout_step, shape = (bs, n_step_output, ens_size, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
-
-            y = batch[:, self.multi_step + rollout_step, 0, :, self.data_indices.data.output.full]
-            LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
-            # y includes the auxiliary variables, so we must leave those out when computing the loss
+            y = {}
+            for dataset_name, dataset_batch in batch.items():
+                start = self.n_step_input + rollout_step * self.n_step_output
+                y_time = dataset_batch.narrow(1, start, self.n_step_output)[:, :, 0, :, :]
+                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+                y[dataset_name] = y_time.index_select(-1, var_idx)
+                LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
 
             loss, metrics_next, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,

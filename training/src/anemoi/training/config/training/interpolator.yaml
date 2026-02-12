@@ -7,6 +7,9 @@ run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
 load_weights_only: False # only load model weights, do not restore optimiser states etc.
+update_ds_stats_on_ckpt_load:
+  states: False # rebuild state processors from current dataset when loading a checkpoint
+  tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -17,8 +20,12 @@ precision: 16-mixed
 # multistep input
 # 1 = single step scheme, X(t-1) used to predict X(t)
 # k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-# Deepmind use k = 2 in their model
 multistep_input: 2
+
+# multistep output
+# 1 = single step output scheme, single model forward predicts X(t)
+# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
+multistep_output: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
@@ -50,10 +57,7 @@ explicit_times:
   input: [0, 6]
   target: [1, 2, 3, 4, 5]
 
-target_forcing: #forcing parameters for the target time to include as input
-  data: #of which come from the dataset
-    - "insolation"
-  time_fraction: True
+target_forcing: null
 
 # select strategy
 strategy:
@@ -70,14 +74,16 @@ loss_gradient_scaling: False
 
 # loss function for the model
 training_loss:
-  # loss class to initialise
-  _target_: anemoi.training.losses.MSELoss
-  # Scalers to include in loss calculation
-  # A selection of available scalers are listed in training/scalers.
-  # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-  # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-  scalers: ['pressure_level', 'general_variable', 'node_weights']
-  ignore_nans: False
+  datasets:
+    data: # user-defined key in data
+      # loss class to initialise
+      _target_: anemoi.training.losses.MSELoss
+      # Scalers to include in loss calculation
+      # A selection of available scalers are listed in training/scalers.
+      # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
+      # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+      scalers: ['pressure_level', 'general_variable', 'node_weights']
+      ignore_nans: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
@@ -85,17 +91,19 @@ training_loss:
 # These metrics are calculated in the output model space, and thus
 # have undergone postprocessing.
 validation_metrics:
-  # loss class to initialise
-  mse:
-    _target_: anemoi.training.losses.MSELoss
-    # Scalers to include in loss calculation
-    # Cannot scale over the variable dimension due to possible remappings.
-    # Available scalers include:
-    # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
-    # Use the `scale_validation_metrics` section to variable scale.
-    scalers: []
-    # other kwargs
-    ignore_nans: True
+  datasets:
+    data: # user-defined key in data
+      # loss class to initialise
+      mse:
+        _target_: anemoi.training.losses.MSELoss
+        # Scalers to include in loss calculation
+        # Cannot scale over the variable dimension due to possible remappings.
+        # Available scalers include:
+        # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
+        # Use the `scale_validation_metrics` section to variable scale.
+        scalers: []
+        # other kwargs
+        ignore_nans: True
 
 # Variable groups definition for scaling
 # The variable level scaling methods are defined under training/scalers
@@ -120,15 +128,19 @@ validation_metrics:
 # still works
 
 variable_groups:
-  default: sfc
-  pl:
-    param: [q, t, u, v, w, z]
+  datasets:
+    data: # user-defined key in data
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
 
 metrics:
-  - z_500
-  - t_850
-  - u_850
-  - v_850
+  datasets:
+    data: # user-defined key in data
+      - z_500
+      - t_850
+      - u_850
+      - v_850
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null

@@ -22,8 +22,7 @@ def test_filtered_loss() -> None:
     """Test that loss function can be instantiated."""
     data_config = {"data": {"forcing": [], "diagnostic": []}}
     name_to_index = {"tp": 0, "other_var": 1}
-    data_indices = IndexCollection(DictConfig(data_config), name_to_index)
-
+    data_indices = IndexCollection(DictConfig(data_config).data, name_to_index)
     loss = get_loss_function(
         DictConfig(
             {
@@ -50,10 +49,7 @@ def test_filtered_loss() -> None:
 
     assert loss.predicted_variables == ["tp"]
     # tensors are of size (batch, output_steps, ens, latlon, vars)
-    right_shaped_pred_output_pair = (
-        torch.ones((6, 1, 710 * 640, 2)),
-        torch.zeros((6, 1, 710 * 640, 2)),
-    )
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
     loss_value = loss(*right_shaped_pred_output_pair, squash=False)
     assert loss_value.shape[0] == len(
         name_to_index.keys(),
