@@ -22,6 +22,8 @@ from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
+from anemoi.utils.dates import frequency_to_string
+from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,9 +67,23 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
+    def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        return self.ds_train.statistics_tendencies
+        n_step_output = self.config.training.multistep_output
+        lead_times = [self._lead_time_for_step(step) for step in range(1, n_step_output + 1)]
+
+        stats_by_dataset: dict[str, dict | None] = {}
+        for dataset_name, dataset in self.ds_train.datasets.items():
+            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
+            if all(stats is None for stats in stats_by_lead.values()):
+                stats_by_dataset[dataset_name] = None
+                continue
+            stats_by_lead["lead_times"] = lead_times
+            stats_by_dataset[dataset_name] = stats_by_lead
+
+        if not any(stats is not None for stats in stats_by_dataset.values()):
+            return None
+        return stats_by_dataset
 
     @cached_property
     def metadata(self) -> dict:
@@ -96,12 +112,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
 
+    def _lead_time_for_step(self, step: int) -> str:
+        timestep = frequency_to_timedelta(self.config.data.timestep)
+        return frequency_to_string(timestep * step)
+
     def relative_date_indices(self, val_rollout: int = 1) -> list:
         """Determine a list of relative time indices to load for each batch."""
         if hasattr(self.config.training, "explicit_times"):
             return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
 
-        # Calculate indices using multistep, timeincrement and rollout
+        # Calculate indices using n_step_input, n_step_output and rollout
         rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
 
         rollout_max = getattr(rollout_cfg, "max", None)
@@ -115,8 +135,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             LOGGER.warning("Falling back rollout to: %s", rollout_value)
 
         rollout = max(rollout_value, val_rollout)
-        multi_step = self.config.training.multistep_input
-        return list(range(multi_step + rollout))
+        n_step_input = self.config.training.multistep_input
+        n_step_output = self.config.training.multistep_output  # defaults to 1
+        time_range = n_step_input + rollout * n_step_output
+        return list(range(time_range))
 
     @cached_property
     def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
@@ -135,11 +157,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        return self._get_dataset(
-            self.train_dataloader_config,
-            shuffle=True,
-            label="training",
-        )
+        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
 
     @cached_property
     def ds_valid(self) -> MultiDataset:
