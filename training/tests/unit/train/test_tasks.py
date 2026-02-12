@@ -508,3 +508,70 @@ def test_graphmultioutinterpolator_output_times(monkeypatch: pytest.MonkeyPatch)
     # Test dynamic behavior via interp_times
     for i in range(interpolator.output_times):
         assert interpolator.get_init_step(i) == i
+
+
+def test_graphsingleoutinterpolator_output_times(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test GraphMultiOutInterpolator minimal behavior for output_times and get_init_step."""
+    from omegaconf import DictConfig
+
+    from anemoi.training.train.tasks.interpolator import GraphInterpolator
+
+    # Minimal config
+    cfg = DictConfig(
+        {
+            "training": {
+                "explicit_times": {
+                    "input": ["2025-01-01T00"],
+                    "target": ["2025-01-01T00", "2025-01-01T06"],
+                },
+            },
+        },
+    )
+
+    # Minimal fake data_indices
+    class DummyIndex:
+        model = type("Dummy", (), {"output": [0]})()
+
+    data_indices = {"data": DummyIndex()}
+
+    # Stub BaseGraphModule.__init__ so we don't need full dependencies
+    def _stub_init(
+        self: BaseGraphModule,
+        *,
+        config: DictConfig,
+        graph_data: HeteroData,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: IndexCollection,
+        metadata: dict | None = None,
+        supporting_arrays: dict | None = None,
+    ) -> None:
+        del graph_data, statistics, statistics_tendencies, metadata, data_indices, supporting_arrays
+        import types
+
+        self.n_step_input = 1
+        self.n_step_output = len(config.training.explicit_times.target)
+        self.interp_times = config.training.explicit_times.target
+
+        # Minimal placeholder attributes
+        self.model = types.SimpleNamespace()
+        self.get_init_step = lambda rollout: rollout
+
+    monkeypatch.setattr(GraphInterpolator, "__init__", _stub_init, raising=True)
+
+    interpolator = GraphInterpolator(
+        config=cfg,
+        graph_data={"data": None},
+        statistics={"data": {}},
+        statistics_tendencies={"data": None},
+        data_indices=data_indices,
+        metadata={},
+        supporting_arrays={},
+    )
+
+    # Check output_times initialized correctly
+    assert interpolator.output_times == 2  # len(target)
+
+    # Test dynamic behavior via interp_times
+    for i in range(interpolator.output_times):
+        assert interpolator.get_init_step(i) == i

@@ -1118,7 +1118,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         total_targets = output_times
-        if pl_module.task_type == "forecaster":
+        if pl_module.task_type != "forecaster":
             total_targets *= pl_module.n_step_output
 
         input_tensor = (
