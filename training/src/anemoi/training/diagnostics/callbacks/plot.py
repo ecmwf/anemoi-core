@@ -1020,7 +1020,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 )
 
             if pl_module.task_type != "forecaster":
-                output_times = [1]
+                output_times = 1
 
             for rollout_step in range(output_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
