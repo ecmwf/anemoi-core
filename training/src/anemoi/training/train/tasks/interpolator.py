@@ -102,7 +102,6 @@ class GraphInterpolator(BaseGraphModule):
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
         self.n_step_input = 1
-        self.rollout = 1
 
     @property
     def output_times(self) -> int:

@@ -488,7 +488,6 @@ def test_graphmultioutinterpolator_output_times(monkeypatch: pytest.MonkeyPatch)
 
         # Minimal placeholder attributes
         self.model = types.SimpleNamespace()
-        self.rollout = 0
         self.get_init_step = lambda rollout: rollout
 
     monkeypatch.setattr(GraphMultiOutInterpolator, "__init__", _stub_init, raising=True)
