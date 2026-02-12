@@ -18,12 +18,11 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.training.train.protocols.base import BaseGraphModule
 
 
-
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseRolloutGraphModule(BaseGraphModule, ABC):
-    """Base class for rollout tasks."""
+class SingleProtocol(BaseGraphModule, ABC):
+    """Base class for deterministic prediction tasks."""
 
     def _compute_metrics(
         self,
@@ -58,11 +57,6 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             dataset_name=dataset_name,
         )
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        train_loss = super().training_step(batch, batch_idx)
-        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
-        return train_loss
-
     def _step(
         self,
         batch: dict[str, torch.Tensor],
@@ -93,8 +87,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
                 x,
                 y_preds_next,
                 batch,
+                step=step,
                 data_indices=self.data_indices,
-                step=step
             )
 
             loss = loss + loss_next
@@ -103,7 +97,4 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
 
         loss *= 1.0 / len(self.task.steps())
         return loss, metrics, y_preds
-
-    def on_train_epoch_end(self) -> None:
-        self.task.on_train_epoch_end(current_epoch=self.current_epoch)
 

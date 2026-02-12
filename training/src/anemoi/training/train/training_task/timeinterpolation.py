@@ -8,32 +8,46 @@
 # nor does it submit to any jurisdiction.
 
 from anemoi.training.train.training_task.base import BaseTask
+import torch
+import logging
+from anemoi.models.data_indices.collection import IndexCollection
+from operator import itemgetter
 
+LOGGER = logging.getLogger(__name__)
 
-class BaseExplicitIndicesTask(BaseTask):
-    """Base class for tasks with explicit time indices."""
-
-    def __init__(self, input_times: list[int], target_times: list[int], **_kwargs):
-        self.input_times = input_times
-        self.target_times = target_times
-
-    def get_relative_time_indices(self) -> list[int]:
-        """Get the relative time indices for the model input sequence.
-
-        Returns
-        -------
-            list[int]: List of relative time indices.
-        """
-        return sorted(set(self.input_times + self.target_times))
-
-    def get_inputs(self, index: int) -> list[int]:
-        return [index + t for t in self.input_times]
-
-    def get_targets(self, index: int) -> list[int]:
-        return [index + t for t in self.target_times]
-
-
-class TimeInterpolationTask(BaseExplicitIndicesTask):
+class TimeInterpolationTask(BaseTask):
     """Time interpolation task implementation."""
 
     name: str = "timeinterpolation"
+
+    def __init__(self, explicit_input_times: list[int], explicit_output_times: list[int], **_kwargs):
+        self.boundary_times = explicit_input_times  # [0, 6]
+        self.interp_times = explicit_output_times  # [1, 2, 3, 4, 5]
+        sorted_indices = sorted(set(self.boundary_times + self.interp_times))
+        self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
+
+    def get_inputs(
+        self,
+        batch: dict[str, torch.Tensor],
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, torch.Tensor]:
+
+        x_bound = {}
+        for dataset_name, dataset_batch in batch.items():
+            time_indices = itemgetter(*self.boundary_times)(self.imap)
+            x_bound[dataset_name] = dataset_batch[:, time_indices][...,data_indices[dataset_name].data.input.full]
+            # shape: (bs, time, ens, latlon, nvar)
+        return x_bound
+
+    def get_targets(
+        self,
+        batch: dict[str, torch.Tensor],
+        data_indices: dict[str, IndexCollection],
+        step: int,
+    ) -> dict[str, torch.Tensor]:
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            var_indices = data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+            y[dataset_name] = dataset_batch[:, self.imap[step], None, :, :, var_indices,]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+        return y

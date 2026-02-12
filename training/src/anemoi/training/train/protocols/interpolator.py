@@ -147,27 +147,12 @@ class GraphInterpolator(BaseGraphModule):
         metrics = {}
         y_preds = []
 
-        x_bound = {}
-        for dataset_name in self.dataset_names:
-            x_bound[dataset_name] = batch[dataset_name][:, itemgetter(*self.boundary_times)(self.imap)][
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, time, ens, latlon, nvar)
-
+        x_bound = self.task.get_inputs(batch, self.data_indices)
         for interp_step in self.interp_times:
             target_forcing = self.get_target_forcing(batch, interp_step)
 
             y_pred = self(x_bound, target_forcing)
-            y = {}
-            for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[
-                    :,
-                    self.imap[interp_step],
-                    None,
-                    :,
-                    :,
-                    self.data_indices[dataset_name].data.output.full,
-                ]
+            y = self.task.get_targets(batch, self.data_indices, step=interp_step)
 
             loss_step, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,

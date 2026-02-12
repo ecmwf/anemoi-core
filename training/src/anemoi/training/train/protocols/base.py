@@ -948,6 +948,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             sync_dist=True,
         )
 
+        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
+
         return train_loss
 
     def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
@@ -1031,7 +1033,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scheduler.step(epoch=self.trainer.global_step)
 
     def on_train_epoch_end(self) -> None:
-        pass
+        self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
