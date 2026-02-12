@@ -67,7 +67,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        n_step_output = self.config.training.multistep_output
+        n_step_output = self.config.task.training_task.multistep_output
         lead_times = [self._lead_time_for_step(step) for step in range(1, n_step_output + 1)]
 
         stats_by_dataset: dict[str, dict | None] = {}

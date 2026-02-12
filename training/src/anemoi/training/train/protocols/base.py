@@ -183,12 +183,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        if not hasattr(self.__class__, "task_type"):
-            msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
-                indicating the type of task (e.g., 'forecaster', 'time-interpolator')."""
-            raise AttributeError(msg)
-
-        metadata["metadata_inference"]["task"] = self.task_type
+        #metadata["metadata_inference"]["task"] = self.task_type
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
@@ -278,8 +273,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
-        self.n_step_input = config.training.multistep_input
-        self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
+        self.n_step_input = config.task.training_task.multistep_input
+        self.n_step_output = config.task.training_task.multistep_output  # defaults to 1 via pydantic
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.lr = (
             config.system.hardware.num_nodes

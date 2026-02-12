@@ -16,12 +16,10 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.training.train.protocols.rollout import BaseRolloutGraphModule
+from anemoi.training.train.protocols.base import BaseGraphModule
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
@@ -29,10 +27,8 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphEnsForecaster(BaseRolloutGraphModule):
+class EnsembleProtocol(BaseGraphModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
-
-    task_type = "forecaster"
 
     def __init__(
         self,

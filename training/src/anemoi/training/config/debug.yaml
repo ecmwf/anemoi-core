@@ -6,7 +6,7 @@ defaults:
 - graph: multi_scale
 - model: gnn
 - task: forecasting
-- training: default
+- training: single
 - _self_
 
 config_validation: False

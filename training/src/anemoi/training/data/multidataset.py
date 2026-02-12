@@ -186,6 +186,7 @@ class MultiDataset(IterableDataset):
 
         Returns the intersection of valid indices from all datasets.
         """
+        valid_date_indices_intersection = None
         for dataset_name, ds in self.datasets.items():
             valid_date_indices = get_usable_indices(
                 ds.missing,

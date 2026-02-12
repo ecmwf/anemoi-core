@@ -149,7 +149,7 @@ class GraphInterpolator(BaseGraphModule):
 
         x_bound = self.task.get_inputs(batch, self.data_indices)
         for interp_step in self.interp_times:
-            target_forcing = self.get_target_forcing(batch, interp_step)
+            target_forcing = self.get_target_forcing(batch, interp_step, data_indice=self.data_indices)
 
             y_pred = self(x_bound, target_forcing)
             y = self.task.get_targets(batch, self.data_indices, step=interp_step)

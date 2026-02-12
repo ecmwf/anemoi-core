@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC
 import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -21,7 +20,7 @@ from anemoi.training.train.protocols.base import BaseGraphModule
 LOGGER = logging.getLogger(__name__)
 
 
-class SingleProtocol(BaseGraphModule, ABC):
+class SingleProtocol(BaseGraphModule):
     """Base class for deterministic prediction tasks."""
 
     def _compute_metrics(
