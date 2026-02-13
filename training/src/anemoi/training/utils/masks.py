@@ -12,9 +12,9 @@ from abc import abstractmethod
 
 import numpy as np
 import torch
+from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.data_indices.collection import IndexCollection
-from torch_geometric.data.storage import NodeStorage
 
 
 class BaseMask:
