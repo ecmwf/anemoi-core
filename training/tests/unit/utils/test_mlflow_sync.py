@@ -8,47 +8,137 @@
 # nor does it submit to any jurisdiction.
 
 import os
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
 
 
-def test_error_message_generation_missing_env_vars() -> None:
-    """Test that the error message is generated correctly when env vars are missing.
+def test_mlflow_temp_log_file_with_tmpdir(mocker: "MockerFixture", tmp_path: Path) -> None:
+    """Test that mlflow_temp_log_file context manager works when TMPDIR is set."""
+    from anemoi.training.utils.mlflow_sync import mlflow_temp_log_file
+
+    test_user = "testuser"
+    mocker.patch.dict(os.environ, {"TMPDIR": str(tmp_path), "USER": test_user}, clear=False)
+
+    with mlflow_temp_log_file() as temp_file:
+        # Verify it returns a temp file
+        assert temp_file is not None
+        assert hasattr(temp_file, "name")
+        assert Path(temp_file.name).exists()
+
+        # Verify environment variables were set
+        assert os.environ["MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE"] == temp_file.name
+        assert os.environ["MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY"] == str(tmp_path)
+
+        # Verify the temp file is in the correct directory
+        assert temp_file.name.startswith(str(tmp_path))
+        assert test_user in temp_file.name
+
+    # After exiting context, verify cleanup happened
+    assert "MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE" not in os.environ
+    assert "MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY" not in os.environ
+
+
+def test_mlflow_temp_log_file_with_scratch(mocker: "MockerFixture", tmp_path: Path) -> None:
+    """Test that mlflow_temp_log_file works when SCRATCH is set (TMPDIR not set)."""
+    from anemoi.training.utils.mlflow_sync import mlflow_temp_log_file
+
+    test_user = "testuser"
+    # Clear TMPDIR, only set SCRATCH
+    env_vars = {"SCRATCH": str(tmp_path), "USER": test_user}
+    if "TMPDIR" in os.environ:
+        del os.environ["TMPDIR"]
+    mocker.patch.dict(os.environ, env_vars, clear=False)
+
+    with mlflow_temp_log_file() as temp_file:
+        assert temp_file is not None
+        assert Path(temp_file.name).exists()
+        assert temp_file.name.startswith(str(tmp_path))
+
+    # Verify cleanup
+    assert "MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE" not in os.environ
+    assert "MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY" not in os.environ
+
+
+def test_mlflow_temp_log_file_missing_env_vars_raises_error(mocker: "MockerFixture") -> None:
+    """Test that mlflow_temp_log_file raises ValueError when env vars are missing.
 
     This test validates the fix for issue #622 where the error message itself
     would throw a KeyError when trying to access missing environment variables.
     """
-    # Simulate the condition where both TMPDIR and SCRATCH are not set
-    tmpdir_value = os.getenv("TMPDIR", "not set")
-    scratch_value = os.getenv("SCRATCH", "not set")
+    from anemoi.training.utils.mlflow_sync import mlflow_temp_log_file
 
-    # This is the corrected error message format that should not throw KeyError
-    error_msg = f"Please set one of those variables TMPDIR:{tmpdir_value} or SCRATCH:{scratch_value} to proceed."
+    # Mock both environment variables as not set
+    mocker.patch("os.getenv", side_effect=lambda k, d=None: None if k in ["TMPDIR", "SCRATCH"] else os.getenv(k, d))
 
-    # Check that the error message contains expected text
-    assert "Please set one of those variables" in error_msg
-    assert "TMPDIR" in error_msg
-    assert "SCRATCH" in error_msg
-
-    # If neither variable is set, we should see "not set" in the message
-    if not os.getenv("TMPDIR") and not os.getenv("SCRATCH"):
-        assert "not set" in error_msg
+    # Should raise ValueError with a proper error message (not KeyError)
+    with pytest.raises(ValueError, match="Please set one of those variables"), mlflow_temp_log_file():
+        pass
 
 
-def test_lazy_initialization() -> None:
-    """Test documentation for lazy initialization refactoring.
+def test_mlflow_temp_log_file_cleanup_on_exception(mocker: "MockerFixture", tmp_path: Path) -> None:
+    """Test that context manager cleans up even when exception occurs."""
+    from anemoi.training.utils.mlflow_sync import mlflow_temp_log_file
 
-    This test documents that the mlflow_sync module has been refactored to use
-    lazy initialization. The temp file is NOT created at module import time,
-    but only when the sync() method is called.
+    test_user = "testuser"
+    mocker.patch.dict(os.environ, {"TMPDIR": str(tmp_path), "USER": test_user}, clear=False)
 
-    Note: We cannot directly test the module import behavior due to the
-    mlflow_export_import dependency requirement. This test serves as
-    documentation that the refactoring was completed successfully.
+    with pytest.raises(RuntimeError, match="Test exception"), mlflow_temp_log_file() as temp_file:
+        # Verify environment variables are set
+        assert os.environ["MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE"] == temp_file.name
+        # Raise an exception to test cleanup
+        raise RuntimeError("Test exception")  # noqa: EM101, TRY003
 
-    Benefits of lazy initialization:
-    - TMPDIR/SCRATCH are only required when sync() is called, not at import
-    - No side effects at module import time
-    - Resources are created only when needed
-    """
-    # Structural documentation test
-    # If the module can be imported without calling sync(), the refactoring succeeded
-    assert True
+    # Even after exception, cleanup should have happened
+    assert "MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE" not in os.environ
+    assert "MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY" not in os.environ
+
+
+def test_cleanup_temp_env_vars() -> None:
+    """Test that _cleanup_temp_env_vars removes environment variables."""
+    from anemoi.training.utils.mlflow_sync import _cleanup_temp_env_vars
+
+    # Set up environment variables
+    os.environ["MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE"] = "/tmp/test"  # noqa: S108
+    os.environ["MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY"] = "/tmp"  # noqa: S108
+
+    # Call cleanup
+    _cleanup_temp_env_vars()
+
+    # Verify they were removed
+    assert "MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE" not in os.environ
+    assert "MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY" not in os.environ
+
+
+def test_close_and_clean_temp_with_server2server(tmp_path: Path) -> None:
+    """Test that close_and_clean_temp removes artifacts when server2server=True."""
+    from anemoi.training.utils.mlflow_sync import close_and_clean_temp
+
+    # Create an artifact path
+    artifact_path = tmp_path / "artifacts"
+    artifact_path.mkdir()
+    (artifact_path / "test.txt").write_text("test")
+
+    # Call close_and_clean_temp with server2server=True
+    close_and_clean_temp(server2server=True, artifact_path=artifact_path)
+
+    # Verify artifact path was removed (server2server=True)
+    assert not artifact_path.exists()
+
+
+def test_close_and_clean_temp_no_artifact_removal(tmp_path: Path) -> None:
+    """Test that close_and_clean_temp doesn't remove artifacts when server2server=False."""
+    from anemoi.training.utils.mlflow_sync import close_and_clean_temp
+
+    artifact_path = tmp_path / "artifacts"
+    artifact_path.mkdir()
+
+    # Call with server2server=False
+    close_and_clean_temp(server2server=False, artifact_path=artifact_path)
+
+    # Verify artifact path still exists (server2server=False)
+    assert artifact_path.exists()

@@ -12,6 +12,8 @@ import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Generator
+from contextlib import contextmanager
 from itertools import starmap
 from pathlib import Path
 from typing import Any
@@ -24,8 +26,29 @@ from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 
 
-def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
-    # to set up the file where to send the output logs
+def _cleanup_temp_env_vars() -> None:
+    """Clean up environment variables set by export_log_output_file_path."""
+    os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE", None)
+    os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY", None)
+
+
+@contextmanager
+def mlflow_temp_log_file() -> Generator[tempfile._TemporaryFileWrapper, None, None]:
+    """Context manager for MLflow temporary log file.
+
+    Creates a temporary file for MLflow export/import logging and ensures
+    proper cleanup of both the file and environment variables.
+
+    Yields
+    ------
+        Temporary file wrapper for logging.
+
+    Raises
+    ------
+        ValueError: If neither TMPDIR nor SCRATCH environment variables are set.
+
+    """
+    # Check environment variables before creating temp file
     if not os.getenv("TMPDIR") and not os.getenv("SCRATCH"):
         error_msg = "Please set one of those variables TMPDIR:{} or SCRATCH:{} to proceed.".format(
             os.getenv("TMPDIR", "not set"),
@@ -36,21 +59,31 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
     tmpdir = os.environ["TMPDIR"] if os.getenv("TMPDIR") else os.environ["SCRATCH"]
     user = os.environ["USER"]
     Path(tmpdir).mkdir(parents=True, exist_ok=True)
+
     temp = tempfile.NamedTemporaryFile(dir=tmpdir, prefix=f"{user}_")  # noqa: SIM115
     os.environ["MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE"] = temp.name
     os.environ["MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY"] = tmpdir
-    return temp
+
+    try:
+        yield temp
+    finally:
+        # Always cleanup, even if an exception occurs
+        if not temp.closed:
+            temp.close()
+        _cleanup_temp_env_vars()
 
 
-def _cleanup_temp_env_vars() -> None:
-    """Clean up environment variables set by export_log_output_file_path."""
-    os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE", None)
-    os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY", None)
+def close_and_clean_temp(server2server: str, artifact_path: Path) -> None:
+    """Close and clean temporary artifacts.
 
+    Parameters
+    ----------
+    server2server : str
+        Whether this is a server-to-server sync.
+    artifact_path : Path
+        Path to artifacts directory to clean up.
 
-def close_and_clean_temp(temp: tempfile._TemporaryFileWrapper, server2server: str, artifact_path: Path) -> None:
-    temp.close()
-    _cleanup_temp_env_vars()
+    """
     if server2server:
         shutil.rmtree(artifact_path)
 
@@ -330,10 +363,8 @@ class MlFlowSync:
         self,
     ) -> None:
         """Sync an offline run to the destination tracking uri."""
-        # Initialize temp file for logging when sync is actually called
-        temp = export_log_output_file_path()
-
-        try:
+        # Use context manager for temp file - ensures cleanup on all exit paths
+        with mlflow_temp_log_file():
             src_mlflow_client = mlflow.MlflowClient(self.source_tracking_uri)
             dest_mlflow_client = mlflow.MlflowClient(self.dest_tracking_uri)
             http_client = create_http_client(dest_mlflow_client)
@@ -395,7 +426,11 @@ class MlFlowSync:
             else:
                 tags["offlineRun"] = "True"
                 params, tags = self._update_params_tags_runs(
-                    params, tags, dst_run_id, run.info.run_id, run_type="offline",
+                    params,
+                    tags,
+                    dst_run_id,
+                    run.info.run_id,
+                    run_type="offline",
                 )
 
             src_run_dct = {
@@ -460,12 +495,6 @@ class MlFlowSync:
                 )
 
             finally:
-                close_and_clean_temp(temp, server2server, artifact_path)
+                close_and_clean_temp(server2server, artifact_path)
 
             LOGGER.info("Imported run %s into experiment %s", dst_run_id, self.experiment_name)
-
-        finally:
-            # Ensure temp file cleanup happens even on early returns
-            if temp and not temp.closed:
-                temp.close()
-                _cleanup_temp_env_vars()
