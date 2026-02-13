@@ -199,7 +199,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         # start rollout of preprocessed batch
         x = {}
         for dataset_name, dataset_batch in batch.items():
-            dataset_batch = dataset_batch[
+            x[dataset_name] = dataset_batch[
                 :,
                 0 : self.n_step_input,
                 ...,
@@ -211,8 +211,9 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             )
             assert dataset_batch.shape[1] >= required_time_steps, msg
 
+        for dataset_name in self.dataset_names:
             x[dataset_name] = torch.cat(
-                [dataset_batch] * self.nens_per_device,
+                [x[dataset_name]] * self.nens_per_device,
                 dim=2,
             )  # shape == (bs, ms, nens_per_device, latlon, nvar)
             LOGGER.debug("Shapes: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
@@ -232,7 +233,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             # prediction at rollout step rollout_step, shape = (bs, n_step_output, ens_size, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
             y = {}
-            [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
             for dataset_name, dataset_batch in batch.items():
                 start = self.n_step_input + rollout_step * self.n_step_output
                 y_time = dataset_batch.narrow(1, start, self.n_step_output)[:, :, 0, :, :]

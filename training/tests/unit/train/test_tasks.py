@@ -382,15 +382,16 @@ def test_obsinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
         self.config = config
         self.data_indices = data_indices
         self.model_comm_group = None
-        self.grid_shard_shapes = {"dataset": None}
-        self.grid_shard_slice = {"dataset": None}
+        self.grid_shard_shapes = {"data": None}
+        self.grid_shard_slice = {"data": None}
         self.loss_supports_sharding = False
-        self.dataset_names = ["dataset"]
+        self.dataset_names = ["data"]
+        self.target_dataset_names = self.dataset_names
         self.model = DummyModel(
-            num_output_variables=len(data_indices["dataset"].model.output),
+            num_output_variables=len(data_indices["data"].model.output),
             output_times=len(config.training.explicit_times.target),
         )
-        self.loss = {"dataset": DummyLoss()}
+        self.loss = {"data": DummyLoss()}
 
     monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
     cfg = DictConfig(
@@ -412,7 +413,7 @@ def test_obsinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
         "OBS_A": 5,
         "OBS_B": 6,
     }
-    data_indices = _make_minimal_index_collection(name_to_index)
+    data_indices = {"data": _make_minimal_index_collection(name_to_index)}
 
     itp = ObsGraphInterpolator(
         config=cfg,
@@ -420,22 +421,22 @@ def test_obsinterpolator(monkeypatch: pytest.MonkeyPatch) -> None:
         statistics={},
         statistics_tendencies={},
         data_indices=data_indices,
-        metadata={"dataset": {}},
+        metadata={"data": {}},
         supporting_arrays={},
     )
     # check known_future_variables mapping and basic timing logic
-    assert itp.known_future_variables["dataset"] == [0, 1, 2, 3, 4]
+    assert itp.known_future_variables["data"] == [0, 1, 2, 3, 4]
     # boundary_times are shifted by multi_step-1 = 5
     assert itp.boundary_times == [5, 41]
     # interp_times shifted by 5
     assert itp.interp_times[0] == 6 and itp.interp_times[1] == 7 and itp.interp_times[-1] == 35
     b, e, g, v = 2, 1, 3, len(name_to_index)  # all variables are prognostic for simplicity
     t = len(itp.imap)  # multi step input
-    batch = {"dataset": torch.randn((b, t, e, g, v), dtype=torch.float32)}
+    batch = {"data": torch.randn((b, t, e, g, v), dtype=torch.float32)}
     loss, metrics, y_pred = itp._step(batch=batch, validation_mode=False)
 
     assert isinstance(loss, torch.Tensor)
     assert metrics == {}
-    assert isinstance(y_pred["dataset"], torch.Tensor)
-    assert y_pred["dataset"].ndim == 5
-    assert y_pred["dataset"].shape == (b, len(itp.interp_times), e, g, v)
+    assert isinstance(y_pred["data"], torch.Tensor)
+    assert y_pred["data"].ndim == 5
+    assert y_pred["data"].shape == (b, len(itp.interp_times), e, g, v)

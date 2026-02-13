@@ -73,7 +73,6 @@ class GraphForecaster(BaseRolloutGraphModule):
         for rollout_step in range(rollout_steps):
             y_pred = self(x)
             y = {}
-            [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
             for dataset_name, dataset_batch in batch.items():
                 start = self.n_step_input + rollout_step * self.n_step_output
                 y_time = dataset_batch.narrow(1, start, self.n_step_output)

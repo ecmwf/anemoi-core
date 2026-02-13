@@ -81,10 +81,11 @@ class ObsGraphInterpolator(BaseGraphModule):
                     ),
                 )
         boundary_times = config.training.explicit_times.input
-        self.boundary_times = [t + self.multi_step - 1 for t in boundary_times]
+        self.boundary_times = [t + self.n_step_input - 1 for t in boundary_times]
         interp_times = config.training.explicit_times.target
-        self.interp_times = [t + self.multi_step - 1 for t in interp_times]
+        self.interp_times = [t + self.n_step_input - 1 for t in interp_times]
         config.training.multistep_output = len(self.interp_times)
+        self.n_step_output = config.training.multistep_output
         sorted_indices = sorted(
             set(range(self.n_step_input)).union(
                 self.boundary_times,
