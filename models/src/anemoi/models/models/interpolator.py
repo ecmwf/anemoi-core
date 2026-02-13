@@ -107,7 +107,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(target_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(target_forcing, "batch ensemble grid vars -> (batch ensemble grid) (vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension

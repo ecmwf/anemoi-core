@@ -30,15 +30,9 @@ class IndexCollection:
     def __init__(self, data_config, name_to_index) -> None:
         self.config = OmegaConf.to_container(data_config, resolve=True)
         self.name_to_index = dict(sorted(name_to_index.items(), key=operator.itemgetter(1)))
-        self.forcing = (
-            []
-            if data_config.get("forcing", None) is None
-            else OmegaConf.to_container(data_config.forcing, resolve=True)
-        )
+        self.forcing = [] if data_config.forcing is None else OmegaConf.to_container(data_config.forcing, resolve=True)
         self.diagnostic = (
-            []
-            if data_config.get("diagnostic", None) is None
-            else OmegaConf.to_container(data_config.diagnostic, resolve=True)
+            [] if data_config.diagnostic is None else OmegaConf.to_container(data_config.diagnostic, resolve=True)
         )
         self.target = (
             [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)

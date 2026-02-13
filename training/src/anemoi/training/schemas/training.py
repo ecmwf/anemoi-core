@@ -192,7 +192,13 @@ class TimeStepScalerSchema(BaseModel):
     norm: Literal["unit-max", "unit-sum"] | None = Field(default="unit-sum", example="unit-sum")
     "Normalisation method applied to the weights."
     weights: list[float] = Field(example=[1.0, 1.0])
-    "Weights for each time step"
+    "Weights for each time step."
+
+
+class UniformTimeStepScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.UniformTimeStepScaler"] = Field(..., alias="_target_")
+    multistep_output: PositiveInt = Field(example=5)
+    "Number of output time steps."
 
 
 class LeadTimeDecayScalerSchema(BaseModel):
@@ -237,6 +243,7 @@ ScalerSchema = (
     | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
+    | UniformTimeStepScalerSchema
     | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
 )
@@ -413,7 +420,9 @@ class BaseTrainingSchema(BaseModel):
     k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
     multistep_output: PositiveInt = Field(example=1, default=1)
     """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
-    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)]."""
+    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)].
+    During rollout, if multistep_output > multistep_input, only the latest multistep_input outputs
+    are fed into the next step."""
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
