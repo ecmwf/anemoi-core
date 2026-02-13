@@ -2,6 +2,7 @@
 defaults:
   - plot: simple
   - benchmark_profiler: simple
+  - log: mlflow
 
 # another alternative if you don't have any callbacks is to remove it from the
 # defaults list and just use
@@ -14,9 +15,11 @@ plot:
   callbacks:
     # Add plot callbacks here.
     - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample
+      dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       sample_idx: ${diagnostics.plot.sample_idx}
       per_sample : 2
       parameters: ${diagnostics.plot.parameters}
+      output_steps: ${training.multistep_output}
       every_n_batches: ${diagnostics.plot.frequency.batch}
       #Defining the accumulation levels for precipitation related fields and the colormap
       accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
@@ -24,6 +27,7 @@ plot:
 
     # Deterministic callbacks are also overloaded.
     - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss
+      dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       # group parameters by categories when visualizing contributions to the loss
       # one-parameter groups are possible to highlight individual parameters
       parameter_groups:
@@ -31,15 +35,20 @@ plot:
         sfc_wind: [10u, 10v]
       every_n_batches: ${diagnostics.plot.frequency.batch}
     - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum
+      dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       sample_idx: ${diagnostics.plot.sample_idx}
       parameters: ${diagnostics.plot.parameters}
+      output_steps: ${training.multistep_output}
       every_n_batches: ${diagnostics.plot.frequency.batch}
     - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram
+      dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       sample_idx: ${diagnostics.plot.sample_idx}
       parameters: ${diagnostics.plot.parameters}
+      output_steps: ${training.multistep_output}
       every_n_batches: ${diagnostics.plot.frequency.batch}
       precip_and_related_fields: ["tp", "cp"] # Optional: specify precip fields for special histogram treatment
     - _target_: anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot
+      dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       every_n_epochs: ${diagnostics.plot.frequency.epoch}
 
     # Overloaded PlotSample will return the plots for the first ensemble member
@@ -69,37 +78,6 @@ checkpoint:
   every_n_train_steps:
     save_frequency: null # Does not scale with rollout
     num_models_saved: 0
-
-log:
-  wandb:
-    enabled: False
-    offline: False
-    log_model: False
-    project: 'Anemoi'
-    entity: ???
-    # logger options (these probably come with some overhead)
-    gradients: False
-    parameters: False
-  tensorboard:
-    enabled: False
-  mlflow:
-    _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
-    enabled: False
-    offline: False
-    authentication: False
-    tracking_uri: ???
-    experiment_name: 'anemoi-debug'
-    project_name: 'Anemoi'
-    system: False
-    terminal: True
-    run_name: null # If set to null, the run name will be the a random UUID
-    on_resume_create_child: True
-    expand_hyperparams: # Which keys in hyperparams to expand
-      - config
-    http_max_retries: 35
-    max_params_length: 2000
-    save_dir: ${system.output.logs.mlflow}
-  interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True
 progress_bar:

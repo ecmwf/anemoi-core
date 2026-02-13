@@ -21,7 +21,7 @@ authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
 
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.14"
 
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -29,9 +29,9 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -67,7 +67,7 @@ optional-dependencies.docs = [
 ]
 
 optional-dependencies.healpix = [ "healpy>=1.17" ]
-optional-dependencies.hex = [ "h3>=3.7.7,<4" ]
+optional-dependencies.hex = [ "h3>=4" ]
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
 
 optional-dependencies.tri = [ "trimesh>=4.1" ]

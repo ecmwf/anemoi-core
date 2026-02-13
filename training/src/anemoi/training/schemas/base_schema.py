@@ -12,6 +12,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import Any
+from typing import Self
 from typing import Union
 
 from omegaconf import DictConfig
@@ -21,7 +22,6 @@ from pydantic import model_validator
 from pydantic._internal import _model_construction
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
-from typing_extensions import Self
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
@@ -63,10 +63,6 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
     output_config.logs.mlflow = (
         base / "mlflow" if output_config.logs.mlflow is None else base / output_config.logs.mlflow
     )
-    output_config.logs.tensorboard = (
-        base / "tensorboard" if output_config.logs.tensorboard is None else base / output_config.logs.tensorboard
-    )
-
     # CheckPointSchema
     output_config.checkpoints.root = (
         root_output_path / output_config.checkpoints.root if output_config.checkpoints.root else root_output_path
