@@ -12,9 +12,9 @@ from abc import abstractmethod
 
 import numpy as np
 import torch
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from torch_geometric.data.storage import NodeStorage
 
 
 class BaseMask:
@@ -41,10 +41,10 @@ class BaseMask:
 class Boolean1DMask(torch.nn.Module, BaseMask):
     """1D Boolean mask."""
 
-    def __init__(self, graph_data: HeteroData, nodes_name: str, attribute_name: str) -> None:
+    def __init__(self, nodes: NodeStorage, attribute_name: str) -> None:
         super().__init__()
 
-        mask = graph_data[nodes_name][attribute_name].bool().squeeze()
+        mask = nodes[attribute_name].bool().squeeze()
         self.register_buffer("mask", mask)
 
     @property

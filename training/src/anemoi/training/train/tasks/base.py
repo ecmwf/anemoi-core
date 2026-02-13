@@ -167,12 +167,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # Handle dictionary of graph_data
         graph_data = graph_data.to(self.device)
-        self.dataset_names = list(graph_data.keys())
+        self.dataset_names = list(data_indices.keys())
 
         # Create output_mask dictionary for each dataset
-        self.output_mask = {}
-        for name in self.dataset_names:
-            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data)
+        self.output_mask = {
+            name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
+        }
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
