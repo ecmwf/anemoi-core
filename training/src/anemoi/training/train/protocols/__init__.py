@@ -13,8 +13,8 @@ from .ensemble import EnsembleProtocol
 from .single import SingleProtocol
 
 __all__ = [
-    "EnsembleProtocol",
-    "SingleProtocol",
     "DiffusionProtocol",
     "DiffusionTendProtocol",
+    "EnsembleProtocol",
+    "SingleProtocol",
 ]

@@ -53,7 +53,10 @@ class TimeInterpolationTask(BaseTask):
         return x_bound
 
     def get_target_forcing(
-        self, batch: dict[str, torch.Tensor], interp_step: int, data_indices: dict[str, IndexCollection],
+        self,
+        batch: dict[str, torch.Tensor],
+        interp_step: int,
+        data_indices: dict[str, IndexCollection],
     ) -> dict[str, torch.Tensor]:
         batch_size = next(iter(batch.values())).shape[0]
         ens_size = next(iter(batch.values())).shape[2]
