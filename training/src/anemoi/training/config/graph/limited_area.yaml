@@ -1,7 +1,6 @@
 ---
 overwrite: True
 
-data: "data"
 hidden: "hidden"
 
 nodes:
@@ -9,20 +8,20 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"  # Always overridden from dataloader config
+      dataset: ${dataloader.datasets.data.dataset}
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
       resolution: 6 # grid resolution for npz (o32, o48, ...)
-      reference_node_name: ${graph.data}
+      reference_node_name: "data"
       mask_attr_name: cutout_mask
       margin_radius_km: 10
 
 edges:
 # Encoder configuration
-- source_name: ${graph.data}
+- source_name: "data"
   target_name: ${graph.hidden}
   edge_builders:
   - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
@@ -46,7 +45,7 @@ edges:
   attributes: ${graph.attributes.edges}
 # Decoder configuration
 - source_name: ${graph.hidden}
-  target_name: ${graph.data}
+  target_name: "data"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
     num_nearest_neighbours: 3 # only for knn method

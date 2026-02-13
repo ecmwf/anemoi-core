@@ -207,7 +207,7 @@ the area being modelled.
       datasets:
          your_dataset_name:
             _target_: anemoi.training.data.grid_indices.FullGrid
-            nodes_name: ${graph.data}
+            nodes_name: "MY_DATASET"
 
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we

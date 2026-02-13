@@ -72,14 +72,14 @@ graph:
         - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
       attributes: ${graph.attributes.edges}
     # Encoder configuration
-    - source_name: ${graph.data}
+    - source_name: "data"
       target_name: ${graph.hidden}
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalEncoderEdges
       attributes: ${graph.attributes.edges}
     # Decoder configuration
     - source_name: ${graph.hidden}
-      target_name: ${graph.data}
+      target_name: "data"
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalDecoderEdges
       attributes: ${graph.attributes.edges}
@@ -260,7 +260,7 @@ training:
           slope: 0.001
         node_weights:
           _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-          nodes_name: ${graph.data}
+          nodes_name: "data"
           nodes_attribute_name: area_weight
           norm: unit-sum
   metrics:
@@ -432,5 +432,5 @@ dataloader:
     datasets:
       data:
         _target_: anemoi.training.data.grid_indices.FullGrid
-        nodes_name: ${graph.data}
+        nodes_name: "data"
   validation_rollout: 1

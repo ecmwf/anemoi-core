@@ -43,7 +43,7 @@ grid_indices:
   datasets:
     data: # user-defined name for the dataset
       _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: ${graph.data}
+      nodes_name: "data"
 
 # ============
 # Dataloader definitions

@@ -53,12 +53,8 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.statistics = statistics
 
         model_config = DotDict(model_config)
-        self._graph_name_data = (
-            model_config.graph.data
-        )  # assumed to be all the same because this is how we construct the graphs
-        self._graph_name_hidden = (
-            model_config.graph.hidden
-        )  # assumed to be all the same because this is how we construct the graphs
+        self._graph_name_hidden = model_config.graph.hidden
+
         self.n_step_input = model_config.training.multistep_input
         self.n_step_output = model_config.training.multistep_output
 
@@ -70,11 +66,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # Unpack config for hierarchical graph
         self.level_process = model_config.model.enable_hierarchical_level_processing
 
-        self.node_attributes = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.node_attributes[dataset_name] = NamedNodesAttributes(
-                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
-            )
+        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -92,7 +84,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
 
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
-        return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden[0]]
+        return self.node_attributes.attr_ndims[self._graph_name_hidden[0]]
 
     def _build_networks(self, model_config):
 
@@ -106,10 +98,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden[0])],
+                graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
                 edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden[0]],
+                src_size=self.node_attributes.num_nodes[dataset_name],
+                dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
             )
             self.encoder[dataset_name] = instantiate(
@@ -120,8 +112,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
-
-        first_dataset_name = next(iter(self._graph_data.keys()))
 
         # Level processors
         if self.level_process:
@@ -135,10 +125,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
                 # Create graph providers for down level processor
                 self.down_level_processor_graph_providers[nodes_names] = create_graph_provider(
-                    graph=self._graph_data[first_dataset_name][(nodes_names, "to", nodes_names)],
+                    graph=self._graph_data[(nodes_names, "to", nodes_names)],
                     edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes[first_dataset_name].num_nodes[nodes_names],
-                    dst_size=self.node_attributes[first_dataset_name].num_nodes[nodes_names],
+                    src_size=self.node_attributes.num_nodes[nodes_names],
+                    dst_size=self.node_attributes.num_nodes[nodes_names],
                     trainable_size=model_config.model.processor.get("trainable_size", 0),
                 )
 
@@ -152,10 +142,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
                 # Create graph providers for up level processor
                 self.up_level_processor_graph_providers[nodes_names] = create_graph_provider(
-                    graph=self._graph_data[first_dataset_name][(nodes_names, "to", nodes_names)],
+                    graph=self._graph_data[(nodes_names, "to", nodes_names)],
                     edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes[first_dataset_name].num_nodes[nodes_names],
-                    dst_size=self.node_attributes[first_dataset_name].num_nodes[nodes_names],
+                    src_size=self.node_attributes.num_nodes[nodes_names],
+                    dst_size=self.node_attributes.num_nodes[nodes_names],
                     trainable_size=model_config.model.processor.get("trainable_size", 0),
                 )
 
@@ -176,10 +166,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             dst_nodes_name = self._graph_name_hidden[i + 1]
 
             self.downscale_graph_providers[src_nodes_name] = create_graph_provider(
-                graph=self._graph_data[first_dataset_name][(src_nodes_name, "to", dst_nodes_name)],
+                graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[first_dataset_name].num_nodes[src_nodes_name],
-                dst_size=self.node_attributes[first_dataset_name].num_nodes[dst_nodes_name],
+                src_size=self.node_attributes.num_nodes[src_nodes_name],
+                dst_size=self.node_attributes.num_nodes[dst_nodes_name],
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
             )
 
@@ -187,7 +177,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
-                in_channels_dst=self.node_attributes[first_dataset_name].attr_ndims[dst_nodes_name],
+                in_channels_dst=self.node_attributes.attr_ndims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.downscale_graph_providers[src_nodes_name].edge_dim,
             )
@@ -201,10 +191,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             dst_nodes_name = self._graph_name_hidden[i - 1]
 
             self.upscale_graph_providers[src_nodes_name] = create_graph_provider(
-                graph=self._graph_data[first_dataset_name][(src_nodes_name, "to", dst_nodes_name)],
+                graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[first_dataset_name].num_nodes[src_nodes_name],
-                dst_size=self.node_attributes[first_dataset_name].num_nodes[dst_nodes_name],
+                src_size=self.node_attributes.num_nodes[src_nodes_name],
+                dst_size=self.node_attributes.num_nodes[dst_nodes_name],
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
@@ -223,10 +213,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_hidden[0], "to", self._graph_name_data)],
+                graph=self._graph_data[(self._graph_name_hidden[0], "to", dataset_name)],
                 edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden[0]],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                src_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
+                dst_size=self.node_attributes.num_nodes[dataset_name],
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 

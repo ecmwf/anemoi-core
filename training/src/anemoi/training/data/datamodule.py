@@ -149,7 +149,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
         for dataset_name, grid_config in grid_indices_config.items():
             grid_indices = instantiate(grid_config, reader_group_size=self.config.dataloader.read_group_size)
-            grid_indices.setup(self.graph_data[dataset_name])
+            grid_indices.setup(self.graph_data)
             grid_indices_dict[dataset_name] = grid_indices
 
         return grid_indices_dict

@@ -41,10 +41,10 @@ grid_indices:
   datasets:
     era5:
       _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: ${graph.data}
+      nodes_name: era5
     cerra:
       _target_: anemoi.training.data.grid_indices.FullGrid  # Could be different
-      nodes_name: ${graph.data}
+      nodes_name: cerra
 
 # ============
 # Multi-Dataset Configuration

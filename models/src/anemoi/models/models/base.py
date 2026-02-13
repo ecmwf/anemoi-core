@@ -59,22 +59,16 @@ class BaseGraphModel(nn.Module):
         self.data_indices = data_indices
         self.statistics = statistics
 
+        self.dataset_names = list(data_indices.keys())
+
         model_config = DotDict(model_config)
-        self._graph_name_data = (
-            model_config.graph.data
-        )  # assumed to be all the same because this is how we construct the graphs
-        self._graph_name_hidden = (
-            model_config.graph.hidden
-        )  # assumed to be all the same because this is how we construct the graphs
+        self._graph_name_hidden = model_config.graph.hidden
+
         self.n_step_input = model_config.training.multistep_input
         self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
 
-        self.node_attributes = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.node_attributes[dataset_name] = NamedNodesAttributes(
-                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
-            )
+        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -113,16 +107,13 @@ class BaseGraphModel(nn.Module):
             self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return (
-            self.n_step_input * self.num_input_channels[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-        )
+        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         return self.n_step_output * self.num_output_channels[dataset_name]
 
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
-        return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
+        return self.node_attributes.attr_ndims[dataset_name]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
@@ -163,15 +154,6 @@ class BaseGraphModel(nn.Module):
                     f"Hidden-to-hidden graph edge structure mismatch between reference dataset '{reference_dataset}' "
                     f"and dataset '{dataset_name}'. All datasets must have identical hidden graph topology "
                     f"for the shared processor to work correctly."
-                )
-
-                # Compare number of nodes (should be same for hidden graphs)
-                ref_num_hidden_nodes = self.node_attributes[reference_dataset].num_nodes[self._graph_name_hidden]
-                dataset_num_hidden_nodes = self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden]
-                assert ref_num_hidden_nodes == dataset_num_hidden_nodes, (
-                    f"Hidden node count mismatch between reference dataset '{reference_dataset}' ({ref_num_hidden_nodes} nodes) "
-                    f"and dataset '{dataset_name}' ({dataset_num_hidden_nodes} nodes). "
-                    f"All datasets must have the same number of hidden nodes for the shared processor."
                 )
 
             LOGGER.info(

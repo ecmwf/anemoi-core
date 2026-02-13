@@ -1,7 +1,6 @@
 ---
 overwrite: True
 
-data: "data"
 hidden: "data"
 
 nodes:
@@ -9,7 +8,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
-      dataset: ${dataloader.dataset}
+      dataset: ${dataloader.datasets.data.dataset}
     attributes:
       area_weight:
         _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights # options: Area, Uniform
@@ -18,8 +17,8 @@ nodes:
 
 edges:
 # Encoder configuration
-- source_name: ${graph.data}
-  target_name: ${graph.data}
+- source_name: "data"
+  target_name: "data"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
     num_nearest_neighbours: 1 # only for knn method
