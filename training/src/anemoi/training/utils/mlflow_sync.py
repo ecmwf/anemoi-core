@@ -42,15 +42,12 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
     return temp
 
 
-def close_and_clean_temp(server2server: str, artifact_path: Path) -> None:
+def close_and_clean_temp(temp: tempfile._TemporaryFileWrapper, server2server: str, artifact_path: Path) -> None:
     temp.close()
     os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE")
     os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY")
     if server2server:
         shutil.rmtree(artifact_path)
-
-
-temp = export_log_output_file_path()
 
 
 import mlflow  # noqa: E402
@@ -328,128 +325,143 @@ class MlFlowSync:
         self,
     ) -> None:
         """Sync an offline run to the destination tracking uri."""
-        src_mlflow_client = mlflow.MlflowClient(self.source_tracking_uri)
-        dest_mlflow_client = mlflow.MlflowClient(self.dest_tracking_uri)
-        http_client = create_http_client(dest_mlflow_client)
-        # GET SOURCE RUN ##
-        run = src_mlflow_client.get_run(self.run_id)
-        server2server = self._check_source_tracking_uri()
-        run_logged = self.check_run_is_logged(status=run.info.status)
-        if run_logged:
-            LOGGER.info(
-                "Run already imported %s into experiment %s",
-                self.run_id,
-                self.experiment_name,
-            )
-            return
-
-        if run.info.lifecycle_stage == "deleted" and not self.export_deleted_runs:
-            LOGGER.warning(
-                "Not exporting run %s because its lifecycle_stage is  %s",
-                run.info.run_id,
-                run.info.lifecycle_stage,
-            )
-
-            return
-
-        msg = {
-            "run_id": run.info.run_id,
-            "lifecycle_stage": run.info.lifecycle_stage,
-            "experiment_id": run.info.experiment_id,
-        }
-        LOGGER.info("Exporting run: %s", msg)
-
-        run_info = mlflow_utils.strip_underscores(run.info)
-        src_user_id = run_info["user_id"]
-
-        exp_id = self._get_dst_experiment_id(dest_mlflow_client=dest_mlflow_client)
-        dst_run = dest_mlflow_client.create_run(exp_id)
-        dst_run_id = dst_run.info.run_id
-
-        tags = dict(sorted(run.data.tags.items()))
-
-        params = run.data.params
-        # So far there is no easy way to force mlflow to use a specific run_id, that means
-        # that when we online sync the offline runs those will have different run_ids. To keep
-        # track of online and offline governance in that case we update run_ids info
-
-        artifact_path = self._get_artifacts_path(server2server, run)
-
-        if server2server:
-            tags["server2server"] = "True"
-            self._download_artifacts(src_mlflow_client, run.info.run_id, artifact_path)
-            params, tags = self._update_params_tags_runs(
-                params,
-                tags,
-                dst_run_id,
-                run.info.run_id,
-                run_type="server2server",
-            )
-
-        else:
-            tags["offlineRun"] = "True"
-            params, tags = self._update_params_tags_runs(params, tags, dst_run_id, run.info.run_id, run_type="offline")
-
-        src_run_dct = {
-            "params": params,
-            "metrics": _get_metrics_with_steps(src_mlflow_client, run),
-            "tags": tags,
-            "inputs": {
-                "dataset_inputs": _inputs_to_dict(run.inputs),
-            },
-        }
-
-        src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
-
-        if self.log_model:
-            from mlflow_export_import.logged_model.import_logged_model import import_logged_model
-
-            for model in src_run_dct["inputs"]["model_inputs"]:
-                model_path = (
-                    run.data.params["config.diagnostics.log.mlflow.save_dir"]
-                    + "/"
-                    + run.info.run_id
-                    + "/"
-                    + model["model_id"]
-                )
-                import_logged_model(
-                    input_dir=model_path,
-                    experiment_name="test",
-                    run_id=run.info_run_id,
-                    mlflow_client=src_mlflow_client,
-                    model_type="input",
-                    step=model["step"],
-                )
+        # Initialize temp file for logging when sync is actually called
+        temp = export_log_output_file_path()
 
         try:
-            LOGGER.info("Starting to export run data")
+            src_mlflow_client = mlflow.MlflowClient(self.source_tracking_uri)
+            dest_mlflow_client = mlflow.MlflowClient(self.dest_tracking_uri)
+            http_client = create_http_client(dest_mlflow_client)
+            # GET SOURCE RUN ##
+            run = src_mlflow_client.get_run(self.run_id)
+            server2server = self._check_source_tracking_uri()
+            run_logged = self.check_run_is_logged(status=run.info.status)
+            if run_logged:
+                LOGGER.info(
+                    "Run already imported %s into experiment %s",
+                    self.run_id,
+                    self.experiment_name,
+                )
+                return
 
-            import_run_data(
-                dest_mlflow_client,
-                src_run_dct,
-                dst_run_id,
-                src_user_id,
-            )
-            _import_inputs(http_client, src_run_dct, dst_run_id)
+            if run.info.lifecycle_stage == "deleted" and not self.export_deleted_runs:
+                LOGGER.warning(
+                    "Not exporting run %s because its lifecycle_stage is  %s",
+                    run.info.run_id,
+                    run.info.lifecycle_stage,
+                )
 
-            mlflow.set_tracking_uri(self.dest_tracking_uri)
-            dest_mlflow_client.log_artifacts(dst_run_id, artifact_path)
-            dest_mlflow_client.set_terminated(dst_run_id, RunStatus.to_string(RunStatus.FINISHED))
+                return
 
-        except BaseException:
-            dest_mlflow_client.set_terminated(dst_run_id, RunStatus.to_string(RunStatus.FAILED))
-            import traceback
+            msg = {
+                "run_id": run.info.run_id,
+                "lifecycle_stage": run.info.lifecycle_stage,
+                "experiment_id": run.info.experiment_id,
+            }
+            LOGGER.info("Exporting run: %s", msg)
 
-            traceback.print_exc()
-            LOGGER.exception(
-                "Importing run %s of experiment %s failed."
-                "Make sure you're using the latest version of mlflow_export_import"
-                "Please install it from https://github.com/mlflow/mlflow-export-import",
-                dst_run_id,
-                self.experiment_name,
-            )
+            run_info = mlflow_utils.strip_underscores(run.info)
+            src_user_id = run_info["user_id"]
+
+            exp_id = self._get_dst_experiment_id(dest_mlflow_client=dest_mlflow_client)
+            dst_run = dest_mlflow_client.create_run(exp_id)
+            dst_run_id = dst_run.info.run_id
+
+            tags = dict(sorted(run.data.tags.items()))
+
+            params = run.data.params
+            # So far there is no easy way to force mlflow to use a specific run_id, that means
+            # that when we online sync the offline runs those will have different run_ids. To keep
+            # track of online and offline governance in that case we update run_ids info
+
+            artifact_path = self._get_artifacts_path(server2server, run)
+
+            if server2server:
+                tags["server2server"] = "True"
+                self._download_artifacts(src_mlflow_client, run.info.run_id, artifact_path)
+                params, tags = self._update_params_tags_runs(
+                    params,
+                    tags,
+                    dst_run_id,
+                    run.info.run_id,
+                    run_type="server2server",
+                )
+
+            else:
+                tags["offlineRun"] = "True"
+                params, tags = self._update_params_tags_runs(
+                    params, tags, dst_run_id, run.info.run_id, run_type="offline",
+                )
+
+            src_run_dct = {
+                "params": params,
+                "metrics": _get_metrics_with_steps(src_mlflow_client, run),
+                "tags": tags,
+                "inputs": {
+                    "dataset_inputs": _inputs_to_dict(run.inputs),
+                },
+            }
+
+            src_run_dct["inputs"]["model_inputs"] = [
+                utils.strip_underscores(model) for model in run.inputs.model_inputs
+            ]
+
+            if self.log_model:
+                from mlflow_export_import.logged_model.import_logged_model import import_logged_model
+
+                for model in src_run_dct["inputs"]["model_inputs"]:
+                    model_path = (
+                        run.data.params["config.diagnostics.log.mlflow.save_dir"]
+                        + "/"
+                        + run.info.run_id
+                        + "/"
+                        + model["model_id"]
+                    )
+                    import_logged_model(
+                        input_dir=model_path,
+                        experiment_name="test",
+                        run_id=run.info_run_id,
+                        mlflow_client=src_mlflow_client,
+                        model_type="input",
+                        step=model["step"],
+                    )
+
+            try:
+                LOGGER.info("Starting to export run data")
+
+                import_run_data(
+                    dest_mlflow_client,
+                    src_run_dct,
+                    dst_run_id,
+                    src_user_id,
+                )
+                _import_inputs(http_client, src_run_dct, dst_run_id)
+
+                mlflow.set_tracking_uri(self.dest_tracking_uri)
+                dest_mlflow_client.log_artifacts(dst_run_id, artifact_path)
+                dest_mlflow_client.set_terminated(dst_run_id, RunStatus.to_string(RunStatus.FINISHED))
+
+            except BaseException:
+                dest_mlflow_client.set_terminated(dst_run_id, RunStatus.to_string(RunStatus.FAILED))
+                import traceback
+
+                traceback.print_exc()
+                LOGGER.exception(
+                    "Importing run %s of experiment %s failed."
+                    "Make sure you're using the latest version of mlflow_export_import"
+                    "Please install it from https://github.com/mlflow/mlflow-export-import",
+                    dst_run_id,
+                    self.experiment_name,
+                )
+
+            finally:
+                close_and_clean_temp(temp, server2server, artifact_path)
+
+            LOGGER.info("Imported run %s into experiment %s", dst_run_id, self.experiment_name)
 
         finally:
-            close_and_clean_temp(server2server, artifact_path)
-
-        LOGGER.info("Imported run %s into experiment %s", dst_run_id, self.experiment_name)
+            # Ensure temp file cleanup happens even on early returns
+            if temp and not temp.closed:
+                temp.close()
+                os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE", None)
+                os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY", None)
