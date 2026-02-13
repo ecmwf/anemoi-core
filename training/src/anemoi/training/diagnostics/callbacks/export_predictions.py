@@ -46,14 +46,56 @@ class ExportPredictions(pl.Callback):
             output_times = (getattr(pl_module, "rollout", 0), "forecast")
         return output_times
 
-    def _build_time_coord(self, length: int) -> np.ndarray:
+    def _build_time_coord(
+        self,
+        length: int,
+        batch_idx: int = 0,
+        batch_size: int = 1,
+        sample_idx: int = 0,
+    ) -> np.ndarray:
         if self.start and self.frequency:
             start = np.datetime64(self.start)
             step = frequency_to_timedelta(self.frequency)
             step_s = int(step.total_seconds())
-            times = start + np.arange(length, dtype="int64") * np.timedelta64(step_s, "s")
+            sample_offset = batch_idx * batch_size + sample_idx
+            times = start + (sample_offset + np.arange(length, dtype="int64")) * np.timedelta64(step_s, "s")
             return times
         return np.arange(length, dtype="int64")
+
+    def _extract_time_coord_from_batch(
+        self,
+        batch: torch.Tensor | dict[str, torch.Tensor],
+        expected_len: int,
+    ) -> np.ndarray | None:
+        if not isinstance(batch, dict):
+            return None
+
+        time_key_candidates = ("sample_time_ns", "__sample_time_ns__", "time_ns")
+        time_tensor = None
+        for key in time_key_candidates:
+            if key in batch:
+                time_tensor = batch[key]
+                break
+        if time_tensor is None:
+            return None
+
+        if not torch.is_tensor(time_tensor):
+            return None
+
+        arr = time_tensor.detach().cpu().numpy()
+        if arr.ndim == 1:
+            sample_times = arr
+        elif arr.ndim >= 2:
+            if self.sample_idx >= arr.shape[0]:
+                return None
+            sample_times = arr[self.sample_idx]
+        else:
+            return None
+
+        if sample_times.shape[0] < expected_len:
+            return None
+
+        return sample_times[:expected_len].astype("int64").astype("datetime64[ns]")
 
     def _get_dataset_indices(self, pl_module: pl.LightningModule):
         data_indices = pl_module.data_indices
@@ -234,10 +276,25 @@ class ExportPredictions(pl.Callback):
             )
             return
 
-        time_coord = self._build_time_coord(data_len)
+        time_coord = self._extract_time_coord_from_batch(batch, data_len)
+        if time_coord is None:
+            time_coord = self._build_time_coord(
+                data_len,
+                batch_idx=batch_idx,
+                batch_size=data_batch.shape[0],
+                sample_idx=self.sample_idx,
+            )
         input_time = time_coord[: pl_module.multi_step]
         target_time = time_coord[pl_module.multi_step : pl_module.multi_step + target_len]
         pred_time = target_time
+        if batch_idx == 0:
+            LOGGER.info(
+                "ExportPredictions time window: input[%s..%s], target[%s..%s]",
+                str(input_time[0]) if len(input_time) else "n/a",
+                str(input_time[-1]) if len(input_time) else "n/a",
+                str(target_time[0]) if len(target_time) else "n/a",
+                str(target_time[-1]) if len(target_time) else "n/a",
+            )
         ds = xr.Dataset(
             data_vars={
                 "input": (("input_time", "node", "variable"), data[: pl_module.multi_step]),
