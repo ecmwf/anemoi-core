@@ -1,6 +1,6 @@
 # This workflow assigns labels to a pull request based on the files changed in the PR.
 # The labels are defined in the `.github/labels.yml` file.
-name: "[Pull Request] Label File-based"
+name: "[PR] Label File-based"
 on:
   pull_request_target:
     types: [opened, synchronize]

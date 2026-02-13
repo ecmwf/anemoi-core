@@ -42,6 +42,7 @@ cover/
 
 # Documentation
 docs/_build/
+docs/_api/
 /site
 *.mo
 *.pot
@@ -93,6 +94,11 @@ dmypy.json
 *.csv
 *.xlsx
 *.xls
+*.json
+*.txt
+*.zip
+*.db
+*.tgz
 
 # ML artifacts
 wandb/
@@ -119,8 +125,10 @@ tmp/
 temp/
 logs/
 _dev/
-outputs/
+_api/
+./outputs
 *tmp_data/
+*/uv.lock
 
 # Project specific
 ?
@@ -130,8 +138,12 @@ bar
 ~$images.pptx
 test.py
 test.ipynb
-cutout.png
 _version.py
 *.to_upload
 tempCodeRunnerFile.python
 Untitled-*.py
+trace.txt
+?/
+*.prof
+prof/
+*.gz

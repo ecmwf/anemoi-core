@@ -7,16 +7,17 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 from enum import Enum
 from functools import partial
 from typing import Annotated
 from typing import Any
 from typing import Literal
-from typing import Union
+from typing import Self
 
 from pydantic import AfterValidator
+from pydantic import BaseModel as PydanticBaseModel
+from pydantic import ConfigDict
+from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -24,9 +25,9 @@ from pydantic import PositiveInt
 from pydantic import field_validator
 from pydantic import model_validator
 
-from anemoi.training.schemas.utils import allowed_values
-
-from .utils import BaseModel
+from anemoi.training.schemas.schema_utils import DatasetDict
+from anemoi.utils.schemas import BaseModel
+from anemoi.utils.schemas.errors import allowed_values
 
 
 class GradientClip(BaseModel):
@@ -55,11 +56,11 @@ class SWA(BaseModel):
 class Rollout(BaseModel):
     """Rollout configuration."""
 
-    start: PositiveInt = Field(example=1)
+    start: NonNegativeInt = Field(example=1)
     "Number of rollouts to start with."
     epoch_increment: NonNegativeInt = Field(example=0)
     "Number of epochs to increment the rollout."
-    max: PositiveInt = Field(example=1)
+    max: NonNegativeInt = Field(example=1)
     "Maximum number of rollouts."
 
 
@@ -76,8 +77,41 @@ class LR(BaseModel):
     "Number of iterations."
     min: NonNegativeFloat = Field(example=3e-7)
     "Minimum learning rate."
-    warmup_t: NonNegativeInt = Field(example=1000)
+    warmup: NonNegativeInt = Field(example=1000)
     "Number of warm up iteration. Default to 1000."
+
+
+class OptimizerSchema(PydanticBaseModel):
+    """Choosing the PydanticBaseModel to allow extra inputs."""
+
+    model_config = ConfigDict(extra="allow")
+
+    target_: str = Field(..., alias="_target_")
+    """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
+
+
+class ExplicitTimes(BaseModel):
+    """Time indices for input and output.
+
+    Starts at index 0. Input and output can overlap.
+    """
+
+    input: list[NonNegativeInt] = Field(examples=[0, 1])
+    "Input time indices."
+    target: list[NonNegativeInt] = Field(examples=[2])
+    "Target time indices."
+
+
+class TargetForcing(BaseModel):
+    """Forcing parameters for target output times.
+
+    Extra forcing parameters to use as input to distinguish between different target times.
+    """
+
+    data: list[str] = Field(examples=["insolation"])
+    "List of forcing parameters to use as input to the model at the interpolated step."
+    time_fraction: bool = Field(example=True)
+    "Use target time as a fraction between input boundary times as input."
 
 
 class LossScalingSchema(BaseModel):
@@ -89,47 +123,182 @@ class LossScalingSchema(BaseModel):
     "Scaling value associated to each surface variable loss."
 
 
-class PressureLevelScalerTargets(str, Enum):
-
-    relu_scaler = "anemoi.training.data.scaling.ReluPressureLevelScaler"
-    linear_scaler = "anemoi.training.data.scaling.LinearPressureLevelScaler"
-    polynomial_sclaer = "anemoi.training.data.scaling.PolynomialPressureLevelScaler"
-    no_scaler = "anemoi.training.data.scaling.NoPressureLevelScaler"
+class GeneralVariableLossScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.GeneralVariableLossScaler"] = Field(..., alias="_target_")
+    weights: dict[str, float]
+    "Weight of each variable."  # Check keys (variables) are read ???
 
 
-class PressureLevelScalerSchema(BaseModel):
-    target_: PressureLevelScalerTargets = Field(
-        example="anemoi.training.data.scaling.ReluPressureLevelScaler",
+class VariableMaskingScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.VariableMaskingLossScaler"] = Field(..., alias="_target_")
+    variables: list[str] = Field(defaultexample=["tp"])
+    "Variables to compute the loss over."
+    invert: bool = Field(examples=False)
+    "Flag to invert the variable mask."
+
+
+class NaNMaskScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
+    use_processors_tendencies: bool = Field(default=False)
+    "Flag to include processors for tendencies when building the loss mask."
+
+
+class TendencyScalerTargets(str, Enum):
+    stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
+    var = "anemoi.training.losses.scalers.VarTendencyScaler"
+
+
+class TendencyScalerSchema(BaseModel):
+    target_: TendencyScalerTargets = Field(
+        example="anemoi.training.losses.scalers.StdevTendencyScaler",
         alias="_target_",
     )
-    minimum: float = Field(example=0.2)
-    "Minimum value of the scaling function."
-    slope: float = 0.001
-    "Slope of the scaling function."
+    timestep: str | None = Field(default=None, example="6h")
+    "Timestep key used to select tendency statistics for scalers."
 
 
-PossibleScalars = Annotated[
-    str,
-    AfterValidator(partial(allowed_values, values=["limited_area_mask", "variable", "loss_weights_mask", "*"])),
-]
+class VariableLevelScalerTargets(str, Enum):
+    relu_scaler = "anemoi.training.losses.scalers.ReluVariableLevelScaler"
+    linear_scaler = "anemoi.training.losses.scalers.LinearVariableLevelScaler"
+    polynomial_sclaer = "anemoi.training.losses.scalers.PolynomialVariableLevelScaler"
+    no_scaler = "anemoi.training.losses.scalers.NoVariableLevelScaler"
+
+
+class VariableLevelScalerSchema(BaseModel):
+    target_: VariableLevelScalerTargets = Field(
+        example="anemoi.training.losses.scalers.ReluVariableLevelScaler",
+        alias="_target_",
+    )
+    group: str = Field(example="pl")
+    "Group of variables to scale."
+    slope: float = Field(example=1.0)
+    "Slope of scaling function."
+    y_intercept: float = Field(example=0.001)
+    "Y-axis shift of scaling function."
+
+
+class GraphNodeAttributeScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.GraphNodeAttributeScaler"] = Field(..., alias="_target_")
+    nodes_name: str = Field(example="data")
+    "Name of the nodes to take the attribute from."
+    nodes_attribute_name: str = Field(example="area_weight")
+    "Name of the node attribute to return."
+    norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
+    "Normalisation method applied to the node attribute."
+
+
+class TimeStepScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.TimeStepScaler"] = Field(..., alias="_target_")
+    norm: Literal["unit-max", "unit-sum"] | None = Field(default="unit-sum", example="unit-sum")
+    "Normalisation method applied to the weights."
+    weights: list[float] = Field(example=[1.0, 1.0])
+    "Weights for each time step."
+
+
+class UniformTimeStepScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.UniformTimeStepScaler"] = Field(..., alias="_target_")
+    multistep_output: PositiveInt = Field(example=5)
+    "Number of output time steps."
+
+
+class LeadTimeDecayScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.LeadTimeDecayScaler"] = Field(..., alias="_target_")
+    output_lead_times: list[int] = Field(example=[0, 6, 12, 18, 24])
+    "Lead times corresponding to each output step."
+    decay_factor: float = Field(example=0.1)
+    "Decay factor for the lead time weights."
+    max_lead_time: int = Field(example=24)
+    "Maximum lead time for decay calculation."
+    decay_type: Literal["linear", "exponential"] | None = Field(default="linear", example="linear")
+    "Type of decay to apply."
+    inverse: bool | None = Field(default=False, example=False)
+    "If true, weights increase with lead time."
+    norm: Literal["unit-max", "unit-sum"] | None = Field(default="unit-sum", example="unit-sum")
+    "Normalisation method applied to the weights."
+
+
+class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler"] = Field(
+        ...,
+        alias="_target_",
+    )
+    nodes_name: str = Field(example="data")
+    "Name of the nodes to take the attribute from."
+    nodes_attribute_name: str = Field(example="area_weight")
+    "Name of the node attribute to return."
+    scaling_mask_attribute_name: str = Field(example="cutout_mask")
+    "Name of the node attribute to use as a mask to reweight the reference values."
+    weight_frac_of_total: float = Field(example=0.5)
+    "Fraction of total weight to assign to nodes within the scaling mask. The remaining weight is distributed among "
+    "nodes outside the mask."
+    norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
+    "Normalisation method applied to the node attribute."
+
+
+ScalerSchema = (
+    GeneralVariableLossScalerSchema
+    | VariableLevelScalerSchema
+    | VariableMaskingScalerSchema
+    | TendencyScalerSchema
+    | NaNMaskScalerSchema
+    | GraphNodeAttributeScalerSchema
+    | TimeStepScalerSchema
+    | UniformTimeStepScalerSchema
+    | LeadTimeDecayScalerSchema
+    | ReweightedGraphNodeAttributeScalerSchema
+)
 
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
-    rmse = "anemoi.training.losses.rmse.WeightedRMSELoss"
-    mse = "anemoi.training.losses.mse.WeightedMSELoss"
-    mae = "anemoi.training.losses.mae.WeightedMAELoss"
-    logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
-    huber = "anemoi.training.losses.huber.WeightedHuberLoss"
-    limited_mse = "anemoi.training.losses.limitedarea.WeightedMSELossLimitedArea"
+    kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
+    afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
+    rmse = "anemoi.training.losses.RMSELoss"
+    mse = "anemoi.training.losses.MSELoss"
+    weighted_mse = "anemoi.training.losses.WeightedMSELoss"
+    mae = "anemoi.training.losses.MAELoss"
+    logcosh = "anemoi.training.losses.LogCoshLoss"
+    huber = "anemoi.training.losses.HuberLoss"
+    combined = "anemoi.training.losses.combined.CombinedLoss"
+    fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
+    lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
 
 
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
-    scalars: list[PossibleScalars] = Field(example=["variable"])
+    scalers: list[str] = Field(example=["variable"])  # TODO(Mario): Validate scalers are defined
     "Scalars to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
+
+
+class KernelCRPSSchema(BaseLossSchema):
+    fair: bool = True
+    "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
+
+
+class AlmostFairKernelCRPSSchema(BaseLossSchema):
+    alpha: float = 1.0
+    """Factor for linear combination of fair (unbiased, ensemble variance component
+    weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
+    no_autocast: bool = True
+    "Deactivate autocast for the kernel CRPS calculation"
+
+
+class MultiScaleLossSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
+    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
+    weights: list[float]
+    keep_batch_sharded: bool
+    loss_matrices_path: str
+    loss_matrices: list[str | None]
+
+    @field_validator("weights")
+    @classmethod
+    def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
+        if "loss_matrices" in info.data:
+            assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
+        return v
 
 
 class HuberLossSchema(BaseLossSchema):
@@ -137,34 +306,38 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
-class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
-    inside_lam: bool = True
-    "Whether to compute the MSE inside or outside the limited area."
-    wmse_contribution: bool = False
-    "Whether to compute the contribution to the MSE or not."
+class SpectralLossSchema(BaseLossSchema):
+    """Spectral loss class."""
+
+    transform: Literal["fft2d", "sht"] = Field(..., example="fft2d")
+    """Type of spectral transform to use."""
+
+    class Config(BaseModel.Config):
+        """Override to allow extra parameters for spectral transforms."""
+
+        extra = "allow"
 
 
 class CombinedLossSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
-    losses: list[BaseLossSchema] = Field(min_length=1)
+    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
-    loss_weights: Union[list[Union[int, float]], None] = None
+    loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
 
     @field_validator("losses", mode="before")
     @classmethod
-    def add_empty_scalars(cls, losses: Any) -> Any:
-        """Add empty scalars to loss functions, as scalars can be set at top level."""
+    def add_empty_scalers(cls, losses: Any) -> Any:
+        """Add empty scalers to loss functions, as scalers can be set at top level."""
         from omegaconf.omegaconf import open_dict
 
         for loss in losses:
-            if "scalars" not in loss:
+            if "scalers" not in loss:
                 with open_dict(loss):
-                    loss["scalars"] = []
+                    loss["scalers"] = []
         return losses
 
     @model_validator(mode="after")
-    def check_length_of_weights_and_losses(self) -> CombinedLossSchema:
+    def check_length_of_weights_and_losses(self) -> Self:
         """Check that the number of losses and weights match, or if not set, skip."""
         losses, loss_weights = self.losses, self.loss_weights
         if loss_weights is not None and len(losses) != len(loss_weights):
@@ -173,58 +346,68 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaSchema, CombinedLossSchema]
+LossSchemas = (
+    BaseLossSchema
+    | HuberLossSchema
+    | CombinedLossSchema
+    | AlmostFairKernelCRPSSchema
+    | KernelCRPSSchema
+    | SpectralLossSchema
+    | MultiScaleLossSchema
+    | None
+)
 
 
-class GraphNodeAttributeSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.nodeweights.GraphNodeAttribute"] = Field(..., alias="_target_")
-    "Node loss weights object from anemoi.training.losses."
-    target_nodes: str = Field(examples=["data"])
-    "name of target nodes, key in HeteroData graph object."
-    node_attribute: str = Field(examples=["area_weight"])
-    "name of node weight attribute, key in HeteroData graph object."
+class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
+    ddp_ens = "anemoi.training.distributed.strategy.DDPEnsGroupStrategy"
+    ddp = "anemoi.training.distributed.strategy.DDPGroupStrategy"
 
 
-class ReweightedGraphNodeAttributeSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute"] = Field(..., alias="_target_")
-    "Node loss weights object from anemoi.training.losses."
-    target_nodes: str = Field(examples=["data"])
-    "name of target nodes, key in HeteroData graph object."
-    node_attribute: str = Field(examples=["area_weight"])
-    "name of node weight attribute, key in the nodes object."
-    scaled_attribute: str = Field(examples=["cutout_mask"])
-    "name of node attribute defining the subset of nodes to be scaled, key in the nodes object."
-    weight_frac_of_total: float = Field(examples=[0.3], ge=0, le=1)
-    "sum of weight of subset nodes as a fraction of sum of weight of all nodes after rescaling"
+class BaseDDPStrategySchema(BaseModel):
+    """Strategy configuration."""
+
+    target_: ImplementedStrategiesUsingBaseDDPStrategySchema = Field(..., alias="_target_")
+    num_gpus_per_model: PositiveInt = Field(example=2)
+    "Number of GPUs per model."
+    read_group_size: PositiveInt = Field(example=1)
+    "Number of GPUs per reader group. Defaults to number of GPUs."
 
 
-NodeLossWeightsSchema = Union[GraphNodeAttributeSchema, ReweightedGraphNodeAttributeSchema]
+class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
+    """Strategy object from anemoi.training.strategy."""
+
+    num_gpus_per_ensemble: PositiveInt = Field(example=2)
+    "Number of GPUs per ensemble."
 
 
-class ScaleValidationMetrics(BaseModel):
-    """Configuration for scaling validation metrics.
+StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
 
-    Here variable scaling is possible due to the metrics being calculated in the same way as the
-    training loss, within internal model space.
-    """
-
-    scalars_to_apply: list[str] = Field(example=["variable"])
-    """List of scalars to be applied."""
-    metrics: list[str]
-    """List of metrics to keep in normalised space.."""
+VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
-class TrainingSchema(BaseModel):
+class UpdateDsStatsOnCkptLoadSchema(BaseModel):
+    """Configuration for updating processor statistics on checkpoint load."""
+
+    states: bool = Field(default=False, example=False)
+    "Rebuild state pre/post-processing statistics from the current dataset."
+    tendencies: bool = Field(default=True, example=True)
+    "Rebuild tendency pre/post-processing statistics from the current dataset."
+
+
+class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    run_id: Union[str, None] = Field(example=None)
-    "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
-    fork_run_id: Union[str, None] = Field(example=None)
-    "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."
+    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
+    run_id: str | None = Field(example=None)
+    "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
+    fork_run_id: str | None = Field(example=None)
+    "Run ID to fork from, either last.ckpt or specified in system.input.warm_start."
     load_weights_only: bool = Field(example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
     transfer_learning: bool = Field(example=False)
     "Flag to activate transfer learning mode when loading a checkpoint."
+    update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
+    "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
@@ -232,40 +415,106 @@ class TrainingSchema(BaseModel):
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
-    """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
-    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""
+    """Number of input steps for the model.
+    E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
+    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
+    multistep_output: PositiveInt = Field(example=1, default=1)
+    """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
+    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)].
+    During rollout, if multistep_output > multistep_input, only the latest multistep_input outputs
+    are fed into the next step."""
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
-    num_sanity_val_steps: PositiveInt = Field(example=6)
+    num_sanity_val_steps: NonNegativeInt = Field(example=6)
     "Sanity check runs n batches of val before starting the training routine."
     gradient_clip: GradientClip
     "Config for gradient clipping."
+    strategy: StrategySchemas
+    "Strategy to use."
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
-    zero_optimizer: bool = Field(example=False)
-    "use ZeroRedundancyOptimizer, saves memory for larger models."
-    training_loss: LossSchemas
+    training_loss: DatasetDict[LossSchemas]
     "Training loss configuration."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
-    validation_metrics: list[LossSchemas]
-    "List of validation metrics configurations. These metrics "
-    scale_validation_metrics: ScaleValidationMetrics
-    """Configuration for scaling validation metrics."""
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
-    max_epochs: Union[PositiveInt, None] = None
+    scalers: DatasetDict[dict[str, ScalerSchema]]
+    "Scalers to use in the computation of the loss and validation scores."
+    validation_metrics: DatasetDict[dict[str, LossSchemas] | None]
+    "List of validation metrics configurations."
+    variable_groups: DatasetDict[VariableGroupType]
+    "Groups for variable loss scaling"
+    max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
     max_steps: PositiveInt = 150000
     "Maximum number of steps, stops earlier if max_epochs is reached first."
     lr: LR = Field(default_factory=LR)
     "Learning rate configuration."
-    variable_loss_scaling: LossScalingSchema
-    "Configuration of the variable scaling used in the loss computation."
-    pressure_level_scaler: PressureLevelScalerSchema
-    "Configuration of the pressure level scaler apllied in the loss computation."
-    metrics: list[str]
+    optimizer: OptimizerSchema = Field(default_factory=OptimizerSchema)
+    "Optimizer configuration."
+    recompile_limit: PositiveInt = 32
+    "How many times torch.compile will recompile a function for a given input shape."
+    metrics: DatasetDict[list[str]]
     "List of metrics"
-    node_loss_weights: NodeLossWeightsSchema
-    "Node loss weights configuration."
+    ensemble_size_per_device: PositiveInt = 1
+    "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
+
+
+class ForecasterSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphForecaster",] = Field(..., alias="model_task")
+    "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
+
+
+class ForecasterEnsSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
+    "Training objective."
+
+
+class DiffusionForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+    "Training objective."
+
+
+class DiffusionTendForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
+        ...,
+        alias="model_task",
+    )
+    "Training objective."
+
+
+class InterpolationSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
+    "Training objective."
+    explicit_times: ExplicitTimes
+    "Time indices for input and output."
+    target_forcing: DatasetDict[TargetForcing]
+    "Forcing parameters for target output times."
+
+
+class AutoencoderSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
+    "Training objective."
+
+
+class InterpolationMultiSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
+    "Training objective."
+    explicit_times: ExplicitTimes
+    "Time indices for input and output."
+    target_forcing: None
+    "Forcing parameters not applied for multi-outputs."
+
+
+TrainingSchema = Annotated[
+    ForecasterSchema
+    | ForecasterEnsSchema
+    | InterpolationSchema
+    | InterpolationMultiSchema
+    | DiffusionForecasterSchema
+    | DiffusionTendForecasterSchema
+    | AutoencoderSchema,
+    Discriminator("model_task"),
+]

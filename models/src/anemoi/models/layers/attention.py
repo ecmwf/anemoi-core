@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import Any
 from typing import Optional
 
 import einops
@@ -20,6 +21,7 @@ from packaging import version
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
@@ -34,6 +36,20 @@ class MultiHeadSelfAttention(nn.Module):
     allows for three different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - flash attention, see https://github.com/Dao-AILab/flash-attention
+
+    The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
+
+    "scaled_dot_product_attention" (SDPA)
+        SDPA is a pytorch function, so it is easiest to use but the least performant.
+        It runs on CPUs and GPUs.
+
+    "flash_attention"
+        Flash attention is optimised for efficient usage of the GPUs memory hierarchy. It loads smaller chunks
+        into fast local memory, and fuses attention into a single kernel to reduce the passes through memory.
+        It runs on Nvidia Ampere (e.g. A100) GPUs or newer and AMD MI200 GPUs or newer. Check the GitHub for
+        the full requirements.
+        You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
+        wheels available on the GitHub repo. On an aarch64 system, you have to build flash attention from source.
     """
 
     def __init__(
@@ -41,13 +57,15 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads: int,
         embed_dim: int,
         layer_kernels: DotDict,
-        bias: bool = False,
+        qkv_bias: bool = False,
+        qk_norm: bool = False,
         is_causal: bool = False,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
+        use_rotary_embeddings: bool = False,
     ):
         """Initialize MultiHeadSelfAttention.
 
@@ -64,15 +82,17 @@ class MultiHeadSelfAttention(nn.Module):
             number of heads
         embed_dim : int
             embedding dimension
-        bias : bool, optional
-            bias, by default False
+        qkv_bias : bool, optional
+            bias for querys, keys and values, by default False
+        qk_norm : bool, optional
+            normalize q and k, by default False
         is_causal : bool, optional
             apply causal attention mask, by default False
         window_size : Optional[int], optional
             window_size, by default None
         dropout_p : float, optional
             dropout probability, by default 0.0
-        attention_implementation: str, optional
+        attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
         softcap : float, optional
@@ -95,7 +115,9 @@ class MultiHeadSelfAttention(nn.Module):
         self.window_size = window_size
         self.dropout_p = dropout_p
         self.is_causal = is_causal
+        self.qk_norm = qk_norm
         self.softcap = softcap
+        self.use_rotary_embeddings = use_rotary_embeddings
 
         self.set_attention_function()
 
@@ -105,31 +127,42 @@ class MultiHeadSelfAttention(nn.Module):
         else:
             self.alibi_slopes = None
 
-        linear = layer_kernels["Linear"]
-        self.lin_qkv = linear(embed_dim, 3 * embed_dim, bias=bias)
+        linear = layer_kernels.Linear
+        self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.lin_v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
 
         self.projection = linear(embed_dim, embed_dim, bias=True)
+
+        if self.qk_norm:
+            self.q_norm = layer_kernels["QueryNorm"](self.head_dim)
+            self.k_norm = layer_kernels["KeyNorm"](self.head_dim)
 
     def set_attention_function(self):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
-        assert (
-            self.attention_implementation in attn_funcs
-        ), f"{self.attention_implementation} not supported. \
+        assert self.attention_implementation in attn_funcs, f"{self.attention_implementation} not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
-        LOGGER.info(f"Using {self.attention_implementation}")
 
         # initalise the attn func here
-        self.attention = attn_funcs[self.attention_implementation]()
+        if self.attention_implementation == "flash_attention":
+            self.attention = attn_funcs[self.attention_implementation](
+                use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
+            )
+        else:
+            self.attention = attn_funcs[self.attention_implementation]()
 
-    def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+    def attention_computation(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
-
-        query, key, value = self.lin_qkv(x).chunk(3, -1)
-
         if model_comm_group:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
@@ -150,6 +183,10 @@ class MultiHeadSelfAttention(nn.Module):
         value = shard_heads(value, shapes=shapes, mgroup=model_comm_group)
         dropout_p = self.dropout_p if self.training else 0.0
 
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
         out = self.attention(
             query,
             key,
@@ -162,16 +199,28 @@ class MultiHeadSelfAttention(nn.Module):
             alibi_slopes=self.alibi_slopes,
         )
 
-        out = shard_sequence(out, shapes=shapes, mgroup=model_comm_group)
+        out = shard_sequence(out, shapes=shapes, num_heads=self.num_heads, mgroup=model_comm_group)
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         out = self.projection(out)
 
         return out
 
+    def forward(
+        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+    ) -> Tensor:
+
+        query = self.lin_q(x)
+        key = self.lin_k(x)
+        value = self.lin_v(x)
+
+        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
+
 
 class SDPAAttentionWrapper(nn.Module):
-    """Wrapper for Pytorch scaled dot product attention"""
+    """Wrapper for Pytorch scaled dot product attention
+    To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
+    """
 
     def __init__(self):
         super().__init__()
@@ -181,6 +230,7 @@ class SDPAAttentionWrapper(nn.Module):
         self.attention = scaled_dot_product_attention
         self.mask = None
         self.window_size = None
+        LOGGER.info("Using scaled_dot_product_attention.")
 
     def update_mask(self, seq_len, window_size: int, device: str):
 
@@ -209,7 +259,7 @@ class SDPAAttentionWrapper(nn.Module):
             )
         if alibi_slopes is not None:
             NotImplementedError(
-                "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention or disable alibi slopes."
+                "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
             )
 
         sequence_len = query.shape[-2]
@@ -217,33 +267,84 @@ class SDPAAttentionWrapper(nn.Module):
         if window_size is not None and (self.mask is None or tuple(self.mask.shape) != (sequence_len, sequence_len)):
             self.update_mask(sequence_len, window_size=window_size, device=query.device)
 
-        with torch.nn.attention.sdpa_kernel(backends=[torch.nn.attention.SDPBackend.MATH]):
-            out = self.attention(
-                query,
-                key,
-                value,
-                attn_mask=self.mask,
-                is_causal=causal,
-                dropout_p=dropout_p,
-            )
+        out = self.attention(
+            query,
+            key,
+            value,
+            attn_mask=self.mask,
+            is_causal=causal,
+            dropout_p=dropout_p,
+        )
 
         return out
 
 
 class FlashAttentionWrapper(nn.Module):
-    """Wrapper for Flash attention."""
+    """Wrapper for Flash attention.
 
-    def __init__(self):
+    Either flash attn v2 or flash attn v3 (optimised for hoppers and newer), based on
+    what is installed.
+    flash attention v3 does not support rotary embeddings or alibi slopes. To use these
+    features, you should downgrade to flash attention v2.
+
+    """
+
+    def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
-        try:
-            import flash_attn
-        except ImportError:
-            raise ImportError("Error: Flash-attn not installed. Please install flash-attn to use Flash Attention")
 
-        if version.parse(flash_attn.__version__) < version.parse("2.6.0"):
-            raise RuntimeError("Error: Flash-attn version is too low. Update to 2.6.0 or higher.")
+        flash_attn, self.use_flash_attn_v3 = self._import_flash_attn()
+
+        flash_attn_version = version.parse(flash_attn.__version__)
+        self._init_rotary_embeddings(use_rotary_embeddings, head_dim, flash_attn_version)
+
+        self.attention = flash_attn.flash_attn_func
+
+    def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int, flash_attn_version) -> None:
+        """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
+        self.use_rotary_embeddings = False
+        if use_rotary_embeddings:
+            if flash_attn_version >= version.parse("3"):
+                raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
+            elif flash_attn_version <= version.parse("2.6"):
+                raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
+
+            from flash_attn.layers.rotary import RotaryEmbedding
+
+            self.use_rotary_embeddings = True
+            self.rotary_emb = RotaryEmbedding(dim=head_dim)
+
+    def _import_flash_attn(self) -> (Any, bool):
+        """imports either flash attention v2 or v3.
+
+        returns:
+            flash attention module
+            use_flash_attention_v3 (bool)
+        """
+        use_flash_attn_v3 = False
+
+        # to detect which flash-attn interface we're using we try import them
+        # Since each import is semantically different we use this to
+        # distringuish flash attention versions
+        try:
+            # first try import flash attn v2
+            import flash_attn
+
+        except ImportError as e_v2:
+
+            # failed importing flash attn v2,
+            # try import flash attn v3
+            try:
+                import flash_attn_interface as flash_attn
+
+            except ImportError as e_v3:
+                # print both errors if both fail
+                raise ImportError(f"Error importing flash-attn v2: {e_v2}\nError importing flash-attn v2: {e_v3}")
+            else:
+                LOGGER.info("Using flash attention v3")
+                use_flash_attn_v3 = True
         else:
-            self.attention = flash_attn.flash_attn_func
+            LOGGER.info("Using flash attention v2")
+        return flash_attn, use_flash_attn_v3
 
     def forward(
         self,
@@ -261,20 +362,63 @@ class FlashAttentionWrapper(nn.Module):
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
 
+        if alibi_slopes is not None and self.use_flash_attn_v3:
+            NotImplementedError(
+                "Alibi slopes is currently not supported by flash attention v3. please switch to flash attention v2 or disable alibi slopes."
+            )
+
         alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
 
-        out = self.attention(
-            query,
-            key,
-            value,
-            causal=False,
-            window_size=(window_size, window_size),
-            dropout_p=dropout_p,
-            softcap=softcap,
-            alibi_slopes=alibi_slopes,
-        )
+        if self.use_rotary_embeddings:
+            key = key.unsqueeze(-3)
+            value = value.unsqueeze(-3)
+            keyvalue = torch.cat((key, value), dim=-3)
+            query, keyvalue = self.rotary_emb(
+                query, keyvalue, max_seqlen=max(keyvalue.shape[1], query.shape[1])
+            )  # assumption seq const
+            key = keyvalue[:, :, 0, ...]
+            value = keyvalue[:, :, 1, ...]
+
+        if self.use_flash_attn_v3:
+            out = self.attention(
+                query,
+                key,
+                value,
+                causal=False,
+                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+                softcap=softcap,
+            )[
+                0
+            ]  # fav3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
+        else:
+            out = self.attention(
+                query,
+                key,
+                value,
+                causal=False,
+                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+                dropout_p=dropout_p,
+                softcap=softcap,
+                alibi_slopes=alibi_slopes,
+            )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
+
+
+class MultiHeadCrossAttention(MultiHeadSelfAttention):
+    """Multi Head Cross Attention Pytorch Layer."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(
+        self, x: PairTensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+    ) -> Tensor:
+        query = self.lin_q(x[1])
+        key = self.lin_k(x[0])
+        value = self.lin_v(x[0])
+
+        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
 
 
 def get_alibi_slopes(num_heads: int) -> Tensor:

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,325 +7,199 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
-
+import datetime
 import logging
-import os
-import random
-from functools import cached_property
-from typing import TYPE_CHECKING
+from abc import abstractmethod
 
 import numpy as np
 import torch
 from einops import rearrange
-from torch.utils.data import IterableDataset
-from torch.utils.data import get_worker_info
+from omegaconf import DictConfig
+from rich.console import Console
+from rich.tree import Tree
 
-from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.usable_indices import get_usable_indices
+from anemoi.datasets import open_dataset
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
-    from anemoi.training.data.grid_indices import BaseGridIndices
-
-
-class NativeGridDataset(IterableDataset):
-    """Iterable dataset for AnemoI data on the arbitrary grids."""
+class BaseAnemoiReader:
+    """Anemoi data reader for native grid datasets."""
 
     def __init__(
         self,
-        data_reader: Callable,
-        grid_indices: type[BaseGridIndices],
-        rollout: int = 1,
-        multistep: int = 1,
-        timeincrement: int = 1,
-        shuffle: bool = True,
-        label: str = "generic",
-        effective_bs: int = 1,
-    ) -> None:
-        """Initialize (part of) the dataset state.
+        dataset: str | dict,
+        start: datetime.datetime | int | None = None,
+        end: datetime.datetime | int | None = None,
+        frequency: str | None = None,
+        drop: list[str] | None = None,
+    ):
+        """Initialize Anemoi data reader."""
+        ds_kwargs = {}
+        if drop is not None:
+            ds_kwargs["drop"] = drop
 
-        Parameters
-        ----------
-        data_reader : Callable
-            user function that opens and returns the anemoi-datasets array data
-        grid_indices : Type[BaseGridIndices]
-            indices of the grid to keep. Defaults to None, which keeps all spatial indices.
-        rollout : int, optional
-            length of rollout window, by default 12
-        timeincrement : int, optional
-            time increment between samples, by default 1
-        multistep : int, optional
-            collate (t-1, ... t - multistep) into the input state vector, by default 1
-        shuffle : bool, optional
-            Shuffle batches, by default True
-        label : str, optional
-            label for the dataset, by default "generic"
-        effective_bs : int, default 1
-            effective batch size useful to compute the lenght of the dataset
-        """
-        self.label = label
-        self.effective_bs = effective_bs
+        if frequency is not None:
+            ds_kwargs["frequency"] = frequency
 
-        self.data = data_reader
+        self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
 
-        self.rollout = rollout
-        self.timeincrement = timeincrement
-        self.grid_indices = grid_indices
+    @property
+    def dates(self) -> np.ndarray:
+        """Return dataset dates."""
+        return self.data.dates
 
-        # lazy init
-        self.n_samples_per_epoch_total: int = 0
-        self.n_samples_per_epoch_per_worker: int = 0
-
-        # lazy init model and reader group info, will be set by the DDPGroupStrategy:
-        self.model_comm_group_rank = 0
-        self.model_comm_num_groups = 1
-        self.model_comm_group_id = 0
-        self.global_rank = 0
-
-        self.reader_group_rank = 0
-        self.reader_group_size = 1
-
-        # additional state vars (lazy init)
-        self.n_samples_per_worker = 0
-        self.chunk_index_range: np.ndarray | None = None
-        self.shuffle = shuffle
-
-        # Data dimensions
-        self.multi_step = multistep
-        assert self.multi_step > 0, "Multistep value must be greater than zero."
-        self.ensemble_dim: int = 2
-        self.ensemble_size = self.data.shape[self.ensemble_dim]
-
-    @cached_property
+    @property
     def statistics(self) -> dict:
         """Return dataset statistics."""
         return self.data.statistics
 
-    @cached_property
+    def statistics_tendencies(
+        self,
+        timestep: int | str | datetime.timedelta | None = None,
+    ) -> dict | None:
+        """Return dataset tendency statistics."""
+        if timestep is None:
+            timestep = getattr(self, "timestep", None)
+        if timestep is None:
+            msg = "timestep must be provided to compute tendency statistics."
+            raise ValueError(msg)
+        try:
+            return self.data.statistics_tendencies(timestep)
+        except (KeyError, AttributeError):
+            return None
+
+    @property
+    def variables(self) -> list[str]:
+        """Return dataset variables."""
+        return self.data.variables
+
+    @property
+    def missing(self) -> set[int]:
+        """Return dataset missing values mask."""
+        return self.data.missing
+
+    @property
     def metadata(self) -> dict:
         """Return dataset metadata."""
         return self.data.metadata()
 
-    @cached_property
+    @property
+    def frequency(self) -> datetime.timedelta:
+        """Return dataset frequency."""
+        return self.data.frequency
+
+    @property
     def supporting_arrays(self) -> dict:
         """Return dataset supporting_arrays."""
         return self.data.supporting_arrays()
 
-    @cached_property
-    def name_to_index(self) -> dict:
+    @property
+    def name_to_index(self) -> dict[str, int]:
         """Return dataset statistics."""
         return self.data.name_to_index
 
-    @cached_property
-    def resolution(self) -> dict:
+    @property
+    def resolution(self) -> str:
         """Return dataset resolution."""
         return self.data.resolution
 
-    @cached_property
-    def valid_date_indices(self) -> np.ndarray:
-        """Return valid date indices.
+    @property
+    @abstractmethod
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
 
-        A date t is valid if we can sample the sequence
-            (t - multistep + 1, ..., t + rollout)
-        without missing data (if time_increment is 1).
-
-        If there are no missing dates, total number of valid ICs is
-        dataset length minus rollout minus additional multistep inputs
-        (if time_increment is 1).
-        """
-        return get_usable_indices(self.data.missing, len(self.data), self.rollout, self.multi_step, self.timeincrement)
-
-    def set_comm_group_info(
+    def get_sample(
         self,
-        global_rank: int,
-        model_comm_group_id: int,
-        model_comm_group_rank: int,
-        model_comm_num_groups: int,
-        reader_group_rank: int,
-        reader_group_size: int,
-    ) -> None:
-        """Set model and reader communication group information (called by DDPGroupStrategy).
+        time_indices: slice | int | list[int],
+        grid_shard_indices: np.ndarray | None = None,
+    ) -> torch.Tensor:
+        """Get a sample from the dataset."""
+        if isinstance(grid_shard_indices, slice):
+            # Load only shards into CPU memory
+            x = self.data[time_indices, :, :, grid_shard_indices]
 
-        Parameters
-        ----------
-        global_rank : int
-            Global rank
-        model_comm_group_id : int
-            Model communication group ID
-        model_comm_group_rank : int
-            Model communication group rank
-        model_comm_num_groups : int
-            Number of model communication groups
-        reader_group_rank : int
-            Reader group rank
-        reader_group_size : int
-            Reader group size
-        """
-        self.global_rank = global_rank
-        self.model_comm_group_id = model_comm_group_id
-        self.model_comm_group_rank = model_comm_group_rank
-        self.model_comm_num_groups = model_comm_num_groups
-        self.reader_group_rank = reader_group_rank
-        self.reader_group_size = reader_group_size
-
-        assert self.reader_group_size >= 1, "reader_group_size must be positive"
-
-        LOGGER.debug(
-            "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
-            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
-            global_rank,
-            model_comm_group_id,
-            model_comm_group_rank,
-            model_comm_num_groups,
-            reader_group_rank,
-        )
-
-    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
-        """Called by worker_init_func on each copy of dataset.
-
-        This initialises after the worker process has been spawned.
-
-        Parameters
-        ----------
-        n_workers : int
-            Number of workers
-        worker_id : int
-            Worker ID
-
-        """
-        self.worker_id = worker_id
-
-        # Divide this equally across shards (one shard per group!)
-        shard_size = len(self.valid_date_indices) // self.model_comm_num_groups
-        shard_start = self.model_comm_group_id * shard_size
-        shard_end = (self.model_comm_group_id + 1) * shard_size
-
-        shard_len = shard_end - shard_start
-        self.n_samples_per_worker = shard_len // n_workers
-
-        low = shard_start + worker_id * self.n_samples_per_worker
-        high = min(shard_start + (worker_id + 1) * self.n_samples_per_worker, shard_end)
-        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
-
-        LOGGER.debug(
-            "Worker %d (pid %d, global_rank %d, model comm group %d) has low/high range %d / %d",
-            worker_id,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            low,
-            high,
-        )
-
-        base_seed = get_base_seed()
-
-        torch.manual_seed(base_seed)
-        random.seed(base_seed)
-        self.rng = np.random.default_rng(seed=base_seed)
-        sanity_rnd = self.rng.random(1)
-
-        LOGGER.debug(
-            (
-                "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
-                "group_rank %d, base_seed %d), sanity rnd %f"
-            ),
-            worker_id,
-            self.label,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            base_seed,
-            sanity_rnd,
-        )
-
-    def __iter__(self) -> torch.Tensor:
-        """Return an iterator over the dataset.
-
-        The datasets are retrieved by anemoi.datasets from anemoi datasets. This iterator yields
-        chunked batches for DDP and sharded training.
-
-        Currently it receives data with an ensemble dimension, which is discarded for
-        now. (Until the code is "ensemble native".)
-        """
-        if self.shuffle:
-            shuffled_chunk_indices = self.rng.choice(
-                self.valid_date_indices,
-                size=len(self.valid_date_indices),
-                replace=False,
-            )[self.chunk_index_range]
         else:
-            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
+            # Load full grid in CPU memory, select grid_shard after
+            # Note that anemoi-datasets currently doesn't support slicing + indexing
+            # in the same operation.
+            x = self.data[time_indices, :, :, :]
+            x = x[..., grid_shard_indices]  # select the grid shard
 
-        LOGGER.debug(
-            (
-                "Worker pid %d, label %s, worker id %d, global_rank %d, "
-                "model comm group %d, group_rank %d using indices[0:10]: %s"
-            ),
-            os.getpid(),
-            self.label,
-            self.worker_id,
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            shuffled_chunk_indices[:10],
-        )
-
-        for i in shuffled_chunk_indices:
-            start = i - (self.multi_step - 1) * self.timeincrement
-            end = i + (self.rollout + 1) * self.timeincrement
-
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[start : end : self.timeincrement, :, :, grid_shard_indices]
-            else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[start : end : self.timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]  # select the grid shard
-            x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-            self.ensemble_dim = 1
-
-            yield torch.from_numpy(x)
+        x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+        return torch.from_numpy(x)
 
     def __repr__(self) -> str:
-        return f"""
-            {super().__repr__()}
-            Dataset: {self.data}
-            Rollout: {self.rollout}
-            Multistep: {self.multi_step}
-            Timeincrement: {self.timeincrement}
-        """
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Frequency: {self.frequency}")
+        tree.add(f"Resolution: {self.resolution}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        return tree
 
 
-def worker_init_func(worker_id: int) -> None:
-    """Configures each dataset worker process.
+class NativeGridDataset(BaseAnemoiReader):
+    """Native grid dataset."""
 
-    Calls WeatherBenchDataset.per_worker_init() on each dataset object.
+    @property
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
+        return False
 
-    Parameters
-    ----------
-    worker_id : int
-        Worker ID
 
-    Raises
-    ------
-    RuntimeError
-        If worker_info is None
+class TrajectoryDataset(BaseAnemoiReader):
+    """Trajectory dataset."""
 
-    """
-    worker_info = get_worker_info()  # information specific to each worker process
-    if worker_info is None:
-        LOGGER.error("worker_info is None! Set num_workers > 0 in your dataloader!")
-        raise RuntimeError
-    dataset_obj = worker_info.dataset  # the copy of the dataset held by this worker process.
-    dataset_obj.per_worker_init(
-        n_workers=worker_info.num_workers,
-        worker_id=worker_id,
-    )
+    def __init__(
+        self,
+        dataset: str | dict,
+        trajectory_start: datetime.datetime,
+        trajectory_length: int,
+        start: datetime.datetime | int | None = None,
+        end: datetime.datetime | int | None = None,
+        frequency: str | None = None,
+        drop: list[str] | None = None,
+    ):
+        super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        self.trajectory_start = trajectory_start
+        self.trajectory_length = trajectory_length
+
+    @property
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
+        return True
+
+    @property
+    def trajectory_ids(self) -> list[str]:
+        trajectory_length_seconds = self.trajectory_length * frequency_to_seconds(self.frequency)
+        return (self.dates - self.trajectory_start) // np.timedelta64(trajectory_length_seconds, "s")
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = super().tree(prefix)
+        tree.add(f"Trajectory start: {self.trajectory_start}")
+        tree.add(f"Trajectory length: {self.trajectory_length} steps")
+        return tree
+
+
+def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
+    """Factory function to create dataset based on dataset configuration."""
+    if isinstance(dataset_config, DictConfig):
+        dataset_config = dict(dataset_config)
+    trajectory_config = dataset_config.pop("trajectory", {})
+    if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
+        LOGGER.info("Creating TrajectoryDataset...")
+        return TrajectoryDataset(
+            **dataset_config,
+            trajectory_start=trajectory_config["start"],
+            trajectory_length=trajectory_config["length"],
+        )
+
+    LOGGER.info("Creating NativeGridDataset...")
+    return NativeGridDataset(**dataset_config)

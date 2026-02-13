@@ -1,0 +1,32 @@
+---
+defaults:
+  - plot: multi
+  - callbacks: placeholder
+  - benchmark_profiler: detailed
+  - log: mlflow
+
+# another alternative if you don't have any callbacks is to remove it from the
+# defaults list and just use
+# callbacks: []
+
+debug:
+  # this will detect and trace back NaNs / Infs etc. but will slow down training
+  anomaly_detection: False
+
+enable_checkpointing: True
+checkpoint:
+  every_n_minutes:
+    save_frequency: 30 # Approximate, as this is checked at the end of training steps
+    num_models_saved: 3 # If set to k, saves the 'last' k model weights in the training.
+
+  every_n_epochs:
+    save_frequency: 1
+    num_models_saved: -1 # If set to -1, all checkpoints are kept ensuring runs can be continued/forked at any point in the training process
+
+  every_n_train_steps:
+    save_frequency: null # Does not scale with rollout
+    num_models_saved: 0
+
+enable_progress_bar: True
+check_val_every_n_epoch: 1
+print_memory_summary: False

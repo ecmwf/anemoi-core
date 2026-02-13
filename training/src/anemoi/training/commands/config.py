@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
+import argparse
 import contextlib
 import importlib.resources as pkg_resources
 import logging
@@ -17,24 +16,18 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import TYPE_CHECKING
 from typing import Any
 
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pydantic import BaseModel
 
 from anemoi.training.commands import Command
 from anemoi.training.schemas.base_schema import BaseSchema
-
-if TYPE_CHECKING:
-    import argparse
-    from collections.abc import Generator
-
-    from pydantic import BaseModel
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -106,7 +99,8 @@ class ConfigGenerator(Command):
         if args.subcommand == "validate":
             LOGGER.info("Validating configs.")
             LOGGER.warning(
-                "Note that this command is not taking into account if your config has a no_validation flag."
+                "Note that this command is not taking into account if your config has set \
+                    the config_validation flag to false."
                 "So this command will validate the config regardless of the flag.",
             )
             self.validate_config(args.config_name, args.mask_env_vars)
@@ -135,7 +129,7 @@ class ConfigGenerator(Command):
         """Copies the file to the destination directory."""
         try:
             shutil.copy2(item, file_path)
-            LOGGER.info("Copied %s to %s", item.name, file_path)
+            LOGGER.debug("Copied %s to %s", item.name, file_path)
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
 
@@ -212,9 +206,6 @@ class ConfigGenerator(Command):
         with tempfile.TemporaryDirectory() as tmpdirname:
             tmp_dir = Path(tmpdirname)
             self.copy_files(config_path, tmp_dir)
-            if not tmp_dir.exists():
-                LOGGER.error("No files found in  %s", config_path.absolute())
-                raise FileNotFoundError
 
             # Move to config directory to be able to handle hydra
             with change_directory(tmp_dir), initialize(version_base=None, config_path="./"):

@@ -8,35 +8,40 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import io
 import logging
 import os
 import re
 import sys
 import time
+from abc import ABC
+from abc import abstractmethod
+from argparse import Namespace
+from collections.abc import Mapping
 from pathlib import Path
 from threading import Thread
-from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
 from weakref import WeakValueDictionary
 
-from packaging.version import Version
+import mlflow
+from mlflow.exceptions import RestException
+from mlflow.tracking import MlflowClient
+from omegaconf import DictConfig
+from pytorch_lightning.callbacks import Checkpoint
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
+from typing_extensions import override
 
-from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+from anemoi.training.diagnostics.mlflow import LOG_MODEL
+from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
+from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
-from anemoi.training.diagnostics.mlflow.utils import health_check
-
-if TYPE_CHECKING:
-    from argparse import Namespace
-
-    import mlflow
+from anemoi.utils.mlflow.auth import TokenAuth
+from anemoi.utils.mlflow.utils import health_check
 
 LOGGER = logging.getLogger(__name__)
 
@@ -206,7 +211,7 @@ class LogsMonitor:
         # split lines and keep \n at the end of each line
         lines = [e + b"\n" for e in data.split(b"\n") if e]
 
-        ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")  # noqa: RUF039
+        ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")
 
         def _handle_csi(line: bytes) -> bytes:
             # removes the cursor up and down symbols from the line
@@ -241,7 +246,7 @@ class LogsMonitor:
         self.experiment.log_artifact(self.run_id, str(self.file_save_path))
 
 
-class AnemoiMLflowLogger(MLFlowLogger):
+class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
     """A custom MLflow logger that logs terminal output."""
 
     def __init__(
@@ -251,16 +256,19 @@ class AnemoiMLflowLogger(MLFlowLogger):
         run_name: str | None = None,
         tracking_uri: str | None = os.getenv("MLFLOW_TRACKING_URI"),
         save_dir: str | None = "./mlruns",
-        log_model: Literal["all"] | bool = False,
+        log_model: Literal["all"] | bool = LOG_MODEL,
         prefix: str = "",
-        resumed: bool | None = False,
-        forked: bool | None = False,
         run_id: str | None = None,
         fork_run_id: str | None = None,
         offline: bool | None = False,
         authentication: bool | None = None,
+        system: bool | None = True,
+        terminal: bool | None = True,
         log_hyperparams: bool | None = True,
+        expand_hyperparams: list[str] | None = None,
         on_resume_create_child: bool | None = True,
+        max_params_length: int | None = MAX_PARAMS_LENGTH,
+        http_max_retries: int | None = 35,
     ) -> None:
         """Initialize the AnemoiMLflowLogger.
 
@@ -280,10 +288,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
             Log model checkpoints to server (expensive), by default False
         prefix : str, optional
             Prefix for experiments, by default ""
-        resumed : bool | None, optional
-            Whether the run was resumed or not, by default False
-        forked : bool | None, optional
-            Whether the run was forked or not, by default False
         run_id : str | None, optional
             Run id of current run, by default None
         fork_run_id : str | None, optional
@@ -292,57 +296,114 @@ class AnemoiMLflowLogger(MLFlowLogger):
             Whether to run offline or not, by default False
         authentication : bool | None, optional
             Whether to authenticate with server or not, by default None
+        system: bool | None, optional
+            If True, log system metrics, by default True
+        terminal: bool | None, optional
+            If True, log terminal output to mlflow, by default True
         log_hyperparams : bool | None, optional
             Whether to log hyperparameters, by default True
+        expand_hyperparams: list[str] | None, optional
+            keys to expand within params. Any key being expanded will have lists converted
+            according to `expand_iterables`. By default ['config']
         on_resume_create_child: bool | None, optional
             Whether to create a child run when resuming a run, by default False
+        max_params_length: int | None, optional
+            Maximum number of params to be logged to Mlflow
+        http_max_retries: int | None, optional
+            Maximum number of retries for MLflow HTTP requests, default 35
         """
-        self._resumed = resumed
-        self._forked = forked
+        self.authentication = authentication
+        self.offline = offline
+        self.log_system = system
+        self.log_terminal = terminal
+        self.expand_hyperparams = expand_hyperparams if expand_hyperparams else ["config"]
+        self._resumed = run_id is not None
+        self._forked = fork_run_id is not None
         self._flag_log_hparams = log_hyperparams
+        if self._resumed and not on_resume_create_child:
+            LOGGER.info(
+                "Resuming run without creating child run - MLFlow logs will not update the"
+                "initial runs hyperparameters with those of the resumed run."
+                "To update the initial run's hyperparameters, set "
+                "`diagnostics.log.mlflow.on_resume_create_child: True`.",
+            )
+            self._flag_log_hparams = False
 
+        # initialize server2server lineage attributes
         self._fork_run_server2server = None
         self._parent_run_server2server = None
+        self._parent_dry_run = False
+        self._max_params_length = max_params_length
 
-        enabled = authentication and not offline
-        self.auth = TokenAuth(tracking_uri, enabled=enabled)
+        # max http retries
+        os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(http_max_retries)
+        os.environ["_MLFLOW_HTTP_REQUEST_MAX_RETRIES_LIMIT"] = str(http_max_retries + 1)
 
-        if rank_zero_only.rank == 0:
-            if offline:
-                LOGGER.info("MLflow is logging offline.")
+        # these are the default values, but set them explicitly in case they change
+        os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR"] = "2"
+        os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_JITTER"] = "1"
+
+        # Report max parameters length
+        LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
+
+        self.tracking_uri = tracking_uri
+        # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
+        if self.offline:
+            if self._resumed or self._forked:
+                self.tracking_uri = save_dir
             else:
-                LOGGER.info("MLflow token authentication %s for %s", "enabled" if enabled else "disabled", tracking_uri)
-                self.auth.authenticate()
-                health_check(tracking_uri)
+                # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
+                self.tracking_uri = None
+                if save_dir is None:
+                    # otherwise, by default we create a dir called "None"... not ideal
+                    save_dir = "./mlruns"
 
+        else:
+            # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
+            # saving dir and save all artifacts/metrics to the remote server database
+            LOGGER.info("AnemoiMLFlow logging to %s", self.tracking_uri)
+            save_dir = None
+
+        if save_dir is not None:
+            Path(save_dir).mkdir(parents=True, exist_ok=True)
+
+        self._init_authentication()
         run_id, run_name, tags = self._get_mlflow_run_params(
             project_name=project_name,
             run_name=run_name,
             config_run_id=run_id,
             fork_run_id=fork_run_id,
-            tracking_uri=tracking_uri,
             on_resume_create_child=on_resume_create_child,
         )
-        # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
-        if offline:
-            # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
-            tracking_uri = None
-
-        else:
-            # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
-            # saving dir and save all artifacts/metrics to the remote server database
-            save_dir = None
 
         super().__init__(
             experiment_name=experiment_name,
             run_name=run_name,
-            tracking_uri=tracking_uri,
+            tracking_uri=self.tracking_uri,
             tags=tags,
             save_dir=save_dir,
             log_model=log_model,
             prefix=prefix,
             run_id=run_id,
         )
+
+        # Track logged metrics to prevent duplicate logs
+        # 2000 has been chosen as this should contain metrics form many steps
+        self._logged_metrics = FixedLengthSet(maxlen=2000)  # Track (key, step)
+
+    @abstractmethod
+    def _init_authentication(self) -> None:
+        """Initialize authentication specific to each logger."""
+
+    def _check_dry_run(self, run: mlflow.entities.Run) -> None:
+        """Check if the parent run is a dry run.
+
+        A dry run is a run that is used as template base run
+        but do not contain any checkpoints.
+        """
+        dry_run = run.data.tags.get("dry_run", "False") == "True"
+        LOGGER.info("Parent run is a Dry Run: %s", dry_run)
+        self._parent_dry_run = dry_run
 
     def _check_server2server_lineage(self, run: mlflow.entities.Run) -> bool:
         """Address lineage and metadata for server2server runs.
@@ -369,10 +430,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
         run_name: str,
         config_run_id: str,
         fork_run_id: str,
-        tracking_uri: str,
         on_resume_create_child: bool,
     ) -> tuple[str | None, str, dict[str, Any]]:
-
         run_id = None
         tags = {"projectName": project_name}
 
@@ -389,28 +448,46 @@ class AnemoiMLflowLogger(MLFlowLogger):
             import mlflow
 
             self.auth.authenticate()
-            mlflow_client = mlflow.MlflowClient(tracking_uri)
+            mlflow_client = mlflow.MlflowClient(self.tracking_uri)
 
-            if config_run_id and on_resume_create_child:
+            # This block is used when a run ID is specified with child runs option activated
+            if config_run_id and on_resume_create_child and not fork_run_id:
                 parent_run_id = config_run_id  # parent_run_id
                 parent_run = mlflow_client.get_run(parent_run_id)
                 run_name = parent_run.info.run_name
                 self._check_server2server_lineage(parent_run)
+                self._check_dry_run(parent_run)
                 tags["mlflow.parentRunId"] = parent_run_id
                 tags["resumedRun"] = "True"  # tags can't take boolean values
-            elif config_run_id and not on_resume_create_child:
+            # This block is used when a run ID is specified without child runs option activated
+            elif config_run_id and not on_resume_create_child and not fork_run_id:
                 run_id = config_run_id
                 run = mlflow_client.get_run(run_id)
                 run_name = run.info.run_name
                 self._check_server2server_lineage(run)
+                self._check_dry_run(run)
                 mlflow_client.update_run(run_id=run_id, status="RUNNING")
                 tags["resumedRun"] = "True"
+            # This block is used when a run is forked and an existing run ID is specified
+            # Child run option is activated
+            elif config_run_id and fork_run_id:
+                parent_run_id = config_run_id  # parent_run_id which is the main run ID
+                parent_run = mlflow_client.get_run(parent_run_id)
+                run_name = parent_run.info.run_name
+                self._check_server2server_lineage(parent_run)
+                self._check_dry_run(parent_run)
+                tags["mlflow.parentRunId"] = config_run_id  # We want to be linked to the main run ID
+                tags["resumedRun"] = "True"  # We want to be linked to the main run ID
+                tags["forkedRun"] = "True"  # This is a forked run
+                tags["forkedRunId"] = fork_run_id  # This is a forked run
+            # This block is used when a run is forked without no child runs
             else:
                 parent_run_id = fork_run_id
                 tags["forkedRun"] = "True"
                 tags["forkedRunId"] = parent_run_id
                 run = mlflow_client.get_run(parent_run_id)
                 self._check_server2server_lineage(run)
+                self._check_dry_run(run)
 
         if not run_name:
             import uuid
@@ -422,11 +499,32 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
         return run_id, run_name, tags
 
+    @override
     @property
     def experiment(self) -> MLFlowLogger.experiment:
         if rank_zero_only.rank == 0:
             self.auth.authenticate()
         return super().experiment
+
+    @override
+    @rank_zero_only
+    def log_metrics(self, metrics: Mapping[str, float], step: int | None = None) -> None:
+        cleaned_metrics = metrics.copy()
+        for k in metrics:
+            metric_id = (k, step or 0)
+            if metric_id in self._logged_metrics:
+                cleaned_metrics.pop(k)
+                continue
+            self._logged_metrics.add(metric_id)
+        try:
+            return super().log_metrics(metrics=cleaned_metrics, step=step)
+        except RestException as e:
+            # Handle duplicate metric key issue gracefully
+            if "duplicate key value violates unique constraint" in str(e):
+                LOGGER.warning("Duplicate metric detected %s", e)
+            else:
+                # Re-raise if it's a different kind of error
+                raise
 
     @rank_zero_only
     def log_system_metrics(self) -> None:
@@ -459,6 +557,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
                     LOGGER.warning("Failed to init AMD GPU Monitor: %s", e)
 
         mlflow.enable_system_metrics_logging()
+        # https://mlflow.org/docs/latest/system-metrics/
+        # By default, system metrics are sampled every 10 seconds
+        # we choose to update this to 100 - system metrics are logged every 1 min 30 seconds
+        mlflow.set_system_metrics_sampling_interval(interval=100)
         system_monitor = CustomSystemMetricsMonitor(
             self.run_id,
             resume_logging=self.run_id is not None,
@@ -483,58 +585,11 @@ class AnemoiMLflowLogger(MLFlowLogger):
         self.run_id_to_log_monitor[self.run_id] = log_monitor
         log_monitor.start()
 
-    @staticmethod
-    def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
-        """Clean up params to avoid issues with mlflow.
-
-        Too many logged params will make the server take longer to render the
-        experiment.
-
-        Parameters
-        ----------
-        params : dict[str, Any]
-            Parameters to clean up.
-
-        Returns
-        -------
-        dict[str, Any]
-            Cleaned up params ready for MlFlow.
-        """
-        prefixes_to_remove = [
-            "hardware",
-            "data",
-            "dataloader",
-            "model",
-            "training",
-            "diagnostics",
-            "metadata.config",
-            "metadata.dataset.variables_metadata",
-            "metadata.dataset.specific.forward.forward.attrs.variables_metadata",
-        ]
-        keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
-        for key in keys_to_remove:
-            del params[key]
-        return params
-
     @rank_zero_only
-    def log_hyperparams_as_artifact(self, params: dict[str, Any] | Namespace) -> None:
-        """Log hyperparameters as an artifact."""
-        import json
-        import tempfile
-        from json import JSONEncoder
-
-        class StrEncoder(JSONEncoder):
-            def default(self, o: Any) -> str:
-                return str(o)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            path = Path(tmp_dir) / "config.json"
-            with Path.open(path, "w") as f:
-                json.dump(params, f, cls=StrEncoder)
-            self.experiment.log_artifact(run_id=self.run_id, local_path=path)
-
-    @rank_zero_only
-    def log_hyperparams(self, params: dict[str, Any] | Namespace, *, expand_keys: list[str] | None = None) -> None:
+    def log_hyperparams(
+        self,
+        params: dict[str, Any] | Namespace,
+    ) -> None:
         """Overwrite the log_hyperparams method.
 
         - flatten config params using '.'.
@@ -545,49 +600,26 @@ class AnemoiMLflowLogger(MLFlowLogger):
         ----------
         params : dict[str, Any] | Namespace
             params to log
-        expand_keys : list[str] | None, optional
-            keys to expand within params. Any key being expanded will
-            have lists converted according to `expand_iterables`,
-            by default None.
         """
         if self._flag_log_hparams:
             params = _convert_params(params)
 
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
             if config := params.get("config"):
-                params["config"] = config.model_dump(by_alias=True)
+                params["config"] = config if isinstance(config, dict | DictConfig) else config.model_dump(by_alias=True)
 
-            import mlflow
-            from mlflow.entities import Param
-
-            truncation_length = 250
-
-            if Version(mlflow.VERSION) >= Version("1.28.0"):
-                truncation_length = 500
-
-            self.log_hyperparams_as_artifact(params)
-
-            expanded_params = {}
-            params = params.copy()
-
-            for key in expand_keys or []:
-                if key in params:
-                    expanded_params.update(
-                        expand_iterables(params.pop(key), size_threshold=None, delimiter="."),
-                    )
-            expanded_params.update(params)
-
-            expanded_params = _flatten_dict(
-                expanded_params,
-                delimiter=".",
-            )  # Flatten dict with '.' to not break API queries
-            expanded_params = self._clean_params(expanded_params)
-
-            # Truncate parameter values.
-            params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
-
-            for idx in range(0, len(params_list), 100):
-                self.experiment.log_batch(run_id=self.run_id, params=params_list[idx : idx + 100])
+            self.log_hyperparams_as_mlflow_artifact(
+                client=self.experiment,
+                run_id=self.run_id,
+                params=params,
+            )
+            self.log_hyperparams_in_mlflow(
+                self.experiment,
+                self.run_id,
+                params,
+                expand_keys=self.expand_hyperparams,
+                max_params_length=self._max_params_length,
+            )
 
     @rank_zero_only
     def finalize(self, status: str = "success") -> None:
@@ -601,3 +633,155 @@ class AnemoiMLflowLogger(MLFlowLogger):
             self.run_id_to_log_monitor[self.run_id].finish(status)
 
         super().finalize(status)
+
+    @classmethod
+    def log_hyperparams_in_mlflow(
+        cls,
+        client: MlflowClient,
+        run_id: str,
+        params: dict[str, Any] | Namespace,
+        *,
+        expand_keys: list[str] | None = None,
+        clean_params: bool = True,
+        max_params_length: int | None = MAX_PARAMS_LENGTH,
+    ) -> None:
+        """Log hyperparameters to MLflow server.
+
+        - flatten config params using '.'.
+        - expand keys within params to avoid truncation.
+        - log hyperparameters as an artifact.
+
+        Parameters
+        ----------
+        client : MlflowClient
+            MLflow client.
+        run_id : str
+            Run ID.
+        params : dict[str, Any] | Namespace
+            params to log.
+        expand_keys : list[str] | None, optional
+            keys to expand within params. Any key being expanded will
+            have lists converted according to `expand_iterables`,
+            by default None.
+        max_params_length: int | None, optional
+            Maximum number of params to be logged to Mlflow
+        """
+        import mlflow
+        from mlflow.entities import Param
+
+        try:  # Check maximum param value length is available and use it
+            truncation_length = mlflow.utils.validation.MAX_PARAM_VAL_LENGTH
+        except AttributeError:  # Fallback (in case of MAX_PARAM_VAL_LENGTH not available)
+            truncation_length = 250  # Historical default value
+
+        cls.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
+
+        expanded_params = {}
+        params = params.copy()
+        for key in expand_keys or []:
+            if key in params:
+                expanded_params.update(
+                    expand_iterables(params, size_threshold=None, delimiter="."),
+                )
+        expanded_params.update(params)
+
+        expanded_params = _flatten_dict(
+            expanded_params,
+            delimiter=".",
+        )  # Flatten dict with '.' to not break API queries
+
+        if clean_params:
+            expanded_params = clean_config_params(expanded_params)
+
+        LOGGER.info("Logging %s parameters", len(expanded_params))
+        if len(expanded_params) > max_params_length:
+            msg = (
+                f"Too many params: {len(expanded_params)} > {max_params_length}",
+                "Please revisit the fields being logged and add redundant or irrelevant "
+                "ones to the clean_config_params function.",
+            )
+            raise ValueError(msg)
+
+        # Truncate parameter values.
+        params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
+        for idx in range(0, len(params_list), 100):
+            client.log_batch(run_id=run_id, params=params_list[idx : idx + 100])
+
+    @staticmethod
+    def log_hyperparams_as_mlflow_artifact(
+        client: MlflowClient,
+        run_id: str,
+        params: dict[str, Any] | Namespace,
+    ) -> None:
+        """Log hyperparameters as an artifact."""
+        import json
+        import tempfile
+        from json import JSONEncoder
+
+        class StrEncoder(JSONEncoder):
+            def default(self, o: Any) -> str:
+                return str(o)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            with Path.open(path, "w") as f:
+                json.dump(params, f, cls=StrEncoder)
+            client.log_artifact(run_id=run_id, local_path=path)
+
+    @override
+    @rank_zero_only
+    def after_save_checkpoint(self, checkpoint_callback: Checkpoint) -> None:
+        """Logs model checkpoint as an artifact, sanitizing the path correctly."""
+        if not self._log_model:
+            return
+
+        import shutil
+        import tempfile
+
+        # Get the path to the checkpoint file saved by the callback
+        model_path = checkpoint_callback.last_model_path or checkpoint_callback.best_model_path
+        if not model_path or not Path(model_path).exists():
+            LOGGER.warning("after_save_checkpoint failed: Checkpoint path not found.")
+            return
+
+        # Use a temporary directory to handle the sanitized file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 1. Create a safe filename by replacing the colon
+            safe_filename = Path(Path(model_path).name.replace(":", "-"))
+
+            # 2. Create the full path for the temporary, sanitized file
+            tmp_model_path = Path(tmpdir) / safe_filename
+
+            # 3. Copy the original checkpoint to this new temporary path
+            shutil.copy2(model_path, tmp_model_path)
+
+            # 4. Define ONLY the destination directory for MLflow
+            artifact_subdir = "checkpoints"
+
+            # 5. Log the sanitized temporary file into the 'checkpoints' directory
+            msg = f"Logging checkpoint '{model_path}' to MLflow artifact path '{artifact_subdir}/{safe_filename}'"
+            LOGGER.info(msg)
+            try:
+                self.experiment.log_artifact(self.run_id, tmp_model_path, artifact_subdir)
+            except Exception:
+                LOGGER.exception()
+                raise
+
+
+class AnemoiMLflowLogger(BaseAnemoiMLflowLogger):
+    def _init_authentication(self) -> None:
+        """Authentication for a standard MLFlow server."""
+        enabled = self.authentication and not self.offline
+        self.auth = TokenAuth(self.tracking_uri, enabled=enabled)
+
+        if rank_zero_only.rank == 0:
+            if self.offline:
+                LOGGER.info("MLflow is logging offline.")
+            else:
+                LOGGER.info(
+                    "MLflow token authentication %s for %s",
+                    "enabled" if enabled else "disabled",
+                    self.tracking_uri,
+                )
+                self.auth.authenticate()
+                health_check(self.tracking_uri)

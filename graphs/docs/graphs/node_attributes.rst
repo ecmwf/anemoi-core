@@ -20,7 +20,8 @@ connections only between subsets of nodes.
    :maxdepth: 1
 
    node_attributes/weights
-   node_attributes/zarr_attribute
+   node_attributes/anemoi_dataset_attribute
+   node_attributes/area_masks
 
 Additionally, different boolean operations have been implemented to
 support more complex use cases:

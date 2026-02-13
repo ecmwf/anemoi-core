@@ -1,5 +1,5 @@
 # Manage labels of pull requests that originate from forks
-name: "[Pull Request] Label PRs from public forks"
+name: "[PR] Label Forks"
 
 on:
   pull_request_target:

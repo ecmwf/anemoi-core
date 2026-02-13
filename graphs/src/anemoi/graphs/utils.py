@@ -7,12 +7,32 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
+
+from enum import Enum
 
 import torch
 from sklearn.neighbors import NearestNeighbors
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+
+
+def get_distributed_device() -> torch.device:
+    """Get the distributed device.
+
+    Returns
+    -------
+    torch.device
+        The distributed device.
+    """
+    if torch.cuda.is_available():
+        import os
+
+        local_rank = int(os.environ.get("SLURM_LOCALID", 0))
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        device = "cpu"
+
+    return device
 
 
 def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
@@ -22,7 +42,7 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
     ----------
     coords_rad : torch.Tensor
         corrdinates in radians
-    mask : Optional[torch.Tensor], optional
+    mask : torch.Tensor, optional
         mask to remove nodes, by default None
 
     Returns
@@ -51,7 +71,7 @@ def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | N
     ----------
     coords_rad : torch.Tensor
         corrdinates in radians
-    mask : Optional[torch.Tensor], optional
+    mask : torch.Tensor, optional
         mask to remove nodes, by default None
 
     Returns
@@ -106,3 +126,31 @@ def haversine_distance(source_coords: torch.Tensor, target_coords: torch.Tensor)
     )
     c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
     return c
+
+
+class NodesAxis(Enum):
+    SOURCE = 0
+    TARGET = 1
+
+
+def get_edge_attributes(config: dict, source_name: str, target_name: str) -> dict:
+    """Get edge attributes out of a graph config
+
+    Parameters
+    ----------
+    config : dict
+        The graph configuration.
+    source_name : str
+        Name of source nodes of edges to be considered
+    target_name : str
+        Name of target nodes of edges to be considered
+    Returns
+    -------
+    dict
+        Dictionary of the form {attribute_name: attribute}
+    """
+    attrs = {}
+    for edges_config in config.get("edges", {}):
+        if edges_config["source_name"] == source_name and edges_config["target_name"] == target_name:
+            attrs.update(edges_config["attributes"])
+    return attrs

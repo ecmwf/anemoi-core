@@ -7,6 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .area_weights import CosineLatWeightedAttribute
+from .area_weights import IsolatitudeAreaWeights
+from .area_weights import MaskedPlanarAreaWeights
 from .area_weights import PlanarAreaWeights
 from .area_weights import SphericalAreaWeights
 from .area_weights import UniformWeights
@@ -14,15 +17,24 @@ from .boolean_op import BooleanAndMask
 from .boolean_op import BooleanNot
 from .boolean_op import BooleanOrMask
 from .masks import CutOutMask
+from .masks import GridsMask
+from .masks import LimitedAreaMask
 from .masks import NonmissingAnemoiDatasetVariable
+from .masks import NonzeroAnemoiDatasetVariable
 
 __all__ = [
+    "GridsMask",
     "SphericalAreaWeights",
     "PlanarAreaWeights",
     "UniformWeights",
     "CutOutMask",
+    "LimitedAreaMask",
+    "MaskedPlanarAreaWeights",
     "NonmissingAnemoiDatasetVariable",
+    "NonzeroAnemoiDatasetVariable",
     "BooleanAndMask",
     "BooleanNot",
     "BooleanOrMask",
+    "CosineLatWeightedAttribute",
+    "IsolatitudeAreaWeights",
 ]

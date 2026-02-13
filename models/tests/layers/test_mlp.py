@@ -10,7 +10,6 @@
 
 import pytest
 import torch
-from hydra.utils import instantiate
 
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.utils import load_layer_kernels
@@ -43,22 +42,22 @@ def num_out_feature():
 
 @pytest.fixture
 def layer_kernels():
-    return instantiate(load_layer_kernels())
+    return load_layer_kernels()
 
 
 class TestMLP:
     def test_init(self, num_features, hdim, num_out_feature, layer_kernels):
         """Test MLP initialization."""
-        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, n_extra_layers=0, activation="SiLU")
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, n_extra_layers=0)
         assert isinstance(mlp, MLP)
-        assert isinstance(mlp.model, torch.nn.Sequential)
-        assert len(mlp.model) == 6
+        assert isinstance(mlp.mlp, torch.nn.Sequential)
+        assert len(mlp.mlp) == 5
 
-        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 0, "ReLU", False, False, False)
-        assert len(mlp.model) == 5
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 0, False, False)
+        assert len(mlp.mlp) == 5
 
-        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 1, "SiLU", False, False, False)
-        assert len(mlp.model) == 7
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 1, False, False)
+        assert len(mlp.mlp) == 7
 
     def test_forwards(self, batch_size, nlatlon, num_features, hdim, num_out_feature, layer_kernels):
         """Test MLP forward pass."""

@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from abc import ABC
@@ -18,10 +17,7 @@ import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.generate.hex_icosahedron import create_hex_nodes
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
-from anemoi.graphs.generate.tri_icosahedron import create_stretched_tri_nodes
-from anemoi.graphs.generate.tri_icosahedron import create_tri_nodes
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
@@ -51,7 +47,6 @@ class IcosahedralNodes(BaseNodeBuilder, ABC):
             "resolutions",
             "nx_graph",
             "node_ordering",
-            "area_mask_builder",
         }
         if not hasattr(self, "multi_scale_edge_cls"):
             raise AttributeError("Classes inheriting from IcosahedralNodes must set 'multi_scale_edge_cls' attribute.")
@@ -90,6 +85,7 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
     ) -> None:
 
         super().__init__(resolution, name)
+        self.hidden_attributes = self.hidden_attributes | {"area_mask_builder"}
 
         self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
@@ -107,6 +103,8 @@ class TriNodes(IcosahedralNodes):
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
+        from anemoi.graphs.generate.tri_icosahedron import create_tri_nodes
+
         return create_tri_nodes(resolution=max(self.resolutions))
 
 
@@ -119,6 +117,8 @@ class HexNodes(IcosahedralNodes):
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.HexNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
+        from anemoi.graphs.generate.hex_icosahedron import create_hex_nodes
+
         return create_hex_nodes(resolution=max(self.resolutions))
 
 
@@ -136,6 +136,8 @@ class LimitedAreaTriNodes(LimitedAreaIcosahedralNodes):
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
+        from anemoi.graphs.generate.tri_icosahedron import create_tri_nodes
+
         return create_tri_nodes(resolution=max(self.resolutions), area_mask_builder=self.area_mask_builder)
 
 
@@ -153,10 +155,12 @@ class LimitedAreaHexNodes(LimitedAreaIcosahedralNodes):
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.HexNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
+        from anemoi.graphs.generate.hex_icosahedron import create_hex_nodes
+
         return create_hex_nodes(resolution=max(self.resolutions), area_mask_builder=self.area_mask_builder)
 
 
-class StretchedIcosahedronNodes(IcosahedralNodes, ABC):
+class StretchedIcosahedronNodes(LimitedAreaIcosahedralNodes, ABC):
     """Nodes based on iterative refinements of an icosahedron with 2
     different resolutions.
 
@@ -172,18 +176,17 @@ class StretchedIcosahedronNodes(IcosahedralNodes, ABC):
         lam_resolution: int,
         name: str,
         reference_node_name: str,
-        mask_attr_name: str,
+        mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
     ) -> None:
-
-        super().__init__(lam_resolution, name)
+        super().__init__(
+            resolution=lam_resolution,
+            reference_node_name=reference_node_name,
+            mask_attr_name=mask_attr_name,
+            margin_radius_km=margin_radius_km,
+            name=name,
+        )
         self.global_resolution = global_resolution
-
-        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
-
-    def register_nodes(self, graph: HeteroData) -> None:
-        self.area_mask_builder.fit(graph)
-        return super().register_nodes(graph)
 
 
 class StretchedTriNodes(StretchedIcosahedronNodes):
@@ -196,6 +199,8 @@ class StretchedTriNodes(StretchedIcosahedronNodes):
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.StretchedTriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
+        from anemoi.graphs.generate.tri_icosahedron import create_stretched_tri_nodes
+
         return create_stretched_tri_nodes(
             base_resolution=self.global_resolution,
             lam_resolution=max(self.resolutions),

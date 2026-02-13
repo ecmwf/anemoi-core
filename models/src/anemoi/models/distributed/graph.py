@@ -13,8 +13,10 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.primitives import _gather
+from anemoi.models.distributed.primitives import _gather_channels_alltoall
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
+from anemoi.models.distributed.primitives import _split_channels_alltoall
 
 
 def shard_tensor(
@@ -89,7 +91,7 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
     return _ReduceParallelSection.apply(input_, mgroup)
 
 
-def sync_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: ProcessGroup) -> Tensor:
+def sync_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: ProcessGroup, gather_in_fwd: bool = True) -> Tensor:
     """Sync tensor.
 
     Perform a gather in the forward pass and an allreduce followed by a split in the backward pass.
@@ -104,13 +106,15 @@ def sync_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: ProcessGroup) -
         Shapes of sharded Tensors
     mgroup : ProcessGroup
         model communication group
+    gather_in_fwd : bool
+        perform gather in forward, default True
 
     Returns
     -------
     Tensor
         Synced tensor.
     """
-    return _SyncParallelSection.apply(input_, dim, shapes, mgroup)
+    return _SyncParallelSection.apply(input_, dim, shapes, mgroup, gather_in_fwd)
 
 
 def reduce_shard_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: ProcessGroup) -> Tensor:
@@ -137,15 +141,62 @@ def reduce_shard_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: Process
     return _ReduceShardParallelSection.apply(input_, dim, shapes, mgroup)
 
 
+def shard_channels(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
+    """Sync tensor.
+
+    gathers shards along the channel dimension and gathers along the sequence dimension
+
+    Parameters
+    ----------
+    input_ : Tensor
+        Input
+    shapes: list
+        shapes of shards
+    mgroup : ProcessGroup
+        model communication group
+
+    Returns
+    -------
+    Tensor
+        Sharded heads.
+    """
+    return _SplitChannelsParallelSection.apply(input_, shapes, mgroup)
+
+
+def gather_channels(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
+    """Inverse of shard_channels.
+
+    Goes from channel-parallel to sequence-parallel distribution.
+    Input: each GPU has full sequence, different channel parts
+    Output: each GPU has different sequence parts, all channels
+
+    Parameters
+    ----------
+    input_ : Tensor
+        Input tensor (full sequence, partial channels)
+    shapes: list
+        shapes of sequence shards per rank
+    mgroup : ProcessGroup
+        model communication group
+
+    Returns
+    -------
+    Tensor
+        Sequence sharded tensor with all channels
+    """
+    return _GatherChannelsParallelSection.apply(input_, shapes, mgroup)
+
+
 class _SyncParallelSection(torch.autograd.Function):
     """Sync the input from parallel section."""
 
     @staticmethod
-    def forward(ctx, input_, dim_, shapes_, mgroup_):
+    def forward(ctx, input_, dim_, shapes_, mgroup_, gather_in_fwd_=True):
         ctx.dim = dim_
         ctx.comm_group = mgroup_
         ctx.shapes = shapes_
-        if mgroup_:
+        ctx.gather_in_fwd = gather_in_fwd_
+        if mgroup_ and gather_in_fwd_:
             return _gather(input_, dim_, shapes_, group=mgroup_)
         return input_
 
@@ -153,13 +204,15 @@ class _SyncParallelSection(torch.autograd.Function):
     def backward(ctx, grad_output):
         if ctx.comm_group:
             grad_output = _reduce(grad_output, group=ctx.comm_group)
-            return (
-                _split(grad_output, ctx.dim, ctx.shapes, group=ctx.comm_group),
-                None,
-                None,
-                None,
-            )
-        return grad_output, None, None, None
+            if ctx.gather_in_fwd:
+                return (
+                    _split(grad_output, ctx.dim, ctx.shapes, group=ctx.comm_group),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+        return grad_output, None, None, None, None
 
 
 class _ReduceShardParallelSection(torch.autograd.Function):
@@ -296,3 +349,47 @@ class _ReduceParallelSection(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output, None
+
+
+class _SplitChannelsParallelSection(torch.autograd.Function):
+    """Split channels for parallel section."""
+
+    @staticmethod
+    def forward(ctx, input_, shapes_, mgroup_):
+        ctx.shapes = shapes_
+        ctx.comm_group = mgroup_
+        if mgroup_:
+            return _split_channels_alltoall(input_, shapes_, group=mgroup_)
+        return input_
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.comm_group:
+            return (
+                _gather_channels_alltoall(grad_output, ctx.shapes, group=ctx.comm_group),
+                None,
+                None,
+            )
+        return grad_output, None, None
+
+
+class _GatherChannelsParallelSection(torch.autograd.Function):
+    """Gather channels from parallel section."""
+
+    @staticmethod
+    def forward(ctx, input_, shapes_, mgroup_):
+        ctx.shapes = shapes_
+        ctx.comm_group = mgroup_
+        if mgroup_:
+            return _gather_channels_alltoall(input_, shapes_, group=mgroup_)
+        return input_
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.comm_group:
+            return (
+                _split_channels_alltoall(grad_output, ctx.shapes, group=ctx.comm_group),
+                None,
+                None,
+            )
+        return grad_output, None, None

@@ -35,9 +35,9 @@ year = datetime.datetime.now().year
 if year == 2024:
     years = "2024"
 else:
-    years = "2024-%s" % (year,)
+    years = f"2024-{year}"
 
-copyright = "%s, Anemoi contributors" % (years,)
+copyright = f"{years}, Anemoi contributors"
 
 try:
     from anemoi.graphs._version import __version__
@@ -73,6 +73,10 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "'**.ipynb_checkpoints'"
 
 intersphinx_mapping = {
     "python": ("https://python.readthedocs.io/en/latest", None),
+    "anemoi-docs": (
+        "https://anemoi.readthedocs.io/en/latest/",
+        ("../../../anemoi-docs/docs/_build/html/objects.inv", None),
+    ),
     "anemoi-utils": (
         "https://anemoi-utils.readthedocs.io/en/latest/",
         ("../../anemoi-utils/docs/_build/html/objects.inv", None),

@@ -6,44 +6,39 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from __future__ import annotations
+
 
 import functools
-import os
+from collections import deque
 from typing import Any
 
-import requests
 
-from anemoi.utils.remote import robust
+class FixedLengthSet:
+    def __init__(self, maxlen: int):
+        self.maxlen = maxlen
+        self._deque = deque(maxlen=maxlen)
+        self._set = set()
 
+    def add(self, item: float) -> None:
+        if item in self._set:
+            return  # Already present, do nothing
+        if len(self._deque) == self.maxlen:
+            oldest = self._deque.popleft()
+            self._set.remove(oldest)
+        self._deque.append(item)
+        self._set.add(item)
 
-def health_check(tracking_uri: str) -> None:
-    """Query the health endpoint of an MLflow server.
+    def __contains__(self, item: float):
+        return item in self._set
 
-    If the server is not reachable, raise an error and remind the user that authentication may be required.
+    def __len__(self):
+        return len(self._set)
 
-    Raises
-    ------
-    ConnectionError
-        If the server is not reachable.
+    def __iter__(self):
+        return iter(self._deque)
 
-    """
-    token = os.getenv("MLFLOW_TRACKING_TOKEN")
-
-    headers = {"Authorization": f"Bearer {token}"}
-    response = robust(requests.get, retry_after=30, maximum_tries=10)(
-        f"{tracking_uri}/health",
-        headers=headers,
-        timeout=60,
-    )
-
-    if response.text == "OK":
-        return
-
-    error_msg = f"Could not connect to MLflow server at {tracking_uri}. "
-    if not token:
-        error_msg += "The server may require authentication, did you forget to turn it on?"
-    raise ConnectionError(error_msg)
+    def __repr__(self):
+        return f"{list(self._deque)}"
 
 
 def expand_iterables(
@@ -108,7 +103,7 @@ def expand_iterables(
     expanded_params = {}
 
     for key, value in params.items():
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             if should_be_expanded(value):
                 for i, v in enumerate(value):
                     expanded_params[f"{key}{delimiter}{i}"] = expand(v)
@@ -120,3 +115,38 @@ def expand_iterables(
         else:
             expanded_params[key] = expand(value)
     return expanded_params
+
+
+def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Clean up params to avoid issues with mlflow.
+
+    Too many logged params will make the server take longer to render the
+    experiment.
+
+    Parameters
+    ----------
+    params : dict[str, Any]
+        Parameters to clean up.
+
+    Returns
+    -------
+    dict[str, Any]
+        Cleaned up params ready for MlFlow.
+    """
+    prefixes_to_remove = [
+        "system",
+        "data",
+        "dataloader",
+        "model",
+        "training",
+        "diagnostics",
+        "graph",
+        "metadata.config",
+        "config.dataset.sourcesmetadata.dataset.variables_metadata",
+        "metadata.dataset.",
+    ]
+
+    keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
+    for key in keys_to_remove:
+        del params[key]
+    return params

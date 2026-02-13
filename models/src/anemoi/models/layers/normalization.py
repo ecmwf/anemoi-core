@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-from typing import List
 from typing import Union
 
 from torch import Size
@@ -43,37 +42,51 @@ class ConditionalLayerNorm(nn.Module):
         self,
         normalized_shape: Union[int, list, Size],
         condition_shape: int = 16,
-        w_one_bias_zero_init: bool = True,
+        zero_init: bool = True,
         autocast: bool = True,
-    ):
+    ) -> None:
+        """Initialize Conditional Layer Normalization.
+
+        Parameters
+        ----------
+        normalized_shape : Union[int, list, Size]
+            Shape or dimension(s) over which to normalize.
+        condition_shape : int, optional
+            Dimension of the conditioning vector, by default 16.
+        zero_init : bool, optional
+            If True, initializes the scale and bias transformation weights to zeros.
+            This means the conditional normalization behaves like standard layer
+            normalization initially, by default True.
+        autocast : bool, optional
+            If True, automatically cast output to match input dtype, by default True.
+        """
         super().__init__()
         self.norm = nn.LayerNorm(normalized_shape, elementwise_affine=False)  # no learnable parameters
         self.scale = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.bias = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.autocast = autocast
 
-        if w_one_bias_zero_init:
-            nn.init.ones_(self.scale.weight)
+        if zero_init:
+            nn.init.zeros_(self.scale.weight)
             nn.init.zeros_(self.scale.bias)
             nn.init.zeros_(self.bias.weight)
             nn.init.zeros_(self.bias.bias)
 
-    def forward(self, input: List[Tensor, Tensor]) -> Tensor:
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
         """Conditional Layer Normalization.
 
         Parameters
         ----------
-        input : List[Tensor, Tensor]
-            A list of two tensors (x, cond),
-            the first is the input tensor and
-            the second is the condition tensor.
+        x : Tensor
+            Input tensor to be normalized.
+        cond : Tensor
+            Conditioning tensor used to modulate the normalization.
 
         Returns
         -------
         Tensor
-            The output tensor.
+            Output tensor.
         """
-        x, cond = input
         scale = self.scale(cond)
         bias = self.bias(cond)
         out = self.norm(x)

@@ -15,6 +15,7 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.imputer import ConstantImputer
+from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
 
 
@@ -24,21 +25,26 @@ def non_default_input_imputer():
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
-                "imputer": {"default": "none", "mean": ["y"], "maximum": ["x"], "none": ["z"], "minimum": ["q"]},
+                "imputer": {
+                    "default": "none",
+                    "mean": ["y", "other"],
+                    "maximum": ["x"],
+                    "none": ["z"],
+                    "minimum": ["q"],
+                },
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
-                "remapped": {},
             },
         },
     )
     statistics = {
-        "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0]),
-        "stdev": np.array([0.5, 0.5, 0.5, 1, 14]),
-        "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0]),
-        "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
+        "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0, 1.0]),
+        "stdev": np.array([0.5, 0.5, 0.5, 1, 14, 1.0]),
+        "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0, 0.0]),
+        "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0, 2.0]),
     }
-    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return InputImputer(config=config.data.imputer, data_indices=data_indices, statistics=statistics)
 
 
@@ -51,51 +57,57 @@ def default_input_imputer():
                 "imputer": {"default": "minimum"},
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
-                "remapped": [],
             },
         },
     )
     statistics = {
-        "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0]),
-        "stdev": np.array([0.5, 0.5, 0.5, 1, 14]),
-        "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0]),
-        "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
+        "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0, 1.0]),
+        "stdev": np.array([0.5, 0.5, 0.5, 1, 14, 1.0]),
+        "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0, 0.0]),
+        "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0, 2.0]),
     }
-    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return InputImputer(config=config.data.imputer, statistics=statistics, data_indices=data_indices)
 
 
 @pytest.fixture()
-def non_default_input_data():
-    base = torch.Tensor([[1.0, 2.0, 3.0, np.nan, 5.0], [6.0, np.nan, 8.0, 9.0, 10.0]])
-    expected = torch.Tensor([[1.0, 2.0, 3.0, 1.0, 5.0], [6.0, 2.0, 8.0, 9.0, 10.0]])
-    return base, expected
+def non_default_input_data(device):
+    # one sample, two time steps, two grid points, 6 variables
+    base = torch.tensor(
+        [
+            [
+                [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]],
+                [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, np.nan, 1.0]],
+            ]
+        ]
+    ).to(device)
+    expected = torch.tensor(
+        [
+            [
+                [[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 2.0, 8.0, 9.0, 3.0, 1.0]],
+                [[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, 3.0, 1.0]],
+            ]
+        ]
+    ).to(device)
+    restored = torch.tensor(
+        [
+            [
+                [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]],
+                [[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]],
+            ]
+        ]
+    ).to(device)
+    return base, expected, restored
 
 
 @pytest.fixture()
-def default_input_data():
-    base = torch.Tensor([[1.0, 2.0, 3.0, np.nan, 5.0], [6.0, np.nan, 8.0, 9.0, 0]])
-    expected = torch.Tensor([[1.0, 2.0, 3.0, 1.0, 5.0], [6.0, 1.0, 8.0, 9.0, 0]])
-    return base, expected
-
-
-@pytest.fixture()
-def default_constant_imputer():
-    config = DictConfig(
-        {
-            "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
-            "data": {
-                "imputer": {"default": "none", 0: ["x"], 3.0: ["y"], 22.7: ["z"], 10: ["q"]},
-                "forcing": ["z", "q"],
-                "diagnostic": ["other"],
-                "remapped": [],
-            },
-        },
-    )
-    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
-    return ConstantImputer(config=config.data.imputer, statistics=None, data_indices=data_indices)
+def default_input_data(device):
+    # one sample, one time step, two grid points, 6 variables
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]]).to(device)
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 1.0, 8.0, 9.0, 1.0, 1.0]]]]).to(device)
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 1.0, 1.0]]]]).to(device)
+    return base, expected, restored
 
 
 @pytest.fixture()
@@ -104,30 +116,76 @@ def non_default_constant_imputer():
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
-                "imputer": {"default": 22.7},
+                "imputer": {"default": "none", 0: ["x"], 3.0: ["y", "other"], 22.7: ["z"], 10: ["q"]},
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
-                "remapped": [],
             },
         },
     )
-    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return ConstantImputer(config=config.data.imputer, statistics=None, data_indices=data_indices)
 
 
 @pytest.fixture()
-def non_default_constant_data():
-    base = torch.Tensor([[1.0, 2.0, 3.0, np.nan, 5.0], [6.0, np.nan, 8.0, 9.0, 0]])
-    expected = torch.Tensor([[1.0, 2.0, 3.0, 22.7, 5.0], [6.0, 22.7, 8.0, 9.0, 0]])
-    return base, expected
+def default_constant_imputer():
+    config = DictConfig(
+        {
+            "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
+            "data": {
+                "imputer": {"default": 22.7},
+                "forcing": ["z", "q"],
+                "diagnostic": ["other"],
+            },
+        },
+    )
+    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    return ConstantImputer(config=config.data.imputer, statistics=None, data_indices=data_indices)
 
 
 @pytest.fixture()
-def default_constant_data():
-    base = torch.Tensor([[1.0, 2.0, 3.0, np.nan, 5.0], [6.0, np.nan, 8.0, 9.0, 0]])
-    expected = torch.Tensor([[1.0, 2.0, 3.0, 10, 5.0], [6.0, 3.0, 8.0, 9.0, 0]])
-    return base, expected
+def default_constant_data(device):
+    # one sample, one time step, two grid points, 6 variables
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]]).to(device)
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]]]]).to(device)
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 22.7, 1.0]]]]).to(device)
+    return base, expected, restored
+
+
+@pytest.fixture()
+def non_default_constant_data(device):
+    # one sample, one time step, two grid points, 6 variables
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]]).to(device)
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 10.0, 5.0, 1.0], [6.0, 3.0, 8.0, 9.0, 3.0, 1.0]]]]).to(device)
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 3.0, 1.0]]]]).to(device)
+    return base, expected, restored
+
+
+@pytest.fixture()
+def copy_imputer():
+    config = DictConfig(
+        {
+            "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
+            "data": {
+                "imputer": {"x": ["y", "other", "q"]},
+                "forcing": ["z", "q"],
+                "diagnostic": ["other"],
+            },
+        },
+    )
+    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    return CopyImputer(config=config.data.imputer, statistics=None, data_indices=data_indices)
+
+
+@pytest.fixture()
+def copy_data(device):
+    # one sample, one time step, two grid points, 6 variables
+    base = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]]]]).to(device)
+    expected = torch.tensor([[[[1.0, 2.0, 3.0, 1.0, 5.0, 1.0], [6.0, 6.0, 8.0, 9.0, 6.0, 1.0]]]]).to(device)
+    restored = torch.tensor([[[[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, 6.0, 1.0]]]]).to(device)
+    return base, expected, restored
 
 
 fixture_combinations = (
@@ -135,6 +193,7 @@ fixture_combinations = (
     ("non_default_constant_imputer", "non_default_constant_data"),
     ("default_input_imputer", "default_input_data"),
     ("non_default_input_imputer", "non_default_input_data"),
+    ("copy_imputer", "copy_data"),
 )
 
 
@@ -144,7 +203,7 @@ fixture_combinations = (
 )
 def test_imputer_not_inplace(imputer_fixture, data_fixture, request) -> None:
     """Check that the imputer does not modify the input tensor when in_place=False."""
-    x, _ = request.getfixturevalue(data_fixture)
+    x, _, _ = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
     x_old = x.clone()
     imputer(x, in_place=False)
@@ -157,7 +216,7 @@ def test_imputer_not_inplace(imputer_fixture, data_fixture, request) -> None:
 )
 def test_imputer_inplace(imputer_fixture, data_fixture, request) -> None:
     """Check that the imputer modifies the input tensor when in_place=True."""
-    x, _ = request.getfixturevalue(data_fixture)
+    x, _, _ = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
     x_old = x.clone()
     out = imputer(x, in_place=True)
@@ -171,7 +230,7 @@ def test_imputer_inplace(imputer_fixture, data_fixture, request) -> None:
 )
 def test_transform_with_nan(imputer_fixture, data_fixture, request):
     """Check that the imputer correctly transforms a tensor with NaNs."""
-    x, expected = request.getfixturevalue(data_fixture)
+    x, expected, _ = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
     transformed = imputer.transform(x)
     assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
@@ -181,48 +240,64 @@ def test_transform_with_nan(imputer_fixture, data_fixture, request):
     ("imputer_fixture", "data_fixture"),
     fixture_combinations,
 )
-def test_transform_with_nan_small(imputer_fixture, data_fixture, request):
-    """Check that the imputer correctly transforms a tensor with NaNs."""
-    x, expected = request.getfixturevalue(data_fixture)
-    imputer = request.getfixturevalue(imputer_fixture)
-    transformed = imputer.transform(x, in_place=False)
-    assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
-    x_small = x[..., [0, 1, 2, 3]]
-    expected_small = expected[..., [0, 1, 2, 3]]
-    transformed_small = imputer.transform(x_small, in_place=False)
-    assert torch.allclose(
-        transformed_small,
-        expected_small,
-        equal_nan=True,
-    ), "Transform (in inference) does not handle NaNs correctly."
-
-
-@pytest.mark.parametrize(
-    ("imputer_fixture", "data_fixture"),
-    fixture_combinations,
-)
 def test_transform_with_nan_inference(imputer_fixture, data_fixture, request):
     """Check that the imputer correctly transforms a tensor with NaNs in inference."""
-    x, expected = request.getfixturevalue(data_fixture)
+    x, expected, expected_restored = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
+    # transform on training data to set nan mask
     transformed = imputer.transform(x, in_place=False)
     assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
     # Split data to "inference size" removing "diagnostics"
-    x_small_in = x[..., [0, 1, 2, 3]]
-    x_small_out = x[..., [0, 1, 4]]
-    expected_small_in = expected[..., [0, 1, 2, 3]]
-    expected_small_out = expected[..., [0, 1, 4]]
+    x_small_in = x[..., imputer.data_indices.data.input.full]
+    x_small_out = expected_restored[..., imputer.data_indices.data.output.full]
+    expected_small_in = expected[..., imputer.data_indices.data.input.full]
+    expected_small_out = expected[..., imputer.data_indices.data.output.full]
+    # transform on inference data
     transformed_small = imputer.transform(x_small_in, in_place=False)
     assert torch.allclose(
         transformed_small,
         expected_small_in,
         equal_nan=True,
     ), "Transform (in inference) does not handle NaNs correctly."
-    # Check that the inverse also performs correctly
+    # inverse transform on inference data
+    imputer.transform(x_small_in, in_place=False)
     restored = imputer.inverse_transform(expected_small_out, in_place=False)
     assert torch.allclose(
         restored, x_small_out, equal_nan=True
     ), "Inverse transform does not restore NaNs correctly in inference."
+
+
+def test_transform_with_subset_data_index_is_noop(non_default_input_imputer, non_default_input_data) -> None:
+    """Subset transforms should be a no-op when skip_imputation is provided."""
+    x, _, _ = non_default_input_data
+    imputer = non_default_input_imputer
+
+    imputer.transform(x, in_place=False)
+    saved_mask = imputer.nan_locations.clone()
+
+    prog_index = imputer.data_indices.data.input.prognostic
+    x_subset = x[..., prog_index]
+    transformed = imputer.transform(x_subset, in_place=False, data_index=prog_index, skip_imputation=True)
+
+    assert torch.allclose(
+        transformed, x_subset, equal_nan=True
+    ), "Subset transform should not modify the input when data_index is provided."
+    assert torch.equal(imputer.nan_locations, saved_mask), "Subset transform should not update the saved NaN mask."
+
+
+def test_inverse_transform_skip_imputation_is_noop(non_default_input_imputer, non_default_input_data) -> None:
+    """Inverse transform should be a no-op when skip_imputation is set."""
+    x, expected, _ = non_default_input_data
+    imputer = non_default_input_imputer
+
+    imputer.transform(x, in_place=False)
+    data_index = imputer.data_indices.data.input.prognostic
+    expected_prog = expected[..., data_index]
+
+    restored = imputer.inverse_transform(expected_prog, in_place=False, skip_imputation=True, data_index=data_index)
+    assert torch.allclose(
+        restored, expected_prog, equal_nan=True
+    ), "Inverse transform should not modify the input when skip_imputation is set."
 
 
 @pytest.mark.parametrize(
@@ -231,7 +306,7 @@ def test_transform_with_nan_inference(imputer_fixture, data_fixture, request):
 )
 def test_transform_noop(imputer_fixture, data_fixture, request):
     """Check that the imputer does not modify a tensor without NaNs."""
-    x, expected = request.getfixturevalue(data_fixture)
+    x, expected, _ = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
     _ = imputer.transform(x)
     transformed = imputer.transform(expected)
@@ -244,12 +319,14 @@ def test_transform_noop(imputer_fixture, data_fixture, request):
 )
 def test_inverse_transform(imputer_fixture, data_fixture, request):
     """Check that the imputer correctly inverts the transformation."""
-    x, expected = request.getfixturevalue(data_fixture)
+    x, expected, expected_restored = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
     transformed = imputer.transform(x, in_place=False)
     assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
     restored = imputer.inverse_transform(transformed, in_place=False)
-    assert torch.allclose(restored, x, equal_nan=True), "Inverse transform does not restore NaNs correctly."
+    assert torch.allclose(
+        restored, expected_restored, equal_nan=True
+    ), "Inverse transform does not restore NaNs correctly."
 
 
 @pytest.mark.parametrize(
@@ -258,9 +335,10 @@ def test_inverse_transform(imputer_fixture, data_fixture, request):
 )
 def test_mask_saving(imputer_fixture, data_fixture, request):
     """Check that the imputer saves the NaN mask correctly."""
-    x, _ = request.getfixturevalue(data_fixture)
+    x, _, _ = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
-    expected_mask = torch.isnan(x)
+    # reduce time dimension
+    expected_mask = torch.isnan(x)[:, 0][..., imputer.data_indices.data.input.full]
     imputer.transform(x)
     assert torch.equal(imputer.nan_locations, expected_mask), "Mask not saved correctly after first run."
 
@@ -271,8 +349,11 @@ def test_mask_saving(imputer_fixture, data_fixture, request):
 )
 def test_loss_nan_mask(imputer_fixture, data_fixture, request):
     """Check that the imputer correctly transforms a tensor with NaNs."""
-    x, _ = request.getfixturevalue(data_fixture)
-    expected = torch.tensor([[1.0, 1.0, 1.0], [1.0, 0.0, 1.0]])  # only prognostic and diagnostic variables
+    x, _, _ = request.getfixturevalue(data_fixture)
+    expected = torch.tensor(
+        [[[1.0, 1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 1.0]]],
+        device=x.device,
+    )  # only prognostic and diagnostic variables
     imputer = request.getfixturevalue(imputer_fixture)
     imputer.transform(x)
     assert torch.allclose(
@@ -291,7 +372,7 @@ def test_loss_nan_mask(imputer_fixture, data_fixture, request):
 )
 def test_reuse_imputer(imputer_fixture, data_fixture, request):
     """Check that the imputer reuses the mask correctly on subsequent runs."""
-    x, expected = request.getfixturevalue(data_fixture)
+    x, expected, _ = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
     x2 = x**2.0
     _ = imputer.transform(x2, in_place=False)
@@ -305,39 +386,33 @@ def test_reuse_imputer(imputer_fixture, data_fixture, request):
     ("imputer_fixture", "data_fixture"),
     fixture_combinations,
 )
-def test_inference_imputer(imputer_fixture, data_fixture, request):
+def test_changing_nan_locations(imputer_fixture, data_fixture, request):
     """Check that the imputer resets its mask during inference."""
-    x, expected = request.getfixturevalue(data_fixture)
+    x, expected, expected_restored = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
 
-    # Check training flag
-    assert imputer.training, "Imputer is not set to training mode."
-
-    expected_mask = torch.isnan(x)
+    # reduce time dimension
+    expected_mask = torch.isnan(x)[:, 0][..., imputer.data_indices.data.input.full]
     transformed = imputer.transform(x, in_place=False)
     assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
     restored = imputer.inverse_transform(transformed, in_place=False)
-    assert torch.allclose(restored, x, equal_nan=True), "Inverse transform does not restore NaNs correctly."
+    assert torch.allclose(
+        restored, expected_restored, equal_nan=True
+    ), "Inverse transform does not restore NaNs correctly."
     assert torch.equal(imputer.nan_locations, expected_mask), "Mask not saved correctly after first run."
 
-    imputer.eval()
-    with torch.no_grad():
-        x2 = x.roll(-1, dims=0)
-        expected2 = expected.roll(-1, dims=0)
-        expected_mask2 = torch.isnan(x2)
-
-        assert torch.equal(imputer.nan_locations, expected_mask), "Mask not saved correctly after first run."
-
-        # Check training flag
-        assert not imputer.training, "Imputer is not set to evaluation mode."
-
-        assert not torch.allclose(x, x2, equal_nan=True), "Failed to modify the input data."
-        assert not torch.allclose(expected, expected2, equal_nan=True), "Failed to modify the expected data."
-        assert not torch.allclose(expected_mask, expected_mask2, equal_nan=True), "Failed to modify the nan mask."
-
-        transformed = imputer.transform(x2, in_place=False)
-        assert torch.allclose(transformed, expected2, equal_nan=True), "Transform does not handle NaNs correctly."
-        restored = imputer.inverse_transform(transformed, in_place=False)
-        assert torch.allclose(restored, x2, equal_nan=True), "Inverse transform does not restore NaNs correctly."
-
-        assert torch.equal(imputer.nan_locations, expected_mask2), "Mask not saved correctly after evaluation run."
+    # change nan locations by rolling the tensor
+    x = x.roll(1, dims=0)
+    expected = expected.roll(1, dims=0)
+    expected_restored = expected_restored.roll(1, dims=0)
+    # reduce time dimension
+    expected_mask = torch.isnan(x)[:, 0][..., imputer.data_indices.data.input.full]
+    imputer.transform(x, in_place=False)
+    assert torch.allclose(
+        imputer.transform(x, in_place=False), expected, equal_nan=True
+    ), "Transform does not handle changed NaNs correctly."
+    restored = imputer.inverse_transform(imputer.transform(x, in_place=False), in_place=False)
+    assert torch.allclose(
+        restored, expected_restored, equal_nan=True
+    ), "Inverse transform does not restore changed NaNs correctly."
+    assert torch.equal(imputer.nan_locations, expected_mask), "Mask not saved correctly after changing nan locations."

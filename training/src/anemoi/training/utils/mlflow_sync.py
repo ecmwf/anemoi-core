@@ -14,9 +14,14 @@ import shutil
 import tempfile
 from itertools import starmap
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import mlflow.entities
+from mlflow_export_import.common import utils
+
+from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 
 
 def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
@@ -64,16 +69,25 @@ try:
     from mlflow_export_import.run.import_run import _import_inputs
     from mlflow_export_import.run.run_data_importer import _log_data
     from mlflow_export_import.run.run_data_importer import _log_metrics
-    from mlflow_export_import.run.run_data_importer import _log_params
+
 except ImportError:
-    msg = "The 'mlflow-export-import' package is not installed. Please install it from https://github.com/mlflow/mlflow-export-import"
+    msg = (
+        "The 'mlflow-export-import' package is not installed."
+        "Please install it from https://github.com/mlflow/mlflow-export-import"
+    )
     raise ImportError(msg) from None
 
 LOGGER = logging.getLogger(__name__)
 
 
 # # This functions are based on the existing functions in mlflow_export_import.run.run_data_importer.py
-def _log_tags(client: mlflow.MlflowClient, run_dct: dict, run_id: str, batch_size: int, src_user_id: str) -> None:
+def _log_tags(
+    client: mlflow.MlflowClient,
+    run_dct: dict,
+    run_id: str,
+    batch_size: int,
+    src_user_id: str,
+) -> None:
     def get_data(run_dct: dict, *args) -> list:
         del args  # unused
         tags = run_dct["tags"]
@@ -93,7 +107,27 @@ def _log_tags(client: mlflow.MlflowClient, run_dct: dict, run_id: str, batch_siz
     _log_data(run_dct, run_id, batch_size, get_data, log_data, args_get)
 
 
+def _log_params(client: mlflow.MlflowClient, run_dct: dict[str, Any], run_id: str, batch_size: int) -> None:
+    def get_data(run_dct: dict[str, Any], args: Any = None) -> list[mlflow.entities.Param]:  # noqa: ARG001
+        cleaned_run_dct = clean_config_params(run_dct["params"])
+        LOGGER.info("Logging %s parameters", len(cleaned_run_dct))
+        if len(cleaned_run_dct) > MAX_PARAMS_LENGTH:
+            msg = (
+                f"Too many params: {len(cleaned_run_dct)} > {MAX_PARAMS_LENGTH}",
+                "Please revisit the fields being logged and add redundant or irrelevant "
+                "ones to the clean_config_params function.",
+            )
+            raise ValueError(msg)
+        return [mlflow.entities.Param(k, v) for k, v in cleaned_run_dct.items()]
+
+    def log_data(run_id: str, params: dict[str, Any]) -> None:
+        client.log_batch(run_id, params=params)
+
+    _log_data(run_dct, run_id, batch_size, get_data, log_data)
+
+
 def import_run_data(mlflow_client: mlflow.MlflowClient, run_dct: dict, run_id: str, src_user_id: str) -> None:
+
     _log_params(mlflow_client, run_dct, run_id, MAX_PARAMS_TAGS_PER_BATCH)
     _log_metrics(mlflow_client, run_dct, run_id, MAX_METRICS_PER_BATCH)
     _log_tags(
@@ -116,6 +150,7 @@ class MlFlowSync:
         experiment_name: str = "anemoi_debug",
         export_deleted_runs: bool = False,
         log_level: str = "INFO",
+        log_model: bool = False,
     ) -> None:
         self.source_tracking_uri = source_tracking_uri
         self.dest_tracking_uri = dest_tracking_uri
@@ -123,6 +158,7 @@ class MlFlowSync:
         self.experiment_name = experiment_name
         self.export_deleted_runs = export_deleted_runs
         self.log_level = log_level
+        self.log_model = log_model
 
         LOGGER.setLevel(self.log_level)
 
@@ -189,7 +225,12 @@ class MlFlowSync:
             artifact_path = Path(temp_dir, run.info.run_id)
             artifact_path.mkdir(parents=True, exist_ok=True)
         else:
-            artifact_path = Path(self.source_tracking_uri, run.info.experiment_id, run.info.run_id, "artifacts")
+            artifact_path = Path(
+                self.source_tracking_uri,
+                run.info.experiment_id,
+                run.info.run_id,
+                "artifacts",
+            )
 
         return artifact_path
 
@@ -202,7 +243,12 @@ class MlFlowSync:
 
         mlflow.set_tracking_uri(self.source_tracking_uri)  # OTHERWISE IT WILL NOT WORK
         artifacts = client.list_artifacts(run_id)
-        LOGGER.info("Downloading artifacts %s for run %s to %s", len(artifacts), run_id, artifact_path)
+        LOGGER.info(
+            "Downloading artifacts %s for run %s to %s",
+            len(artifacts),
+            run_id,
+            artifact_path,
+        )
         for artifact in artifacts:
             # Download artifact file from the server
             mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=artifact.path, dst_path=artifact_path)
@@ -290,7 +336,11 @@ class MlFlowSync:
         server2server = self._check_source_tracking_uri()
         run_logged = self.check_run_is_logged(status=run.info.status)
         if run_logged:
-            LOGGER.info("Run already imported %s into experiment %s", self.run_id, self.experiment_name)
+            LOGGER.info(
+                "Run already imported %s into experiment %s",
+                self.run_id,
+                self.experiment_name,
+            )
             return
 
         if run.info.lifecycle_stage == "deleted" and not self.export_deleted_runs:
@@ -344,8 +394,32 @@ class MlFlowSync:
             "params": params,
             "metrics": _get_metrics_with_steps(src_mlflow_client, run),
             "tags": tags,
-            "inputs": _inputs_to_dict(run.inputs),
+            "inputs": {
+                "dataset_inputs": _inputs_to_dict(run.inputs),
+            },
         }
+
+        src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
+
+        if self.log_model:
+            from mlflow_export_import.logged_model.import_logged_model import import_logged_model
+
+            for model in src_run_dct["inputs"]["model_inputs"]:
+                model_path = (
+                    run.data.params["config.diagnostics.log.mlflow.save_dir"]
+                    + "/"
+                    + run.info.run_id
+                    + "/"
+                    + model["model_id"]
+                )
+                import_logged_model(
+                    input_dir=model_path,
+                    experiment_name="test",
+                    run_id=run.info_run_id,
+                    mlflow_client=src_mlflow_client,
+                    model_type="input",
+                    step=model["step"],
+                )
 
         try:
             LOGGER.info("Starting to export run data")
@@ -368,7 +442,9 @@ class MlFlowSync:
 
             traceback.print_exc()
             LOGGER.exception(
-                "Importing run %s of experiment %s failed",
+                "Importing run %s of experiment %s failed."
+                "Make sure you're using the latest version of mlflow_export_import"
+                "Please install it from https://github.com/mlflow/mlflow-export-import",
                 dst_run_id,
                 self.experiment_name,
             )

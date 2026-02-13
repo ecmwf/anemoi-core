@@ -7,20 +7,21 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+from torch_geometric.data import HeteroData
 
-if TYPE_CHECKING:
-    from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.data_indices.collection import IndexCollection
 
 
 class BaseMask:
     """Base class for masking model output."""
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        """Initialize base mask."""
 
     @property
     def supporting_arrays(self) -> dict:
@@ -37,32 +38,50 @@ class BaseMask:
         raise NotImplementedError(error_message)
 
 
-class Boolean1DMask(BaseMask):
+class Boolean1DMask(torch.nn.Module, BaseMask):
     """1D Boolean mask."""
 
-    def __init__(self, values: torch.Tensor) -> None:
-        self.mask = values.bool().squeeze()
+    def __init__(self, graph_data: HeteroData, nodes_name: str, attribute_name: str) -> None:
+        super().__init__()
+
+        mask = graph_data[nodes_name][attribute_name].bool().squeeze()
+        self.register_buffer("mask", mask)
 
     @property
     def supporting_arrays(self) -> dict:
         return {"output_mask": self.mask.numpy()}
 
-    def broadcast_like(self, x: torch.Tensor, dim: int) -> torch.Tensor:
+    def broadcast_like(self, x: torch.Tensor, dim: int, grid_shard_slice: slice | None = None) -> torch.Tensor:
         assert x.shape[dim] == len(
             self.mask,
         ), f"Dimension mismatch: dimension {dim} has size {x.shape[dim]}, but mask length is {len(self.mask)}."
         target_shape = [1 for _ in range(x.ndim)]
         target_shape[dim] = len(self.mask)
-        mask = self.mask.reshape(target_shape)
-        return mask.to(x.device)
+        mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
+        return mask.reshape(target_shape)
 
     @staticmethod
-    def _fill_masked_tensor(x: torch.Tensor, mask: torch.Tensor, fill_value: float | torch.Tensor) -> torch.Tensor:
-        if isinstance(fill_value, torch.Tensor):
-            return x.masked_scatter(mask, fill_value)
+    def _fill_tensor_with_tensor(
+        x: torch.Tensor,
+        indices: torch.Tensor,
+        fill_value: torch.Tensor,
+        dim: int,
+    ) -> torch.Tensor:
+        assert fill_value.ndim == 4, "fill_value has to be shape (bs, ens, latlon, nvar)"
+        fill_value = torch.index_select(fill_value, dim, indices)  # The mask is applied over the latlon dim
+        return x.index_copy_(dim, indices, fill_value)
+
+    @staticmethod
+    def _fill_tensor_with_float(x: torch.Tensor, mask: torch.Tensor, fill_value: float) -> torch.Tensor:
         return x.masked_fill(mask, fill_value)
 
-    def apply(self, x: torch.Tensor, dim: int, fill_value: float | torch.Tensor = np.nan) -> torch.Tensor:
+    def apply(
+        self,
+        x: torch.Tensor,
+        dim: int,
+        fill_value: float | torch.Tensor = np.nan,
+        grid_shard_slice: slice | None = None,
+    ) -> torch.Tensor:
         """Apply the mask to the input tensor.
 
         Parameters
@@ -79,14 +98,21 @@ class Boolean1DMask(BaseMask):
         torch.Tensor
             The masked tensor with fill_value in the positions where the mask is False.
         """
-        mask = self.broadcast_like(x, dim)
-        return Boolean1DMask._fill_masked_tensor(x, ~mask, fill_value)
+        mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
+
+        if isinstance(fill_value, torch.Tensor):
+            indices = (~mask).nonzero(as_tuple=True)[0].to(x.device)
+            return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
+
+        mask = self.broadcast_like(x, dim, grid_shard_slice).cpu()
+        return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
     def rollout_boundary(
         self,
         pred_state: torch.Tensor,
         true_state: torch.Tensor,
         data_indices: IndexCollection,
+        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Rollout the boundary forcing.
 
@@ -108,6 +134,7 @@ class Boolean1DMask(BaseMask):
             pred_state[..., data_indices.model.input.prognostic],
             dim=2,
             fill_value=true_state[..., data_indices.data.output.prognostic],
+            grid_shard_slice=grid_shard_slice,
         )
 
         return pred_state

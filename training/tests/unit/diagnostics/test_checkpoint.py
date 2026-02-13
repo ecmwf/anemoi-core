@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import datetime
 import shutil
 from pathlib import Path
@@ -84,9 +82,8 @@ def checkpoint_settings(tmp_path: str) -> dict[str : str | bool]:
 
 
 @pytest.fixture
-def callback(tmp_path: str, config: DictConfig, checkpoint_settings: dict) -> AnemoiCheckpoint:
+def callback(tmp_path: str, checkpoint_settings: dict) -> AnemoiCheckpoint:
     callback = AnemoiCheckpoint(
-        config=config,
         filename="{step}",
         save_last=True,
         train_time_interval=datetime.timedelta(seconds=0.1),
@@ -136,7 +133,7 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
             if Path(tmp_path + "/" + pl_ckpt_name).exists():
                 uuid = load_metadata(ckpt_path)["uuid"]
 
-                pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name)
+                pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name, weights_only=False)
 
                 assert uuid == pl_model.hparams["metadata"]["uuid"]
 

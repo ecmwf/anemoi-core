@@ -1,0 +1,66 @@
+# This workflow checks that the appropriate ATS labels are applied to a pull request:
+# - "ATS Approval Not Needed": pass
+# - "ATS Approved": pass
+# - "ATS Approval Needed": fail
+# - Missing ATS label: fail
+
+name: "[PR] ATS labels"
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - labeled
+      - unlabeled
+      - synchronize
+
+permissions:
+  pull-requests: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get PR details
+        uses: actions/github-script@v7
+        id: check-pr
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+            const labels = pr.data.labels.map(label => label.name);
+            core.setOutput('labels', JSON.stringify(labels));
+            core.setOutput('author', context.payload.pull_request.user.login);
+
+      - name: Evaluate ATS labels
+        run: |
+          AUTHOR='${{ steps.check-pr.outputs.author }}'
+          if [ "$AUTHOR" == "DeployDuck" ] || [ "$AUTHOR" == "pre-commit-ci[bot]" ]; then
+            echo "Bot PR, skipping."
+            exit 0
+          fi
+          LABELS=$(echo '${{ steps.check-pr.outputs.labels }}' | jq -r '.[]')
+          echo "Labels found:"
+          echo -e "$LABELS\n"
+          echo "Result:"
+          if echo "$LABELS" | grep -qi "ATS approval not needed"; then
+            echo "ATS approval not needed. Passing."
+            EXIT_CODE=0
+          elif echo "$LABELS" | grep -qi "ATS approved"; then
+            echo "ATS Approved. Passing."
+            EXIT_CODE=0
+          elif echo "$LABELS" | grep -qi "ATS approval needed"; then
+            echo "ATS Approval Needed. Failing."
+            EXIT_CODE=1
+          else
+            echo "No ATS approval labels found. Please assign the appropriate ATS label. Failing."
+            EXIT_CODE=1
+          fi
+          echo -e "\nFor more information on ATS labels, see:"
+          echo "https://anemoi.readthedocs.io/en/latest/contributing/guidelines.html#labelling-guidelines"
+          exit $EXIT_CODE

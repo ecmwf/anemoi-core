@@ -8,15 +8,14 @@ nodes:
   # Data nodes
   data:
     node_builder:
-      _target_: anemoi.graphs.nodes.ZarrDatasetNodes # options: ZarrDatasetNodes, NPZFileNodes
-      dataset: ${dataloader.dataset}
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
+      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"  # Always overridden from dataloader config
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.TriNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
+      _target_: anemoi.graphs.nodes.TriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
       resolution: 5 # grid resolution for npz (o32, o48, ...)
-    attributes: ${graph.attributes.nodes}
 
 edges:
 # Encoder configuration
@@ -34,6 +33,7 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
+    scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
@@ -46,7 +46,6 @@ edges:
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
-
 
 attributes:
   nodes:

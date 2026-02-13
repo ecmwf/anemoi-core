@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from abc import ABC
@@ -18,6 +17,7 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.normalise import NormaliserMixin
+from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,10 +25,12 @@ LOGGER = logging.getLogger(__name__)
 class BaseNodeAttribute(ABC, NormaliserMixin):
     """Base class for the weights of the nodes."""
 
+    norm_by_group: bool = False
+
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         self.norm = norm
         self.dtype = getattr(torch, dtype)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = get_distributed_device()
 
     @abstractmethod
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor: ...

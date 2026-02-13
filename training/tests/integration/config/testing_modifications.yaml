@@ -7,31 +7,31 @@ dataloader:
     training: 2
     validation: 2
   limit_batches:
-      training: 2
-      validation: 2
+    training: 2
+    validation: 2
 
 diagnostics:
-  plot:
-    callbacks: []
   log:
-    wandb:
-      enabled: False
-      entity: null # override '???'
-    tensorboard:
-      enabled: False
     mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
       tracking_uri: null # override '???'
 
-hardware:
-  accelerator: auto
-  num_gpus_per_node: 1
-  num_nodes: 1
-  num_gpus_per_model: 1
+system:
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
 
-  paths:
+  output:
     # We overwrite this in the test to use pytest tmp_path but need a value for hydra
-    output: ${oc.env:PWD}/tmp_output/
+    root: ${oc.env:PWD}/tmp_output/
+
+  input:
+    graph: null
+    truncation: null
+    truncation_inv: null
 
 graph:
   overwrite: True
