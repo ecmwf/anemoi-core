@@ -13,6 +13,8 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from anemoi.training.train.train import AnemoiTrainer
 
@@ -43,43 +45,52 @@ def build_mock_config(
     warm_start: str | None = None,
     checkpoints_path: Path | None = None,
     warm_start_path: Path | None = None,
-) -> MagicMock:
-    config = MagicMock()
-    config.config_validation = False
-    config.training.run_id = run_id
-    config.training.fork_run_id = fork_run_id
-    config.training.load_weights_only = False
-    config.training.transfer_learning = False
-    config.system.output.root = ""
-    config.system.output.checkpoints.root = checkpoints_path
-    config.system.input.warm_start = warm_start_path / warm_start if warm_start_path and warm_start else None
-    config.diagnostics.log.mlflow.enabled = False
-    return config
+) -> DictConfig:
+    # Build a nested dict that matches the expected structure
+    config_dict = {
+        "config_validation": False,
+        "training": {
+            "run_id": run_id,
+            "fork_run_id": fork_run_id,
+            "load_weights_only": False,
+            "transfer_learning": False,
+        },
+        "system": {
+            "output": {
+                "root": "",
+                "checkpoints": {"root": checkpoints_path},
+                "plots": "",
+                "profiler": "",
+                "logs": {
+                    "root": "",
+                    "wandb": "",
+                    "mlflow": "",
+                    "tensorboard": "",
+                },
+            },
+            "input": {"warm_start": warm_start_path / warm_start if warm_start_path and warm_start else None},
+        },
+        "diagnostics": {"log": {"mlflow": {"enabled": False}}},
+        "data": {},
+        "dataloader": {},
+        "graph": {},
+        "model": {},
+    }
+    return OmegaConf.create(config_dict)
 
 
 @pytest.fixture
 def trainer_factory() -> AnemoiTrainer:
     def _make_trainer(mock_config: MagicMock) -> AnemoiTrainer:
-        with (
-            patch("anemoi.training.train.train.OmegaConf.to_object", return_value=mock_config),
-            patch(
-                "anemoi.training.train.train.DictConfig",
-                return_value=mock_config,
-            ),
-            patch("anemoi.training.train.train.UnvalidatedBaseSchema", return_value=mock_config),
-            patch(
-                "anemoi.training.train.train.LOGGER",
-            ),
-            patch(
-                "anemoi.training.train.train.AnemoiTrainer._check_dry_run",
-            ),
-            patch(
-                "anemoi.training.train.train.AnemoiTrainer._log_information",
-            ),
-            patch(
-                "pathlib.Path.exists",
-                return_value=True,
-            ),
+        with patch(
+            "anemoi.training.train.train.LOGGER",
+        ), patch(
+            "anemoi.training.train.train.AnemoiTrainer._check_dry_run",
+        ), patch(
+            "anemoi.training.train.train.AnemoiTrainer._log_information",
+        ), patch(
+            "pathlib.Path.exists",
+            return_value=True,
         ):
             return AnemoiTrainer(config=mock_config)
 
