@@ -798,12 +798,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             statistics=statistics,
             graph_data=graph_data,
         )
-        if self.multi_out > 1:
-            warnings.warn(
-                "The currently implemented normalization of the tendencies when the model has more than one output step is unconventional. Using"
-                "more than one output step with tendency diffusion models is currently highly experimental and results should be "
-                "cautiously interpreted."
-            )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
