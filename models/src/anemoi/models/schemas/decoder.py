@@ -61,7 +61,7 @@ class TransformerDecoderSchema(TransformerModelComponent):
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"
     attention_implementation: str = Field(example="triton_attention")
-    "Attention implementation to use. Default to 'triton_attention'."
+    "Attention implementation to use."
     softcap: NonNegativeFloat = Field(example=0.0)
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)

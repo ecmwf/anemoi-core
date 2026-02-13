@@ -1,4 +1,4 @@
-# (C) Copyright 2026 Anemoi contributors.
+# (C) Copyright 2024- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -151,7 +151,7 @@ class MultiHeadSelfAttention(nn.Module):
         }
 
         # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
-        if ATTENTION_BACKEND != "":
+        if ATTENTION_BACKEND:
             if ATTENTION_BACKEND == self.attention_implementation:
                 # Attention backend has already been updated, return early
                 return
@@ -236,7 +236,7 @@ class MultiHeadSelfAttention(nn.Module):
         value = self.lin_v(x)
 
         # Check at runtime if the Attention backend env var has been set, and update attention backend accordingly
-        if ATTENTION_BACKEND != "":
+        if ATTENTION_BACKEND:
             self.set_attention_function()
 
         return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)

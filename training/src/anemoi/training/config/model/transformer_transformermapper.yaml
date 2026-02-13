@@ -30,7 +30,7 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0 # GraphTransformer
-  attention_implementation: triton # Possible values:  flash_attention, triton, scaled_dot_product_attention
+  attention_implementation: triton_attention # Possible values:  flash_attention, triton_attention, scaled_dot_product_attention
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
@@ -47,7 +47,7 @@ encoder:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: -1
   dropout_p: 0.0
-  attention_implementation: triton # Possible values:  flash_attention, triton, scaled_dot_product_attention
+  attention_implementation: triton_attention # Possible values:  flash_attention, triton_attention, scaled_dot_product_attention
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   qk_norm: False
@@ -64,7 +64,7 @@ decoder:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: -1
   dropout_p: 0.0
-  attention_implementation: triton # Possible values:  flash_attention, triton, scaled_dot_product_attention
+  attention_implementation: triton_attention # Possible values:  flash_attention, triton_attention, scaled_dot_product_attention
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   qk_norm: False
