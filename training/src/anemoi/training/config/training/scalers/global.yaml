@@ -48,3 +48,8 @@ datasets:
       nodes_name: ${graph.data}
       nodes_attribute_name: area_weight
       norm: unit-sum
+
+   # Scalers in the time dimension
+    time_steps:
+      _target_: anemoi.training.losses.scalers.UniformTimeStepScaler
+      multistep_output: ${training.multistep_output}

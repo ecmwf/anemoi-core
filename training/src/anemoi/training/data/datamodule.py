@@ -9,23 +9,19 @@
 
 
 import logging
-from collections.abc import Callable
 from functools import cached_property
 
-import numpy as np
 import pytorch_lightning as pl
 from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 from torch_geometric.data import HeteroData
 
-from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
-from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
@@ -71,20 +67,23 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict | None:
-        stats = self.ds_train.statistics_tendencies
-        if stats is None:
-            return None
+    def statistics_tendencies(self) -> dict[str, dict | None] | None:
+        """Return tendency statistics from all training datasets."""
+        n_step_output = self.config.training.multistep_output
+        lead_times = [self._lead_time_for_step(step) for step in range(1, n_step_output + 1)]
 
-        multi_out = self.config.training.multistep_output
-        lead_times = [self._lead_time_for_step(step) for step in range(1, multi_out + 1)]
-        stats_by_lead = {}
-        for lead_time in lead_times:
-            all_stats_tend = self.ds_train.statistics_tendencies_for_timestep(lead_time)
-            for dataset_name in self.dataset_names:
-                stats_by_lead[dataset_name] = {lead_time: all_stats_tend.get(dataset_name, None)}
-                stats_by_lead[dataset_name]["lead_times"] = lead_times
-        return stats_by_lead
+        stats_by_dataset: dict[str, dict | None] = {}
+        for dataset_name, dataset in self.ds_train.datasets.items():
+            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
+            if all(stats is None for stats in stats_by_lead.values()):
+                stats_by_dataset[dataset_name] = None
+                continue
+            stats_by_lead["lead_times"] = lead_times
+            stats_by_dataset[dataset_name] = stats_by_lead
+
+        if not any(stats is not None for stats in stats_by_dataset.values()):
+            return None
+        return stats_by_dataset
 
     @cached_property
     def metadata(self) -> dict:
@@ -122,7 +121,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if hasattr(self.config.training, "explicit_times"):
             return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
 
-        # Calculate indices using multistep, timeincrement and rollout
+        # Calculate indices using n_step_input, n_step_output and rollout
         rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
 
         rollout_max = getattr(rollout_cfg, "max", None)
@@ -136,31 +135,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             LOGGER.warning("Falling back rollout to: %s", rollout_value)
 
         rollout = max(rollout_value, val_rollout)
-        multi_step = self.config.training.multistep_input
-        multi_out = self.config.training.multistep_output  # defaults to 1
-        time_range = multi_step + rollout * multi_out
+        n_step_input = self.config.training.multistep_input
+        n_step_output = self.config.training.multistep_output  # defaults to 1
+        time_range = n_step_input + rollout * n_step_output
         return list(range(time_range))
-
-    def add_trajectory_ids(self, data_reader: Callable) -> Callable:
-        """Add trajectory IDs to data reader for forecast trajectory tracking."""
-        if not hasattr(self.config.dataloader, "model_run_info"):
-            data_reader.trajectory_ids = None
-            return data_reader
-
-        mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
-        mr_len = self.config.dataloader.model_run_info.length
-
-        if hasattr(self.config.training, "rollout") and self.config.training.rollout.max is not None:
-            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
-            assert (
-                max_rollout_index < mr_len
-            ), f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}"
-
-        data_reader.trajectory_ids = (data_reader.dates - mr_start) // np.timedelta64(
-            mr_len * frequency_to_seconds(self.config.data.frequency),
-            "s",
-        )
-        return data_reader
 
     @cached_property
     def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
@@ -200,17 +178,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self,
         datasets: dict[str, dict],
         shuffle: bool = True,
-        val_rollout: int = 1,
+        val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
-        data_readers = {}
-        for name, dataset_config in datasets.items():
-            data_reader = open_dataset(dataset_config)
-            data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
-            data_readers[name] = data_reader
-
         return MultiDataset(
-            data_readers=data_readers,
+            data_readers=datasets,
             relative_date_indices=self.relative_date_indices(val_rollout),
             timestep=self.config.data.timestep,
             shuffle=shuffle,

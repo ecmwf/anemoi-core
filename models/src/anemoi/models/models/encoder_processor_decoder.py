@@ -109,7 +109,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+            n_step_output=self.n_step_output,
+        )
 
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -146,7 +151,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
-                time=self.multi_out,
+                time=self.n_step_output,
             )
             .to(dtype=dtype)
             .clone()
@@ -154,9 +159,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        x_out[..., self._internal_output_idx[dataset_name]] += (
-            x_skip[..., self._internal_input_idx[dataset_name]].unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
-        )
+        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+        assert (
+            x_skip.shape[1] == x_out.shape[1]
+        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
@@ -320,15 +327,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": self.multi_step,
+                "input_timesteps": self.n_step_input,
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
             md_dict["metadata_inference"][dataset]["shapes"] = shapes
 
             rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
-            input_rel_date_indices = rel_date_indices[:-1]
-            output_rel_date_indices = rel_date_indices[-1]
+            input_rel_date_indices = rel_date_indices[: self.n_step_input]
+            output_rel_date_indices = rel_date_indices[-self.n_step_output :]
             md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
             md_dict["metadata_inference"][dataset]["timesteps"][
                 "output_relative_date_indices"

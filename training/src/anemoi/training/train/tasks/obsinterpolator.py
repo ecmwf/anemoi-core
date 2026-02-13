@@ -71,7 +71,7 @@ class ObsGraphInterpolator(BaseGraphModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
-        self.multi_step = config.training.get("multistep_input", 1)
+        self.n_step_input = config.training.get("multistep_input", 1)
         self.known_future_variables = {dataset_name: [] for dataset_name in self.dataset_names}
         if config.training.get("known_future_variables", None) is not None:
             for dataset_name in self.dataset_names:
@@ -86,7 +86,7 @@ class ObsGraphInterpolator(BaseGraphModule):
         self.interp_times = [t + self.multi_step - 1 for t in interp_times]
         config.training.multistep_output = len(self.interp_times)
         sorted_indices = sorted(
-            set(range(self.multi_step)).union(
+            set(range(self.n_step_input)).union(
                 self.boundary_times,
                 self.interp_times,
             ),
@@ -106,7 +106,12 @@ class ObsGraphInterpolator(BaseGraphModule):
             obs = {var.item() for var in self.data_indices[dataset_name].data.input.full}.difference(
                 set(self.known_future_variables[dataset_name]),
             )
-            x_init = data_batch[:, : self.multi_step, ..., list(obs)]  # here only past steps are used for observed vars
+            x_init = data_batch[
+                :,
+                : self.n_step_input,
+                ...,
+                list(obs),
+            ]  # here only past steps are used for observed vars
             x_init_nwp = data_batch[:, itemgetter(*self.boundary_times)(self.imap)][
                 ...,
                 self.known_future_variables[dataset_name],

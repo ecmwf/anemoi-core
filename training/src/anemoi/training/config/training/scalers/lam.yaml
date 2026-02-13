@@ -57,3 +57,8 @@ datasets:
       nodes_name: ${graph.data}
       nodes_attribute_name: cutout_mask
       norm: null
+
+    # Scalers in the time dimension
+    time_steps:
+      _target_: anemoi.training.losses.scalers.UniformTimeStepScaler
+      multistep_output: ${training.multistep_output}

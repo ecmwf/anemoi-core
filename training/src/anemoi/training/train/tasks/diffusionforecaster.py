@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.preprocessing import StepwiseProcessors
+
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -36,10 +38,10 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -60,31 +62,37 @@ class BaseDiffusionForecaster(BaseGraphModule):
         """Get input tensor shape for diffusion model."""
         x = {}
         for dataset_name, dataset_batch in batch.items():
-            msg = f"Batch length not sufficient for multi_step len!, {dataset_batch.shape[1]} !>= {self.multi_step}"
-            assert dataset_batch.shape[1] >= self.multi_step + self.multi_out, msg
+            msg = (
+                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {self.n_step_input + self.n_step_output}"
+            )
+            assert dataset_batch.shape[1] >= self.n_step_input + self.n_step_output, msg
             x[dataset_name] = dataset_batch[
                 :,
-                0 : self.multi_step,
+                0 : self.n_step_input,
                 ...,
                 self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
+            ]  # (bs, n_step_input, latlon, nvar)
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
     def get_target(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get target tensor shape for diffusion model."""
         y = {}
-        fc_times = [self.multi_step + i for i in range(self.multi_out)]
-
         for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[:, fc_times][
-                ...,
-                self.data_indices[dataset_name].data.output.full,
-            ]
+            start = self.n_step_input
+            y_time = dataset_batch.narrow(1, start, self.n_step_output)
+            var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+            y[dataset_name] = y_time.index_select(-1, var_idx)  # (bs, n_step_output, ens, latlon, nvar)
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
-    def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         return self.model.model.fwd_with_preconditioning(
             x,
             y_noised,
@@ -97,9 +105,9 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        dataset_name: str,
         weights: torch.Tensor | None = None,
         grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the diffusion loss with noise weighting.
@@ -122,7 +130,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
         torch.Tensor
             Computed loss with noise weighting applied
         """
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
         assert weights is not None, f"{self.__class__.__name__} must be provided for diffusion loss computation."
 
         return self.loss[dataset_name](
@@ -147,12 +154,32 @@ class BaseDiffusionForecaster(BaseGraphModule):
         device: torch.device,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         sigma, weight = {}, {}
+        dataset_names = list(shape.keys())
+        ref_shape = shape[dataset_names[0]]
+        # Expected shape: (batch, time, ensemble, grid, vars)
+        assert len(ref_shape) == 5, "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for diffusion noise."
+        batch_size = ref_shape[0]
+        ensemble_size = ref_shape[2]
         for dataset_name, shape_x in shape.items():
-            rnd_uniform = torch.rand(shape_x, device=device)
-            sigma[dataset_name] = (
-                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
-            ) ** rho
-            weight[dataset_name] = (sigma[dataset_name] ** 2 + sigma_data**2) / (sigma[dataset_name] * sigma_data) ** 2
+            assert (
+                len(shape_x) == 5
+            ), f"Expected 5D tensor shape (batch, time, ensemble, grid, vars) for dataset '{dataset_name}'."
+            assert (
+                shape_x[0] == batch_size and shape_x[2] == ensemble_size
+            ), "Batch or ensemble dimension mismatch across datasets when sampling diffusion noise."
+
+        base_shape = (batch_size, ensemble_size)
+        rnd_uniform = torch.rand(base_shape, device=device)
+        sigma_base = (
+            sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+        ) ** rho
+        weight_base = (sigma_base**2 + sigma_data**2) / (sigma_base * sigma_data) ** 2
+        sigma_base = sigma_base[:, None, :, None, None]
+        weight_base = weight_base[:, None, :, None, None]
+
+        for dataset_name in shape:
+            sigma[dataset_name] = sigma_base
+            weight[dataset_name] = weight_base
         return sigma, weight
 
 
@@ -163,14 +190,14 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         """Step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
@@ -178,16 +205,14 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
         Returns
         -------
-        tuple[torch.Tensor, dict, torch.Tensor]
+        tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-
-        x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
+        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
-        shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 1) for k, x_ in x.items()}
+        shapes = {k: y_.shape for k, y_ in y.items()}
         sigma, noise_weights = self._get_noise_level(
             shape=shapes,
             sigma_max=self.model.model.sigma_max,
@@ -209,7 +234,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]
 
 
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
@@ -219,10 +244,10 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -235,168 +260,203 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
-        self._tendency_pre_processors = None
-        self._tendency_post_processors = None
+        self._tendency_pre_processors: dict[str, object] = {}
+        self._tendency_post_processors: dict[str, object] = {}
         self._validate_tendency_processors()
 
     def _validate_tendency_processors(self) -> None:
         stats = self.statistics_tendencies
         assert stats is not None, "Tendency statistics are required for diffusion tendency models."
-        lead_times = stats.get("lead_times") if isinstance(stats, dict) else None
-        assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
-        assert (
-            len(lead_times) == self.multi_out
-        ), f"Expected {self.multi_out} tendency statistics entries, got {len(lead_times)}."
-        assert all(
-            lead_time in stats for lead_time in lead_times
-        ), "Missing tendency statistics for one or more output steps."
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         post_processors_tendencies = getattr(self.model, "post_processors_tendencies", None)
         assert (
             pre_processors_tendencies is not None and post_processors_tendencies is not None
         ), "Per-step tendency processors are required for multi-output diffusion tendency models."
-        assert (
-            len(pre_processors_tendencies) == self.multi_out and len(post_processors_tendencies) == self.multi_out
-        ), "Per-step tendency processors must match multistep_output."
 
-        self._tendency_pre_processors = pre_processors_tendencies
-        self._tendency_post_processors = post_processors_tendencies
+        def _wrap_if_needed(
+            kind: str,
+            proc: object,
+            dataset_name: str,
+            lead_times: list[str],
+        ) -> StepwiseProcessors:
+            if isinstance(proc, StepwiseProcessors):
+                return proc
+            assert (
+                self.n_step_output == 1
+            ), "Per-step tendency processors are required for multi-output diffusion tendency models."
+            lead_time = lead_times[0]
+            wrapped = StepwiseProcessors([lead_time])
+            wrapped.set(lead_time, proc)
+            LOGGER.warning(
+                "Wrapping flat tendency %s-processor for dataset '%s' into stepwise (single-step).",
+                kind,
+                dataset_name,
+            )
+            return wrapped
+
+        for dataset_name in self.dataset_names:
+            dataset_stats = stats.get(dataset_name) if isinstance(stats, dict) else None
+            assert dataset_stats is not None, f"Tendency statistics are required for dataset '{dataset_name}'."
+            lead_times = dataset_stats.get("lead_times") if isinstance(dataset_stats, dict) else None
+            assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
+            assert (
+                len(lead_times) == self.n_step_output
+            ), f"Expected {self.n_step_output} tendency statistics entries, got {len(lead_times)}."
+            assert all(
+                lead_time in dataset_stats for lead_time in lead_times
+            ), "Missing tendency statistics for one or more output steps."
+
+            assert (
+                dataset_name in pre_processors_tendencies
+            ), "Per-step tendency processors are required for multi-output diffusion tendency models."
+            assert (
+                dataset_name in post_processors_tendencies
+            ), "Per-step tendency processors are required for multi-output diffusion tendency models."
+
+            pre_tend = pre_processors_tendencies[dataset_name]
+            post_tend = post_processors_tendencies[dataset_name]
+            pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
+            post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
+            assert (
+                len(pre_tend) == self.n_step_output and len(post_tend) == self.n_step_output
+            ), "Per-step tendency processors must match n_step_output."
+            assert all(
+                proc is not None for proc in pre_tend
+            ), "Missing tendency pre-processors for one or more output steps."
+            assert all(
+                proc is not None for proc in post_tend
+            ), "Missing tendency post-processors for one or more output steps."
+
+            self._tendency_pre_processors[dataset_name] = pre_tend
+            self._tendency_post_processors[dataset_name] = post_tend
 
     def _compute_tendency_target(
         self,
         y: dict[str, torch.Tensor],
         x_ref: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
-        tendencies = {}
-        for step, pre_proc in enumerate(self._tendency_pre_processors):
-            y_step = {k: y[k][:, step : step + 1] for k in y}
-            x_ref_step = {k: x_ref[k][:, step : step + 1] for k in x_ref}
-            tendency_step = self.model.model.compute_tendency(
-                y_step,
-                x_ref_step,
-                self.model.pre_processors,
-                pre_proc,
-                input_post_processor=self.model.post_processors,
-            )
-            for dataset_name in tendency_step:
-                if dataset_name not in tendencies:
-                    tendencies[dataset_name] = []
-                tendencies[dataset_name].append(tendency_step[dataset_name])
-        return {k: torch.cat(v, dim=1) for k, v in tendencies.items()}
+        tendencies: dict[str, torch.Tensor] = {}
+        for dataset_name, y_dataset in y.items():
+            # y is normalized data.output.full; x_ref is normalized model.input.prognostic (subset)
+            pre_tend = self._tendency_pre_processors[dataset_name]
+            tendency_steps = []
+            for step, pre_proc in enumerate(pre_tend):
+                y_step = y_dataset[:, step : step + 1]
+                x_ref_step = x_ref[dataset_name].unsqueeze(1)
+                tendency_step = self.model.model.compute_tendency(
+                    {dataset_name: y_step},
+                    {dataset_name: x_ref_step},
+                    {dataset_name: self.model.pre_processors[dataset_name]},
+                    {dataset_name: pre_proc},
+                    input_post_processor={dataset_name: self.model.post_processors[dataset_name]},
+                    skip_imputation=True,
+                )[dataset_name]
+                tendency_steps.append(tendency_step)
+            tendencies[dataset_name] = torch.cat(tendency_steps, dim=1)
+        return tendencies
 
     def _reconstruct_state(
         self,
         x_ref: dict[str, torch.Tensor],
         tendency: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
-        states = {}
-        for step, post_proc in enumerate(self._tendency_post_processors):
-            tendency_step = {k: tendency[k][:, step : step + 1] for k in tendency}
-            x_ref_step = {k: x_ref[k][:, step : step + 1] for k in x_ref}
-            state_step = self.model.model.add_tendency_to_state(
-                x_ref_step,
-                tendency_step,
-                self.model.post_processors,
-                post_proc,
-                output_pre_processor=self.model.pre_processors,
-            )
-            for dataset_name in state_step:
-                if dataset_name not in states:
-                    states[dataset_name] = []
-                states[dataset_name].append(state_step[dataset_name])
-        return {k: torch.cat(v, dim=1) for k, v in states.items()}
+        states: dict[str, torch.Tensor] = {}
+        for dataset_name, tendency_dataset in tendency.items():
+            # x_ref is normalized model.input.prognostic; tendency is normalized model.output.* space
+            post_tend = self._tendency_post_processors[dataset_name]
+            state_steps = []
+            for step, post_proc in enumerate(post_tend):
+                x_ref_step = x_ref[dataset_name].unsqueeze(1)
+                tendency_step = tendency_dataset[:, step : step + 1]
+                state_step = self.model.model.add_tendency_to_state(
+                    {dataset_name: x_ref_step},
+                    {dataset_name: tendency_step},
+                    {dataset_name: self.model.post_processors[dataset_name]},
+                    {dataset_name: post_proc},
+                    output_pre_processor={dataset_name: self.model.pre_processors[dataset_name]},
+                    skip_imputation=True,
+                )[dataset_name]
+                state_steps.append(state_step)
+            out_dataset = torch.cat(state_steps, dim=1)
+            out_dataset = self.model.model._apply_imputer_inverse(self.model.post_processors, dataset_name, out_dataset)
+            states[dataset_name] = out_dataset
+        return states
 
-    def compute_loss_metrics(
+    def compute_dataset_loss_metrics(
         self,
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        dataset_name: str,
         validation_mode: bool = False,
         y_pred_state: dict[str, torch.Tensor] | None = None,
         y_state: dict[str, torch.Tensor] | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor] | None]:
-        """Compute loss and metrics for the given predictions and targets.
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+        """Compute loss and metrics for the given predictions and targets."""
+        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred,
+            y,
+            validation_mode=validation_mode,
+            dataset_name=dataset_name,
+        )
 
-        Parameters
-        ----------
-        y_pred : dict[str, torch.Tensor]
-            Predicted values
-        y : dict[str, torch.Tensor]
-            Target values
-        step : int, optional
-            Current step
-        validation_mode : bool, optional
-            Whether to compute validation metrics
-        y_pred_state : dict[str, torch.Tensor], optional
-            Predicted states (for validation metrics) if they differ from y_pred (e.g., tendency-based models)
-        y_state : dict[str, torch.Tensor], optional
-            Target states (for validation metrics) if they differ from y (e.g., tendency-based models)
-        **kwargs
-            Additional arguments to pass to loss computation
+        loss = self._compute_loss(
+            y_pred_full,
+            y_full,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
+            **kwargs,
+        )
 
-        Returns
-        -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
-            Loss, metrics dictionary (if validation_mode), and full predictions
-        """
-        total_loss, metrics_next, y_preds = None, {}, {}
-        for dataset_name in self.dataset_names:
-            y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
-                y_pred[dataset_name],
-                y[dataset_name],
+        metrics_next = {}
+        if validation_mode:
+            assert y_pred_state is not None, "y_pred_state must be provided for tendency-based diffusion models."
+            assert y_state is not None, "y_state must be provided for tendency-based diffusion models."
+            assert (
+                dataset_name in y_pred_state
+            ), f"{dataset_name} must be a key in y_pred_state for tendency-based diffusion models."
+            assert (
+                dataset_name in y_state
+            ), f"{dataset_name} must be a key in y_state for tendency-based diffusion models."
+            assert (
+                y_pred_state[dataset_name] is not None
+            ), "y_pred_state must be provided for tendency-based diffusion models."
+            assert y_state[dataset_name] is not None, "y_state must be provided for tendency-based diffusion models."
+
+            y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
+                y_pred_state[dataset_name],
+                self.model.model._apply_imputer_inverse(
+                    self.model.post_processors,
+                    dataset_name,
+                    y_state[dataset_name],
+                ),
                 validation_mode=validation_mode,
                 dataset_name=dataset_name,
             )
-            loss = self._compute_loss(
-                y_pred=y_pred_full,
-                y=y_full,
+
+            metrics_next = self._compute_metrics(
+                y_pred_state_full,
+                y_state_full,
                 grid_shard_slice=grid_shard_slice,
                 dataset_name=dataset_name,
                 **kwargs,
             )
-            if loss is not None:
-                dataset_loss_sum = loss.sum()  # collapse potential multi-scale loss
-                total_loss = dataset_loss_sum if total_loss is None else total_loss + dataset_loss_sum
 
-                if validation_mode:
-                    loss_obj = self.loss[dataset_name]
-                    loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
-                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = loss
-
-            # Compute metrics if in validation mode
-            if validation_mode:
-                assert y_pred_state is not None, "y_pred_state must be provided for tendency-based diffusion models."
-                assert y_state is not None, "y_state must be provided for tendency-based diffusion models."
-                # Prepare states for metrics computation
-                y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
-                    y_pred_state[dataset_name],
-                    y_state[dataset_name],
-                    validation_mode,
-                )
-                dataset_metrics = self._compute_metrics(
-                    y_pred_state_full,
-                    y_state_full,
-                    grid_shard_slice=grid_shard_slice,
-                    **kwargs,
-                )
-                y_preds[dataset_name] = y_pred_state_full
-                for metric_name, metric_value in dataset_metrics.items():
-                    metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
-        return total_loss, metrics_next, y_preds if validation_mode else None
+        return loss, metrics_next, y_pred_state_full if validation_mode else None
 
     def _step(
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         """Step for the tendency-based diffusion forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
@@ -404,16 +464,16 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         Returns
         -------
-        tuple[torch.Tensor, dict, torch.Tensor]
+        tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-
-        x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, multi_out, ens, latlon, nvar)
+        # batch is already normalized in BaseGraphModule._normalize_batch
+        # x: data.input.full (normalized), y: data.output.full (normalized)
+        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
-        if pre_processors_tendencies is None:
+        if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
             msg = (
                 "pre_processors_tendencies not found. This is required for tendency-based diffusion models. "
                 "Ensure that statistics_tendencies is provided during model initialization."
@@ -425,10 +485,13 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             self.grid_shard_shapes,
             self.model_comm_group,
         )
+        # x_ref is normalized model.input.prognostic (subset), aligned to output steps
+        x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
         tendency_target = self._compute_tendency_target(y, x_ref)
+
         # get noise level and associated loss weights
-        shapes = {k: (x_.shape[0],) + (1,) * (x_.ndim - 1) for k, x_ in x.items()}
+        shapes = {k: target.shape for k, target in tendency_target.items()}
         sigma, noise_weights = self._get_noise_level(
             shape=shapes,
             sigma_max=self.model.model.sigma_max,
@@ -458,4 +521,4 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        return loss, metrics, [y_pred]

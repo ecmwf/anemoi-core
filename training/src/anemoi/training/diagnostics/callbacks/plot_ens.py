@@ -123,10 +123,14 @@ class EnsemblePlotMixin:
             ].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
+        total_targets = output_times[0]
+        if output_times[1] == "forecast":
+            total_targets *= pl_module.n_step_output
+
         input_tensor = (
             batch[dataset_name][
                 :,
-                pl_module.multi_step - 1 : pl_module.multi_step + output_times[0] + 1,
+                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
                 ...,
                 pl_module.data_indices[dataset_name].data.output.full,
             ]
@@ -138,13 +142,15 @@ class EnsemblePlotMixin:
             tuple(
                 self.post_processors[dataset_name](x[dataset_name].detach().cpu(), in_place=False)[
                     self.sample_idx : self.sample_idx + 1,
-                    -1:,  # TODO (dieter): -1: -> :, and set up plotting of all output steps
+                    :,
                     members,
                     ...,
                 ]
                 for x in outputs[1]
             ),
         )
+        if output_times[1] == "time_interp" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
+            output_tensor = output_tensor.squeeze(0)
         output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
         data = data.numpy()
@@ -241,12 +247,14 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
+        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         members: list | None = None,
+        focus_area: list[dict] | None = None,
         **kwargs: Any,
     ) -> None:
         # Initialize PlotSample first
@@ -256,11 +264,13 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             sample_idx,
             parameters,
             accumulation_levels_plot,
+            output_steps,
             precip_and_related_fields,
             colormaps,
             per_sample,
             every_n_batches,
             dataset_names,
+            focus_area,
             **kwargs,
         )
         self.plot_members = members
@@ -291,7 +301,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name not in diagnostics)
-                for name in self.config.diagnostics.plot.parameters
+                for name in self.parameters
             }
 
             data, output_tensor = self.process(
@@ -303,27 +313,71 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 members=self.plot_members,
             )
 
-            local_rank = pl_module.local_rank
-            for rollout_step in range(output_times[0]):
-                fig = plot_predicted_ensemble(
-                    parameters=plot_parameters_dict,
-                    n_plots_per_sample=4,
-                    latlons=self.latlons[dataset_name],
-                    clevels=self.accumulation_levels_plot,
-                    y_true=data[rollout_step + 1, ...].squeeze(),
-                    y_pred=output_tensor[rollout_step, ...].squeeze(),
-                    datashader=self.datashader_plotting,
-                    precip_and_related_fields=self.precip_and_related_fields,
-                    colormaps=self.colormaps,
-                )
+            # Apply spatial mask
+            _, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
 
-                self._output_figure(
-                    logger,
-                    fig,
-                    epoch=epoch,
-                    tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                    exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}",
-                )
+            local_rank = pl_module.local_rank
+            if output_times[1] == "forecast" and pl_module.n_step_output > 1:
+                max_out_steps = min(pl_module.n_step_output, self.output_steps)
+                for rollout_step in range(output_times[0]):
+                    for out_step in range(max_out_steps):
+                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
+                        fig = plot_predicted_ensemble(
+                            parameters=plot_parameters_dict,
+                            n_plots_per_sample=4,
+                            latlons=self.latlons[dataset_name],
+                            clevels=self.accumulation_levels_plot,
+                            y_true=data[truth_idx, ...].squeeze(),
+                            y_pred=output_tensor[rollout_step, out_step, ...].squeeze(),
+                            datashader=self.datashader_plotting,
+                            precip_and_related_fields=self.precip_and_related_fields,
+                            colormaps=self.colormaps,
+                        )
+
+                        self._output_figure(
+                            logger,
+                            fig,
+                            epoch=epoch,
+                            tag=(
+                                "pred_val_sample_"
+                                f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
+                                f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                            ),
+                            exp_log_tag=(
+                                "pred_val_sample_"
+                                f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
+                                f"rank{local_rank:01d}{self.focus_mask.tag}"
+                            ),
+                        )
+            else:
+                for rollout_step in range(output_times[0]):
+                    fig = plot_predicted_ensemble(
+                        parameters=plot_parameters_dict,
+                        n_plots_per_sample=4,
+                        latlons=self.latlons[dataset_name],
+                        clevels=self.accumulation_levels_plot,
+                        y_true=data[rollout_step + 1, ...].squeeze(),
+                        y_pred=output_tensor[rollout_step, ...].squeeze(),
+                        datashader=self.datashader_plotting,
+                        precip_and_related_fields=self.precip_and_related_fields,
+                        colormaps=self.colormaps,
+                    )
+
+                    self._output_figure(
+                        logger,
+                        fig,
+                        epoch=epoch,
+                        tag=(
+                            f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_"
+                            f"rank{local_rank:01d}{self.focus_mask.tag}"
+                        ),
+                        exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
+                    )
 
 
 # Overload callbacks from single forecaster by using them with the first ensemble member
@@ -357,12 +411,24 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         config: DictConfig,
         sample_idx: int,
         parameters: list[str],
+        output_steps: int,
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback."""
-        _PlotSpectrum.__init__(self, config, sample_idx, parameters, min_delta, every_n_batches, dataset_names)
+        _PlotSpectrum.__init__(
+            self,
+            config,
+            sample_idx,
+            parameters,
+            output_steps,
+            min_delta,
+            every_n_batches,
+            dataset_names,
+            focus_area,
+        )
 
 
 class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
@@ -374,11 +440,13 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
+        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback."""
@@ -388,11 +456,13 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
             sample_idx,
             parameters,
             accumulation_levels_plot,
+            output_steps,
             precip_and_related_fields,
             colormaps,
             per_sample,
             every_n_batches,
             dataset_names,
+            focus_area,
             **kwargs,
         )
 
@@ -405,10 +475,12 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         config: DictConfig,
         sample_idx: int,
         parameters: list[str],
+        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback."""
         _PlotHistogram.__init__(
@@ -416,10 +488,12 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
             config,
             sample_idx,
             parameters,
+            output_steps,
             precip_and_related_fields,
             log_scale,
             every_n_batches,
             dataset_names,
+            focus_area,
         )
 
 

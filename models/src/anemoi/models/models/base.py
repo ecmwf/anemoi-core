@@ -66,8 +66,8 @@ class BaseGraphModel(nn.Module):
         self._graph_name_hidden = (
             model_config.graph.hidden
         )  # assumed to be all the same because this is how we construct the graphs
-        self.multi_step = model_config.training.multistep_input
-        self.multi_out = model_config.training.multistep_output
+        self.n_step_input = model_config.training.multistep_input
+        self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
 
         self.node_attributes = torch.nn.ModuleDict()
@@ -99,6 +99,7 @@ class BaseGraphModel(nn.Module):
         self._internal_input_idx = {}
         self._internal_output_idx = {}
         self.input_dim = {}
+        self.output_dim = {}
         self.input_dim_latent = {}
         self.output_dim = {}
 
@@ -114,9 +115,12 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return (
-            self.multi_step * self.num_input_channels[dataset_name]
+            self.n_step_input * self.num_input_channels[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
         )
+
+    def _calculate_output_dim(self, dataset_name: str) -> int:
+        return self.n_step_output * self.num_output_channels[dataset_name]
 
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
         return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
@@ -197,7 +201,6 @@ class BaseGraphModel(nn.Module):
 
     def _get_consistent_dim(self, x: dict[str, Tensor], dim: int) -> int:
         dim_sizes = [_x.shape[dim] for _x in x.values()]
-
         # Assert all datasets have the same sizes
         assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
 
@@ -256,7 +259,7 @@ class BaseGraphModel(nn.Module):
         batch: dict[str, torch.Tensor],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
-        multi_step: int,
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
@@ -274,7 +277,7 @@ class BaseGraphModel(nn.Module):
             Pre-processing module
         post_processors : nn.Module,
             Post-processing module
-        multi_step : int,
+        n_step_input : int,
             Number of input timesteps
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
@@ -300,7 +303,7 @@ class BaseGraphModel(nn.Module):
             x = {}
             for dataset_name in dataset_names:
                 x[dataset_name] = batch[dataset_name][
-                    :, 0:multi_step, None, ...
+                    :, 0:n_step_input, None, ...
                 ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
