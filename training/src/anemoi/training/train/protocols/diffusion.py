@@ -60,7 +60,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         self.rho = config.model.model.diffusion.rho
 
-
     def forward(
         self,
         x: dict[str, torch.Tensor],

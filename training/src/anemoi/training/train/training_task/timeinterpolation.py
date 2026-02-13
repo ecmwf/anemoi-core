@@ -7,13 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.training.train.training_task.base import BaseTask
-import torch
 import logging
-from anemoi.models.data_indices.collection import IndexCollection
 from operator import itemgetter
 
+import torch
+
+from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.train.training_task.base import BaseTask
+
 LOGGER = logging.getLogger(__name__)
+
 
 class TimeInterpolationTask(BaseTask):
     """Time interpolation task implementation."""
@@ -27,9 +30,9 @@ class TimeInterpolationTask(BaseTask):
         target_forcings: dict[str, list[int]],
         **_kwargs,
     ) -> None:
-        self.boundary_times = explicit_input_times  # [0, 6]
+        self.boundary_times = explicit_input_times  # [0, 6]
         self.interp_times = explicit_output_times  # [1, 2, 3, 4, 5]
-        self.target_forcings = target_forcings # {"data": []}
+        self.target_forcings = target_forcings  # {"data": []}
         self.use_time_fraction = True
 
         self.num_tfi = {name: len(elements) for name, elements in self.target_forcings.items()}
@@ -45,11 +48,13 @@ class TimeInterpolationTask(BaseTask):
         x_bound = {}
         for dataset_name, dataset_batch in batch.items():
             time_indices = itemgetter(*self.boundary_times)(self.imap)
-            x_bound[dataset_name] = dataset_batch[:, time_indices][...,data_indices[dataset_name].data.input.full]
+            x_bound[dataset_name] = dataset_batch[:, time_indices][..., data_indices[dataset_name].data.input.full]
             # shape: (bs, time, ens, latlon, nvar)
         return x_bound
 
-    def get_target_forcing(self, batch: dict[str, torch.Tensor], interp_step: int, data_indices: dict[str, IndexCollection]) -> dict[str, torch.Tensor]:
+    def get_target_forcing(
+        self, batch: dict[str, torch.Tensor], interp_step: int, data_indices: dict[str, IndexCollection],
+    ) -> dict[str, torch.Tensor]:
         batch_size = next(iter(batch.values())).shape[0]
         ens_size = next(iter(batch.values())).shape[2]
         grid_size = next(iter(batch.values())).shape[3]
@@ -67,7 +72,9 @@ class TimeInterpolationTask(BaseTask):
 
             # get the forcing information for the target interpolation time:
             if num_tfi >= 1:
-                target_forcing_indices = itemgetter(*self.target_forcings[dataset_name].data)(data_indices[dataset_name].data.input.name_to_index)
+                target_forcing_indices = itemgetter(*self.target_forcings[dataset_name].data)(
+                    data_indices[dataset_name].data.input.name_to_index,
+                )
                 target_forcing[dataset_name][..., :num_tfi] = batch[dataset_name][
                     :,
                     self.imap[interp_step],
@@ -91,6 +98,13 @@ class TimeInterpolationTask(BaseTask):
         y = {}
         for dataset_name, dataset_batch in batch.items():
             var_indices = data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = dataset_batch[:, self.imap[step], None, :, :, var_indices,]
+            y[dataset_name] = dataset_batch[
+                :,
+                self.imap[step],
+                None,
+                :,
+                :,
+                var_indices,
+            ]
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y

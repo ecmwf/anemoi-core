@@ -31,4 +31,3 @@ class BaseExplicitIndicesTask(BaseTask):
 
     def get_targets(self, index: int) -> list[int]:
         return [index + t for t in self.target_times]
-

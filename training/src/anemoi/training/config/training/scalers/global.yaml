@@ -1,6 +1,5 @@
 datasets:
   data:
-
     # Several scalers can be added here. In order to be applied their names must be included in the loss.
     # scaler name must be included in `scalers` in the losses for this to be applied.
     general_variable:
@@ -52,4 +51,4 @@ datasets:
    # Scalers in the time dimension
     time_steps:
       _target_: anemoi.training.losses.scalers.UniformTimeStepScaler
-      multistep_output: ${task.training_task.multistep_output}
+      multistep_output: ${task.multistep_output}

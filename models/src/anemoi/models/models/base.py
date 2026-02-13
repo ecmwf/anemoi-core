@@ -66,8 +66,8 @@ class BaseGraphModel(nn.Module):
         self._graph_name_hidden = (
             model_config.graph.hidden
         )  # assumed to be all the same because this is how we construct the graphs
-        self.n_step_input = 2 # model_config.task.training_task.multistep_input
-        self.n_step_output = 1 #model_config.task.training_task.multistep_output
+        self.n_step_input = 2  # model_config.task.multistep_input
+        self.n_step_output = 1  # model_config.task.multistep_output
         self.num_channels = model_config.model.num_channels
 
         self.node_attributes = torch.nn.ModuleDict()

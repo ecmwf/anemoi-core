@@ -92,7 +92,7 @@ class ForecastingTask(BaseTask):
         self,
         batch: dict[str, torch.Tensor],
         data_indices: dict[str, IndexCollection],
-        step: int,
+        step: int = 0,
     ) -> dict[str, torch.Tensor]:
         start = self.num_input_steps + self.num_output_steps * step
         y = {}
@@ -132,12 +132,12 @@ class ForecastingTask(BaseTask):
 
             batch_time_index = self.num_input_steps + (rollout_step + 1) * self.num_output_steps - (i + 1)
 
-            #x[:, -(i + 1)] = self.output_mask[dataset_name].rollout_boundary(
+            # x[:, -(i + 1)] = self.output_mask[dataset_name].rollout_boundary(
             #    x[:, -(i + 1)],
             #    batch[:, batch_time_index],
             #    data_indices,
             #    grid_shard_slice=self.grid_shard_slice[dataset_name],
-            #)
+            # )
 
             # get new "constants" needed for time-varying fields
             x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
@@ -153,7 +153,7 @@ class ForecastingTask(BaseTask):
         x: dict[str, torch.Tensor],
         y_pred: dict[str, torch.Tensor],
         batch: dict[str, torch.Tensor],
-        step: int | None = None,
+        step: int = 0,
         data_indices: IndexCollection | None = None,
     ) -> dict[str, torch.Tensor]:
         """Advance the input state for the next rollout step."""

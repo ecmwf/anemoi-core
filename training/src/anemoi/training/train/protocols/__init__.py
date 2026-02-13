@@ -7,12 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .diffusion import DiffusionProtocol
+from .diffusion import DiffusionTendProtocol
 from .ensemble import EnsembleProtocol
 from .single import SingleProtocol
-from .diffusion import DiffusionTendProtocol
-from .diffusion import DiffusionProtocol
 
 __all__ = [
     "EnsembleProtocol",
     "SingleProtocol",
+    "DiffusionProtocol",
+    "DiffusionTendProtocol",
 ]

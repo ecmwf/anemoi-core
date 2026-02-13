@@ -107,7 +107,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def task(self) -> "BaseTask":
         """Task instance."""
-        return instantiate(convert_to_omegaconf(self.config).task.training_task)
+        return instantiate(self.config.task)
 
     @cached_property
     def datamodule(self) -> Any:

@@ -11,11 +11,11 @@
 from __future__ import annotations
 
 import logging
+
 import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.protocols.base import BaseGraphModule
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -96,4 +96,3 @@ class SingleProtocol(BaseGraphModule):
 
         loss *= 1.0 / len(self.task.steps())
         return loss, metrics, y_preds
-

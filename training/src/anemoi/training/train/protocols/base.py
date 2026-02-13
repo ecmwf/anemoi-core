@@ -184,7 +184,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        #metadata["metadata_inference"]["task"] = self.task_type
+        # metadata["metadata_inference"]["task"] = self.task_type
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
@@ -272,8 +272,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
-        self.n_step_input = config.task.training_task.multistep_input
-        self.n_step_output = config.task.training_task.multistep_output  # defaults to 1 via pydantic
+        self.n_step_input = config.task.multistep_input
+        self.n_step_output = config.task.multistep_output  # defaults to 1 via pydantic
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.lr = (
             config.system.hardware.num_nodes
@@ -1032,7 +1032,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
-
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
