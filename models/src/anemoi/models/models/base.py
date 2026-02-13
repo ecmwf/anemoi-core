@@ -72,7 +72,6 @@ class BaseGraphModel(nn.Module):
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
-        self._assert_consistent_hidden_graphs()
 
         # build networks
         self._build_networks(model_config)
@@ -132,34 +131,6 @@ class BaseGraphModel(nn.Module):
                 dataset_internal_output_idx,
             ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
 
-    def _assert_consistent_hidden_graphs(self) -> None:
-        """Assert that all datasets have identical hidden-to-hidden graph structures.
-
-        This is required because the processor is shared between datasets and operates
-        on the hidden state, so all datasets must have the same hidden graph topology.
-        """
-        if isinstance(self._graph_data, dict) and len(self._graph_data) > 1:
-            dataset_names = list(self._graph_data.keys())
-            reference_dataset = dataset_names[0]
-            reference_graph = self._graph_data[reference_dataset]
-            reference_hidden_graph = reference_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
-
-            # Check hidden graph structure consistency across all datasets
-            for dataset_name in dataset_names[1:]:
-                dataset_graph = self._graph_data[dataset_name]
-                dataset_hidden_graph = dataset_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
-
-                # Compare edge indices
-                assert torch.equal(reference_hidden_graph.edge_index, dataset_hidden_graph.edge_index), (
-                    f"Hidden-to-hidden graph edge structure mismatch between reference dataset '{reference_dataset}' "
-                    f"and dataset '{dataset_name}'. All datasets must have identical hidden graph topology "
-                    f"for the shared processor to work correctly."
-                )
-
-            LOGGER.info(
-                "All datasets have consistent hidden-to-hidden graph structures (required for shared processor)"
-            )
-
     def _assert_valid_sharding(
         self,
         batch_size: int,
@@ -202,8 +173,8 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data[dataset_name])
+        for dataset_name in self.dataset_names:
+            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data)
 
     @abstractmethod
     def forward(

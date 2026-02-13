@@ -298,7 +298,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 grid_indices_configs[dataset_name],
                 reader_group_size=reader_group_size,
             )
-            self.grid_indices[dataset_name].setup(graph_data[dataset_name])
+            self.grid_indices[dataset_name].setup(graph_data)
         self.grid_dim = -2
 
         # check sharding support
