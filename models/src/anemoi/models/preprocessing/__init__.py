@@ -126,6 +126,8 @@ class BasePreprocessor(nn.Module):
         torch.Tensor
             Processed tensor
         """
+        if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
+            kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
         if inverse:
             return self.inverse_transform(x, in_place=in_place, **kwargs)
         return self.transform(x, in_place=in_place, **kwargs)
@@ -201,3 +203,35 @@ class Processors(nn.Module):
             assert not torch.isnan(
                 x
             ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
+
+
+class StepwiseProcessors(nn.Module):
+    """Ordered container for per-step processors that can include missing steps."""
+
+    def __init__(self, lead_times: list[str]) -> None:
+        super().__init__()
+        self._lead_times = list(lead_times)
+        self._processors = nn.ModuleDict()
+
+    def __len__(self) -> int:
+        return len(self._lead_times)
+
+    def __iter__(self):
+        for lead_time in self._lead_times:
+            key = str(lead_time)
+            yield self._processors[key] if key in self._processors else None
+
+    def __getitem__(self, index: int | str) -> Optional["Processors"]:
+        if isinstance(index, int):
+            lead_time = self._lead_times[index]
+        else:
+            lead_time = str(index)
+        key = str(lead_time)
+        return self._processors[key] if key in self._processors else None
+
+    @property
+    def lead_times(self) -> list[str]:
+        return list(self._lead_times)
+
+    def set(self, lead_time: str, processors: "Processors") -> None:
+        self._processors[str(lead_time)] = processors

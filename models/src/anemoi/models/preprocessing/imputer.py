@@ -26,6 +26,8 @@ LOGGER = logging.getLogger(__name__)
 class BaseImputer(BasePreprocessor, ABC):
     """Base class for Imputers."""
 
+    supports_skip_imputation = True
+
     def __init__(
         self,
         config=None,
@@ -130,7 +132,7 @@ class BaseImputer(BasePreprocessor, ABC):
             Tensor with NaN locations of shape (batch, time, ..., grid)
         """
         idx = [slice(None), slice(None)] + [0] * (x.ndim - 4) + [slice(None), slice(None)]
-        return torch.isnan(x[idx])
+        return torch.isnan(x[tuple(idx)])
 
     def _expand_subset_mask(self, x: torch.Tensor, idx_src: int, nan_locations: torch.Tensor) -> torch.Tensor:
         """Expand the subset of the nan location mask to the correct shape.
@@ -183,10 +185,18 @@ class BaseImputer(BasePreprocessor, ABC):
                 x[..., idx_dst][nan_locations[..., idx_src]] = value
         return x
 
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         if not in_place:
             x = x.clone()
+        if skip_imputation:
+            return x
 
         # recalculate NaN locations every forward pass and save for backward pass
         nan_locations = self.get_nans(x)
@@ -236,10 +246,18 @@ class BaseImputer(BasePreprocessor, ABC):
         # Replace values
         return self.fill_with_value(x, index, nan_locations, index)
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         if not in_place:
             x = x.clone()
+        if skip_imputation:
+            return x
 
         # Replace original nans with nan again
         if x.shape[-1] == self.num_training_output_vars:
@@ -417,10 +435,18 @@ class DynamicMixin:
                 x[..., idx][nan_locations[..., idx]] = value
         return x
 
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         if not in_place:
             x = x.clone()
+        if skip_imputation:
+            return x
 
         # Initilialize mask every time
         nan_locations = self.get_nans(x)
@@ -442,7 +468,7 @@ class DynamicMixin:
 
         return self.fill_with_value(x, index, nan_locations)
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         return x
 
@@ -507,10 +533,16 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
                 x[..., idx][nan_locations[..., idx]] = x[..., indices[value]][nan_locations[..., idx]]
         return x
 
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Impute missing values in the input tensor."""
-        return DynamicMixin.transform(self, x, in_place)
+        return DynamicMixin.transform(self, x, in_place, skip_imputation=skip_imputation)
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         return DynamicMixin.inverse_transform(self, x, in_place)
