@@ -96,6 +96,8 @@ dataloader:
         nodes_name: ${graph.data}
 
 training:
+  max_epochs: 100
+  max_steps: null
   metrics:
     datasets:
       data:

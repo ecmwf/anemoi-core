@@ -13,8 +13,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import matplotlib
 import numpy as np
 import xarray as xr
+
+# Headless backend for HPC / no X11.
+matplotlib.use("Agg")
 
 
 def _open_export(path: Path) -> xr.Dataset:
@@ -23,6 +27,12 @@ def _open_export(path: Path) -> xr.Dataset:
     if path.suffix == ".zarr":
         return xr.open_zarr(path, consolidated=False)
     raise ValueError(f"Unsupported export file: {path}")
+
+
+def _export_latlon(ds: xr.Dataset) -> tuple[np.ndarray, np.ndarray] | None:
+    if "latitude" in ds.coords and "longitude" in ds.coords:
+        return np.asarray(ds.coords["latitude"].values).reshape(-1), np.asarray(ds.coords["longitude"].values).reshape(-1)
+    return None
 
 
 def _open_latlon(dataset_path: Path) -> tuple[np.ndarray, np.ndarray] | None:
@@ -46,6 +56,19 @@ def _open_latlon(dataset_path: Path) -> tuple[np.ndarray, np.ndarray] | None:
     if lat is None or lon is None:
         return None
     return np.asarray(lat).reshape(-1), np.asarray(lon).reshape(-1)
+
+
+def _align_node_length(
+    targ: np.ndarray,
+    pred: np.ndarray,
+    err: np.ndarray,
+    latlon: tuple[np.ndarray, np.ndarray] | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[np.ndarray, np.ndarray] | None]:
+    if latlon is None:
+        return targ, pred, err, latlon
+    lat, lon = latlon
+    n = min(targ.shape[0], pred.shape[0], err.shape[0], lat.shape[0], lon.shape[0])
+    return targ[:n], pred[:n], err[:n], (lat[:n], lon[:n])
 
 
 def _select_var(ds: xr.Dataset, var: str) -> int:
@@ -83,7 +106,10 @@ def main() -> None:
     pred = pred[:, var_idx]
     err = err[:, var_idx]
 
-    latlon = _open_latlon(args.dataset) if args.dataset else None
+    latlon = _export_latlon(ds)
+    if latlon is None and args.dataset:
+        latlon = _open_latlon(args.dataset)
+    targ, pred, err, latlon = _align_node_length(targ, pred, err, latlon)
 
     import matplotlib.pyplot as plt  # local import to avoid backend issues
 

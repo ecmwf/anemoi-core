@@ -85,6 +85,33 @@ class ExportPredictions(pl.Callback):
         indices = [name_to_index[n] for n in names]
         return names, indices
 
+    def _get_latlons(self, pl_module: pl.LightningModule, n_nodes: int) -> tuple[np.ndarray, np.ndarray] | None:
+        """Get per-node lat/lon from graph coordinates used by the model."""
+        latlons = getattr(pl_module, "latlons_data", None)
+        if latlons is None:
+            return None
+        if isinstance(latlons, dict):
+            if "data" in latlons:
+                coords = latlons["data"]
+            elif len(latlons) == 1:
+                coords = next(iter(latlons.values()))
+            else:
+                return None
+        else:
+            coords = latlons
+
+        arr = coords.detach().cpu().numpy() if hasattr(coords, "detach") else np.asarray(coords)
+        if arr.ndim != 2 or arr.shape[1] < 2:
+            return None
+        lat = arr[:, 0]
+        lon = arr[:, 1]
+        # Graph coords are in radians in training task, convert to degrees if needed.
+        if np.nanmax(np.abs(lat)) <= np.pi + 1e-6 and np.nanmax(np.abs(lon)) <= 2 * np.pi + 1e-6:
+            lat = np.rad2deg(lat)
+            lon = np.rad2deg(lon)
+        n = min(n_nodes, lat.shape[0], lon.shape[0])
+        return lat[:n], lon[:n]
+
     def _post_process(self, pl_module: pl.LightningModule, tensor: torch.Tensor) -> torch.Tensor:
         post_processor = self._get_post_processor(pl_module)
         # Use post-processors to denormalize. Avoid in-place if supported.
@@ -233,6 +260,14 @@ class ExportPredictions(pl.Callback):
                 "rollout": target_len,
             },
         )
+
+        latlons = self._get_latlons(pl_module, ds.sizes["node"])
+        if latlons is not None:
+            lat, lon = latlons
+            ds = ds.assign_coords(
+                latitude=("node", lat),
+                longitude=("node", lon),
+            )
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         base = self.output_dir / f"pred_target_epoch{trainer.current_epoch:03d}_batch{batch_idx:04d}"
