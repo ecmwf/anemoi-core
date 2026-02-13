@@ -371,7 +371,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
             edge_shard_shapes=proc_edge_shard_shapes,
-            **proc_kwargs,
+            **processor_kwargs,
         )
 
         # Processor skip connection
