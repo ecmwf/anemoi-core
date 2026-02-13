@@ -132,12 +132,12 @@ class ForecastingTask(BaseTask):
 
             batch_time_index = self.num_input_steps + (rollout_step + 1) * self.num_output_steps - (i + 1)
 
-            #x[:, -(i + 1)] = self.output_mask[dataset_name].rollout_boundary(
+            # x[:, -(i + 1)] = self.output_mask[dataset_name].rollout_boundary(
             #    x[:, -(i + 1)],
             #    batch[:, batch_time_index],
             #    data_indices,
             #    grid_shard_slice=self.grid_shard_slice[dataset_name],
-            #)
+            # )
 
             # get new "constants" needed for time-varying fields
             x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[

@@ -11,7 +11,6 @@ import datetime
 import logging
 from abc import abstractmethod
 from functools import cached_property
-from functools import cached_property
 
 import numpy as np
 import torch

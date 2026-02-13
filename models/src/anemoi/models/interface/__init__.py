@@ -227,7 +227,7 @@ class AnemoiModelInterface(torch.nn.Module):
             "batch": batch,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
-            #"n_step_input": self.n_step_input,
+            # "n_step_input": self.n_step_input,
             "model_comm_group": model_comm_group,
         }
 

@@ -184,7 +184,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        #metadata["metadata_inference"]["task"] = self.task_type
+        # metadata["metadata_inference"]["task"] = self.task_type
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
@@ -1032,7 +1032,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
-
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
