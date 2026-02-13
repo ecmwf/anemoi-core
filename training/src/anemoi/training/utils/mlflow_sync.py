@@ -42,10 +42,15 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
     return temp
 
 
+def _cleanup_temp_env_vars() -> None:
+    """Clean up environment variables set by export_log_output_file_path."""
+    os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE", None)
+    os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY", None)
+
+
 def close_and_clean_temp(temp: tempfile._TemporaryFileWrapper, server2server: str, artifact_path: Path) -> None:
     temp.close()
-    os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE")
-    os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY")
+    _cleanup_temp_env_vars()
     if server2server:
         shutil.rmtree(artifact_path)
 
@@ -463,5 +468,4 @@ class MlFlowSync:
             # Ensure temp file cleanup happens even on early returns
             if temp and not temp.closed:
                 temp.close()
-                os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE", None)
-                os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY", None)
+                _cleanup_temp_env_vars()
