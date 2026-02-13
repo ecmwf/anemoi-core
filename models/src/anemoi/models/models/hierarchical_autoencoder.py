@@ -264,7 +264,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
         x_hidden_latents = {}
         for hidden in self._graph_name_hidden:
-            x_hidden_latents[hidden] = self.node_attributes[dataset_names[0]](hidden, batch_size=batch_size)
+            x_hidden_latents[hidden] = self.node_attributes(hidden, batch_size=batch_size)
 
         # Get data and hidden shapes for sharding
         shard_shapes_hidden_dict = {}

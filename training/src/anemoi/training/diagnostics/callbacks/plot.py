@@ -751,15 +751,9 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         super().__init__(config, dataset_names=dataset_names, every_n_epochs=every_n_epochs)
         self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
 
-    def get_node_trainable_tensors(
-        self,
-        node_attributes: NamedNodesAttributes,
-        dataset_name: str,
-    ) -> dict[str, torch.Tensor]:
+    def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
         return {
-            name: tt.trainable
-            for name, tt in node_attributes[dataset_name].trainable_tensors.items()
-            if tt.trainable is not None
+            name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None
         }
 
     def get_edge_trainable_modules(
@@ -817,10 +811,12 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
+        node_trainable_tensors = self.get_node_trainable_tensors(model.node_attributes)
+
         for dataset_name in dataset_names:
-            if len(node_trainable_tensors := self.get_node_trainable_tensors(model.node_attributes, dataset_name)):
+            if dataset_name in node_trainable_tensors and node_trainable_tensors[dataset_name] is not None:
                 fig = plot_graph_node_features(
-                    model.node_attributes[dataset_name],
+                    model.node_attributes,
                     node_trainable_tensors,
                     datashader=self.datashader_plotting,
                 )
@@ -843,7 +839,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
                 )
             elif len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
                 fig = plot_graph_edge_features(
-                    model.node_attributes[dataset_name],
+                    model.node_attributes,
                     edge_trainable_modules,
                     q_extreme_limit=self.q_extreme_limit,
                 )
