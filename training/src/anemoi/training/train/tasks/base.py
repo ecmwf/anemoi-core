@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -204,8 +205,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.statistics_tendencies = statistics_tendencies
 
-        self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
-
         # Initialize components for multi-dataset
         self.target_dataset_names = []  # list of dataset names used for loss computation
         self.scalers = {}  # dict of dict of tensors
@@ -368,6 +367,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 "This may lead to increased memory usage and slower training.",
                 ", ".join(unsupported_metrics),
             )
+
+    @cached_property
+    def logger_enabled(self) -> bool:
+        return self.trainer.logger is not None
 
     def _build_metrics_for_dataset(
         self,
@@ -1071,4 +1074,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
-            self.logger.log_hyperparams(hyper_params)
+            self.logger.log_hyperparams(
+                hyper_params,
+            )
