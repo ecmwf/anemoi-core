@@ -63,10 +63,10 @@ def attetion_ref(q, k, v, sm_scale, causal=False, window=0, mode="fwd", dtype=to
 
 @pytest.mark.gpu
 @pytest.mark.slow
-@pytest.mark.parametrize("Z", [1])
-@pytest.mark.parametrize("H", [16])
+@pytest.mark.parametrize("Z", [4])
+@pytest.mark.parametrize("H", [9])
 @pytest.mark.parametrize(
-    "N_CTX", [128, 1024, 40320] if HAS_FLASH else [128, 1024]
+    "N_CTX", [97, 128, 200, 384, 768, 1024, 1025, 2048, 40320] 
     #"N_CTX", [32]
     # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
@@ -74,7 +74,7 @@ def attetion_ref(q, k, v, sm_scale, causal=False, window=0, mode="fwd", dtype=to
 @pytest.mark.parametrize("causal", [False])  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
 @pytest.mark.parametrize(
     "window",
-    [0, 1120] if HAS_FLASH else [0, 512],
+    [True, False]
     #[0]
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
@@ -86,11 +86,18 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     to be tested (in this case, an o96 processor setup).
     """
     attention = TritonAttention.apply
+    
+    BLOCK_FIXED = 32
+    if N_CTX % BLOCK_FIXED != 0:
+        pytest.skip(f"N_CTX={N_CTX} is not divisible by BLOCK_FIXED={BLOCK_FIXED}, which is a requirement for the current implementation of the triton attention kernel.")
+    
+    if N_CTX > 2048 and not HAS_FLASH:
+        pytest.skip("N_CTX > 2048 will cause OOM for naive pytorch reference implementation, so we skip these tests when flash attention is not available.")
 
     if not is_triton_available():
         pytest.skip("Triton not available")
 
-    if window > 0 and causal:
+    if window and causal:
         pytest.skip("Causal and sliding window together not supported")
     torch.manual_seed(42)
     try:
@@ -108,6 +115,11 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     q = q.to(ref_dtype)
     k = k.to(ref_dtype)
     v = v.to(ref_dtype)
+    
+    window_size = -1
+    if window:
+        window_size = int(torch.randint(0, N_CTX, (1,))[0])
+        
 
     # Compute reference values
     if not HAS_FLASH:
@@ -118,10 +130,10 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
             # Create causal mask
             M = torch.tril(torch.ones((N_CTX, N_CTX), device=DEVICE))
             p[:, :, M == 0] = float("-inf")
-        if window != 0:
+        if window_size != -1:
             # Create sliding window mask
             positions = torch.arange(N_CTX, device="cuda")
-            mask = abs(positions[:, None] - positions[None, :]) <= window
+            mask = abs(positions[:, None] - positions[None, :]) <= window_size  
             p[:, :, ~mask] = float("-inf")
 
         p = torch.softmax(p.float(), dim=-1)
@@ -140,7 +152,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         q_flash.retain_grad()
         k_flash.retain_grad()
         v_flash.retain_grad()
-        flash_window = (-1, -1) if window == 0 else (window, window)
+        flash_window = (-1, -1) if not window else (window_size, window_size)
         ref_out = flash_attn_func(
             q_flash, k_flash, v_flash, causal=causal, window_size=flash_window, softmax_scale=sm_scale
         )
@@ -160,7 +172,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         ref_out = einops.rearrange(ref_out, "b s h d -> b h s d")
 
     # Compute triton values
-    tri_out = attention(q, k, v, causal, window, sm_scale).to(dtype)
+    tri_out = attention(q, k, v, causal, window_size, sm_scale).to(dtype)
 
     # Set tolerances based on dtype precision
     # bfloat16 has 7 mantissa bits vs float16's 10 bits, so ~8x less precision

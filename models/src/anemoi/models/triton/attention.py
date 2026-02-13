@@ -89,6 +89,9 @@ def _attn_fwd_inner(
 
         lo, hi = 0, tl.minimum((start_fixed + 1) * BLOCK_FIXED, N_CTX)
         hi = tl.multiple_of(hi, BLOCK_FIXED)
+        
+        # round down to lowest multiple of BLOCK_ITER 
+        lo = (lo // BLOCK_ITER) * BLOCK_ITER
     elif WINDOW > 0:
         # Attends within the following range (Assuming W=1)
         # X X - - -
@@ -556,10 +559,16 @@ def _attn_bwd_dkdv(
     if WINDOW > 0:
         # Rather then iterating across the whole context, we iterate
         # Over a window around the position of the K and V blocks
-        lo: tl.constexpr = tl.maximum(0, start_fixed - WINDOW)
-        hi: tl.constexpr = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
+        lo = tl.maximum(0, start_fixed - WINDOW) 
+        hi = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
         kv_lower_bound: tl.constexpr = offs_fixed[:, None] - WINDOW
         kv_upper_bound: tl.constexpr = offs_fixed[:, None] + WINDOW
+        
+        #align lo and hi to nearest BLOCK_ITER
+        lo = (lo // BLOCK_ITER) * BLOCK_ITER
+        hi = ((hi + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
+        lo = tl.multiple_of(lo, BLOCK_ITER)
+        hi = tl.multiple_of(hi, BLOCK_ITER)
     elif CAUSAL:
         # lo, hi = start_n, N_CTX
         # start_fixed, rounded down to lowest multiple if not even
@@ -734,14 +743,23 @@ def _attn_bwd_dq(
 
     # Calculate the upper and lower bounds when using masking
     if WINDOW > 0:
-        lo: tl.constexpr = tl.maximum(0, start_fixed - WINDOW)
-        hi: tl.constexpr = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
+        lo= tl.maximum(0, start_fixed - WINDOW)
+        hi= tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
         q_lower_bound: tl.constexpr = offs_fixed[:, None] - WINDOW
         q_upper_bound: tl.constexpr = offs_fixed[:, None] + WINDOW
+        
+        #align lo and hi to nearest BLOCK_ITER
+        lo = (lo // BLOCK_ITER) * BLOCK_ITER
+        hi = ((hi + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
+        lo = tl.multiple_of(lo, BLOCK_ITER)
+        hi = tl.multiple_of(hi, BLOCK_ITER)
     elif CAUSAL:
         # hi is block after start_m, rounded up to nearest multiple of step_n
         lo = 0
-        hi = ((start_fixed + BLOCK_FIXED) // BLOCK_ITER) * BLOCK_ITER
+        hi = (start_fixed + BLOCK_FIXED)
+        
+        # round hi up to nearest multiple of BLOCK_ITER
+        hi = ((hi + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
         # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
         lo = tl.multiple_of(lo, BLOCK_ITER)
         hi = tl.multiple_of(hi, BLOCK_ITER)
