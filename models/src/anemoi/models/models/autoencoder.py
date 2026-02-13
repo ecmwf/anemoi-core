@@ -36,7 +36,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
 
-        for dataset_name in self._graph_data.keys():
+        for dataset_name in self.dataset_names:
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],

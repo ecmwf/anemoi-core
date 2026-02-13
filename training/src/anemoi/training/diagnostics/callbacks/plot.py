@@ -498,8 +498,9 @@ class LongRolloutPlots(BasePlotCallback):
             for name in self.parameters
         }
         if self.latlons is None:
-            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
+            for dataset_name in self.dataset_names:
+                self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+                self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         assert batch.shape[1] >= self.max_rollout + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
@@ -784,9 +785,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             and model.encoder_graph_provider[dataset_name].trainable is not None
             and model.encoder_graph_provider[dataset_name].trainable.trainable is not None
         ):
-            trainable_modules[(model._graph_name_data, model._graph_name_hidden)] = model.encoder_graph_provider[
-                dataset_name
-            ]
+            trainable_modules[(dataset_name, model._graph_name_hidden)] = model.encoder_graph_provider[dataset_name]
 
         # Check decoder
         if (
@@ -796,9 +795,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             and model.decoder_graph_provider[dataset_name].trainable is not None
             and model.decoder_graph_provider[dataset_name].trainable.trainable is not None
         ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_data)] = model.decoder_graph_provider[
-                dataset_name
-            ]
+            trainable_modules[(model._graph_name_hidden, dataset_name)] = model.decoder_graph_provider[dataset_name]
 
         # Check processor
         if (
@@ -1128,9 +1125,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][
-                pl_module.model.model._graph_name_data
-            ].x.detach()
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
