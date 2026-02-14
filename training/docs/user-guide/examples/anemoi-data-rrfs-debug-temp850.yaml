@@ -17,8 +17,6 @@ input:
                 param: [t]
                 typeOfLevel: isobaricInhPa
                 levelist: [850]
-                date: "{date:strftime(%Y%m%d)}"
-                time: "{date:strftime(%H)}"
             - rename:
                 param:
                   t: temp
@@ -26,4 +24,3 @@ input:
                 param: "{param}_{level}"
     - regrid:
         matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
-
