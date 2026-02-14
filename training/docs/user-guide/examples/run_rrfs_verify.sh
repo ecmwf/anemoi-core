@@ -23,6 +23,17 @@ END="$3"
 FREQ="$4"
 GRAPH_PATH="${5:-}"
 
+if [[ ! -f "$CHECKPOINT_PATH" ]]; then
+  echo "ERROR: checkpoint file not found: $CHECKPOINT_PATH"
+  exit 2
+fi
+
+if [[ -n "$GRAPH_PATH" && ! -f "$GRAPH_PATH" ]]; then
+  echo "ERROR: graph file not found: $GRAPH_PATH"
+  echo "Note: this verify config uses graph=existing, so the .pt file must already exist."
+  exit 2
+fi
+
 export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-12345}"
 
 CMD=(
