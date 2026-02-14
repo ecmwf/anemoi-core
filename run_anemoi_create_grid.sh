@@ -16,7 +16,6 @@
 # Edit the paths below to your locations before running.
 
 set -euo pipefail
-set -euo pipefail
 source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-debug/src-jedi-bundle-only4mir.sh
 source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-ecmwf-mir/mir/set_mir.sh
 source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/activate anemoi-training-env-python3.12 
@@ -27,5 +26,13 @@ source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/activate anemoi-trai
 
 set -euo pipefail
 cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
- anemoi-transform make-regrid-matrix src-example.grib2 rrfs-3km-subdomain-grid.nc /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
+# anemoi-transform make-regrid-matrix src-example.grib2 rrfs-3km-subdomain-grid.nc /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
+
+
+
+anemoi-transform make-regrid-matrix \
+  /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v2024050500.grib2 \
+  rrfs-3km-subdomain-grid.nc \
+  /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
+
 
