@@ -59,10 +59,20 @@ def main() -> None:
     lat = np.asarray(ds[lat_name].values)
     lon = np.asarray(ds[lon_name].values)
 
-    if lat.ndim != 2 or lon.ndim != 2:
-        raise ValueError(f"Expected 2D lat/lon arrays. Got lat.ndim={lat.ndim}, lon.ndim={lon.ndim}")
+    # Accept both 2D curvilinear and 1D rectilinear coordinates.
+    if lat.ndim == 1 and lon.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon, lat)
+        lat, lon = lat2d, lon2d
+        print("Detected 1D lat/lon coordinates; expanded to 2D meshgrid for checks.")
+    elif lat.ndim == 2 and lon.ndim == 2:
+        pass
+    else:
+        raise ValueError(
+            f"Unsupported lat/lon dimensionality: lat.ndim={lat.ndim}, lon.ndim={lon.ndim}. "
+            "Expected either both 1D or both 2D."
+        )
     if lat.shape != lon.shape:
-        raise ValueError(f"lat/lon shape mismatch: {lat.shape} vs {lon.shape}")
+        raise ValueError(f"lat/lon shape mismatch after normalization: {lat.shape} vs {lon.shape}")
 
     ny, nx = lat.shape
     print(f"File: {args.grid}")
@@ -115,4 +125,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
