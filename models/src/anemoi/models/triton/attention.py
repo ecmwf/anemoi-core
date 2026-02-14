@@ -127,13 +127,21 @@ def _attn_fwd_inner(
     MINUS_INF : tl.constexpr = -1.0e8
     
     iter_offset = iter_offset + lo
+    mask_fixed = start_fixed * BLOCK_FIXED + offs_fixed < N_CTX
     # loop over k, v and update accumulator
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
         curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
+        mask_iter = curr_iter + offs_iter
         
         # -- compute qk ----
-        k = desc_k.load([iter_offset, 0]).T
-        qk = tl.dot(q, k) * qk_scale
+        #k = desc_k.load([iter_offset, 0]).T
+        k = desc_k.load([iter_offset, 0])#.T
+        # transpose access to mask_iter bc k is transposed
+        #k = tl.where(mask_iter[None, :] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
+        k = tl.where(mask_iter[:, None] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
+        qk = tl.dot(q, tl.trans(k)) * qk_scale
+        qk += tl.where(mask_iter[None, :] < N_CTX, 0, float("-inf")) #TODO replace with MINUS_INF
+        qk += tl.where(mask_fixed[:, None], 0, float("-inf"))  # mask out-of-bounds Q rows
 
         # apply masking
         if WINDOW > 0:
@@ -160,6 +168,7 @@ def _attn_fwd_inner(
         acc = acc * alpha[:, None]
         # prepare p and v for the dot
         v = desc_v.load([iter_offset, 0])
+        v = tl.where(mask_iter[:, None] < N_CTX, v, 0.0)  # mask out-of-bounds v values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
         p = p.to(dtype)
         acc = tl.dot(p, v, acc)
 
@@ -247,7 +256,7 @@ def _generate_configs(try_warp_spec=True):
         # Use a single config in testing for reproducibility
         configs = [ 
             triton.Config(
-                dict(BLOCK_FIXED=32, BLOCK_ITER=16, WARP_SPECIALIZE=False),
+                dict(BLOCK_FIXED=32, BLOCK_ITER=32, WARP_SPECIALIZE=False),
                 num_stages=1,
                 num_warps=4,
                 pre_hook=_host_descriptor_pre_hook,
@@ -329,7 +338,6 @@ def _attn_fwd(
     dtype: tl.constexpr,
 ):
     tl.static_assert(BLOCK_ITER <= HEAD_DIM)
-    tl.static_assert(N_CTX % BLOCK_FIXED == 0)
                      
     start_fixed = tl.program_id(0)
     off_hz = tl.program_id(1)
@@ -383,6 +391,7 @@ def _attn_fwd(
     qk_scale *= 1.44269504  # 1/log(2) #hack to make calculating exponent faster, by merging 1/ln(2) now the cheaper exp2() fn can be called later instead of exp()
     # load q: it will stay in SRAM throughout
     q = desc_q.load([fixed_offset, 0])
+    q = tl.where(offs_fixed[:, None] < N_CTX, q, 0.0)  # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
 
     acc, l_i, m_i = _attn_fwd_inner(
         acc,
@@ -411,6 +420,7 @@ def _attn_fwd(
     #acc = acc * o_scale[:,None]
     m_ptrs = M + off_hz * N_CTX + offs_fixed
     tl.store(m_ptrs, m_i)
+    acc = tl.where(offs_fixed[:, None] < N_CTX, acc, 0.0)  # mask out-of-bounds output values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
     desc_o.store([fixed_offset, 0], acc.to(dtype))
 
 
