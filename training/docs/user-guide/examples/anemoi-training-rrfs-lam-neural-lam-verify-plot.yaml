@@ -65,8 +65,9 @@ dataloader:
   grid_indices:
     datasets:
       data:
-        _target_: anemoi.training.data.grid_indices.FullGrid
+        _target_: anemoi.training.data.grid_indices.MaskedGrid
         nodes_name: ${graph.data}
+        node_attribute_name: indices_connected_nodes
   training:
     datasets:
       data:
