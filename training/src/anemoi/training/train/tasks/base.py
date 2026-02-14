@@ -330,7 +330,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
     @property
-    def output_times(self) -> None:
+    def output_times(self) -> int | None:
+        """Number of outer steps for plotting/validation (e.g. rollout steps or interp times).
+
+        Subclasses that support plot callbacks override this. Used as the length of the
+        outer loop in plot code (e.g. for rollout_step in range(output_times)).
+        """
         return None
 
     def _get_loss_name(self) -> str:

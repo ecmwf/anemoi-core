@@ -990,7 +990,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
+        output_times: int,
     ) -> None:
         logger = trainer.logger
         _ = batch_idx
@@ -1001,8 +1001,8 @@ class PlotLoss(BasePerBatchPlotCallback):
         for dataset_name in dataset_names:
 
             data_indices = pl_module.data_indices[dataset_name]
-            parameter_names = list(data_indices.model.output.name_to_index.keys())
-            parameter_positions = list(data_indices.model.output.name_to_index.values())
+            parameter_names = list[str](data_indices.model.output.name_to_index.keys())
+            parameter_positions = list[int](data_indices.model.output.name_to_index.values())
             # reorder parameter_names by position
             parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
             metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
@@ -1104,9 +1104,28 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
-        output_times: tuple,
+        output_times: int,
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
+        Parameters
+        ----------
+        pl_module : pl.LightningModule
+            The LightningModule instance
+        dataset_name : str
+            The name of the dataset to process
+        outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
+            The outputs from the model
+        batch : dict[str, torch.Tensor]
+            The batch of data
+        output_times : int
+            Number of outer steps for plotting (rollout steps for forecaster, interp times for interpolator).
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            The data and output tensors for plotting
+        """
         if self.latlons is None:
             self.latlons = {}
 
@@ -1117,6 +1136,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
+        # total_targets: forecaster has n_step_output per rollout step; interpolator has 1 per step
         total_targets = output_times
         if pl_module.task_type == "forecaster":
             total_targets *= pl_module.n_step_output
@@ -1140,6 +1160,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
+
         if pl_module.task_type == "time-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
             # Multi-out interpolator: rollouts are packed in the time dimension.
             output_tensor = output_tensor.squeeze(0)
@@ -1223,7 +1244,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
+        output_times: int,
     ) -> None:
         logger = trainer.logger
 
@@ -1364,7 +1385,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
+        output_times: int,
     ) -> None:
         logger = trainer.logger
 
@@ -1397,7 +1418,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if pl_module.task_type == "forecast":
+            if pl_module.task_type == "forecaster":
                 max_out_steps = min(pl_module.n_step_output, self.output_steps)
                 for rollout_step in range(output_times):
                     init_step = pl_module.get_init_step(rollout_step)
@@ -1507,7 +1528,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
+        output_times: int,
     ) -> None:
         logger = trainer.logger
 

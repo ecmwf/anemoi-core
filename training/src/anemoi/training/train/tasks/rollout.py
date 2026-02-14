@@ -84,10 +84,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
 
     @property
     def output_times(self) -> int:
-        return max(
-            1,
-            self.rollout,
-        )  # required for plotting callbacks, will be updated in training loop if rollout increases
+        """Number of rollout steps (outer loop in plot callbacks)."""
+        return max(1, self.rollout)
 
     def _advance_dataset_input(
         self,
