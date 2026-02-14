@@ -67,8 +67,14 @@ def _align_node_length(
     if latlon is None:
         return targ, pred, err, latlon
     lat, lon = latlon
-    n = min(targ.shape[0], pred.shape[0], err.shape[0], lat.shape[0], lon.shape[0])
-    return targ[:n], pred[:n], err[:n], (lat[:n], lon[:n])
+    n_data = min(targ.shape[0], pred.shape[0], err.shape[0])
+    n_ll = min(lat.shape[0], lon.shape[0])
+    if n_data != n_ll:
+        raise ValueError(
+            f"Node-count mismatch: data has {n_data} nodes but lat/lon has {n_ll}. "
+            "Use export-file latitude/longitude (preferred) or provide matching dataset."
+        )
+    return targ[:n_data], pred[:n_data], err[:n_data], (lat[:n_data], lon[:n_data])
 
 
 def _select_var(ds: xr.Dataset, var: str) -> int:
@@ -92,6 +98,11 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("export", type=Path, help="Exported NetCDF/Zarr from ExportPredictions.")
     p.add_argument("--dataset", type=Path, default=None, help="Zarr dataset for lat/lon lookup (optional).")
+    p.add_argument(
+        "--prefer-dataset-latlon",
+        action="store_true",
+        help="Use dataset lat/lon even if export file has latitude/longitude.",
+    )
     p.add_argument("--variable", required=True, help="Variable name (must match export 'variable' coord).")
     p.add_argument("--time-index", type=int, default=0, help="Target/pred time index to plot.")
     p.add_argument("--out", type=Path, default=Path("pred_target_compare.png"), help="Output PNG path.")
@@ -106,9 +117,23 @@ def main() -> None:
     pred = pred[:, var_idx]
     err = err[:, var_idx]
 
-    latlon = _export_latlon(ds)
-    if latlon is None and args.dataset:
+    latlon = None
+    latlon_source = "none"
+    if args.prefer_dataset_latlon and args.dataset:
         latlon = _open_latlon(args.dataset)
+        latlon_source = "dataset"
+    else:
+        latlon = _export_latlon(ds)
+        if latlon is not None:
+            latlon_source = "export"
+        elif args.dataset:
+            latlon = _open_latlon(args.dataset)
+            latlon_source = "dataset"
+
+    if latlon is not None:
+        print(f"Using lat/lon from: {latlon_source} (n={latlon[0].shape[0]})")
+    else:
+        print("No lat/lon available; plotting by node index.")
     targ, pred, err, latlon = _align_node_length(targ, pred, err, latlon)
 
     import matplotlib.pyplot as plt  # local import to avoid backend issues
