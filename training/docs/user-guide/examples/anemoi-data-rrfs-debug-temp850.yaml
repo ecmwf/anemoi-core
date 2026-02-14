@@ -1,0 +1,29 @@
+name: rrfs-debug-temp850-1time
+
+dates:
+  start: "2024-05-05T02:00:00"
+  end: "2024-05-05T02:00:00"
+  frequency: 1h
+
+build:
+  variable_naming: "{param}"
+
+input:
+  pipe:
+    - join:
+        - pipe:
+            - grib:
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                param: [t]
+                typeOfLevel: isobaricInhPa
+                levelist: [850]
+                date: "{date:strftime(%Y%m%d)}"
+                time: "{date:strftime(%H)}"
+            - rename:
+                param:
+                  t: temp
+            - rename:
+                param: "{param}_{level}"
+    - regrid:
+        matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
+
