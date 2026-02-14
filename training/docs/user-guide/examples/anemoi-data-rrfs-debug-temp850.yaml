@@ -23,4 +23,4 @@ input:
             - rename:
                 param: "{param}_{level}"
     - regrid:
-        matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
+        matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/old-rrfs-to-latlon-3km.npz
