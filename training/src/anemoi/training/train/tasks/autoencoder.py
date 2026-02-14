@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -113,6 +114,8 @@ class GraphAutoEncoder(BaseGraphModule):
             rollout_step=0,
             training_mode=True,
             validation_mode=validation_mode,
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
             use_reentrant=False,
         )
 

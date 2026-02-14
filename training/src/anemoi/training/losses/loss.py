@@ -18,8 +18,8 @@ from omegaconf import OmegaConf
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
@@ -29,7 +29,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 # Future import breaks other type hints TODO Harrison Cook
-def get_loss_function(
+def get_loss_function(  # noqa: C901
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: IndexCollection | None = None,
@@ -66,6 +66,7 @@ def get_loss_function(
         If scaler is not found in valid scalers
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
+    has_scalers_config = "scalers" in loss_config
     scalers_to_include = loss_config.pop("scalers", [])
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
@@ -82,13 +83,23 @@ def get_loss_function(
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
     if "CombinedLoss" in loss_config.get("_target_", ""):
+        combined_scalers = {}
+        # In CombinedLoss configs, the top-level `scalers` list is the global
+        # filter. Build sub-losses with only that filtered scaler dict, so
+        # excluded scalers (e.g. ["*", "!s2"]) cannot appear in any child loss.
+        if has_scalers_config:
+            for name in scalers_to_include:
+                if name not in scalers:
+                    error_msg = f"Scaler {name!r} not found in valid scalers: {list(scalers.keys())}"
+                    raise ValueError(error_msg)
+                combined_scalers[name] = scalers[name]
         if data_indices is not None:
             loss_config.update(
                 {"data_indices": data_indices},
             )
             data_indices = None  # for combined loss we want the individual losses to handle data indices
         loss_config.update(
-            {"scalers": scalers},
+            {"scalers": combined_scalers},
         )
         scalers_to_include = []
         scalers = {}  # for combined loss we want the individual losses to handle scalers
@@ -98,7 +109,7 @@ def get_loss_function(
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
     if data_indices is not None:
-        loss_function = FilteringLossWrapper(
+        loss_function = LossVariableMapper(
             loss=loss_function,
             predicted_variables=predicted_variables,
             target_variables=target_variables,

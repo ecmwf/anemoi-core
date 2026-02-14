@@ -225,7 +225,7 @@ def test_loading_checkpoint(
 
 
 @skip_if_offline
-# @pytest.mark.slow
+@pytest.mark.slow
 def test_restart_from_existing_checkpoint(
     global_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,

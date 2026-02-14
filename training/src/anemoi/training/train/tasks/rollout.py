@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.index_space import IndexSpace
     from anemoi.training.schemas.base_schema import BaseSchema
 
 
@@ -151,6 +152,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         dataset_name: str,
         step: int | None = None,
         grid_shard_slice: slice | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -175,6 +178,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             step=step,
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
         )
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
