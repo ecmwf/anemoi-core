@@ -285,7 +285,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             use_reentrant=False,
         )
 
-        # Return [y_pred] so plot callbacks receive a list of per-step dicts (one “step” for multi-out).
+        # All tasks return (loss, metrics, list of per-step dicts) for consistent plot callback contract.
         return loss, metrics, [y_pred]
 
     def get_init_step(self, rollout_step: int) -> int:

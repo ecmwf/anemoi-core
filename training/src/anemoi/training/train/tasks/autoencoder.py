@@ -122,7 +122,8 @@ class GraphAutoEncoder(BaseGraphModule):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        # All tasks return (loss, metrics, list of per-step dicts) for consistent plot callback contract.
+        return loss, metrics, [y_pred]
 
     def on_train_epoch_end(self) -> None:
         pass

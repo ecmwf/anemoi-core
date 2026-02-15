@@ -274,11 +274,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 )
                 for dataset_name, dataset_tensor in batch.items()
             }
-            # output: [loss, [pred_dict1, pred_dict2, ...]], gather predictions for plotting
+            # output: (loss, [pred_dict1, pred_dict2, ...]); all tasks return a list of per-step dicts.
             preds = output[1]
-            if isinstance(preds, dict):
-                preds = [preds]
+            if not isinstance(preds, list):
 
+                raise TypeError(preds)
             output = [
                 output[0],
                 [
@@ -1115,7 +1115,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name : str
             The name of the dataset to process
         outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
-            The outputs from the model
+            The outputs from the model. The second element must be a list of dicts
+            (one per outer step). Tasks with a single step (e.g. diffusion, multi-out
+            interpolator) must return [y_pred] so that ``for x in outputs[1]``
+            iterates over steps; if they return the dict directly, iteration would
+            be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
             The batch of data
         output_times : int
@@ -1134,6 +1138,12 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 pl_module.model.model._graph_name_data
             ].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+
+        # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
+        assert isinstance(
+            outputs[1],
+            list,
+        ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         # total_targets: forecaster has n_step_output per rollout step; interpolator has 1 per step
