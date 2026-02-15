@@ -11,15 +11,7 @@ dataloader:
     validation: 2
 
 diagnostics:
-  plot:
-    callbacks: []
-    asynchronous: False # Whether to plot asynchronously
   log:
-    wandb:
-      enabled: False
-      entity: null # override '???'
-    tensorboard:
-      enabled: False
     mlflow:
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False

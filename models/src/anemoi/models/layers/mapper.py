@@ -19,7 +19,6 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch.utils.checkpoint import checkpoint
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
 
@@ -36,6 +35,7 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class BaseMapper(nn.Module, ABC):
         hidden_dim: int,
         out_channels_dst: Optional[int] = None,
         cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
         layer_kernels: DotDict,
         **kwargs,
     ) -> None:
@@ -70,6 +71,7 @@ class BaseMapper(nn.Module, ABC):
         self.in_channels_dst = in_channels_dst
         self.hidden_dim = hidden_dim
         self.out_channels_dst = out_channels_dst
+        self.gradient_checkpointing = gradient_checkpointing
         self.layer_factory = load_layer_kernels(layer_kernels)
         self.activation = self.layer_factory.Activation()
 
@@ -355,8 +357,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
-        x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst, cond = checkpoint(
+        x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst, cond = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
+            self.gradient_checkpointing,
             x,
             shard_shapes,
             batch_size,
@@ -367,7 +370,6 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             x_dst_is_sharded,
             cond,
             edge_shard_shapes,
-            use_reentrant=False,
         )
 
         size = (x_src.shape[0], x_dst.shape[0])  # node sizes of local graph shard
@@ -379,8 +381,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
         for dst_chunk in dst_chunks:
-            out_dst[dst_chunk] = checkpoint(
+            out_dst[dst_chunk] = maybe_checkpoint(
                 self.run_processor_chunk_edge_sharding,
+                self.gradient_checkpointing,
                 (x_src, x_dst),
                 dst_chunk,
                 edge_attr,
@@ -391,7 +394,6 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
                 model_comm_group,
                 cond,
                 **kwargs,
-                use_reentrant=False,
             ).to(dtype=out_type)
 
         if not keep_x_dst_sharded:  # gather after processing chunks
@@ -480,7 +482,11 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         if self.shard_strategy == "edges":
             return self.mapper_forward_with_edge_sharding(**kwargs_forward)
         else:  # self.shard_strategy == "heads"
-            return checkpoint(self.mapper_forward_with_heads_sharding, **kwargs_forward, use_reentrant=False)
+            return maybe_checkpoint(
+                self.mapper_forward_with_heads_sharding,
+                self.gradient_checkpointing,
+                **kwargs_forward,
+            )
 
 
 class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
@@ -825,8 +831,9 @@ class GNNBaseMapper(BaseMapper, ABC):
         edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
-        return checkpoint(
+        return maybe_checkpoint(
             self.mapper_forward,
+            self.gradient_checkpointing,
             x=x,
             batch_size=batch_size,
             shard_shapes=shard_shapes,
@@ -838,7 +845,6 @@ class GNNBaseMapper(BaseMapper, ABC):
             keep_x_dst_sharded=keep_x_dst_sharded,
             edge_shard_shapes=edge_shard_shapes,
             **kwargs,
-            use_reentrant=False,
         )
 
 
@@ -1189,8 +1195,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
-        return checkpoint(
+        return maybe_checkpoint(
             self.mapper_forward,
+            self.gradient_checkpointing,
             x=x,
             batch_size=batch_size,
             shard_shapes=shard_shapes,
@@ -1199,7 +1206,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
             x_dst_is_sharded=x_dst_is_sharded,
             keep_x_dst_sharded=keep_x_dst_sharded,
             **kwargs,
-            use_reentrant=False,
         )
 
 

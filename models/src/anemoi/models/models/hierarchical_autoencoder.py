@@ -59,7 +59,9 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self._graph_name_hidden = (
             model_config.graph.hidden
         )  # assumed to be all the same because this is how we construct the graphs
-        self.multi_step = model_config.training.multistep_input
+        self.n_step_input = model_config.training.multistep_input
+        self.n_step_output = model_config.training.multistep_output
+
         self.num_channels = model_config.model.num_channels
 
         # hidden_dims is the dimentionality of features at each depth
@@ -234,7 +236,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
                 in_channels_dst=self.target_dim[dataset_name],
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
-                out_channels_dst=self.num_output_channels[dataset_name],
+                out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 

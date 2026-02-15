@@ -32,6 +32,27 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
+def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
+    """Conditionally apply gradient checkpointing to a function.
+
+    Parameters
+    ----------
+    func : callable
+        The function to potentially wrap with checkpointing
+    enabled : bool
+        Whether to apply gradient checkpointing
+    *args, **kwargs
+        Arguments to pass to the function
+
+    Returns
+    -------
+    The result of calling func with the provided arguments
+    """
+    if enabled:
+        return checkpoint(func, *args, **kwargs, use_reentrant=False)
+    return func(*args, **kwargs)
+
+
 def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool = True) -> DotDict["str" : nn.Module]:
     """Load layer kernels from the config.
 

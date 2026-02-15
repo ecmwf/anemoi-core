@@ -1,0 +1,38 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: multi_scale
+- model: graphtransformer
+- training: interpolator
+- _self_
+
+config_validation: True
+
+data:
+  frequency: 1h
+  resolution: o96
+
+  diagnostics: [] # Default behaviour is to interpolate between observed fields, not predict unseen fields
+
+#dataloader:
+# model_run_info: #Add for non-analysis training
+#  start: 2020-02-05T12:00:00
+#  length: 18 #in number of dates (* frequency for actual time)
+
+model:
+  model:
+    _target_: anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator
+  residual:
+    _target_: anemoi.models.layers.residual.SkipConnection
+    step: 0 # use the previous step as skip connection
+  latent_skip: False # True/False for skip connection on latent mesh
+
+training:
+  # Instead of inferred using multistep and timeincrement, specify time indices explicitly
+  explicit_times:
+    input: [0, 6]
+    target: [1, 2, 3, 4, 5]
+  multistep_output: 5
+  model_task: anemoi.training.train.tasks.GraphMultiOutInterpolator

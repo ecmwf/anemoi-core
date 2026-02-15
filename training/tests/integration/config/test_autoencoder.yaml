@@ -18,3 +18,7 @@ diagnostics:
     mlflow:
       authentication: True
       experiment_name: 'ci_hpc_mlflow'
+  # autoencoder so far do not hanlde most of the plotting callbcaks
+  plot:
+    asynchronous: False # Whether to plot asynchronously
+    callbacks: []

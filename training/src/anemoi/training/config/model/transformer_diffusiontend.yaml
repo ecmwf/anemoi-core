@@ -64,6 +64,7 @@ processor:
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
 
@@ -76,6 +77,7 @@ encoder:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
@@ -90,6 +92,7 @@ decoder:
   initialise_data_extractor_zero: True
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"

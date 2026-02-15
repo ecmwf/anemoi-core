@@ -143,9 +143,7 @@ class MultiHeadSelfAttention(nn.Module):
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
-        assert (
-            self.attention_implementation in attn_funcs
-        ), f"{self.attention_implementation} not supported. \
+        assert self.attention_implementation in attn_funcs, f"{self.attention_implementation} not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
 
         # initalise the attn func here

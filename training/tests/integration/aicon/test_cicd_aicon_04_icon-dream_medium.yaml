@@ -38,7 +38,6 @@ system:
       root: logs
       wandb: ""
       mlflow: mlflow
-      tensorboard: tensorboard
     profiler: profiler
   # number of GPUs per node and number of nodes (for DDP)
   hardware:
@@ -219,6 +218,7 @@ training:
   deterministic: false
   precision: 16-mixed
   multistep_input: 2
+  multistep_output: 1
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0
@@ -309,6 +309,7 @@ diagnostics:
     # Precipitation and related fields
     precip_and_related_fields: [tp, cp]
     datasets_to_plot: ["data"]
+    focus_areas: {}
     callbacks: []
 
   debug:
@@ -326,6 +327,7 @@ diagnostics:
   log:
     wandb:
       enabled: False
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
       offline: False
       log_model: False
       project: 'Anemoi'
@@ -333,8 +335,7 @@ diagnostics:
       # logger options (these probably come with some overhead)
       gradients: False
       parameters: False
-    tensorboard:
-      enabled: false
+      interval: 100
     mlflow:
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False

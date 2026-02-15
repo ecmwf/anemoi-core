@@ -46,7 +46,7 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"graph_attention_backend": str, "edge_pre_mlp": bool}
+        allowed_extras = {"graph_attention_backend": str, "edge_pre_mlp": bool, "gradient_checkpointing": bool}
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:
@@ -83,7 +83,7 @@ class TransformerProcessorSchema(TransformerModelComponent):
     def check_valid_extras(self) -> Any:
         # Check for valid extra fields related to MultiHeadSelfAttention and MultiHeadCrossAttention
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"use_rotary_embeddings": bool}
+        allowed_extras = {"use_rotary_embeddings": bool, "gradient_checkpointing": bool}
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:

@@ -50,6 +50,8 @@ class DefinedModels(str, Enum):
     ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_INTERP_ENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
     ANEMOI_MODEL_INTERP_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecInterpolator"
+    ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecMultiOutInterpolator"
+    ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator"
     ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec"
     )

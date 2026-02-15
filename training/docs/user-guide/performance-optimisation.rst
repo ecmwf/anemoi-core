@@ -142,6 +142,51 @@ inform you about which num_chunks parameter to change.
 
       export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER=... ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR=...
 
+Gradient Checkpointing
+======================
+
+Gradient checkpointing is a technique that trades compute time for memory.
+During backpropagation, intermediate activations are normally stored to
+compute gradients. With gradient checkpointing enabled, these activations
+are recomputed on-the-fly during the backward pass instead of being stored.
+
+This can significantly reduce peak memory usage at the cost of increased
+computation time.
+
+Gradient checkpointing is **enabled by default** for all model components
+(encoder, processor, decoder). To disable it for faster training when
+memory is not a constraint:
+
+.. code:: yaml
+
+   model:
+     encoder:
+       gradient_checkpointing: False
+     processor:
+       gradient_checkpointing: False
+     decoder:
+       gradient_checkpointing: False
+
+You can also enable/disable checkpointing independently for each component.
+For example, to only checkpoint the mappers (encoder and decoder), which
+typically have the highest peak memory usage:
+
+.. code:: yaml
+
+   model:
+     encoder:
+       gradient_checkpointing: True
+     processor:
+       gradient_checkpointing: False
+     decoder:
+       gradient_checkpointing: True
+
+.. note::
+
+   Disabling gradient checkpointing will increase memory usage but can
+   lead to pronounced speedups in training. This is recommended when you
+   have sufficient GPU memory and want to maximize training throughput.
+
 Shard model over more GPUs
 ==========================
 

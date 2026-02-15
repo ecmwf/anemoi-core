@@ -19,6 +19,10 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     import torch
+    from omegaconf import DictConfig
+    from torch_geometric.data import HeteroData
+
+    from anemoi.models.data_indices.collection import IndexCollection
 
 
 LOGGER = logging.getLogger(__name__)
@@ -29,16 +33,67 @@ class GraphAutoEncoder(BaseGraphModule):
 
     task_type = "autoencoder"
 
+    def __init__(
+        self,
+        *,
+        config: DictConfig,
+        graph_data: HeteroData,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: IndexCollection,
+        metadata: dict,
+        supporting_arrays: dict,
+    ) -> None:
+        """Initialize graph neural network interpolator.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Job configuration
+        graph_data : HeteroData
+            Graph object
+        statistics : dict
+            Statistics of the training data
+        data_indices : IndexCollection
+            Indices of the training data,
+        metadata : dict
+            Provenance information
+        supporting_arrays : dict
+            Supporting NumPy arrays to store in the checkpoint
+
+        """
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
+
+        assert (
+            self.n_step_input == self.n_step_output
+        ), "Autoencoders must have the same number of input and output steps."
+
     def _step(
         self,
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
 
+        required_time_steps = max(self.n_step_input, self.n_step_output)
         x = {}
 
         for dataset_name, dataset_batch in batch.items():
+            msg = (
+                f"Batch length not sufficient for requested n_step_input/n_step_output for {dataset_name}!"
+                f" {dataset_batch.shape[1]} !>= {required_time_steps}"
+            )
+            assert dataset_batch.shape[1] >= required_time_steps, msg
             x[dataset_name] = dataset_batch[
+                :,
+                0:required_time_steps,
                 ...,
                 self.data_indices[dataset_name].data.input.full,
             ]
@@ -48,7 +103,9 @@ class GraphAutoEncoder(BaseGraphModule):
         y = {}
 
         for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[:, 0, ..., self.data_indices[dataset_name].data.output.full]
+            y_time = dataset_batch.narrow(1, 0, self.n_step_output)
+            var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+            y[dataset_name] = y_time.index_select(-1, var_idx)
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         loss, metrics, y_pred = checkpoint(
