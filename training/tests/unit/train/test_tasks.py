@@ -210,7 +210,7 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         forecaster,
         "_advance_input",
-        lambda x, _y_pred=None, _batch=None, _rollout_step=None: x,
+        lambda x, *_args, **_kwargs: x,
     )
 
     forecaster.rollout = 2
