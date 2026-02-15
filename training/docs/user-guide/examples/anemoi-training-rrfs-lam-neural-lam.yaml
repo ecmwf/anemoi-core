@@ -53,6 +53,10 @@ dataloader:
     start: "2024-05-05T19:00:00"
     end: "2024-05-05T23:00:00"
     drop: [boundary_mask]
+  grid_indices:
+    _target_: anemoi.training.data.grid_indices.MaskedGrid
+    nodes_name: ${graph.data}
+    node_attribute_name: indices_connected_nodes
 
 training:
   metrics:
