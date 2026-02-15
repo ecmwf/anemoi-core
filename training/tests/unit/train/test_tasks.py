@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Any
 
 import einops
@@ -6,7 +5,6 @@ import pytest
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
@@ -163,56 +161,43 @@ _CFG_FORECASTER = DictConfig(
 )
 
 
-def _stub_init_forecaster(
-    self: BaseGraphModule,
+def _set_base_task_attrs(
+    obj: BaseGraphModule,
     *,
+    data_indices: dict[str, IndexCollection],
     config: DictConfig,
-    graph_data: HeteroData,
-    statistics: dict,
-    statistics_tendencies: dict,
-    data_indices: IndexCollection,
-    metadata: dict | None = None,
-    supporting_arrays: dict | None = None,
+    n_step_input: int = 1,
+    n_step_output: int = 1,
 ) -> None:
-    del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
-    pl.LightningModule.__init__(self)
-    self.n_step_input = config.training.multistep_input
-    self.n_step_output = config.training.multistep_output
-    self.model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
-    self.model_comm_group = None
-    self.model_comm_group_size = 1
-    self.grid_shard_shapes = {"data": None}
-    self.grid_shard_slice = {"data": None}
-    self.is_first_step = False
-    self.updating_scalars = {}
-    self.data_indices = data_indices
-    self.dataset_names = list(data_indices.keys())
-    self.target_dataset_names = self.dataset_names
-    self.grid_dim = -2
-    self.config = config
-    self.loss = {"data": DummyLoss()}
-    self.loss_supports_sharding = False
-    self.metrics_support_sharding = True
-    self.device = torch.device("cpu")
-
-
-def _make_graph_forecaster(monkeypatch: pytest.MonkeyPatch) -> GraphForecaster:
-    """Build GraphForecaster with stubbed BaseGraphModule.__init__ (single place for forecaster creation)."""
-    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init_forecaster, raising=True)
-    return GraphForecaster(
-        config=_CFG_FORECASTER,
-        graph_data={"data": HeteroData()},
-        statistics={"data": {}},
-        statistics_tendencies={"data": None},
-        data_indices=_data_indices_single(),
-        metadata={},
-        supporting_arrays={},
-    )
+    """Set attributes common to tasks built via __new__ + pl.LightningModule.__init__."""
+    obj.data_indices = data_indices
+    obj.dataset_names = list(data_indices.keys())
+    obj.config = config
+    obj.n_step_input = n_step_input
+    obj.n_step_output = n_step_output
+    obj.grid_dim = -2
+    obj.model_comm_group = None
+    obj.model_comm_group_size = 1
+    obj.grid_shard_shapes = {"data": None}
+    obj.grid_shard_slice = {"data": None}
 
 
 def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forecaster output_times, get_init_step, and _step return shape (one instantiation)."""
-    forecaster = _make_graph_forecaster(monkeypatch)
+    data_indices = _data_indices_single()
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER)
+    forecaster.rollout = _CFG_FORECASTER.training.rollout.start
+    forecaster.rollout_epoch_increment = _CFG_FORECASTER.training.rollout.epoch_increment
+    forecaster.rollout_max = _CFG_FORECASTER.training.rollout.max
+    forecaster.model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
 
     assert forecaster.output_times == 1
     for i in range(1, _CFG_FORECASTER.training.rollout.max + 1):
@@ -222,7 +207,11 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
-    monkeypatch.setattr(forecaster, "_advance_input", lambda x: x)
+    monkeypatch.setattr(
+        forecaster,
+        "_advance_input",
+        lambda x, _y_pred=None, _batch=None, _rollout_step=None: x,
+    )
 
     forecaster.rollout = 2
     required_time_steps = forecaster.n_step_input + forecaster.rollout * forecaster.n_step_output
@@ -256,62 +245,33 @@ _CFG_DIFFUSION = DictConfig(
 )
 
 
-def test_graphdiffusionforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_graphdiffusionforecaster() -> None:
     class DummyDiffusion:
         def __init__(self, model: DummyDiffusionModel) -> None:
             self.model = model
 
-    def _stub_init(
-        self: BaseGraphModule,
-        *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict | None = None,
-        supporting_arrays: dict | None = None,
-    ) -> None:
-        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
-        pl.LightningModule.__init__(self)
-        self.n_step_input = config.training.multistep_input
-        model = DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
-        self.model = DummyDiffusion(model=model)
-        self.model_comm_group = None
-        self.model_comm_group_size = 1
-        self.grid_shard_shapes = {"data": None}
-        self.grid_shard_slice = {"data": None}
-        self.is_first_step = False
-        self.updating_scalars = {}
-        self.data_indices = data_indices
-        self.dataset_names = list(data_indices.keys())
-        self.target_dataset_names = self.dataset_names
-        self.grid_dim = -2
-        self.config = config
-        self.loss = {"data": DummyLoss()}
-        self.loss_supports_sharding = False
-        self.metrics_support_sharding = True
-        self.n_step_output = 1
-
-    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
-
-    forecaster = GraphDiffusionForecaster(
-        config=_CFG_DIFFUSION,
-        graph_data={"data": HeteroData()},
-        statistics={"data": {}},
-        statistics_tendencies={"data": None},
-        data_indices=_data_indices_single(),
-        metadata={},
-        supporting_arrays={},
+    data_indices = _data_indices_single()
+    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyDiffusion(
+        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
     )
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     t = _CFG_DIFFUSION.training.multistep_input
 
     batch = torch.randn((b, t + 1, e, g, v), dtype=torch.float32)
-    loss, metrics, y_preds = forecaster._step(batch={"data": batch}, validation_mode=False)
+    loss, _, y_preds = forecaster._step(batch={"data": batch}, validation_mode=False)
 
-    _assert_step_return_format(loss, metrics, y_preds, expected_len=1)
+    _assert_step_return_format(loss, y_preds, expected_len=1)
     y_pred = y_preds[0]["data"]
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, 1, e, g, v)
@@ -437,71 +397,18 @@ _CFG_INTERP_STEP = DictConfig({"training": {"explicit_times": {"input": [0, 3], 
 _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}})
 
 
-def _make_stub_init_autoencoder(model: Any = None) -> Callable[[BaseGraphModule], None]:
-    """Return a stub __init__ for GraphAutoEncoder. If model is set, stub sets self.model (for _step tests)."""
-
-    def _stub(
-        self: BaseGraphModule,
-        *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict | None = None,
-        supporting_arrays: dict | None = None,
-    ) -> None:
-        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
-        pl.LightningModule.__init__(self)
-        self.n_step_input = 1
-        self.n_step_output = 1
-        self.data_indices = data_indices
-        self.dataset_names = list(data_indices.keys())
-        self.config = config
-        if model is not None:
-            self.model = model
-
-    return _stub
-
-
 @pytest.mark.parametrize("task_class", [GraphInterpolator, GraphMultiOutInterpolator], ids=["single_out", "multi_out"])
 def test_interpolator_output_times_and_get_init_step(
-    monkeypatch: pytest.MonkeyPatch,
     task_class: type[GraphInterpolator] | type[GraphMultiOutInterpolator],
 ) -> None:
-    """Both interpolator task types: output_times == len(target), get_init_step(i) == i under stub."""
-    import types
-
-    def _stub_init(
-        self: BaseGraphModule,
-        *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict | None = None,
-        supporting_arrays: dict | None = None,
-    ) -> None:
-        del graph_data, statistics, statistics_tendencies, metadata, data_indices, supporting_arrays
-        self.n_step_input = 1
-        self.n_step_output = len(config.training.explicit_times.target)
-        self.interp_times = config.training.explicit_times.target
-        self.model = types.SimpleNamespace()
-        self.get_init_step = lambda rollout: rollout
-
-    monkeypatch.setattr(task_class, "__init__", _stub_init, raising=True)
-
-    data_indices = {"data": _DummyIndexForInterpolator()}
-    interpolator = task_class(
-        config=_CFG_INTERP_TWO_TARGETS,
-        graph_data={"data": None},
-        statistics={"data": {}},
-        statistics_tendencies={"data": None},
-        data_indices=data_indices,
-        metadata={},
-        supporting_arrays={},
-    )
+    """Both interpolator task types: output_times == len(target), get_init_step(i) == i."""
+    interpolator = task_class.__new__(task_class)
+    pl.LightningModule.__init__(interpolator)
+    interpolator.n_step_input = 1
+    interpolator.n_step_output = len(_CFG_INTERP_TWO_TARGETS.training.explicit_times.target)
+    interpolator.interp_times = _CFG_INTERP_TWO_TARGETS.training.explicit_times.target
+    interpolator.model = None  # unused for this test
+    interpolator.get_init_step = lambda rollout: rollout
 
     assert interpolator.output_times == 2
     for i in range(interpolator.output_times):
@@ -532,20 +439,14 @@ def test_graphforecaster_get_init_step() -> None:
     assert forecaster.get_init_step(1) == 0
 
 
-def test_graphautoencoder_output_times(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_graphautoencoder_output_times() -> None:
     """GraphAutoEncoder has output_times=1."""
     from anemoi.training.train.tasks.autoencoder import GraphAutoEncoder
 
-    monkeypatch.setattr(BaseGraphModule, "__init__", _make_stub_init_autoencoder(), raising=True)
-    ae = GraphAutoEncoder(
-        config=_CFG_AE,
-        graph_data={"data": HeteroData()},
-        statistics={"data": {}},
-        statistics_tendencies={"data": None},
-        data_indices=_data_indices_single(),
-        metadata={},
-        supporting_arrays={},
-    )
+    data_indices = _data_indices_single()
+    ae = GraphAutoEncoder.__new__(GraphAutoEncoder)
+    pl.LightningModule.__init__(ae)
+    _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE)
     assert ae.output_times == 1
 
 
@@ -561,112 +462,71 @@ def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> 
         v = next(iter(x.values())).shape[4]
         return {dn: torch.randn(b, t, e, g, v, dtype=torch.float32) for dn in x}
 
-    def _stub_init(
-        self: BaseGraphModule,
-        *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict | None = None,
-        supporting_arrays: dict | None = None,
-    ) -> None:
-        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
-        pl.LightningModule.__init__(self)
-        self.n_step_input = 1
-        self.n_step_output = 1
-        self.data_indices = data_indices
-        self.dataset_names = list(data_indices.keys())
-        self.config = config
-        self.model = type("M", (), {"__call__": lambda _self, x: dummy_forward(x)})()
+    data_indices = _data_indices_single()
+    ae = GraphAutoEncoder.__new__(GraphAutoEncoder)
+    pl.LightningModule.__init__(ae)
+    _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE)
+    ae.model = type(
+        "M",
+        (),
+        {"__call__": lambda _self, x, **_kwargs: dummy_forward(x)},
+    )()
 
-    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
-    ae = GraphAutoEncoder(
-        config=_CFG_AE,
-        graph_data={"data": HeteroData()},
-        statistics={"data": {}},
-        statistics_tendencies={"data": None},
-        data_indices=_data_indices_single(),
-        metadata={},
-        supporting_arrays={},
+    monkeypatch.setattr(
+        ae,
+        "compute_loss_metrics",
+        lambda *args, **_kwargs: (torch.tensor(0.0), {}, args[0] if args else None),
     )
-    monkeypatch.setattr(ae, "compute_loss_metrics", lambda y_pred: (torch.tensor(0.0), {}, y_pred))
 
     b, t, e, g, v = 2, 1, 1, 4, 2
     batch = {"data": torch.randn(b, t, e, g, v, dtype=torch.float32)}
-    loss, metrics, y_preds = ae._step(batch, validation_mode=False)
+    loss, _, y_preds = ae._step(batch, validation_mode=False)
 
-    _assert_step_return_format(loss, metrics, y_preds, expected_len=1)
+    _assert_step_return_format(loss, y_preds, expected_len=1)
 
 
 def test_graphinterpolator_step_returns_list_of_dicts(monkeypatch: pytest.MonkeyPatch) -> None:
     """GraphInterpolator (single-out) _step returns (loss, metrics, list of dicts) per interp step."""
 
-    def dummy_forward(x_bound: dict) -> dict:
+    def dummy_forward(x_bound: dict, target_forcing: dict | None = None) -> dict:
+        del target_forcing
         b = next(iter(x_bound.values())).shape[0]
         e = next(iter(x_bound.values())).shape[2]
         g = next(iter(x_bound.values())).shape[3]
         v = next(iter(x_bound.values())).shape[4]
         return {"data": torch.randn(b, 1, e, g, v, dtype=torch.float32)}
 
-    def _stub_init(
-        self: BaseGraphModule,
-        *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict | None = None,
-        supporting_arrays: dict | None = None,
-    ) -> None:
-        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
-        pl.LightningModule.__init__(self)
-        self.n_step_input = 1
-        self.n_step_output = 1
-        self.data_indices = data_indices
-        self.dataset_names = list(data_indices.keys())
-        self.config = config
-        self.interp_times = config.training.explicit_times.target
-        self.boundary_times = config.training.explicit_times.input
-        sorted_indices = sorted(set(self.boundary_times + self.interp_times))
-        self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
-        self.num_tfi = {"data": 0}
-        self.use_time_fraction = {"data": False}
-        self.target_forcing_indices = {"data": []}
-        self.model = type(
-            "M",
-            (),
-            {"__call__": lambda _self, x_bound, target_forcing=None: dummy_forward(x_bound, target_forcing)},
-        )()
-        self.loss = {"data": DummyLoss()}
-        self.grid_dim = -2
-        self.device = torch.device("cpu")
+    data_indices = _data_indices_single()
+    task = GraphInterpolator.__new__(GraphInterpolator)
+    pl.LightningModule.__init__(task)
+    _set_base_task_attrs(task, data_indices=data_indices, config=_CFG_INTERP_STEP)
+    task.interp_times = _CFG_INTERP_STEP.training.explicit_times.target
+    task.boundary_times = _CFG_INTERP_STEP.training.explicit_times.input
+    sorted_indices = sorted(set(task.boundary_times + task.interp_times))
+    task.imap = {idx: i for i, idx in enumerate(sorted_indices)}
+    task.num_tfi = {"data": 0}
+    task.use_time_fraction = {"data": False}
+    task.target_forcing_indices = {"data": []}
+    task.model = type(
+        "M",
+        (),
+        {"__call__": lambda _self, x_bound, target_forcing=None, **_kwargs: dummy_forward(x_bound, target_forcing)},
+    )()
+    task.loss = {"data": DummyLoss()}
 
-    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
-    task = GraphInterpolator(
-        config=_CFG_INTERP_STEP,
-        graph_data={"data": HeteroData()},
-        statistics={"data": {}},
-        statistics_tendencies={"data": None},
-        data_indices=_data_indices_single(),
-        metadata={},
-        supporting_arrays={},
+    monkeypatch.setattr(
+        task,
+        "compute_loss_metrics",
+        lambda *args, **_kwargs: (torch.tensor(0.0), {}, args[0] if args else None),
     )
-
-    def _fake_compute(y_pred: torch.Tensor) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
-        return torch.tensor(0.0), {}, y_pred
-
-    monkeypatch.setattr(task, "compute_loss_metrics", _fake_compute)
 
     b, t, e, g, v = 2, 4, 1, 4, 2
     batch = {"data": torch.randn(b, t, e, g, v, dtype=torch.float32)}
-    loss, metrics, y_preds = task._step(batch, validation_mode=False)
+    loss, _, y_preds = task._step(batch, validation_mode=False)
 
-    _assert_step_return_format(loss, metrics, y_preds, expected_len=len(task.interp_times))
+    _assert_step_return_format(loss, y_preds, expected_len=len(task.interp_times))
 
 
 def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -679,52 +539,35 @@ def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyP
         v = next(iter(x_bound.values())).shape[4]
         return {"data": torch.randn(b, 2, e, g, v, dtype=torch.float32)}
 
-    def _stub_init(
-        self: BaseGraphModule,
-        *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict | None = None,
-        supporting_arrays: dict | None = None,
-    ) -> None:
-        del graph_data, statistics, statistics_tendencies, metadata, supporting_arrays
-        pl.LightningModule.__init__(self)
-        self.n_step_input = 1
-        self.n_step_output = len(config.training.explicit_times.target)
-        self.data_indices = data_indices
-        self.dataset_names = list(data_indices.keys())
-        self.config = config
-        self.boundary_times = config.training.explicit_times.input
-        self.interp_times = config.training.explicit_times.target
-        sorted_indices = sorted(set(self.boundary_times + self.interp_times))
-        self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
-        self.model = type("M", (), {"__call__": lambda _self, x: dummy_forward(x)})()
-        self.loss = {"data": DummyLoss()}
-        self.grid_dim = -2
-        self.device = torch.device("cpu")
-
-    monkeypatch.setattr(BaseGraphModule, "__init__", _stub_init, raising=True)
-    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
-    task = GraphMultiOutInterpolator(
+    data_indices = _data_indices_single()
+    task = GraphMultiOutInterpolator.__new__(GraphMultiOutInterpolator)
+    pl.LightningModule.__init__(task)
+    _set_base_task_attrs(
+        task,
+        data_indices=data_indices,
         config=_CFG_INTERP_STEP,
-        graph_data={"data": HeteroData()},
-        statistics={"data": {}},
-        statistics_tendencies={"data": None},
-        data_indices=_data_indices_single(),
-        metadata={},
-        supporting_arrays={},
+        n_step_output=len(_CFG_INTERP_STEP.training.explicit_times.target),
     )
+    task.boundary_times = _CFG_INTERP_STEP.training.explicit_times.input
+    task.interp_times = _CFG_INTERP_STEP.training.explicit_times.target
+    sorted_indices = sorted(set(task.boundary_times + task.interp_times))
+    task.imap = {idx: i for i, idx in enumerate(sorted_indices)}
+    task.model = type(
+        "M",
+        (),
+        {"__call__": lambda _self, x, **_kwargs: dummy_forward(x)},
+    )()
+    task.loss = {"data": DummyLoss()}
 
-    def _fake_compute(y_pred: torch.Tensor) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
-        return torch.tensor(0.0), {}, y_pred
-
-    monkeypatch.setattr(task, "compute_loss_metrics", _fake_compute)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    monkeypatch.setattr(
+        task,
+        "compute_loss_metrics",
+        lambda *args, **_kwargs: (torch.tensor(0.0), {}, args[0] if args else None),
+    )
 
     b, t, e, g, v = 2, 4, 1, 4, 2
     batch = {"data": torch.randn(b, t, e, g, v, dtype=torch.float32)}
-    loss, metrics, y_preds = task._step(batch, validation_mode=False)
+    loss, _, y_preds = task._step(batch, validation_mode=False)
 
-    _assert_step_return_format(loss, metrics, y_preds, expected_len=1)
+    _assert_step_return_format(loss, y_preds, expected_len=1)
