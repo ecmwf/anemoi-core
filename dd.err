@@ -1,21 +1,64 @@
-2026-02-15 16:17:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
-2026-02-15 16:17:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
-2026-02-15 16:17:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
-2026-02-15 16:17:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
-2026-02-15 16:20:55 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-15 16:20:55 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-15 16:20:55 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-15 16:20:55 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-15 16:20:55 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-02-15 16:20:55 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-02-15 16:20:55 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-02-15 16:20:55 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
-Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
-Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-16 00:31:52 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-16 00:31:52 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-16 00:31:52 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-16 00:31:52 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-16 00:34:48 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-16 00:34:48 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-16 00:34:48 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-16 00:34:48 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-16 00:34:48 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-16 00:34:48 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-16 00:34:48 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-16 00:34:48 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
 Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
+    cli_main(__version__, __doc__, COMMANDS)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
 Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    sys.exit(main())
+             ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    cli_main(__version__, __doc__, COMMANDS)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
+    cli_main(__version__, __doc__, COMMANDS)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+    cmd.run(args, unknown)
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    sys.exit(main())
+             ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    cli_main(__version__, __doc__, COMMANDS)
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
     cmd.run(args, unknown)
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
@@ -25,201 +68,140 @@ Traceback (most recent call last):
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
     _run_hydra(
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
-    AnemoiTrainer(config).train()
-    ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Traceback (most recent call last):
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-Traceback (most recent call last):
-pydantic_core._pydantic_core.ValidationError: 4 validation errors for BaseSchema
-diagnostics.log.wandb._target_
-  Input should be 'pytorch_lightning.loggers.wandb.WandbLogger' [type=literal_error, input_value='anemoi.training.diagnost...ogger.AnemoiWandbLogger', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-diagnostics.log.tensorboard
-  Extra inputs are not permitted [type=extra_forbidden, input_value={'enabled': False}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.max_steps
-  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/int_type
-training.`anemoi.training.train.tasks.GraphForecaster`.lr.iterations
-  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/int_type
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
     _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_hydra(
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
     _run_app(
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
-    AnemoiTrainer(config).train()
-    ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
     _run_app(
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
     run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-pydantic_core._pydantic_core.ValidationError: 4 validation errors for BaseSchema
-diagnostics.log.wandb._target_
-  Input should be 'pytorch_lightning.loggers.wandb.WandbLogger' [type=literal_error, input_value='anemoi.training.diagnost...ogger.AnemoiWandbLogger', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-diagnostics.log.tensorboard
-  Extra inputs are not permitted [type=extra_forbidden, input_value={'enabled': False}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.max_steps
-  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/int_type
-training.`anemoi.training.train.tasks.GraphForecaster`.lr.iterations
-  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
-    For further information visit https://errors.pydantic.dev/2.11/v/int_type
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
-    AnemoiTrainer(config).train()
-    ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
     run_and_report(
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
     raise ex
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    raise ex
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    return func()
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
     return func()
            ^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
     lambda: hydra.run(
             ^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
     _ = ret.return_value
         ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    _ = ret.return_value
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+        ^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
     raise self._return_value
+    raise self._return_value
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    raise self._return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
     ret.return_value = task_function(task_cfg)
                        ^^^^^^^^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+    ret.return_value = task_function(task_cfg)
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+    AnemoiTrainer(config).train()
     AnemoiTrainer(config).train()
     ^^^^^^^^^^^^^^^^^^^^^
-pydantic_core._pydantic_core.ValidationError: 4 validation errors for BaseSchema
-diagnostics.log.wandb._target_
-  Input should be 'pytorch_lightning.loggers.wandb.WandbLogger' [type=literal_error, input_value='anemoi.training.diagnost...ogger.AnemoiWandbLogger', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-diagnostics.log.tensorboard
-  Extra inputs are not permitted [type=extra_forbidden, input_value={'enabled': False}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.max_steps
-  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/int_type
-training.`anemoi.training.train.tasks.GraphForecaster`.lr.iterations
-  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/int_type
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    AnemoiTrainer(config).train()
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
     self.config = BaseSchema(**config)
                   ^^^^^^^^^^^^^^^^^^^^
   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
     validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-pydantic_core._pydantic_core.ValidationError: 4 validation errors for BaseSchema
-diagnostics.log.wandb._target_
-  Input should be 'pytorch_lightning.loggers.wandb.WandbLogger' [type=literal_error, input_value='anemoi.training.diagnost...ogger.AnemoiWandbLogger', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
-diagnostics.log.tensorboard
-  Extra inputs are not permitted [type=extra_forbidden, input_value={'enabled': False}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.11/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.max_steps
-  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/int_type
-training.`anemoi.training.train.tasks.GraphForecaster`.lr.iterations
-  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
-    For further information visit https://errors.pydantic.dev/2.11/v/int_type
-srun: error: u22g12: tasks 2-3: Exited with exit code 1
-srun: Terminating StepId=8634038.0
-[2026-02-15T16:20:58.122] error: *** STEP 8634038.0 ON u22g11 CANCELLED AT 2026-02-15T16:20:58 DUE TO TASK FAILURE ***
-srun: error: u22g11: task 0: Exited with exit code 1
-srun: error: u22g11: task 1: Exited with exit code 1
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/schemas/base_schema.py", line 83, in model_post_init
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/schemas/base_schema.py", line 83, in model_post_init
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/schemas/base_schema.py", line 83, in model_post_init
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/schemas/base_schema.py", line 83, in model_post_init
+    if self.diagnostics.log.mlflow.enabled and (
+    if self.diagnostics.log.mlflow.enabled and (
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'enabled'
+    if self.diagnostics.log.mlflow.enabled and (
+AttributeError: 'NoneType' object has no attribute 'enabled'
+    if self.diagnostics.log.mlflow.enabled and (
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'enabled'
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'enabled'
+srun: error: u23g13: tasks 0-1: Exited with exit code 1
+srun: Terminating StepId=8645822.0
+srun: error: u23g14: tasks 2-3: Exited with exit code 1
