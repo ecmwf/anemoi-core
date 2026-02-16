@@ -12,11 +12,6 @@ dataloader:
 
 diagnostics:
   log:
-    wandb:
-      enabled: False
-      entity: null # override '???'
-    tensorboard:
-      enabled: False
     mlflow:
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
