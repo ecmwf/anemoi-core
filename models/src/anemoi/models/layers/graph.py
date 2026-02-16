@@ -73,9 +73,9 @@ class NamedNodesAttributes(nn.Module):
         super().__init__()
 
         for nodes_name in graph_data.node_types:
-            assert nodes_name in num_trainable_params, (
-                f"Number of trainable parameters for nodes group '{nodes_name}' not provided in config.model.trainable_parameters."
-            )
+            assert (
+                nodes_name in num_trainable_params
+            ), f"Number of trainable parameters for nodes group '{nodes_name}' not provided in config.model.trainable_parameters."
 
         self.define_fixed_attributes(graph_data, num_trainable_params)
 
@@ -89,7 +89,8 @@ class NamedNodesAttributes(nn.Module):
         nodes_names = list(graph_data.node_types)
         self.num_nodes = {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
         self.attr_ndims = {
-            nodes_name: 2 * graph_data[nodes_name].x.shape[1] + num_trainable_params[nodes_name] for nodes_name in nodes_names
+            nodes_name: 2 * graph_data[nodes_name].x.shape[1] + num_trainable_params[nodes_name]
+            for nodes_name in nodes_names
         }
 
     def register_coordinates(self, name: str, node_coords: Tensor) -> None:
