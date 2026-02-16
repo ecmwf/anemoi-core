@@ -27,6 +27,20 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache
 mkdir -p ${TRITON_CACHE_DIR}/${SLURM_JOB_ID}
 
+echo "=== Anemoi GPU preflight ==="
+echo "date: $(date)"
+echo "host: $(hostname)"
+echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
+echo "SLURM_JOB_NODELIST=${SLURM_JOB_NODELIST:-}"
+echo "SLURM_NNODES=${SLURM_NNODES:-}"
+echo "SLURM_NTASKS=${SLURM_NTASKS:-}"
+echo "SLURM_NTASKS_PER_NODE=${SLURM_NTASKS_PER_NODE:-}"
+echo "SLURM_GPUS_ON_NODE=${SLURM_GPUS_ON_NODE:-}"
+echo "override system.hardware.num_gpus_per_node=2"
+echo "override system.hardware.num_nodes=2"
+echo "override system.hardware.num_gpus_per_model=4"
+echo "============================"
+
 srun --gpu-bind=closest \
   --export=ALL,TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}/${SLURM_PROCID} \
   anemoi-training train \
@@ -35,4 +49,3 @@ srun --gpu-bind=closest \
     system.hardware.num_gpus_per_node=2 \
     system.hardware.num_nodes=2 \
     system.hardware.num_gpus_per_model=4
-
