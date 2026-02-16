@@ -118,7 +118,7 @@ class BaseLoss(nn.Module, ABC):
                 "Scaler tensor must be at least applied to the GRID dimension. "
                 "Please add a scaler here, use `UniformWeights` for simple uniform scaling.",
             )
-             raise RuntimeError(error_msg)
+            raise RuntimeError(error_msg)
 
         scale_tensor = self.scaler
         if without_scalers is not None and len(without_scalers) > 0:
