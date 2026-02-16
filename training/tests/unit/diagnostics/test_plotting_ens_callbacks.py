@@ -104,23 +104,23 @@ def test_ensemble_plot_mixin_process():
     batch = {dataset_name: torch.randn(2, 6, 100, 5)}
 
     # outputs: (loss, list of dict[dataset_name -> tensor])
-    # Each pred tensor: (bs, n_ensemble, latlon, nvar) for indexing [:, :, members, ...]
+    # Each pred tensor: (bs, latlon, n_ensemble, nvar) for indexing [:, :, members, ...]
     # Batch slice 0:5 gives (2, 5, 100, 5) for input_tensor
     data_tensor = torch.randn(2, 5, 100, 5)
     output_preds = [
-        {dataset_name: torch.randn(2, 1, 100, 5)},
-        {dataset_name: torch.randn(2, 1, 100, 5)},
-        {dataset_name: torch.randn(2, 1, 100, 5)},
+        {dataset_name: torch.randn(2, 100, 1, 5)},
+        {dataset_name: torch.randn(2, 100, 1, 5)},
+        {dataset_name: torch.randn(2, 100, 1, 5)},
     ]
     outputs = [torch.tensor(0.5), output_preds]
 
-    # Mock post_processors: returns tensor, [sample_idx] gives (n_steps, latlon, nvar)
+    # Mock post_processors: returns tensor; for outputs, shape (bs, latlon, n_ensemble, nvar)
     mock_post_processor = MagicMock()
     mock_post_processor.side_effect = [
         data_tensor,
-        torch.randn(2, 1, 100, 5),
-        torch.randn(2, 1, 100, 5),
-        torch.randn(2, 1, 100, 5),
+        torch.randn(2, 100, 1, 5),
+        torch.randn(2, 100, 1, 5),
+        torch.randn(2, 100, 1, 5),
     ]
     mock_post_processor.cpu.return_value = mock_post_processor
     pl_module.model.post_processors = {dataset_name: mock_post_processor}
