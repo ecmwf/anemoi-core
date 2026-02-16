@@ -1,14 +1,15 @@
 ---
 defaults:
-  - /graph/projections@smoothers.smooth_1x: smooth_knn16
-  - /graph/projections@smoothers.smooth_2x: smooth_knn32
-  - /graph/projections@smoothers.smooth_4x: smooth_knn64
-  - /graph/projections@smoothers.smooth_8x: smooth_knn128
+  # Load graph/projections/smooth_knn*_n320.yaml and mount each config under
+  # the matching local path in "smoothers" (e.g. smoothers.smooth_1x).
+  # Use graph/projections/multiscale=4scale_o96 to switch to o96 smoothers.
+  - /graph/projections@smoothers.smooth_1x: smooth_knn16_n320
+  - /graph/projections@smoothers.smooth_2x: smooth_knn32_n320
+  - /graph/projections@smoothers.smooth_4x: smooth_knn64_n320
+  - /graph/projections@smoothers.smooth_8x: smooth_knn128_n320
   - _self_
 
 # 4-scale multiscale smoothing (K=16/32/64/128) on the same geometry as graph.data.
-# Sigma values are in radians (~30/60/120/240 km).
-
 smoothers:
   smooth_1x:
     node_name: smooth_1x

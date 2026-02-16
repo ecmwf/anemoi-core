@@ -61,3 +61,28 @@ def test_projection_graph_provider_fewer_dst_than_src() -> None:
 
     row_sums = matrix.sum(dim=1)
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)
+
+
+def test_projection_graph_provider_accepts_int32_edge_index() -> None:
+    graph = HeteroData()
+    graph["src"].num_nodes = 3
+    graph["dst"].num_nodes = 2
+
+    # GraphCreator may yield int32 edge indices; provider should handle this.
+    edge_index = torch.tensor([[0, 1, 2, 0], [0, 0, 1, 1]], dtype=torch.int32)
+    edge_weight = torch.tensor([0.25, 0.75, 0.6, 0.4], dtype=torch.float32)
+
+    graph[("src", "to", "dst")].edge_index = edge_index
+    graph[("src", "to", "dst")].gauss_weight = edge_weight
+
+    provider = ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="gauss_weight",
+        row_normalize=False,
+    )
+
+    matrix = provider.get_edges().to_dense()
+    assert matrix.shape == (graph["dst"].num_nodes, graph["src"].num_nodes)
+    row_sums = matrix.sum(dim=1)
+    assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)

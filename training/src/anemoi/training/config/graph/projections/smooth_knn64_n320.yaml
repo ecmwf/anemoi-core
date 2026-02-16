@@ -1,5 +1,5 @@
 ---
-# Reusable self-smoothing projection parameters (KNN=64, sigma~120km).
+# Self-smoothing projection parameters for n320 (~30 km), KNN=64.
 
 node_name: smooth
 reference_node_name: ${graph.data}

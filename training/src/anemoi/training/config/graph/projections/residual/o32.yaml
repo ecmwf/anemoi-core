@@ -1,5 +1,7 @@
 ---
 defaults:
+  # Load graph/projections/truncation_o32_knn32.yaml and mount it under
+  # the local key "truncation" (accessible as graph.projections.residual.truncation).
   - /graph/projections@truncation: truncation_o32_knn32
   - _self_
 
