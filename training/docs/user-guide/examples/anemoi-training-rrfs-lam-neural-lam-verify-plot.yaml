@@ -56,6 +56,7 @@ system:
     root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/
 
 dataloader:
+  read_group_size: ${system.hardware.num_gpus_per_model}
   limit_batches:
     training: 1
     validation: null
