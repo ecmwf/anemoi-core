@@ -3,7 +3,7 @@ defaults:
   - plot: none
   - callbacks: placeholder
   - benchmark_profiler: detailed
-  - log: wandb
+  - log: mlflow
 
 debug:
   anomaly_detection: False

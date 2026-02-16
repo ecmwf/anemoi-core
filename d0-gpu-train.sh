@@ -33,6 +33,6 @@ srun --gpu-bind=closest \
     --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
     --config-name anemoi-training-rrfs-lam-neural-lam-static-forcing \
     system.hardware.num_gpus_per_node=2 \
-    system.hardware.num_nodes=2 
-
+    system.hardware.num_nodes=2 \
+    system.hardware.num_gpus_per_model=4
 
