@@ -1,226 +1,225 @@
-2026-02-14 17:09:21 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-verify', 'system.input.warm_start=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/0b1d843b-20a4-492d-a9ed-0a021e9d0370/inference-anemoi-by_epoch-epoch_2233-step_044680.ckpt', 'dataloader.training.datasets.data.start=2024-05-05T00:00:00', 'dataloader.training.datasets.data.end=2024-05-05T23:00:00', 'dataloader.validation.datasets.data.start=2024-05-05T00:00:00', 'dataloader.validation.datasets.data.end=2024-05-05T23:00:00', 'dataloader.test.datasets.data.start=2024-05-05T00:00:00', 'dataloader.test.datasets.data.end=2024-05-05T23:00:00', 'data.frequency=1h']
-2026-02-14 17:12:08 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-14 17:12:08 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-[2026-02-14 17:12:09,508][anemoi.training.train.train][INFO] - Config validated.
-[2026-02-14 17:12:09,508][anemoi.training.train.train][INFO] - Starting from checkpoint: True
-[2026-02-14 17:12:09,508][anemoi.training.train.train][INFO] - Run id: 8996baaf-7788-4743-a40d-b4d9a42047d1
-[2026-02-14 17:12:09,508][anemoi.training.train.train][INFO] - Checkpoints path: root=PosixPath('/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/8996baaf-7788-4743-a40d-b4d9a42047d1') every_n_epochs='anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}' every_n_train_steps='anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}' every_n_minutes='anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}'
-[2026-02-14 17:12:09,509][anemoi.training.train.train][INFO] - Plots path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/plots/8996baaf-7788-4743-a40d-b4d9a42047d1
-[2026-02-14 17:12:09,756][anemoi.training.train.train][INFO] - Creating graph for dataset 'data'
-[2026-02-14 17:12:22,062][anemoi.training.train.train][INFO] - Loading graph data from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-20km_data.pt
-[2026-02-14 17:12:22,399][anemoi.training.data.datamodule][INFO] - Initializing multi-dataset module with datasets: ['data']
-[2026-02-14 17:12:22,399][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-02-14 17:12:22,400][anemoi.training.data.datamodule][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-02-14 17:12:22,402][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
-[2026-02-14 17:12:23,108][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-02-14 17:12:23,110][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 22 valid indices each
-[2026-02-14 17:12:23,110][anemoi.training.train.train][INFO] - Dataset 'data' - Number of variables: 45
-[2026-02-14 17:12:23,111][anemoi.training.train.train][INFO] - Dataset 'data' - Variables: ['clmr_200', 'clmr_500', 'clmr_850', 'clmr_925', 'grle_200', 'grle_500', 'grle_850', 'grle_925', 'height_200', 'height_500', 'height_850', 'height_925', 'icmr_200', 'icmr_500', 'icmr_850', 'icmr_925', 'landcover', 'orography', 'pres_0g', 'refc', 'rwmr_200', 'rwmr_500', 'rwmr_850', 'rwmr_925', 'snmr_200', 'snmr_500', 'snmr_850', 'snmr_925', 'sphum_200', 'sphum_500', 'sphum_850', 'sphum_925', 'swdown', 'temp_200', 'temp_500', 'temp_850', 'temp_925', 'ugrd_200', 'ugrd_500', 'ugrd_850', 'ugrd_925', 'vgrd_200', 'vgrd_500', 'vgrd_850', 'vgrd_925']
-[2026-02-14 17:12:23,112][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of prognostic variables: 42
-[2026-02-14 17:12:23,112][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of auxiliary variables: 3
-[2026-02-14 17:12:23,112][anemoi.training.train.train][INFO] - Total GPU count / model group size: 1 - NB: the learning rate will be scaled by this factor!
-[2026-02-14 17:12:23,113][anemoi.training.train.train][INFO] - Effective learning rate: 6.250e-05
-[2026-02-14 17:12:23,113][anemoi.training.train.train][INFO] - Training limits: max_epochs=1, max_steps=1. Training will stop when either limit is reached first. Learning rate scheduler will run for 1 steps.
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py:463: UserWarning: Pydantic serializer warnings:
-  PydanticSerializationUnexpectedValue(Expected `int` - serialized value may not be as expected [input_value={'data': 45}, input_type=dict])
-  return self.__pydantic_serializer__.to_python(
-[2026-02-14 17:12:23,218][anemoi.training.diagnostics.callbacks][INFO] - Using progress bar: <class 'pytorch_lightning.callbacks.progress.tqdm_progress.TQDMProgressBar'>
-[2026-02-14 17:12:23,471][anemoi.models.migrations.migrator][INFO] - Loading migration 1755530253_initial
-[2026-02-14 17:12:23,471][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857427_deprecate_eda
-[2026-02-14 17:12:23,471][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857428_chunking_fix
-[2026-02-14 17:12:23,471][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479917_hardware_schema_update
-[2026-02-14 17:12:23,471][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479918_refactor_mapper
-[2026-02-14 17:12:23,471][anemoi.models.migrations.migrator][INFO] - Loading migration 1767108147_move_to_multiple_datasets
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/lightning_fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3.12 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3 ...
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/accelerator_connector.py:513: You passed `Trainer(accelerator='cpu', precision='16-mixed')` but AMP with fp16 is not supported on CPU. Using `precision='bf16-mixed'` instead.
-[2026-02-14 17:12:23,544][pytorch_lightning.utilities.rank_zero][INFO] - Using bfloat16 Automatic Mixed Precision (AMP)
-[2026-02-14 17:12:23,578][pytorch_lightning.utilities.rank_zero][INFO] - GPU available: False, used: False
-[2026-02-14 17:12:23,578][pytorch_lightning.utilities.rank_zero][INFO] - TPU available: False, using: 0 TPU cores
-[2026-02-14 17:12:23,578][pytorch_lightning.utilities.rank_zero][INFO] - HPU available: False, using: 0 HPUs
-[2026-02-14 17:12:23,578][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer(limit_train_batches=1)` was configured so 1 batch per epoch will be used.
-[2026-02-14 17:12:23,600][lightning_fabric.utilities.seed][INFO] - Seed set to 12345
-[2026-02-14 17:12:23,751][anemoi.training.train.train][INFO] - Initial seed: Rank 0, initial seed 12345, running with random seed: 12345
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/provenance.py:143: UserWarning: The '__version__' attribute is deprecated and will be removed in MarkupSafe 3.1. Use feature detection, or `importlib.metadata.version("markupsafe")`, instead.
-  versions[name] = str(module.__version__)
-[2026-02-14 17:15:45,611][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-02-14 17:15:45,842][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_850 is not normalized.
-[2026-02-14 17:15:45,842][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_925 is not normalized.
-[2026-02-14 17:15:45,842][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: landcover is not normalized.
-[2026-02-14 17:15:45,842][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: orography is not normalized.
-[2026-02-14 17:15:45,842][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: refc is not normalized.
-[2026-02-14 17:15:45,842][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_850 is not normalized.
-[2026-02-14 17:15:45,842][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_925 is not normalized.
-[2026-02-14 17:15:45,842][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: swdown is not normalized.
-[2026-02-14 17:15:46,313][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-14 17:15:46,314][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-14 17:15:46,314][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-14 17:15:46,335][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-14 17:15:46,335][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-14 17:15:46,404][anemoi.models.layers.block][WARNING] - GraphTransformerMapperBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:46,490][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-14 17:15:46,490][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-14 17:15:46,491][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-14 17:15:46,491][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-14 17:15:46,492][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-14 17:15:46,556][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:46,621][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:46,686][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:46,750][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:46,814][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:46,878][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:46,942][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,006][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,070][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,133][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,197][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,261][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,325][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,388][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,452][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,516][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,537][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-14 17:15:47,538][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-14 17:15:47,538][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-14 17:15:47,539][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-14 17:15:47,539][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-14 17:15:47,602][anemoi.models.layers.block][WARNING] - GraphTransformerMapperBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-14 17:15:47,672][anemoi.training.losses.scalers.variable_level][INFO] - Variable Level Scaling: Applying ReluVariableLevelScaler scaling to pl variables ({'param': ['q', 't', 'u', 'v', 'w', 'z']})
-[2026-02-14 17:15:47,672][anemoi.training.losses.scalers.variable_level][INFO] - with slope = 0.001 and y-intercept/minimum = 0.2.
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:57: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
-  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
-[2026-02-14 17:15:47,711][anemoi.training.train.train][INFO] - Resuming training from last checkpoint: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/0b1d843b-20a4-492d-a9ed-0a021e9d0370/inference-anemoi-by_epoch-epoch_2233-step_044680.ckpt
-[2026-02-14 17:15:47,712][anemoi.training.train.train][INFO] - Restoring only model weights from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/0b1d843b-20a4-492d-a9ed-0a021e9d0370/inference-anemoi-by_epoch-epoch_2233-step_044680.ckpt
-[2026-02-14 17:15:48,980][anemoi.training.train.train][INFO] - Warm start ckpt type: AnemoiModelInterface
-[2026-02-14 17:15:48,982][anemoi.models.data_indices.collection][INFO] - No variable order to compare. Skipping variable order check.
-[2026-02-14 17:15:48,982][anemoi.training.train.train][INFO] - The following submodules will NOT be trained: []
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py:463: UserWarning: Pydantic serializer warnings:
-  PydanticSerializationUnexpectedValue(Expected `int` - serialized value may not be as expected [input_value={'data': 45}, input_type=dict])
-  return self.__pydantic_serializer__.to_python(
-[2026-02-14 17:15:56,104][anemoi.models.utils.compile][INFO] - The following modules will be compiled: ['anemoi.models.layers.conv.GraphTransformerConv']
-[2026-02-14 17:15:56,104][anemoi.training.train.train][INFO] - Recompile limit set to 32
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/lightning_fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3.12 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3 ...
-[2026-02-14 17:15:56,233][lightning_fabric.utilities.distributed][INFO] - Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/1
-[2026-02-14 17:15:56,245][pytorch_lightning.utilities.rank_zero][INFO] - ----------------------------------------------------------------------------------------------------
-distributed_backend=gloo
-All distributed processes registered. Starting with 1 processes
-----------------------------------------------------------------------------------------------------
-
-[2026-02-14 17:16:23,225][timm.scheduler.cosine_lr][WARNING] - Cosine annealing scheduler will have no effect on the learning rate since t_initial = t_mul = eta_mul = 1.
-[2026-02-14 17:16:23,528][lightning_fabric.utilities.seed][INFO] - [rank: 0] Seed set to 12345
-[2026-02-14 17:16:23,565][pytorch_lightning.callbacks.model_summary][INFO] - 
-  | Name    | Type                 | Params | Mode 
----------------------------------------------------------
-0 | model   | AnemoiModelInterface | 255 M  | train
-1 | loss    | ModuleDict           | 0      | train
-2 | metrics | ModuleDict           | 0      | train
----------------------------------------------------------
-255 M     Trainable params
-0         Non-trainable params
-255 M     Total params
-1,022.769 Total estimated model params size (MB)
-344       Modules in train mode
-0         Modules in eval mode
-Sanity Checking: |          | 0/? [00:00<?, ?it/s][2026-02-14 17:16:23,569][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-02-14 17:16:23,569][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
-[2026-02-14 17:16:23,573][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-02-14 17:16:23,573][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 21 valid indices each
-[2026-02-14 17:16:23,574][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-[2026-02-14 17:16:23,791][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
-[2026-02-14 17:16:23,897][anemoi.training.data.multidataset][INFO] - Worker 7 (pid 1461115, global_rank 0, model comm group 0)  has low/high range 19 / 21
-[2026-02-14 17:16:23,897][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 1461108, global_rank 0, model comm group 0)  has low/high range 0 / 3
-[2026-02-14 17:16:23,897][anemoi.training.data.multidataset][INFO] - Worker 5 (pid 1461113, global_rank 0, model comm group 0)  has low/high range 15 / 17
-[2026-02-14 17:16:23,897][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 1461110, global_rank 0, model comm group 0)  has low/high range 6 / 9
-[2026-02-14 17:16:23,898][anemoi.training.data.multidataset][INFO] - Worker 4 (pid 1461112, global_rank 0, model comm group 0)  has low/high range 12 / 15
-[2026-02-14 17:16:23,898][anemoi.training.data.multidataset][INFO] - Worker 6 (pid 1461114, global_rank 0, model comm group 0)  has low/high range 17 / 19
-[2026-02-14 17:16:23,898][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 1461109, global_rank 0, model comm group 0)  has low/high range 3 / 6
-[2026-02-14 17:16:23,898][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 1461111, global_rank 0, model comm group 0)  has low/high range 9 / 12
-[2026-02-14 17:16:23,948][anemoi.training.data.multidataset][INFO] - Worker 0 (validation, pid 1461108, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:16:23,948][anemoi.training.data.multidataset][INFO] - Worker 7 (validation, pid 1461115, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:16:23,948][anemoi.training.data.multidataset][INFO] - Worker 2 (validation, pid 1461110, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:16:23,948][anemoi.training.data.multidataset][INFO] - Worker 5 (validation, pid 1461113, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:16:23,949][anemoi.training.data.multidataset][INFO] - Worker 1 (validation, pid 1461109, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:16:23,949][anemoi.training.data.multidataset][INFO] - Worker 3 (validation, pid 1461111, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:16:23,949][anemoi.training.data.multidataset][INFO] - Worker 4 (validation, pid 1461112, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:16:23,949][anemoi.training.data.multidataset][INFO] - Worker 6 (validation, pid 1461114, base_seed 12345, sanity rnd 0.227336)
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `on_after_batch_transfer` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
-Sanity Checking:   0%|          | 0/6 [00:00<?, ?it/s]Sanity Checking DataLoader 0:   0%|          | 0/6 [00:00<?, ?it/s]No ROCm runtime is found, using ROCM_HOME='/opt/rocm'
-[2026-02-14 17:20:08,493][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions shapes: data_batch=(3, 4, 1, 298122, 45) input=(3, 3, 1, 298122, 42) data=(3, 1, 298122, 42) preds=(1, 1, 298122, 42) multi_step=2 rollout=1
-[2026-02-14 17:20:08,526][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions time window: input[2024-05-05T00:00:00..2024-05-05T01:00:00], target[2024-05-05T02:00:00..2024-05-05T02:00:00]
-[2026-02-14 17:20:18,467][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0000.*
-Sanity Checking DataLoader 0:  17%|█▋        | 1/6 [03:52<19:20,  0.00it/s][2026-02-14 17:22:38,982][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0001.*
-Sanity Checking DataLoader 0:  33%|███▎      | 2/6 [06:12<12:25,  0.01it/s][2026-02-14 17:25:01,399][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0002.*
-Sanity Checking DataLoader 0:  50%|█████     | 3/6 [08:35<08:35,  0.01it/s][2026-02-14 17:27:23,680][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0003.*
-Sanity Checking DataLoader 0:  67%|██████▋   | 4/6 [10:57<05:28,  0.01it/s][2026-02-14 17:29:44,054][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0004.*
-Sanity Checking DataLoader 0:  83%|████████▎ | 5/6 [13:17<02:39,  0.01it/s][2026-02-14 17:31:22,554][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0005.*
-Sanity Checking DataLoader 0: 100%|██████████| 6/6 [14:56<00:00,  0.01it/s]                                                                           [2026-02-14 17:31:22,757][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-Training: |          | 0/? [00:00<?, ?it/s][2026-02-14 17:31:23,128][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
-[2026-02-14 17:31:23,137][anemoi.training.data.multidataset][INFO] - Worker 4 (pid 1531504, global_rank 0, model comm group 0)  has low/high range 12 / 15
-[2026-02-14 17:31:23,137][anemoi.training.data.multidataset][INFO] - Worker 6 (pid 1531506, global_rank 0, model comm group 0)  has low/high range 18 / 20
-[2026-02-14 17:31:23,137][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 1531502, global_rank 0, model comm group 0)  has low/high range 6 / 9
-[2026-02-14 17:31:23,137][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 1531500, global_rank 0, model comm group 0)  has low/high range 0 / 3
-[2026-02-14 17:31:23,137][anemoi.training.data.multidataset][INFO] - Worker 7 (pid 1531507, global_rank 0, model comm group 0)  has low/high range 20 / 22
-[2026-02-14 17:31:23,137][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 1531501, global_rank 0, model comm group 0)  has low/high range 3 / 6
-[2026-02-14 17:31:23,137][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 1531503, global_rank 0, model comm group 0)  has low/high range 9 / 12
-[2026-02-14 17:31:23,137][anemoi.training.data.multidataset][INFO] - Worker 5 (pid 1531505, global_rank 0, model comm group 0)  has low/high range 15 / 18
-[2026-02-14 17:31:23,367][anemoi.training.data.multidataset][INFO] - Worker 4 (training, pid 1531504, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:31:23,367][anemoi.training.data.multidataset][INFO] - Worker 0 (training, pid 1531500, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:31:23,367][anemoi.training.data.multidataset][INFO] - Worker 6 (training, pid 1531506, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:31:23,367][anemoi.training.data.multidataset][INFO] - Worker 2 (training, pid 1531502, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:31:23,367][anemoi.training.data.multidataset][INFO] - Worker 3 (training, pid 1531503, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:31:23,367][anemoi.training.data.multidataset][INFO] - Worker 5 (training, pid 1531505, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:31:23,367][anemoi.training.data.multidataset][INFO] - Worker 7 (training, pid 1531507, base_seed 12345, sanity rnd 0.227336)
-[2026-02-14 17:31:23,367][anemoi.training.data.multidataset][INFO] - Worker 1 (training, pid 1531501, base_seed 12345, sanity rnd 0.227336)
-Training:   0%|          | 0/1 [00:00<?, ?it/s]Epoch 0:   0%|          | 0/1 [00:00<?, ?it/s] Epoch 0: 100%|██████████| 1/1 [06:07<00:00,  0.00it/s]Epoch 0: 100%|██████████| 1/1 [06:07<00:00,  0.00it/s, train_multi_dataset_loss_step=0.683]
-Validation: |          | 0/? [00:00<?, ?it/s][A[2026-02-14 17:37:36,357][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
-
-Validation: |          | 0/? [00:00<?, ?it/s][A
-Validation DataLoader 0: |          | 0/? [00:00<?, ?it/s][A[2026-02-14 17:39:57,100][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions shapes: data_batch=(3, 4, 1, 298122, 45) input=(3, 3, 1, 298122, 42) data=(3, 1, 298122, 42) preds=(1, 1, 298122, 42) multi_step=2 rollout=1
-[2026-02-14 17:39:57,139][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions time window: input[2024-05-05T00:00:00..2024-05-05T01:00:00], target[2024-05-05T02:00:00..2024-05-05T02:00:00]
-[2026-02-14 17:39:58,285][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0000.*
-
-Validation DataLoader 0: |          | 1/? [02:21<00:00,  0.01it/s][A[2026-02-14 17:42:19,387][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0001.*
-
-Validation DataLoader 0: |          | 2/? [04:43<00:00,  0.01it/s][A[2026-02-14 17:44:40,643][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0002.*
-
-Validation DataLoader 0: |          | 3/? [07:04<00:00,  0.01it/s][A[2026-02-14 17:47:01,465][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0003.*
-
-Validation DataLoader 0: |          | 4/? [09:25<00:00,  0.01it/s][A[2026-02-14 17:49:22,292][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0004.*
-
-Validation DataLoader 0: |          | 5/? [11:45<00:00,  0.01it/s][A[2026-02-14 17:51:00,762][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0005.*
-
-Validation DataLoader 0: |          | 6/? [13:24<00:00,  0.01it/s][A[2026-02-14 17:52:39,035][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0006.*
-
-Validation DataLoader 0: |          | 7/? [15:02<00:00,  0.01it/s][A[2026-02-14 17:54:21,563][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0007.*
-
-Validation DataLoader 0: |          | 8/? [16:45<00:00,  0.01it/s][A
-                                                                  [AEpoch 0: 100%|██████████| 1/1 [22:55<00:00,  0.00it/s, train_multi_dataset_loss_step=0.683, val_multi_dataset_loss_step=1.160, val_multi_dataset_loss_epoch=0.899][2026-02-14 17:54:25,734][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/8996baaf-7788-4743-a40d-b4d9a42047d1/inference-last.ckpt
-[2026-02-14 17:54:25,735][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-last/anemoi-metadata/ai-models.json
-[2026-02-14 17:54:25,754][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-last/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:25,758][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-last/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:34,722][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/8996baaf-7788-4743-a40d-b4d9a42047d1/last.ckpt
-[2026-02-14 17:54:34,722][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
-[2026-02-14 17:54:34,723][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:34,729][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:36,020][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/8996baaf-7788-4743-a40d-b4d9a42047d1/inference-anemoi-by_epoch-epoch_000-step_000001.ckpt
-[2026-02-14 17:54:36,020][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/ai-models.json
-[2026-02-14 17:54:36,021][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:36,024][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:44,272][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/8996baaf-7788-4743-a40d-b4d9a42047d1/anemoi-by_epoch-epoch_000-step_000001.ckpt
-[2026-02-14 17:54:44,272][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
-[2026-02-14 17:54:44,273][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:44,279][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:45,576][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/8996baaf-7788-4743-a40d-b4d9a42047d1/inference-last.ckpt
-[2026-02-14 17:54:45,576][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-last/anemoi-metadata/ai-models.json
-[2026-02-14 17:54:45,577][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-last/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:45,580][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-last/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:53,652][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/8996baaf-7788-4743-a40d-b4d9a42047d1/last.ckpt
-[2026-02-14 17:54:53,652][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
-[2026-02-14 17:54:53,653][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-14 17:54:53,658][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-Epoch 0: 100%|██████████| 1/1 [23:27<00:00,  0.00it/s, train_multi_dataset_loss_step=0.683, val_multi_dataset_loss_step=1.160, val_multi_dataset_loss_epoch=0.899, train_multi_dataset_loss_epoch=0.683][2026-02-14 17:54:53,739][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer.fit` stopped: `max_steps=1` reached.
-Epoch 0: 100%|██████████| 1/1 [23:27<00:00,  0.00it/s, train_multi_dataset_loss_step=0.683, val_multi_dataset_loss_step=1.160, val_multi_dataset_loss_epoch=0.899, train_multi_dataset_loss_epoch=0.683]
+2026-02-15 16:17:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-15 16:17:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-15 16:17:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-15 16:17:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+2026-02-15 16:20:55 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-15 16:20:55 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-15 16:20:55 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-15 16:20:55 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-15 16:20:55 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-15 16:20:55 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-15 16:20:55 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-02-15 16:20:55 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2']
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+Traceback (most recent call last):
+pydantic_core._pydantic_core.ValidationError: 4 validation errors for BaseSchema
+diagnostics.log.wandb._target_
+  Input should be 'pytorch_lightning.loggers.wandb.WandbLogger' [type=literal_error, input_value='anemoi.training.diagnost...ogger.AnemoiWandbLogger', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+diagnostics.log.tensorboard
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'enabled': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/extra_forbidden
+training.`anemoi.training.train.tasks.GraphForecaster`.max_steps
+  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/int_type
+training.`anemoi.training.train.tasks.GraphForecaster`.lr.iterations
+  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/int_type
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+pydantic_core._pydantic_core.ValidationError: 4 validation errors for BaseSchema
+diagnostics.log.wandb._target_
+  Input should be 'pytorch_lightning.loggers.wandb.WandbLogger' [type=literal_error, input_value='anemoi.training.diagnost...ogger.AnemoiWandbLogger', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+diagnostics.log.tensorboard
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'enabled': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/extra_forbidden
+training.`anemoi.training.train.tasks.GraphForecaster`.max_steps
+  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/int_type
+training.`anemoi.training.train.tasks.GraphForecaster`.lr.iterations
+  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+    For further information visit https://errors.pydantic.dev/2.11/v/int_type
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 4 validation errors for BaseSchema
+diagnostics.log.wandb._target_
+  Input should be 'pytorch_lightning.loggers.wandb.WandbLogger' [type=literal_error, input_value='anemoi.training.diagnost...ogger.AnemoiWandbLogger', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+diagnostics.log.tensorboard
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'enabled': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/extra_forbidden
+training.`anemoi.training.train.tasks.GraphForecaster`.max_steps
+  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/int_type
+training.`anemoi.training.train.tasks.GraphForecaster`.lr.iterations
+  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/int_type
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 4 validation errors for BaseSchema
+diagnostics.log.wandb._target_
+  Input should be 'pytorch_lightning.loggers.wandb.WandbLogger' [type=literal_error, input_value='anemoi.training.diagnost...ogger.AnemoiWandbLogger', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/literal_error
+diagnostics.log.tensorboard
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'enabled': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.11/v/extra_forbidden
+training.`anemoi.training.train.tasks.GraphForecaster`.max_steps
+  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/int_type
+training.`anemoi.training.train.tasks.GraphForecaster`.lr.iterations
+  Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/int_type
+srun: error: u22g12: tasks 2-3: Exited with exit code 1
+srun: Terminating StepId=8634038.0
+[2026-02-15T16:20:58.122] error: *** STEP 8634038.0 ON u22g11 CANCELLED AT 2026-02-15T16:20:58 DUE TO TASK FAILURE ***
+srun: error: u22g11: task 0: Exited with exit code 1
+srun: error: u22g11: task 1: Exited with exit code 1
