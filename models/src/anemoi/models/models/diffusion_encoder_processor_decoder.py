@@ -28,6 +28,7 @@ from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models.base import BaseGraphModel
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
 
@@ -99,27 +100,31 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         )
 
         # Decoder hidden -> data
-        self.decoder_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_data],
-            trainable_size=model_config.model.decoder.get("trainable_size", 0),
-        )
+        self.decoder_graph_provider = torch.nn.ModuleDict()
+        self.decoder = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.decoder_graph_provider[dataset_name] = create_graph_provider(
+                graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
+                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            )
+            self.decoder[dataset_name] = instantiate(
+                model_config.model.decoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.num_channels,
+                in_channels_dst=self.input_dim[dataset_name],
+                hidden_dim=self.num_channels,
+                out_channels_dst=self.output_dim[dataset_name],
+                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+            )
 
-        self.decoder = instantiate(
-            model_config.model.decoder,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.num_channels,
-            in_channels_dst=self.input_dim,
-            hidden_dim=self.num_channels,
-            out_channels_dst=self.num_output_channels,
-            edge_dim=self.decoder_graph_provider.edge_dim,
-        )
-
-    def _calculate_input_dim(self):
-        base_input_dim = super()._calculate_input_dim()
-        return base_input_dim + self.num_output_channels  # input + noised targets
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        base_input_dim = super()._calculate_input_dim(dataset_name)
+        output_dim = super()._calculate_output_dim(dataset_name)
+        input_dim = base_input_dim + output_dim  # input + noised targets
+        return input_dim
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()
@@ -140,7 +145,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -154,23 +159,50 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         x_out = einops.rearrange(
             x_out,
-            "(batch ensemble grid) vars -> batch ensemble grid vars",
+            "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
             batch=batch_size,
             ensemble=ensemble_size,
+            time=self.n_step_output,
         ).to(dtype=dtype)
 
         return x_out
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
+        assert noise_emb.ndim in (4, 5), "noise_emb must be 4D or 5D."
+        if noise_emb.ndim == 4:
+            noise_emb = noise_emb.unsqueeze(3)
         out = einops.repeat(
-            noise_emb, "batch ensemble noise_level vars -> batch ensemble (repeat noise_level) vars", repeat=repeat
+            noise_emb,
+            "batch time ensemble noise_level vars -> batch time ensemble (repeat noise_level) vars",
+            repeat=repeat,
         )
-        out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
+        out = einops.rearrange(out, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
         return out
 
-    def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
-        noise_cond = self.noise_embedder(sigma)
-        noise_cond = self.noise_cond_mlp(noise_cond)
+    def _embed_noise_conditioning(self, sigma: torch.Tensor) -> torch.Tensor:
+        return self.noise_cond_mlp(self.noise_embedder(sigma))
+
+    def _assert_sigma_shapes(self, sigma: dict[str, torch.Tensor]) -> tuple[int, int]:
+        dataset_names = list(sigma)
+        sigma_ref = sigma[dataset_names[0]]
+        assert sigma_ref.ndim == 5, "Expected sigma to have 5 dimensions (batch, time, ensemble, grid, vars)."
+        batch_size, _, ensemble_size = sigma_ref.shape[:3]
+        for dataset_name in dataset_names:
+            sigma_shape = sigma[dataset_name].shape
+            assert (
+                len(sigma_shape) == 5
+            ), f"Expected sigma to have 5 dimensions (batch, time, ensemble, grid, vars) for '{dataset_name}'."
+            assert (
+                sigma_shape[0] == batch_size and sigma_shape[2] == ensemble_size
+            ), "Batch or ensemble dimension mismatch across datasets for diffusion sigma."
+        return batch_size, ensemble_size
+
+    def _generate_noise_conditioning(
+        self,
+        noise_cond: torch.Tensor,
+        dataset_name: str,
+        edge_conditioning: bool = False,
+    ) -> torch.Tensor:
 
         c_data = self._make_noise_emb(
             noise_cond,
@@ -200,17 +232,73 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         return c_data, c_hidden, c_data_to_hidden, c_hidden_to_data, c_hidden_to_hidden
 
+    def _build_conditioning_kwargs(
+        self,
+        x: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
+        batch_size, ensemble_size = self._assert_sigma_shapes(sigma)
+        dataset_names = list(x.keys())
+        sigma_ref = sigma[dataset_names[0]]
+
+        sigma_base = sigma_ref[:, 0, :, 0, 0].unsqueeze(-1)
+        noise_cond_base = self._embed_noise_conditioning(sigma_base)
+        cond_dim = noise_cond_base.shape[-1]
+
+        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = {}, {}, {}
+        for dataset_name in x:
+            time_size = sigma[dataset_name].shape[1]
+            noise_cond = noise_cond_base[:, None, :, None, :].expand(batch_size, time_size, ensemble_size, 1, cond_dim)
+            c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
+                noise_cond, dataset_name=dataset_name, edge_conditioning=False
+            )
+            c_data_shapes = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
+            c_hidden_shapes = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
+            c_data = shard_tensor(c_data, 0, c_data_shapes, model_comm_group)
+            c_hidden = shard_tensor(c_hidden, 0, c_hidden_shapes, model_comm_group)
+
+            fwd_mapper_kwargs[dataset_name] = {"cond": (c_data, c_hidden)}
+            processor_kwargs[dataset_name] = {"cond": c_hidden}
+            bwd_mapper_kwargs[dataset_name] = {"cond": (c_hidden, c_data)}
+
+        return fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs
+
+    def _processor_kwargs_equal(self, left, right) -> bool:
+        if isinstance(left, torch.Tensor) and isinstance(right, torch.Tensor):
+            return torch.equal(left, right)
+        if isinstance(left, (tuple, list)) and isinstance(right, (tuple, list)):
+            if len(left) != len(right):
+                return False
+            return all(self._processor_kwargs_equal(a, b) for a, b in zip(left, right))
+        if isinstance(left, dict) and isinstance(right, dict):
+            if left.keys() != right.keys():
+                return False
+            return all(self._processor_kwargs_equal(left[key], right[key]) for key in left)
+        return left == right
+
+    def _assert_same_processor_kwargs(self, processor_kwargs: dict[str, dict]) -> dict:
+        dataset_names = list(processor_kwargs)
+        base_kwargs = processor_kwargs[dataset_names[0]]
+        for dataset_name in dataset_names[1:]:
+            if not self._processor_kwargs_equal(base_kwargs, processor_kwargs[dataset_name]):
+                raise AssertionError("All datasets must have the same processor kwargs.")
+        return base_kwargs
+
     def forward(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
         sigma: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
 
-        batch_size, ensemble_size = x.shape[0], x.shape[2]
+        # Extract and validate batch & ensemble sizes across datasets
+        batch_size = self._get_consistent_dim(x, 0)
+        ensemble_size = self._get_consistent_dim(x, 2)
+
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = self._resolve_in_out_sharded(
             dataset_names=dataset_names,
@@ -220,23 +308,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         # prepare noise conditionings
-        c_data, c_hidden, shape_c_data, shape_c_hidden = {}, {}, {}, {}
-        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = {}, {}, {}
-        for dataset_name in x:
-            c_data[dataset_name], c_hidden[dataset_name], _, _, _ = self._generate_noise_conditioning(
-                sigma[dataset_name], dataset_name=dataset_name, edge_conditioning=False
-            )
-            shape_c_data[dataset_name] = get_shard_shapes(c_data[dataset_name], 0, model_comm_group=model_comm_group)
-            shape_c_hidden[dataset_name] = get_shard_shapes(
-                c_hidden[dataset_name], 0, model_comm_group=model_comm_group
-            )
-
-        c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
-        c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
-
-        fwd_mapper_kwargs = {"cond": (c_data, c_hidden)}
-        processor_kwargs = {"cond": c_hidden}
-        bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
+        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
+            x, sigma, model_comm_group=model_comm_group
+        )
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
@@ -285,10 +359,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         assert all(
             shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
         ), "All datasets must have the same shard shapes for the hidden graph."
-        proc_kwargs = processor_kwargs[dataset_names[0]]
-        assert all(
-            proc_kwargs == processor_kwargs[dataset_name] for dataset_name in dataset_names
-        ), "All datasets must have the same processor kwargs."
+        proc_kwargs = self._assert_same_processor_kwargs(processor_kwargs)
 
         processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
             batch_size=bse,
@@ -357,20 +428,32 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self, sigma: dict[str, torch.Tensor], sigma_data: torch.Tensor
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """Compute preconditioning factors."""
+        batch_size, ensemble_size = self._assert_sigma_shapes(sigma)
+        dataset_names = list(sigma)
+        sigma_ref = sigma[dataset_names[0]]
+
+        sigma_base = sigma_ref[:, 0, :, 0, 0]
+        c_skip_base = sigma_data**2 / (sigma_base**2 + sigma_data**2)
+        c_out_base = sigma_base * sigma_data / (sigma_base**2 + sigma_data**2) ** 0.5
+        c_in_base = 1.0 / (sigma_data**2 + sigma_base**2) ** 0.5
+        c_noise_base = sigma_base.log() / 4.0
+        base_view = (batch_size, 1, ensemble_size, 1, 1)
+
         c_skip, c_out, c_in, c_noise = {}, {}, {}, {}
-        for dataset_name, sigma_i in sigma.items():
-            c_skip[dataset_name] = sigma_data**2 / (sigma_i**2 + sigma_data**2)
-            c_out[dataset_name] = sigma_i * sigma_data / (sigma_i**2 + sigma_data**2) ** 0.5
-            c_in[dataset_name] = 1.0 / (sigma_data**2 + sigma_i**2) ** 0.5
-            c_noise[dataset_name] = sigma_i.log() / 4.0
+        for dataset_name in dataset_names:
+            shape_x = sigma[dataset_name].shape
+            c_skip[dataset_name] = c_skip_base.view(base_view).expand(shape_x)
+            c_out[dataset_name] = c_out_base.view(base_view).expand(shape_x)
+            c_in[dataset_name] = c_in_base.view(base_view).expand(shape_x)
+            c_noise[dataset_name] = c_noise_base.view(base_view).expand(shape_x)
 
         return c_skip, c_out, c_in, c_noise
 
     def _before_sampling(
         self,
-        batch: torch.Tensor,
-        pre_processors: nn.Module,
-        multi_step: int,
+        batch: dict[str, torch.Tensor],
+        pre_processors: dict[str, nn.Module],
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]:
@@ -382,7 +465,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             Input batch after pre-processing
         pre_processors : nn.Module
             Pre-processing module (already applied)
-        multi_step : int
+        n_step_input : int
             Number of input timesteps
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
@@ -398,12 +481,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         # Dimensions are batch, timesteps, grid, variables
         x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
 
-        grid_shard_shapes = None
-        if model_comm_group is not None:
-            shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
-            grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-            x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-        x = pre_processors(x, in_place=False)
+        for dataset_name, x in batch.items():
+            # Dimensions are batch, timesteps, grid, variables
+            x = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
 
         return (x,), grid_shard_shapes
 
@@ -452,10 +532,10 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def predict_step(
         self,
-        batch: torch.Tensor,
-        pre_processors: nn.Module,
-        post_processors: nn.Module,
-        multi_step: int,
+        batch: dict[str, torch.Tensor],
+        pre_processors: dict[str, nn.Module],
+        post_processors: dict[str, nn.Module],
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         noise_scheduler_params: Optional[dict] = None,
@@ -474,7 +554,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             Pre-processing module
         post_processors : nn.Module,
             Post-processing module
-        multi_step : int,
+        n_step_input : int,
             Number of input timesteps
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
@@ -508,7 +588,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             before_sampling_data, grid_shard_shapes = self._before_sampling(
                 batch,
                 pre_processors,
-                multi_step,
+                n_step_input,
                 model_comm_group,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
@@ -592,10 +672,14 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         scheduler = scheduler_cls(**noise_scheduler_config)
         sigmas = scheduler.get_schedule(x.device, torch.float64)
 
-        # Initialize output with noise
-        batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
-        shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
-        y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * sigmas[0]
+        sigmas, y_init = {}, {}
+        for dataset_name, x_data in x.items():
+            sigmas[dataset_name] = scheduler.get_schedule(x_device, torch.float64)
+
+            # Initialize output with noise
+            batch_size, ensemble_size, grid_size = x_data.shape[0], x_data.shape[2], x_data.shape[-2]
+            shape = (batch_size, self.n_step_output, ensemble_size, grid_size, self.num_output_channels[dataset_name])
+            y_init[dataset_name] = torch.randn(shape, device=x_data.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
@@ -624,6 +708,24 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             grid_shard_shapes=grid_shard_shapes,
         )
 
+    def fill_metadata(self, md_dict) -> None:
+        for dataset in self.input_dim.keys():
+            shapes = {
+                "variables": self.input_dim[dataset],
+                "input_timesteps": self.n_step_input,
+                "ensemble": 1,
+                "grid": None,  # grid size is dynamic
+            }
+            md_dict["metadata_inference"][dataset]["shapes"] = shapes
+
+            rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
+            input_rel_date_indices = rel_date_indices[: self.n_step_input]
+            output_rel_date_indices = rel_date_indices[-self.n_step_output :]
+            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
+            md_dict["metadata_inference"][dataset]["timesteps"][
+                "output_relative_date_indices"
+            ] = output_rel_date_indices
+
 
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     """Diffusion model for tendency prediction."""
@@ -650,19 +752,44 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             truncation_data=truncation_data,
         )
 
-    def _calculate_input_dim(self):
-        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        input_dim += self.num_output_channels  # noised targets
-        input_dim += len(self.data_indices.model.input.prognostic)  # truncated input state
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        input_dim = super()._calculate_input_dim(dataset_name)
+        if self.condition_on_residual:
+            input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output
         return input_dim
 
-    def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
-        x_trunc = x[:, -1, :, :, self._internal_input_idx]
-        x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
+    @staticmethod
+    def _apply_imputer_inverse(
+        post_processors: dict[str, nn.Module],
+        dataset_name: str,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        processors = post_processors[dataset_name]
+        if not hasattr(processors, "processors"):
+            return x
+        for processor in processors.processors.values():
+            if getattr(processor, "supports_skip_imputation", False):
+                x = processor(x, in_place=False, inverse=True, skip_imputation=False)
+        return x
 
-        # Get node attributes
-        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
+    def _assemble_input(
+        self,
+        x: torch.Tensor,
+        y_noised: torch.Tensor,
+        bse: int,
+        grid_shard_shapes: dict | None = None,
+        model_comm_group=None,
+        dataset_name=None,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[list]]:
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=bse)
+        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
+
+        x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group, n_step_output=self.n_step_output)[
+            ..., self._internal_input_idx[dataset_name]
+        ]
+        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+        x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
 
         # Shard node attributes if grid sharding is enabled
         if grid_shard_shapes is not None:
@@ -675,7 +802,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
                 einops.rearrange(x_trunc, "bse grid vars -> (bse grid) vars"),
             ),
@@ -694,7 +821,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         pre_processors_state: Callable,
         pre_processors_tendencies: Callable,
         input_post_processor: Optional[Callable] = None,
-    ) -> torch.Tensor:
+        skip_imputation: bool = False,
+    ) -> dict[str, torch.Tensor]:
         """Compute the tendency from two states.
 
         Parameters
@@ -711,6 +839,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to post-process the input state variables. If provided,
             the input states will be post-processed before computing the tendency.
             If None, the input states are used directly. Default is None.
+        skip_imputation : bool, optional
+            When True, skip imputation in the state/tendency processors and input_post_processor.
+            Defaults to False.
 
         Returns
         -------
@@ -718,16 +849,37 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             The normalized tendency tensor output from model.
         """
 
-        if input_post_processor is not None:
-            x_t1 = input_post_processor(
-                x_t1[..., self.data_indices.data.output.full],
+        assert set(x_t1.keys()) == set(x_t0.keys()), "x_t1 and x_t0 must have the same dataset keys."
+
+        for dataset_name in x_t1.keys():
+            if input_post_processor[dataset_name] is not None:
+                x_t1[dataset_name] = input_post_processor[dataset_name](
+                    x_t1[dataset_name],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.output.full,
+                    skip_imputation=skip_imputation,
+                )
+                x_t0[dataset_name] = input_post_processor[dataset_name](
+                    x_t0[dataset_name],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.input.prognostic,
+                    skip_imputation=skip_imputation,
+                )
+
+            tendency = x_t1[dataset_name].clone()
+            tendency[..., self.data_indices[dataset_name].model.output.prognostic] = pre_processors_tendencies[
+                dataset_name
+            ](
+                x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] - x_t0[dataset_name],
                 in_place=False,
-                data_index=self.data_indices.data.output.full,
+                data_index=self.data_indices[dataset_name].data.output.prognostic,
+                skip_imputation=skip_imputation,
             )
             x_t0 = input_post_processor(
                 x_t0[..., self.data_indices.data.output.full],
                 in_place=False,
-                data_index=self.data_indices.data.output.full,
+                data_index=self.data_indices[dataset_name].data.output.diagnostic,
+                skip_imputation=skip_imputation,
             )
         else:
             x_t1 = x_t1[..., self.data_indices.data.output.full]
@@ -749,12 +901,13 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
     def add_tendency_to_state(
         self,
-        state_inp: torch.Tensor,
-        tendency: torch.Tensor,
-        post_processors_state: Callable,
-        post_processors_tendencies: Callable,
-        output_pre_processor: Optional[Callable] = None,
-    ) -> torch.Tensor:
+        state_inp: dict[str, torch.Tensor],
+        tendency: dict[str, torch.Tensor],
+        post_processors_state: dict[str, Callable],
+        post_processors_tendencies: dict[str, Callable],
+        output_pre_processor: dict[str, Optional[Callable]] = None,
+        skip_imputation: bool = False,
+    ) -> dict[str, torch.Tensor]:
         """Add the tendency to the state.
 
         Parameters
@@ -771,6 +924,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to pre-process the output state. If provided,
             the output state will be pre-processed before returning.
             If None, the output state is returned directly. Default is None.
+        skip_imputation : bool, optional
+            When True, skip imputation in the state/tendency processors.
+            Defaults to False.
 
         Returns
         -------
@@ -779,11 +935,13 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
         state_outp = post_processors_tendencies(tendency, in_place=False, data_index=self.data_indices.data.output.full)
 
-        state_outp[..., self.data_indices.model.output.diagnostic] = post_processors_state(
-            tendency[..., self.data_indices.model.output.diagnostic],
-            in_place=False,
-            data_index=self.data_indices.data.output.diagnostic,
-        )
+        for dataset_name in tendency.keys():
+            state_outp[dataset_name] = post_processors_tendencies[dataset_name](
+                tendency[dataset_name],
+                in_place=False,
+                data_index=self.data_indices[dataset_name].data.output.full,
+                skip_imputation=skip_imputation,
+            )
 
         state_outp[..., self.data_indices.model.output.prognostic] += post_processors_state(
             state_inp[..., self.data_indices.model.input.prognostic],
@@ -795,94 +953,119 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             state_outp = output_pre_processor(
                 state_outp,
                 in_place=False,
-                data_index=self.data_indices.data.output.full,
+                data_index=self.data_indices[dataset_name].data.output.diagnostic,
+                skip_imputation=skip_imputation,
             )
+
+            state_outp[dataset_name][
+                ..., self.data_indices[dataset_name].model.output.prognostic
+            ] += post_processors_state[dataset_name](
+                state_inp[dataset_name],
+                in_place=False,
+                data_index=self.data_indices[dataset_name].data.input.prognostic,
+                skip_imputation=skip_imputation,
+            )
+
+            if output_pre_processor[dataset_name] is not None:
+                state_outp[dataset_name] = output_pre_processor[dataset_name](
+                    state_outp[dataset_name],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.output.full,
+                    skip_imputation=skip_imputation,
+                )
 
         return state_outp
 
     def _before_sampling(
         self,
-        batch: torch.Tensor,
-        pre_processors: nn.Module,
-        multi_step: int,
+        batch: dict[str, torch.Tensor],
+        pre_processors: dict[str, nn.Module],
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
-    ) -> tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]:
+    ) -> tuple[tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]], dict[str, Optional[list]]]:
         """Prepare batch before sampling.
 
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Input batch after pre-processing
-        pre_processors : nn.Module
-            Pre-processing module (already applied)
-        multi_step : int
-            Number of input timesteps
-        model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
-        **kwargs
-            Additional parameters for subclasses
-
-        Returns
-        -------
-        tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]
-            Prepared input tensor(s) and grid shard shapes.
-            Can return a single tensor or tuple of tensors for sampling input.
+        Returns (xs, x_t0s) and grid shard shapes per dataset.
         """
-        # Dimensions are batch, timesteps, grid, variables
-        x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
-        x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension
+        xs = {}
+        x_t0s = {}
+        grid_shard_shapes = dict.fromkeys(batch, None)
 
-        grid_shard_shapes = None
-        if model_comm_group is not None:
-            shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
-            grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-            x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-            shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group=model_comm_group)
-            x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
+        for dataset_name, x in batch.items():
+            # Dimensions are batch, timesteps, grid, variables
+            x_in = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            x_t0 = x[:, -1, None, ...]  # add dummy ensemble dimension
 
-        x = pre_processors(x, in_place=False)
-        x_t0 = pre_processors(x_t0, in_place=False)
+            if model_comm_group is not None:
+                shard_shapes = get_shard_shapes(x_in, -2, model_comm_group=model_comm_group)
+                grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
+                x_in = shard_tensor(x_in, -2, shard_shapes, model_comm_group)
+                shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group=model_comm_group)
+                x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
 
-        return (x, x_t0), grid_shard_shapes
+            x_in = pre_processors[dataset_name](x_in, in_place=False)
+            x_t0 = pre_processors[dataset_name](x_t0, in_place=False)
+
+            xs[dataset_name] = x_in
+            x_t0s[dataset_name] = x_t0
+
+        return (xs, x_t0s), grid_shard_shapes
 
     def _after_sampling(
         self,
-        out: torch.Tensor,
-        post_processors: nn.Module,
-        before_sampling_data: Union[torch.Tensor, tuple[torch.Tensor, ...]],
+        out: dict[str, torch.Tensor],
+        post_processors: dict[str, nn.Module],
+        before_sampling_data: tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: dict[str, Optional[list]] = None,
         gather_out: bool = True,
-        post_processors_tendencies: Optional[nn.Module] = None,
+        post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
         **kwargs,
-    ) -> torch.Tensor:
-        """Process sampled tendency to get state prediction.
-
-        Override to convert tendency to state using x_t0.
-        """
-        # Extract x_t0 from before_sampling_data
+    ) -> dict[str, torch.Tensor]:
+        """Process sampled tendency to get state prediction."""
         if isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 2:
-            x_t0 = before_sampling_data[1]
+            x_t0s = before_sampling_data[1]
         else:
-            raise ValueError("Expected before_sampling_data to contain x_t0")
+            raise ValueError("Expected before_sampling_data to contain x_t0s")
 
-        # truncate x_t0 if needed
-        x_t0 = self.apply_reference_state_truncation(x_t0, grid_shard_shapes, model_comm_group)
+        x_t0s = self.apply_reference_state_truncation(x_t0s, grid_shard_shapes, model_comm_group)
+        assert post_processors_tendencies is not None, "Per-step tendency processors must be provided."
 
-        # Convert tendency to state
-        out = self.add_tendency_to_state(
-            x_t0,
-            out,
-            post_processors,
-            post_processors_tendencies,
-        )
+        for dataset_name, out_dataset in out.items():
+            post_tend = post_processors_tendencies[dataset_name]
+            assert post_tend is not None, "Tendency processors must be provided per dataset."
+            if not isinstance(post_tend, StepwiseProcessors):
+                assert (
+                    self.n_step_output == 1
+                ), "Per-step tendency processors must be provided for multiple output steps."
+                post_tend = [post_tend]
+            assert (
+                len(post_tend) == out_dataset.shape[1]
+            ), "Per-step tendency processors must match the number of output steps."
 
-        # Gather if needed
-        if gather_out and model_comm_group is not None:
-            out = gather_tensor(
-                out, -2, apply_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
-            )
+            states = []
+            for step, post_proc in enumerate(post_tend):
+                out_step = out_dataset[:, step : step + 1]
+                state_step = self.add_tendency_to_state(
+                    {dataset_name: x_t0s[dataset_name]},
+                    {dataset_name: out_step},
+                    {dataset_name: post_processors[dataset_name]},
+                    {dataset_name: post_proc},
+                    skip_imputation=True,
+                )[dataset_name]
+                states.append(state_step)
+
+            out_dataset = torch.cat(states, dim=1)
+            out_dataset = self._apply_imputer_inverse(post_processors, dataset_name, out_dataset)
+            if gather_out and model_comm_group is not None:
+                out_dataset = gather_tensor(
+                    out_dataset,
+                    -2,
+                    apply_shard_shapes(out_dataset, -2, shard_shapes_dim=grid_shard_shapes[dataset_name]),
+                    model_comm_group,
+                )
+            out[dataset_name] = out_dataset
 
         return out
 
@@ -901,7 +1084,14 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         torch.Tensor
             Truncated tensor with same shape as input
         """
-        bs, ens, _, _ = x.shape
-        x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
-        x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
-        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
+        x_skips = {}
+
+        for dataset_name, in_x in x.items():
+            x_skip = self.residual[dataset_name](
+                in_x, grid_shard_shapes[dataset_name], model_comm_group, n_step_output=self.n_step_output
+            )
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            # x_skip.shape: (bs, time, ens, latlon, nvar)
+            x_skips[dataset_name] = x_skip[..., self.data_indices[dataset_name].model.input.prognostic]
+
+        return x_skips

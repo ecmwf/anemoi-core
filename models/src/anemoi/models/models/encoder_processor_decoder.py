@@ -110,11 +110,34 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        x_skip = x[:, -1, ...]
-        x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
-        x_skip = einops.rearrange(x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size)
+            self.decoder[dataset_name] = instantiate(
+                model_config.model.decoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.num_channels,
+                in_channels_dst=self.input_dim[dataset_name],
+                hidden_dim=self.num_channels,
+                out_channels_dst=self.output_dim[dataset_name],
+                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+            )
+
+    def _assemble_input(
+        self,
+        x: torch.Tensor,
+        batch_size: int,
+        grid_shard_shapes: dict | None,
+        model_comm_group=None,
+        dataset_name: str = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[list]]:
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
+        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
+
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+            n_step_output=self.n_step_output,
+        )
 
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
@@ -141,16 +164,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_out = (
             einops.rearrange(
                 x_out,
-                "(batch ensemble grid) vars -> batch ensemble grid vars",
+                "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
+                time=self.n_step_output,
             )
             .to(dtype=dtype)
             .clone()
         )
 
         # residual connection (just for the prognostic variables)
-        x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
+        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+        assert (
+            x_skip.shape[1] == x_out.shape[1]
+        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
@@ -181,8 +210,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         Tensor
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
-        batch_size = x.shape[0]
-        ensemble_size = x.shape[2]
+        dataset_names = list(x.keys())
+
+        # Extract and validate batch & ensemble sizes across datasets
+        batch_size = self._get_consistent_dim(x, 0)
+        ensemble_size = self._get_consistent_dim(x, 2)
+
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
@@ -281,4 +314,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
-        return x_out
+        return x_out_dict
+
+    def fill_metadata(self, md_dict) -> None:
+        for dataset in self.input_dim.keys():
+            shapes = {
+                "variables": self.input_dim[dataset],
+                "input_timesteps": self.n_step_input,
+                "ensemble": 1,
+                "grid": None,  # grid size is dynamic
+            }
+            md_dict["metadata_inference"][dataset]["shapes"] = shapes
+
+            rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
+            input_rel_date_indices = rel_date_indices[: self.n_step_input]
+            output_rel_date_indices = rel_date_indices[-self.n_step_output :]
+            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
+            md_dict["metadata_inference"][dataset]["timesteps"][
+                "output_relative_date_indices"
+            ] = output_rel_date_indices

@@ -16,7 +16,6 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch.utils.checkpoint import checkpoint
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
@@ -24,11 +23,12 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.chunk import GNNProcessorChunk
-from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
-from anemoi.models.layers.chunk import PointWiseMLPProcessorChunk
-from anemoi.models.layers.chunk import TransformerProcessorChunk
+from anemoi.models.layers.block import GraphConvProcessorBlock
+from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.layers.block import PointWiseMLPProcessorBlock
+from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -58,18 +58,41 @@ class BaseProcessor(nn.Module, ABC):
         num_channels: int,
         num_chunks: int,
         cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
         layer_kernels: DotDict,
         **kwargs,
     ) -> None:
-        """Initialize BaseProcessor."""
+        """Initialize BaseProcessor.
+
+        Parameters
+        ----------
+        num_layers : int
+            Number of processor layers.
+        num_channels : int
+            Number of channels, i.e. feature dimension of the processor state.
+        num_chunks: int
+            Number of chunks of the processor. The num_chunks and num_layers, defines how many layers are grouped together for checkpointing, i.e. chunk_size = num_layers/ num_chunks.
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        gradient_checkpointing : bool
+            Whether to enable gradient checkpointing, by default True
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        **kwargs : dict
+            Additional keyword arguments
+        """
         super().__init__()
 
-        # Each Processor divides the layers into chunks that get assigned to each ProcessorChunk
+        self.num_layers = num_layers
         self.num_chunks = num_chunks
-        self.num_channels = num_channels
         self.chunk_size = num_layers // num_chunks
+        self.num_channels = num_channels
+        self.gradient_checkpointing = gradient_checkpointing
 
         self.layer_factory = load_layer_kernels(layer_kernels)
+
+        self._has_dropout = kwargs.get("dropout_p", 0.0) > 0 if "dropout_p" in kwargs else False
 
         assert (
             num_layers % num_chunks == 0
@@ -79,26 +102,46 @@ class BaseProcessor(nn.Module, ABC):
         if cpu_offload:
             self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
 
-    def build_layers(self, processor_chunk_class, *args, **kwargs) -> None:
+    def build_layers(self, layer_class, *layer_args, **layer_kwargs) -> None:
         """Build Layers."""
         self.proc = nn.ModuleList(
             [
-                processor_chunk_class(
-                    *args,
-                    **kwargs,
+                layer_class(
+                    *layer_args,
+                    **layer_kwargs,
                 )
-                for _ in range(self.num_chunks)
+                for _ in range(self.num_layers)
             ],
         )
 
-    def run_layers(self, data: tuple, *args, **kwargs) -> Tensor:
-        """Run Layers with checkpoint."""
-        for layer in self.proc:
-            data = checkpoint(layer, *data, *args, **kwargs, use_reentrant=False)
+    def run_layer_chunk(self, chunk_start: int, data: tuple, *args, **kwargs) -> tuple:
+        for layer_id in range(chunk_start, chunk_start + self.chunk_size):
+            data = self.proc[layer_id](*data, *args, **kwargs)
+
+        return data
+
+    def run_layers(self, data: tuple, *args, **kwargs) -> tuple:
+        """Run Layers with optional checkpoints around chunks."""
+        for chunk_start in range(0, self.num_layers, self.chunk_size):
+            data = maybe_checkpoint(
+                self.run_layer_chunk,
+                self.gradient_checkpointing,
+                chunk_start,
+                data,
+                *args,
+                **kwargs,
+            )
+
         return data
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
+
+        if (model_comm_group := kwargs.get("model_comm_group", None)) is not None:
+            assert (
+                model_comm_group.size() == 1 or not self._has_dropout
+            ), f"Dropout is not supported when model is sharded across {model_comm_group.size()} GPUs"
+
         x = self.run_layers((x,), *args, **kwargs)
         return x
 
@@ -124,20 +167,18 @@ class PointWiseMLPProcessor(BaseProcessor):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
         )
 
         self.build_layers(
-            PointWiseMLPProcessorChunk,
+            PointWiseMLPProcessorBlock,
             num_channels=num_channels,
-            num_layers=self.chunk_size,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
             layer_kernels=self.layer_factory,
-            mlp_hidden_ratio=mlp_hidden_ratio,
             dropout_p=dropout_p,
         )
 
         self.offload_layers(cpu_offload)
-
-        self._has_dropout = dropout_p > 0 if dropout_p else False
 
     def forward(
         self,
@@ -152,11 +193,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         if model_comm_group:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
-
-            assert (
-                model_comm_group.size() > 1 and not self._has_dropout
-            ), "Dropout is not supported when model is sharded across GPUS"
+            ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
 
         (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
 
@@ -232,17 +269,17 @@ class TransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
         )
 
         self.build_layers(
-            TransformerProcessorChunk,
+            TransformerProcessorBlock,
             num_channels=num_channels,
-            num_layers=self.chunk_size,
-            layer_kernels=self.layer_factory,
-            mlp_hidden_ratio=mlp_hidden_ratio,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
             num_heads=num_heads,
-            window_size=window_size,
             qk_norm=qk_norm,
+            window_size=window_size,
+            layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
             softcap=softcap,
@@ -268,7 +305,7 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return x
 
@@ -325,10 +362,21 @@ class GNNProcessor(BaseProcessor):
             "edge_dim": None,
         }
 
-        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, **kwargs_build)
+        self.build_layers(
+            GraphConvProcessorBlock,
+            in_channels=num_channels,
+            out_channels=num_channels,
+            num_chunks=1,
+            **kwargs_build,
+        )
 
         kwargs_build["edge_dim"] = edge_dim  # Edge dim for first layer
-        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, **kwargs_build)
+        self.proc[0] = GraphConvProcessorBlock(
+            in_channels=num_channels,
+            out_channels=num_channels,
+            num_chunks=1,
+            **kwargs_build,
+        )
 
         self.offload_layers(cpu_offload)
 
@@ -375,6 +423,8 @@ class GraphTransformerProcessor(BaseProcessor):
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerProcessor.
@@ -400,6 +450,10 @@ class GraphTransformerProcessor(BaseProcessor):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
         super().__init__(
             num_channels=num_channels,
@@ -413,14 +467,16 @@ class GraphTransformerProcessor(BaseProcessor):
         )
 
         self.build_layers(
-            GraphTransformerProcessorChunk,
-            num_channels=num_channels,
-            num_layers=self.chunk_size,
-            layer_kernels=self.layer_factory,
+            GraphTransformerProcessorBlock,
+            in_channels=num_channels,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
+            out_channels=num_channels,
             num_heads=num_heads,
-            mlp_hidden_ratio=mlp_hidden_ratio,
+            layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
+            graph_attention_backend=graph_attention_backend,
             edge_dim=edge_dim,
+            edge_pre_mlp=edge_pre_mlp,
         )
 
         self.offload_layers(cpu_offload)
