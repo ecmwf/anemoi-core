@@ -13,6 +13,11 @@ dataloader:
       data:
         start: 2017-01-08 18:00:00
 
+focus_areas:
+  europe:
+    latlon_bbox: [30.0, -20.0, 60.0, 40.0]
+
+
 diagnostics:
   log:
     mlflow:
@@ -39,8 +44,8 @@ diagnostics:
         per_sample : 6
         parameters: ${diagnostics.plot.parameters}
         every_n_batches: ${diagnostics.plot.frequency.batch}
-        focus_areas:
-          - latlon_bbox: [-10.0, 35.0, 30.0, 60.0] # [min_lon, min_lat, max_lon, max_lat]
+        focus_area: ${diagnostics.plot.focus_areas.europe}
+        output_steps: ${training.multistep_output}
         #Defining the accumulation levels for precipitation related fields and the colormap
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
         precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
@@ -51,6 +56,7 @@ diagnostics:
         # min_delta: 0.01 # Minimum distance between two consecutive points
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
+        output_steps: ${training.multistep_output}
         parameters:
         - z_500
         - tp
@@ -58,6 +64,7 @@ diagnostics:
         dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
+        output_steps: ${training.multistep_output}
         precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
         parameters:
         - z_500
