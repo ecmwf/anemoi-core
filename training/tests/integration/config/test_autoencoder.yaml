@@ -21,4 +21,44 @@ diagnostics:
   # autoencoder so far do not hanlde most of the plotting callbcaks
   plot:
     asynchronous: False # Whether to plot asynchronously
-    callbacks: []
+    callbacks:
+      # Add plot callbacks here
+      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+        every_n_epochs: 5
+        dataset_names: ["data"]
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+        # group parameters by categories when visualizing contributions to the loss
+        # one-parameter groups are possible to highlight individual parameters
+        dataset_names: ["data"]
+        parameter_groups:
+          moisture: [tp, cp]
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+        dataset_names: ["data"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        per_sample : 6
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        focus_areas:
+          - latlon_bbox: [-10.0, 35.0, 30.0, 60.0] # [min_lon, min_lat, max_lon, max_lat]
+        #Defining the accumulation levels for precipitation related fields and the colormap
+        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+        colormaps: ${diagnostics.plot.colormaps}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+        dataset_names: ["data"]
+        # every_n_batches: 100 # Override for batch frequency
+        # min_delta: 0.01 # Minimum distance between two consecutive points
+        sample_idx: ${diagnostics.plot.sample_idx}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        parameters:
+        - z_500
+        - tp
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+        dataset_names: ["data"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+        parameters:
+        - z_500
+        - tp

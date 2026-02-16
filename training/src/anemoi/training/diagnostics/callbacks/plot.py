@@ -315,7 +315,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                output_times=pl_module.output_times,
                 **kwargs,
             )
 
@@ -356,7 +355,6 @@ class BasePerEpochPlotCallback(BasePlotCallback):
                 pl_module,
                 self.dataset_names,
                 epoch=trainer.current_epoch,
-                output_times=pl_module.output_times,
                 **kwargs,
             )
 
@@ -1100,7 +1098,6 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
-        output_times: int,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
@@ -1118,8 +1115,6 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
             The batch of data
-        output_times : int
-            Number of outer steps for plotting (rollout steps for forecaster, interp times for interpolator).
 
         Returns
         -------
@@ -1142,7 +1137,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = pl_module.get_total_plot_targets(output_times)
+        total_targets = pl_module.get_total_plot_targets(pl_module.output_times)
 
         input_tensor = (
             batch[dataset_name][
@@ -1245,7 +1240,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: int,
     ) -> None:
         logger = trainer.logger
 
@@ -1264,7 +1258,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             local_rank = pl_module.local_rank
 
@@ -1276,7 +1270,12 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            for item in pl_module.iter_plot_samples(data, output_tensor, output_times, max_out_steps=self.output_steps):
+            for item in pl_module.iter_plot_samples(
+                data,
+                output_tensor,
+                pl_module.output_times,
+                max_out_steps=self.output_steps,
+            ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item
                     y_true = None
@@ -1359,13 +1358,12 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: int,
     ) -> None:
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
         for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
@@ -1376,7 +1374,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             )
 
         for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
             diagnostics = (
@@ -1392,7 +1390,12 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.iter_plot_samples(data, output_tensor, output_times, max_out_steps=self.output_steps):
+            for item in pl_module.iter_plot_samples(
+                data,
+                output_tensor,
+                pl.module.output_times,
+                max_out_steps=self.output_steps,
+            ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item
                     y_true = None
@@ -1479,7 +1482,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: int,
     ) -> None:
         logger = trainer.logger
 
@@ -1487,7 +1489,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
             diagnostics = (
@@ -1511,7 +1513,12 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.iter_plot_samples(data, output_tensor, output_times, max_out_steps=self.output_steps):
+            for item in pl_module.iter_plot_samples(
+                data,
+                output_tensor,
+                pl_module.output_times,
+                max_out_steps=self.output_steps,
+            ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item
                     y_true = None

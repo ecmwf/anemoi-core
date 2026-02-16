@@ -1109,7 +1109,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         data: Any,
         output_tensor: Any,
         output_times: int,
-        _max_out_steps: int | None = None,
+        max_out_steps: int | None = None,
     ) -> Iterator[tuple[Any, Any, Any, str]]:
         """Yield (x, y_true, y_pred, tag_suffix) for each plot to generate.
 
@@ -1132,6 +1132,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         x, y_true, y_pred, tag_suffix
             Arrays for plot_predicted_multilevel_flat_sample and a suffix for the figure tag.
         """
+        del max_out_steps
         for rollout_step in range(output_times):
             init_step = self.get_init_step(rollout_step)
             x = data[init_step, ...].squeeze()
