@@ -98,7 +98,7 @@ dataloader:
 
 training:
   max_epochs: 100
-  max_steps: null
+  max_steps: 150000
   metrics:
     datasets:
       data:
