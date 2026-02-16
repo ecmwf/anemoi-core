@@ -302,6 +302,28 @@ def ensemble_config(
 
 
 @pytest.fixture
+def ensemble_multiscale_multiout_config(
+    ensemble_config: tuple[DictConfig, str],
+) -> tuple[DictConfig, str]:
+    cfg, url_dataset = ensemble_config
+
+    cfg.training.multistep_output = 3
+    cfg.training.max_epochs = 1
+    cfg.training.scalers.datasets.data.time_steps = {
+        "_target_": "anemoi.training.losses.scalers.TimeStepScaler",
+        "norm": "unit-sum",
+        "weights": [1.0, 2.0, 3.0],
+    }
+
+    # This integration case targets multiscale loss + multi-output ensemble training.
+    # Disable plotting callbacks to keep runtime focused and predictable.
+    cfg.diagnostics.plot.callbacks = []
+    cfg.diagnostics.callbacks = []
+
+    return cfg, url_dataset
+
+
+@pytest.fixture
 def hierarchical_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,

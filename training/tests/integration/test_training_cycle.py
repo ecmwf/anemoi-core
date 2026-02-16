@@ -169,6 +169,27 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_ensemble_multiscale_multiout(
+    ensemble_multiscale_multiout_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = ensemble_multiscale_multiout_config
+    assert cfg.training.multistep_output > 1
+    assert cfg.training.training_loss.datasets.data._target_ == "anemoi.training.losses.MultiscaleLossWrapper"
+
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_ensemble_multiscale_multiout(
+    ensemble_multiscale_multiout_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = ensemble_multiscale_multiout_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_hierarchical(
     hierarchical_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
