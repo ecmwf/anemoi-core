@@ -66,7 +66,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # Unpack config for hierarchical graph
         self.level_process = model_config.model.enable_hierarchical_level_processing
 
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
+        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)

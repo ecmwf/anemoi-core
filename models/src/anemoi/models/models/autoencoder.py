@@ -58,7 +58,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
+        for dataset_name in self.dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
                 edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),

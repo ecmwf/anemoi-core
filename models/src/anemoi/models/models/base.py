@@ -68,7 +68,7 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
 
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
+        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -103,7 +103,7 @@ class BaseGraphModel(nn.Module):
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
-            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
+            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(self._graph_name_hidden)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
