@@ -235,9 +235,7 @@ def _make_pl_module_forecaster(
     n_step_input=1,
     n_step_output=1,
     output_times=2,
-    _batch_size=2,
     nlatlon=50,
-    _nvar=3,
 ) -> MagicMock:
     """Mock pl_module for forecaster task: get_init_step always 0, output_times as given."""
     pl_module = MagicMock()
@@ -301,7 +299,7 @@ def _make_pl_module_forecaster(
     return pl_module
 
 
-def _make_pl_module_interpolator(*, output_times=2, _batch_size=2, nlatlon=50, _nvar=3) -> MagicMock:
+def _make_pl_module_interpolator(*, output_times=2, nlatlon=50) -> MagicMock:
     """Mock pl_module for time-interpolator: get_init_step(rollout_step)==rollout_step."""
     pl_module = MagicMock()
     pl_module.task_type = "time-interpolator"
@@ -377,9 +375,7 @@ def test_process_forecaster_output_shapes():
         n_step_input=n_step_input,
         n_step_output=n_step_output,
         output_times=output_times,
-        batch_size=batch_size,
         nlatlon=nlatlon,
-        nvar=nvar,
     )
     batch = {"data": torch.randn(batch_size, sample_idx, n_ens, nlatlon, nvar)}
     # outputs: (loss, [pred_0, pred_1, ...]); each pred[dataset] (bs, n_step_output, ens, latlon, nvar)
@@ -417,9 +413,7 @@ def test_process_time_interpolator_output_shapes():
     total_targets = output_times  # no n_step_output factor for interpolator
     pl_module = _make_pl_module_interpolator(
         output_times=output_times,
-        batch_size=batch_size,
         nlatlon=nlatlon,
-        nvar=nvar,
     )
     batch = {"data": torch.randn(batch_size, sample_idx, n_ens, nlatlon, nvar)}
     outputs = (
@@ -453,9 +447,7 @@ def test_process_time_interpolator_multi_out_squeeze():
     output_times = 2
     pl_module = _make_pl_module_interpolator(
         output_times=output_times,
-        batch_size=batch_size,
         nlatlon=nlatlon,
-        nvar=nvar,
     )
     sample_idx = 10
     batch = {"data": torch.randn(batch_size, sample_idx, 1, nlatlon, nvar)}
@@ -719,9 +711,7 @@ def test_plot_spectrum_plot_time_interpolator():
     nlatlon = 20
     pl_module = _make_pl_module_interpolator(
         output_times=output_times,
-        batch_size=2,
         nlatlon=nlatlon,
-        nvar=nvar,
     )
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
@@ -772,9 +762,7 @@ def test_plot_spectrum_plot_forecaster():
     pl_module = _make_pl_module_forecaster(
         output_times=output_times,
         n_step_output=n_step_output,
-        batch_size=2,
         nlatlon=nlatlon,
-        nvar=nvar,
     )
     pl_module.task_type = "forecaster"  # PlotSpectrum checks "forecast" in code
     pl_module.get_init_step = lambda _: 0
@@ -828,9 +816,7 @@ def test_plot_histogram_plot_time_interpolator():
     nlatlon = 20
     pl_module = _make_pl_module_interpolator(
         output_times=output_times,
-        batch_size=2,
         nlatlon=nlatlon,
-        nvar=nvar,
     )
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
@@ -881,9 +867,7 @@ def test_plot_histogram_plot_forecaster():
     pl_module = _make_pl_module_forecaster(
         output_times=output_times,
         n_step_output=n_step_output,
-        batch_size=2,
         nlatlon=nlatlon,
-        nvar=nvar,
     )
     pl_module.get_init_step = lambda _: 0
     callback.post_processors = {"data": _identity_post_processor()}
