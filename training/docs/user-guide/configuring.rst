@@ -169,6 +169,346 @@ config using:
 
    anemoi-training train --config-name=example.yaml
 
+***********************************
+ Anemoi Datasets in Training Configs
+***********************************
+
+Anemoi training integrates with `Anemoi Datasets <https://anemoi-datasets.readthedocs.io/en/latest/>`_
+to provide flexible data loading capabilities. This section explains how to configure dataset
+interactions in your training configs.
+
+.. note::
+   For a full list of actions and advanced features for interacting with Anemoi datasets,
+   see the `Anemoi Datasets Using documentation <https://anemoi.readthedocs.io/projects/datasets/en/latest/using/introduction.html>`_.
+
+Dataset Path Configuration
+===========================
+
+The path to your Anemoi dataset is specified in the ``system.input`` section:
+
+.. code:: yaml
+
+   system:
+      input:
+         dataset: /path/to/your/dataset.zarr
+         graph: /path/to/your/graph.pt
+
+The dataset path can be:
+
+- A local filesystem path: ``/data/aifs-ea-an-oper-0001-mars-o96-2019-2021-6h.zarr``
+- A remote path (if supported by your storage backend)
+- A relative path from your working directory
+
+Dataset Splitting for Training/Validation/Test
+===============================================
+
+Anemoi datasets are split into training, validation, and test sets using temporal ranges.
+This is configured in the ``dataloader`` section:
+
+.. code:: yaml
+
+   dataloader:
+      training:
+         datasets:
+            data:
+               dataset: ${dataloader.dataset}
+               start: null  # Uses dataset's earliest date
+               end: 2020    # Inclusive end date
+               frequency: ${data.frequency}
+               drop: []
+               select: null
+               trajectory: null
+      
+      validation:
+         datasets:
+            data:
+               dataset: ${dataloader.dataset}
+               start: 2021
+               end: 2021
+               frequency: ${data.frequency}
+               drop: []
+               select: null
+               trajectory: null
+      
+      test:
+         datasets:
+            data:
+               dataset: ${dataloader.dataset}
+               start: 2022
+               end: null  # Uses dataset's latest date
+               frequency: ${data.frequency}
+               drop: []
+               select: null
+               trajectory: null
+
+Dataset Configuration Keywords
+==============================
+
+The following keywords are available for each dataset split:
+
+- ``dataset``: Path to the dataset file (usually inherited from ``${dataloader.dataset}`` which references ``${system.input.dataset}``)
+- ``start``: Starting datetime for the data slice. Can be:
+  
+  - A date string: ``"2020-01-01"`` or ``"2020-01-01 12:00:00"``
+  - An integer year: ``2020``
+  - ``null`` to use the dataset's earliest available date
+
+- ``end``: Ending datetime (inclusive) for the data slice. Same format options as ``start``.
+- ``frequency``: Temporal resolution for sampling the data (e.g., ``"6h"``, ``"1h"``). Must be a multiple of the dataset's native frequency.
+- ``drop``: List of variable names to exclude from the dataset:
+
+  .. code:: yaml
+
+     drop: ["10u", "10v"]  # Exclude these variables
+
+- ``select``: List of variable names to include. If not provided, all variables are selected:
+
+  .. code:: yaml
+
+     select: ["2t", "msl", "z500"]  # Only load these variables
+
+- ``trajectory``: Configuration for model run trajectories (for non-analysis training):
+
+  .. code:: yaml
+
+     trajectory:
+        start: "2020-02-05T12:00:00"
+        length: 12  # Number of time steps
+
+Dataset-Specific Features Configuration
+========================================
+
+Dataset-specific features like forcing and diagnostic variables are configured under the ``data.datasets`` section:
+
+.. code:: yaml
+
+   data:
+      datasets:
+         data:  # Dataset name (matches dataloader dataset name)
+            # Forcing variables: used as input but not predicted
+            forcing:
+            - "cos_latitude"
+            - "cos_longitude"
+            - "sin_latitude"
+            - "sin_longitude"
+            - "cos_julian_day"
+            - "sin_julian_day"
+            - "cos_local_time"
+            - "sin_local_time"
+            - "insolation"
+            - "lsm"
+            - "sdor"
+            - "slor"
+            - "z"
+            
+            # Diagnostic variables: predicted but not used as input
+            diagnostic:
+            - "tp"
+            - "cp"
+            
+            # Preprocessing configuration
+            processors:
+               normalizer:
+                  _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+                  config:
+                     default: "mean-std"
+                     std:
+                     - "tp"
+                     min-max:
+                     max:
+                     - "sdor"
+                     - "slor"
+                     - "z"
+                     none:
+                     - "cos_latitude"
+                     - "cos_longitude"
+                     - "sin_latitude"
+                     - "sin_longitude"
+                     - "cos_julian_day"
+                     - "cos_local_time"
+                     - "sin_julian_day"
+                     - "sin_local_time"
+                     - "insolation"
+                     - "lsm"
+
+The ``forcing`` variables are used as model input but are not part of the forecast state that the model predicts.
+The ``diagnostic`` variables are part of the forecast state but are not provided as input to the model.
+
+Grid Indices Configuration
+===========================
+
+For controlling which grid points are used (e.g., for limited area models), configure ``grid_indices`` in the dataloader:
+
+.. code:: yaml
+
+   dataloader:
+      grid_indices:
+         datasets:
+            data:
+               _target_: anemoi.training.data.grid_indices.FullGrid
+               nodes_name: ${graph.data}
+
+For masked grids (e.g., dropping unconnected nodes in a limited area model):
+
+.. code:: yaml
+
+   dataloader:
+      grid_indices:
+         datasets:
+            data:
+               _target_: anemoi.training.data.grid_indices.MaskedGrid
+               nodes_name: ${graph.data}
+               node_attribute_name: "indices_connected_nodes"
+
+Complete Dataset Configuration Example
+=======================================
+
+Here's a complete example showing dataset configuration with multiple features:
+
+.. code:: yaml
+
+   defaults:
+   - data: zarr
+   - dataloader: native_grid
+   - diagnostics: evaluation
+   - system: example
+   - graph: multi_scale
+   - model: transformer
+   - training: default
+   - _self_
+
+   # Dataset path and metadata
+   system:
+      input:
+         dataset: /data/aifs-ea-an-oper-0001-mars-o96-2019-2022-6h.zarr
+         graph: /graphs/multi_scale_o96.pt
+      output:
+         root: /output/experiment_001
+
+   # Data configuration
+   data:
+      resolution: o96
+      frequency: 6h
+      timestep: 6h
+      datasets:
+         data:
+            forcing:
+            - "cos_latitude"
+            - "cos_longitude"
+            - "sin_latitude"
+            - "sin_longitude"
+            - "cos_julian_day"
+            - "sin_julian_day"
+            - "cos_local_time"
+            - "sin_local_time"
+            - "insolation"
+            - "lsm"
+            - "sdor"
+            - "slor"
+            - "z"
+            diagnostic:
+            - "tp"
+            - "cp"
+            processors:
+               normalizer:
+                  _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+                  config:
+                     default: "mean-std"
+                     std:
+                     - "tp"
+                     min-max:
+                     max:
+                     - "sdor"
+                     - "slor"
+                     - "z"
+                     none:
+                     - "cos_latitude"
+                     - "cos_longitude"
+                     - "sin_latitude"
+                     - "sin_longitude"
+                     - "cos_julian_day"
+                     - "cos_local_time"
+                     - "sin_julian_day"
+                     - "sin_local_time"
+                     - "insolation"
+                     - "lsm"
+
+   # Dataloader configuration with temporal splits
+   dataloader:
+      dataset: ${system.input.dataset}
+      
+      grid_indices:
+         datasets:
+            data:
+               _target_: anemoi.training.data.grid_indices.FullGrid
+               nodes_name: ${graph.data}
+      
+      training:
+         datasets:
+            data:
+               dataset: ${dataloader.dataset}
+               start: null
+               end: 2020
+               frequency: ${data.frequency}
+               drop: []
+               select: null
+      
+      validation:
+         datasets:
+            data:
+               dataset: ${dataloader.dataset}
+               start: 2021
+               end: 2021
+               frequency: ${data.frequency}
+               drop: []
+               select: null
+      
+      test:
+         datasets:
+            data:
+               dataset: ${dataloader.dataset}
+               start: 2022
+               end: null
+               frequency: ${data.frequency}
+               drop: []
+               select: null
+
+   training:
+      lr:
+         rate: 1e-3
+      multistep_input: 2
+      multistep_output: 1
+      rollout:
+         start: 1
+         max: 12
+
+This configuration:
+
+- Loads a zarr dataset from ``/data/aifs-ea-an-oper-0001-mars-o96-2019-2022-6h.zarr``
+- Splits data temporally: 2019-2020 for training, 2021 for validation, 2022 for testing
+- Configures forcing variables (used as input but not predicted)
+- Configures diagnostic variables (predicted but not used as input)
+- Sets up normalization for different variable types
+- Uses 6-hourly data frequency
+- Configures multi-step prediction with 2 input steps and 1 output step
+- Sets rollout parameters for validation
+
+Working with Multiple Datasets
+===============================
+
+For training with multiple datasets (e.g., downscaling or multi-resolution training),
+see the :doc:`multi-datasets` documentation for detailed guidance on configuring
+multiple datasets with different resolutions, variable sets, and preprocessing requirements.
+
+Additional Resources
+====================
+
+- `Anemoi Datasets Using guide <https://anemoi.readthedocs.io/projects/datasets/en/latest/using/introduction.html>`_ - For a full list of actions for interacting with datasets
+- `Anemoi Datasets documentation <https://anemoi-datasets.readthedocs.io/en/latest/>`_ - For creating and managing datasets
+- `Anemoi Datasets catalogue <https://anemoi.ecmwf.int/>`_ - For downloading pre-built datasets
+- :doc:`multi-datasets` - For multi-dataset training configurations
+- :doc:`training` - For training process details
+
 *******************************
  Command-line config overrides
 *******************************
