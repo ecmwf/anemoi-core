@@ -476,7 +476,7 @@ class LongRolloutPlots(BasePlotCallback):
         plot_parameters_dict = {
             pl_module.data_indices.model.output.name_to_index[name]: (
                 name,
-                name not in self.config.data.get("diagnostic", []),
+                name in self.config.data.get("diagnostic", []),
             )
             for name in self.parameters
         }
@@ -990,7 +990,6 @@ class PlotLoss(BasePerBatchPlotCallback):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: int,
     ) -> None:
         logger = trainer.logger
         _ = batch_idx
@@ -1019,10 +1018,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            if pl_module.task_type != "forecaster":
-                output_times = 1
-
-            for rollout_step in range(output_times):
+            for rollout_step in range(pl_module.loss_plot_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 start = pl_module.n_step_input + rollout_step * pl_module.n_step_output
                 y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
@@ -1146,10 +1142,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        # total_targets: forecaster has n_step_output per rollout step; interpolator has 1 per step
-        total_targets = output_times
-        if pl_module.task_type == "forecaster":
-            total_targets *= pl_module.n_step_output
+        total_targets = pl_module.get_total_plot_targets(output_times)
 
         input_tensor = (
             batch[dataset_name][
@@ -1171,9 +1164,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             ),
         )
 
-        if pl_module.task_type == "time-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
-            # Multi-out interpolator: rollouts are packed in the time dimension.
-            output_tensor = output_tensor.squeeze(0)
+        output_tensor = pl_module.prepare_plot_output_tensor(output_tensor)
         output_tensor = (
             pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
         )
@@ -1268,7 +1259,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
-                    name not in diagnostics,
+                    name in diagnostics,
                 )
                 for name in self.parameters
             }
@@ -1285,64 +1276,37 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            if pl_module.task_type == "forecaster" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
-                max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times):
-                    init_step = pl_module.get_init_step(rollout_step)
-                    for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
-                        fig = plot_predicted_multilevel_flat_sample(
-                            plot_parameters_dict,
-                            self.per_sample,
-                            latlons,
-                            self.accumulation_levels_plot,
-                            data[init_step, ...].squeeze(),
-                            data[truth_idx, ...].squeeze(),
-                            output_tensor[rollout_step, out_step, ...],
-                            datashader=self.datashader_plotting,
-                            precip_and_related_fields=self.precip_and_related_fields,
-                            colormaps=self.colormaps,
-                        )
+            for item in pl_module.iter_plot_samples(data, output_tensor, output_times, max_out_steps=self.output_steps):
+                if len(item) == 3:
+                    x, y_pred, tag_suffix = item
+                    y_true = None
+                else:
+                    x, y_true, y_pred, tag_suffix = item
+                fig = plot_predicted_multilevel_flat_sample(
+                    plot_parameters_dict,
+                    self.per_sample,
+                    latlons,
+                    self.accumulation_levels_plot,
+                    x,
+                    y_true,
+                    y_pred,
+                    datashader=self.datashader_plotting,
+                    precip_and_related_fields=self.precip_and_related_fields,
+                    colormaps=self.colormaps,
+                )
 
-                        self._output_figure(
-                            logger,
-                            fig,
-                            epoch=epoch,
-                            tag=(
-                                "pred_val_sample_"
-                                f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
-                                f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                            exp_log_tag=(
-                                "val_pred_sample_"
-                                f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
-                                f"rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                        )
-            else:
-                for rollout_step in range(output_times):
-                    interp_step = rollout_step + 1
-                    init_step = pl_module.get_init_step(rollout_step)
-                    fig = plot_predicted_multilevel_flat_sample(
-                        plot_parameters_dict,
-                        self.per_sample,
-                        latlons,
-                        self.accumulation_levels_plot,
-                        data[init_step, ...].squeeze(),
-                        data[rollout_step + 1, ...].squeeze(),
-                        output_tensor[rollout_step, ...],
-                        datashader=self.datashader_plotting,
-                        precip_and_related_fields=self.precip_and_related_fields,
-                        colormaps=self.colormaps,
-                    )
-
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=f"pred_val_sample_{dataset_name}_istep{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                        exp_log_tag=f"val_pred_sample_{dataset_name}_istep{interp_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                    )
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=(
+                        f"pred_val_sample_{dataset_name}_{tag_suffix}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    exp_log_tag=(
+                        f"val_pred_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                )
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
@@ -1423,61 +1387,38 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             plot_parameters_dict_spectrum = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
-                    name not in diagnostics,
+                    name in diagnostics,
                 )
                 for name in self.parameters
             }
 
-            if pl_module.task_type == "forecaster":
-                max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times):
-                    init_step = pl_module.get_init_step(rollout_step)
-                    for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
-                        fig = plot_power_spectrum(
-                            plot_parameters_dict_spectrum,
-                            latlons,
-                            data[init_step, ...].squeeze(),
-                            data[truth_idx, ...].squeeze(),
-                            output_tensor[rollout_step, out_step, ...],
-                            min_delta=self.min_delta,
-                        )
+            for item in pl_module.iter_plot_samples(data, output_tensor, output_times, max_out_steps=self.output_steps):
+                if len(item) == 3:
+                    x, y_pred, tag_suffix = item
+                    y_true = None
+                else:
+                    x, y_true, y_pred, tag_suffix = item
+                fig = plot_power_spectrum(
+                    plot_parameters_dict_spectrum,
+                    latlons,
+                    x,
+                    y_true,
+                    y_pred,
+                    min_delta=self.min_delta,
+                )
 
-                        self._output_figure(
-                            logger,
-                            fig,
-                            epoch=epoch,
-                            tag=(
-                                "pred_val_spec_"
-                                f"{dataset_name}_rstep_{rollout_step:02d}_out{out_step:02d}_"
-                                f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                            exp_log_tag=(
-                                "pred_val_spec_"
-                                f"{dataset_name}_rstep_{rollout_step:02d}_out{out_step:02d}_"
-                                f"rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                        )
-            else:
-                for rollout_step in range(output_times):
-                    init_step = pl_module.get_init_step(rollout_step)
-                    interp_step = rollout_step + 1
-                    fig = plot_power_spectrum(
-                        plot_parameters_dict_spectrum,
-                        latlons,
-                        data[init_step, ...].squeeze(),
-                        data[rollout_step + 1, ...].squeeze(),
-                        output_tensor[rollout_step, ...],
-                        min_delta=self.min_delta,
-                    )
-
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=f"pred_val_spec_{dataset_name}_istep_{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                        exp_log_tag=f"pred_val_spec_{dataset_name}_istep_{interp_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                    )
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=(
+                        f"pred_val_spec_{dataset_name}_{tag_suffix}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    exp_log_tag=(
+                        f"pred_val_spec_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                )
 
 
 class PlotHistogram(BasePlotAdditionalMetrics):
@@ -1565,58 +1506,35 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             plot_parameters_dict_histogram = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
-                    name not in diagnostics,
+                    name in diagnostics,
                 )
                 for name in self.parameters
             }
 
-            if pl_module.task_type == "forecaster":
-                max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times):
-                    init_step = pl_module.get_init_step(rollout_step)
-                    for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
-                        fig = plot_histogram(
-                            plot_parameters_dict_histogram,
-                            data[init_step, ...].squeeze(),
-                            data[truth_idx, ...].squeeze(),
-                            output_tensor[rollout_step, out_step, ...],
-                            self.precip_and_related_fields,
-                            self.log_scale,
-                        )
+            for item in pl_module.iter_plot_samples(data, output_tensor, output_times, max_out_steps=self.output_steps):
+                if len(item) == 3:
+                    x, y_pred, tag_suffix = item
+                    y_true = None
+                else:
+                    x, y_true, y_pred, tag_suffix = item
+                fig = plot_histogram(
+                    plot_parameters_dict_histogram,
+                    x,
+                    y_true,
+                    y_pred,
+                    self.precip_and_related_fields,
+                    self.log_scale,
+                )
 
-                        self._output_figure(
-                            logger,
-                            fig,
-                            epoch=epoch,
-                            tag=(
-                                "pred_val_histo_"
-                                f"{dataset_name}_rstep_{rollout_step:02d}_out{out_step:02d}_"
-                                f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                            exp_log_tag=(
-                                "pred_val_histo_"
-                                f"{dataset_name}_rstep_{rollout_step:02d}_out{out_step:02d}_"
-                                f"rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                        )
-            else:
-                for rollout_step in range(output_times):
-                    init_step = pl_module.get_init_step(rollout_step)
-                    interp_step = rollout_step + 1
-                    fig = plot_histogram(
-                        plot_parameters_dict_histogram,
-                        data[init_step, ...].squeeze(),
-                        data[rollout_step + 1, ...].squeeze(),
-                        output_tensor[rollout_step, ...],
-                        self.precip_and_related_fields,
-                        self.log_scale,
-                    )
-
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=f"pred_val_histo_{dataset_name}_istep_{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                        exp_log_tag=f"pred_val_histo_{dataset_name}_istep_{interp_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                    )
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=(
+                        f"pred_val_histo_{dataset_name}_{tag_suffix}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    exp_log_tag=(
+                        f"pred_val_histo_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                )

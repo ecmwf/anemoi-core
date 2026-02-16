@@ -291,7 +291,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 else self.config.data.datasets[dataset_name].diagnostic
             )
             plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name not in diagnostics)
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
                 for name in self.parameters
             }
 

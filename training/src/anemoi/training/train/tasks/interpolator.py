@@ -290,3 +290,10 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
     def get_init_step(self, rollout_step: int) -> int:
         return rollout_step
+
+    def prepare_plot_output_tensor(self, output_tensor: torch.Tensor) -> torch.Tensor:
+        #! TODO figure out why this is needed and if we can remove it
+        """Multi-out: (1, n_step_output, ...) -> (n_step_output, ...) for iter_plot_samples."""
+        if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:
+            return output_tensor.squeeze(0)
+        return output_tensor

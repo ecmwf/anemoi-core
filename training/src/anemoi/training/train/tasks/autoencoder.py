@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from typing import Any
 
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from collections.abc import Mapping
 
     import torch
@@ -79,6 +81,19 @@ class GraphAutoEncoder(BaseGraphModule):
     @property
     def output_times(self) -> int:
         return 1  # Autoencoder doesn't have rollout
+
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        _output_times: int,
+        max_out_steps: int | None = None,
+    ) -> Iterator[tuple[Any, Any, str]]:
+        """Yield (sample, reconstruction, tag_suffix). Callbacks treat as (x, y_true, y_pred) with x=y_true=sample."""
+        _ = max_out_steps
+        sample = data[0, ...].squeeze()
+        recon = output_tensor[0, ...].squeeze()
+        yield sample, recon, "recon"
 
     def _step(
         self,

@@ -14,6 +14,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
+from typing import Any
 
 import torch
 
@@ -22,6 +23,7 @@ from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from collections.abc import Iterator
 
     from torch_geometric.data import HeteroData
 
@@ -86,6 +88,38 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
     def output_times(self) -> int:
         """Number of rollout steps (outer loop in plot callbacks)."""
         return max(1, self.rollout)
+
+    def get_total_plot_targets(self, output_times: int) -> int:
+        """Forecaster has n_step_output targets per rollout step."""
+        return output_times * self.n_step_output
+
+    @property
+    def loss_plot_times(self) -> int:
+        """Plot loss for each rollout step."""
+        return self.output_times
+
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        output_times: int,
+        max_out_steps: int | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        """Yield (x, y_true, y_pred, tag_suffix) for forecaster multi-step output."""
+        if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:
+            # (1, rollout_steps, n_step_output, ...) -> one plot per (rollout_step, out_step)
+            max_out = min(self.n_step_output, max_out_steps or self.n_step_output)
+            for rollout_step in range(output_times):
+                init_step = self.get_init_step(rollout_step)
+                x = data[init_step, ...].squeeze()
+                for out_step in range(max_out):
+                    truth_idx = rollout_step * self.n_step_output + out_step + 1
+                    y_true = data[truth_idx, ...].squeeze()
+                    y_pred = output_tensor[0, rollout_step, out_step, ...]
+                    tag_suffix = f"rstep{rollout_step:02d}_out{out_step:02d}"
+                    yield x, y_true, y_pred, tag_suffix
+        else:
+            yield from super().iter_plot_samples(data, output_tensor, output_times, max_out_steps)
 
     def _advance_dataset_input(
         self,
