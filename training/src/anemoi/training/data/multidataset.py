@@ -19,9 +19,10 @@ from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
-from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
+from anemoi.training.data.dataset import create_dataset
+from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.usable_indices import get_usable_indices
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class MultiDataset(IterableDataset):
         self.shuffle = shuffle
         self.timestep = timestep
         self.dataset_names = list(data_readers.keys())
+        self.grid_indices = grid_indices
 
         # Create individual NativeGridDataset for each dataset with its own grid_indices
         self.datasets = {}
@@ -66,11 +68,7 @@ class MultiDataset(IterableDataset):
                 msg = f"No grid_indices configuration found for dataset '{name}'"
                 raise ValueError(msg)
 
-            self.datasets[name] = NativeGridDataset(
-                data_reader=data_reader,
-                grid_indices=grid_indices[name],
-                timestep=timestep,
-            )
+            self.datasets[name] = create_dataset(data_reader)
 
         # relative_date_indices are computed in terms of data frequency
         # data_relative_date_indices are in terms of the specific dataset
@@ -118,7 +116,7 @@ class MultiDataset(IterableDataset):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None]:
         """Return combined tendency statistics from all datasets."""
-        return self._collect("statistics_tendencies")
+        return {name: dataset.statistics_tendencies(self.timestep) for name, dataset in self.datasets.items()}
 
     @cached_property
     def metadata(self) -> dict[str, dict]:
@@ -193,23 +191,36 @@ class MultiDataset(IterableDataset):
         """Return valid date indices.
 
         A date t is valid if we can sample the elements t + i
-        for every relative_date_index i.
+        for every relative_date_index i across all datasets.
+
+        Returns the intersection of valid indices from all datasets.
         """
-        valid_date_indices_ref = None
-        for ds in self.datasets.values():
+        valid_date_indices_intersection = None
+        for name, ds in self.datasets.items():
             valid_date_indices = get_usable_indices(
-                ds.data.missing,
-                len(ds.data),
+                ds.missing,
+                len(ds.dates),
                 self.data_relative_date_indices,
-                ds.data.trajectory_ids,
+                ds.trajectory_ids if ds.has_trajectories else None,
             )
-            if valid_date_indices_ref is None:
-                valid_date_indices_ref = valid_date_indices
-            assert np.array_equal(
-                valid_date_indices_ref,
-                valid_date_indices,
-            ), "Datasets have different valid_date_indices, cannot synchronize samples"
-        return valid_date_indices_ref
+            if valid_date_indices_intersection is None:
+                valid_date_indices_intersection = valid_date_indices
+            else:
+                valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
+
+            if len(valid_date_indices) == 0:
+                msg = f"No valid date indices found for dataset '{name}': \n{ds}"
+                raise ValueError(msg)
+
+            LOGGER.info("Dataset '%s' has %d valid indices", name, len(valid_date_indices))
+
+        if len(valid_date_indices_intersection) == 0:
+            msg = "No valid date indices found after intersection across all datasets."
+            raise ValueError(msg)
+
+        LOGGER.info("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
+
+        return valid_date_indices_intersection
 
     def set_comm_group_info(
         self,
@@ -251,12 +262,15 @@ class MultiDataset(IterableDataset):
 
         LOGGER.info(
             "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
-            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
+            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d, "
+            "sample_comm_group_id %d, sample_comm_num_groups %d",
             global_rank,
             model_comm_group_id,
             model_comm_group_rank,
             model_comm_num_groups,
             reader_group_rank,
+            self.sample_comm_group_id,
+            self.sample_comm_num_groups,
         )
 
     def set_ens_comm_group_info(
@@ -280,30 +294,36 @@ class MultiDataset(IterableDataset):
         self.ens_comm_group_rank = ens_comm_group_rank
         self.ens_comm_num_groups = ens_comm_num_groups
 
+        self.sample_comm_group_id = ens_comm_group_id
+        self.sample_comm_num_groups = ens_comm_num_groups
+
         LOGGER.info(
-            "NativeGridDataset.set_group_info(): global_rank %d, ens_comm_group_id %d, "
-            "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d",
+            "NativeGridDataset.set_ens_comm_group_info(): global_rank %d, ens_comm_group_id %d, "
+            "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d, "
+            "sample_comm_group_id %d, sample_comm_num_groups %d",
             self.global_rank,
             ens_comm_group_id,
             ens_comm_group_rank,
             ens_comm_num_groups,
             self.reader_group_rank,
+            self.sample_comm_group_id,
+            self.sample_comm_num_groups,
         )
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all datasets for this worker."""
         self.worker_id = worker_id
 
-        # Divide this equally across shards (one shard per group!)
+        # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
+        # note that we need even splits here across DDP ranks, so we might throw away some samples
         shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
         shard_start = self.sample_comm_group_id * shard_size
-        shard_end = (self.sample_comm_group_id + 1) * shard_size
 
-        shard_len = shard_end - shard_start
-        self.n_samples_per_worker = shard_len // n_workers
+        self.n_samples_per_worker = shard_size // n_workers
 
-        low = shard_start + worker_id * self.n_samples_per_worker
-        high = min(shard_start + (worker_id + 1) * self.n_samples_per_worker, shard_end)
+        # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
+        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
+
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
         LOGGER.info(
@@ -334,9 +354,18 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         start = index + self.data_relative_date_indices[0]
         end = index + self.data_relative_date_indices[-1] + 1
-        timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
-        time_steps = slice(start, end, timeincrement)
-        return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
+        if len(self.data_relative_date_indices) > 1:
+            timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
+        else:
+            timeincrement = 1  # single time step
+        time_indices = slice(start, end, timeincrement)
+
+        x = {}
+        for name, dataset in self.datasets.items():
+            grid_shard_indices = self.grid_indices[name].get_shard_indices(self.reader_group_rank)
+            x[name] = dataset.get_sample(time_indices, grid_shard_indices)
+
+        return x
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.

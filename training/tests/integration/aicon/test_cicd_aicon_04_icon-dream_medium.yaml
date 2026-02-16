@@ -49,46 +49,37 @@ system:
 graph:
   overwrite: True
   nodes:
-    # ICON mesh
-    icon_mesh:
-      node_builder:
-        _target_: anemoi.graphs.nodes.ICONNodes
-        name: "icon_grid_0026_R03B07_G"
-        grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
-        max_level_multimesh: 3
-        max_level_dataset: 3
     # Data nodes
     data:
       node_builder:
         _target_: anemoi.graphs.nodes.ICONCellGridNodes
-        icon_mesh: "icon_mesh"
+        max_level: 3
+        grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
       attributes: ${graph.attributes.nodes}  # options: l1, l2, unit-max, unit-sum, unit-std
     # Hidden nodes
     hidden:
       node_builder:
-        _target_: anemoi.graphs.nodes.ICONMultimeshNodes
-        icon_mesh: "icon_mesh"
+        _target_: anemoi.graphs.nodes.ICONMultiMeshNodes
+        max_level: 3
+        grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
   edges:
     # Processor configuration
     - source_name: "hidden"
       target_name: "hidden"
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
-          icon_mesh: "icon_mesh"
       attributes: ${graph.attributes.edges}
     # Encoder configuration
     - source_name: "data"
       target_name: "hidden"
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalEncoderEdges
-          icon_mesh: "icon_mesh"
       attributes: ${graph.attributes.edges}
     # Decoder configuration
     - source_name: "hidden"
       target_name: "data"
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalDecoderEdges
-          icon_mesh: "icon_mesh"
       attributes: ${graph.attributes.edges}
   attributes:
     nodes:
@@ -236,6 +227,7 @@ training:
   deterministic: false
   precision: 16-mixed
   multistep_input: 2
+  multistep_output: 1
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0
@@ -326,6 +318,7 @@ diagnostics:
     # Precipitation and related fields
     precip_and_related_fields: [tp, cp]
     datasets_to_plot: ["data"]
+    focus_areas: {}
     callbacks: []
 
   debug:

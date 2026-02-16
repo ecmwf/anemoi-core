@@ -25,6 +25,8 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
+
+NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
@@ -133,18 +135,34 @@ def get_loss_function(
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
 
+    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
+        per_scale_loss_config = loss_config.pop("per_scale_loss")
+        per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
+        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
+
     if scalers is None:
         scalers = {}
 
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    # Instantiate the loss function with the loss_init_config
     loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
+    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
+
+    return loss_function
+
+
+def _apply_scalers(
+    loss_function: BaseLoss,
+    scalers_to_include: list,
+    scalers: dict[str, TENSOR_SPEC] | None,
+    data_indices: dict | None,
+) -> None:
+    """Attach scalers to a loss function and set data indices if needed."""
     for key in scalers_to_include:
         if key not in scalers or []:
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
@@ -160,8 +178,6 @@ def get_loss_function(
 
         if hasattr(loss_function, "set_data_indices"):
             loss_function.set_data_indices(data_indices)
-
-    return loss_function
 
 
 def get_metric_ranges(

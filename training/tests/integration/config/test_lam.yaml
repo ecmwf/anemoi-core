@@ -20,10 +20,6 @@ system:
   input:
     dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
     forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
-    # We only use the graph file in test_training_cycle_lam_with_existing_graph, not in test_training_cycle_lam
-    graph: anemoi-integration-tests/training/graphs/lam-graph.pt
-    truncation: null
-    truncation_inv: null
 
 # need this modification since some variables set in the default zarr config are not part of the dataset
 data:
@@ -89,22 +85,25 @@ diagnostics:
         sample_idx: ${diagnostics.plot.sample_idx}
         per_sample : 6
         parameters: ${diagnostics.plot.parameters}
+        output_steps: ${training.multistep_output}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         #Defining the accumulation levels for precipitation related fields and the colormap
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
         precip_and_related_fields: [tp]
         colormaps: ${diagnostics.plot.colormaps}
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
-        dataset_names: ["data"]
-        # every_n_batches: 100 # Override for batch frequency
-        # min_delta: 0.01 # Minimum distance between two consecutive points
-        sample_idx: ${diagnostics.plot.sample_idx}
-        every_n_batches: ${diagnostics.plot.frequency.batch}
-        parameters:
-        - tp
+      #! DEACTIVATING UNTIL PYSHTOOLS FIX FOR 3.13
+      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+      #   dataset_names: ["data"]
+      #   # every_n_batches: 100 # Override for batch frequency
+      #   # min_delta: 0.01 # Minimum distance between two consecutive points
+      #   sample_idx: ${diagnostics.plot.sample_idx}
+      #   every_n_batches: ${diagnostics.plot.frequency.batch}
+      #   parameters:
+      #   - tp
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
         dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
+        output_steps: ${training.multistep_output}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         precip_and_related_fields: [tp]
         parameters:

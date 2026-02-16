@@ -46,7 +46,6 @@ datasets:
           - "lsm"
 
   cerra:
-    # CERRA uses same configuration as ERA5 for debugging
     forcing:
     - "cos_latitude"
     - "cos_longitude"
@@ -75,7 +74,6 @@ datasets:
           - "cos_local_time"
           - "sin_julian_day"
           - "sin_local_time"
-          - "lsm"
       const_imputer:
         _target_: anemoi.models.preprocessing.imputer.InputImputer
         config:

@@ -15,12 +15,11 @@ import os
 import pathlib
 from functools import reduce
 from operator import getitem
-from pathlib import Path
 
 import matplotlib as mpl
 import pytest
 import torch
-from conftest import GetTmpPaths
+from conftest import GetTmpPath
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
@@ -40,19 +39,18 @@ mpl.use("agg")
 
 @pytest.fixture
 @typechecked
-def aicon_config_with_tmp_dir(get_tmp_paths: GetTmpPaths, get_test_archive: GetTestArchive) -> DictConfig:
+def aicon_config_with_tmp_dir(get_tmp_path: GetTmpPath, get_test_archive: GetTestArchive) -> DictConfig:
     """Get AICON config with temporary output paths."""
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(config, ["dataset", "forcing_dataset"])
-    config.system.output.root = tmp_dir
-    dataset, forcing_dataset = rel_paths
-    config.system.input.dataset = str(Path(tmp_dir, dataset))
-    config.system.input.forcing_dataset = str(Path(tmp_dir, forcing_dataset))
+    tmp_dir_dataset, url_dataset = get_tmp_path(config.system.input.dataset)
+    tmp_dir_forcing_dataset, url_forcing_dataset = get_tmp_path(config.system.input.forcing_dataset)
+    config.system.input.dataset = str(tmp_dir_dataset)
+    config.system.input.forcing_dataset = str(tmp_dir_forcing_dataset)
 
-    for url in dataset_urls:
-        get_test_archive(url)
+    get_test_archive(url_dataset)
+    get_test_archive(url_forcing_dataset)
 
     return config
 
@@ -64,8 +62,11 @@ def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data:
 
     Downloading the grid is required as the AICON grid is currently required as a netCDF file.
     """
-    aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = get_test_data(
-        aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename,
+    aicon_config_with_tmp_dir.graph.nodes.data.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.data.node_builder.grid_filename,
+    )
+    aicon_config_with_tmp_dir.graph.nodes.hidden.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.hidden.node_builder.grid_filename,
     )
     return aicon_config_with_tmp_dir
 
@@ -119,7 +120,8 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     assert_metadatakeys(
         trainer.metadata,
         ("config", "data", "timestep"),
-        ("config", "graph", "nodes", "icon_mesh", "node_builder", "max_level_dataset"),
+        ("config", "graph", "nodes", "data", "node_builder", "max_level"),
+        ("config", "graph", "nodes", "hidden", "node_builder", "max_level"),
         ("config", "training", "precision"),
         ("data_indices", dataset_name, "data", "input", "diagnostic"),
         ("data_indices", dataset_name, "data", "input", "full"),
@@ -152,3 +154,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
 def test_aicon_training(trained_aicon: tuple) -> None:
     _, initial_sum, final_sum = trained_aicon
     assert initial_sum != final_sum
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s", "-k", "test_aicon_metadata"])
