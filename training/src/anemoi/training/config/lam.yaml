@@ -35,7 +35,7 @@ dataloader:
 model:
   output_mask:
     _target_: anemoi.training.utils.masks.Boolean1DMask
-    nodes_name: ${graph.data}
+    nodes_name: data
     attribute_name: cutout_mask
 system:
   input:
