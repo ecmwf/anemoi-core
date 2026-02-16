@@ -360,138 +360,69 @@ For masked grids (e.g., dropping unconnected nodes in a limited area model):
                nodes_name: ${graph.data}
                node_attribute_name: "indices_connected_nodes"
 
-Complete Dataset Configuration Example
-=======================================
+Putting It All Together
+=======================
 
-Here's a complete example showing dataset configuration with multiple features:
+Building on the basic example from the :ref:`Example Config File` section, here's how to add 
+dataset-specific configuration. The key additions are in the ``data.datasets`` and 
+``dataloader`` sections:
 
 .. code:: yaml
 
-   defaults:
-   - data: zarr
-   - dataloader: native_grid
-   - diagnostics: evaluation
-   - system: example
-   - graph: multi_scale
-   - model: transformer
-   - training: default
-   - _self_
-
-   # Dataset path and metadata
+   # Specify dataset path
    system:
       input:
          dataset: /data/aifs-ea-an-oper-0001-mars-o96-2019-2022-6h.zarr
-         graph: /graphs/multi_scale_o96.pt
-      output:
-         root: /output/experiment_001
 
-   # Data configuration
+   # Configure dataset-specific features
    data:
-      resolution: o96
       frequency: 6h
       timestep: 6h
       datasets:
          data:
+            # Variables used as input but not predicted
             forcing:
             - "cos_latitude"
-            - "cos_longitude"
             - "sin_latitude"
+            - "cos_longitude"
             - "sin_longitude"
-            - "cos_julian_day"
-            - "sin_julian_day"
-            - "cos_local_time"
-            - "sin_local_time"
             - "insolation"
             - "lsm"
-            - "sdor"
-            - "slor"
             - "z"
+            
+            # Variables predicted but not used as input
             diagnostic:
             - "tp"
             - "cp"
+            
+            # Preprocessing configuration
             processors:
                normalizer:
                   _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
                   config:
                      default: "mean-std"
-                     std:
-                     - "tp"
-                     min-max:
-                     max:
-                     - "sdor"
-                     - "slor"
-                     - "z"
-                     none:
-                     - "cos_latitude"
-                     - "cos_longitude"
-                     - "sin_latitude"
-                     - "sin_longitude"
-                     - "cos_julian_day"
-                     - "cos_local_time"
-                     - "sin_julian_day"
-                     - "sin_local_time"
-                     - "insolation"
-                     - "lsm"
+                     std: ["tp"]
+                     none: ["cos_latitude", "sin_latitude", "cos_longitude", "sin_longitude", "lsm"]
 
-   # Dataloader configuration with temporal splits
+   # Configure temporal splits
    dataloader:
-      dataset: ${system.input.dataset}
-      
-      grid_indices:
-         datasets:
-            data:
-               _target_: anemoi.training.data.grid_indices.FullGrid
-               nodes_name: ${graph.data}
-      
       training:
          datasets:
             data:
-               dataset: ${dataloader.dataset}
-               start: null
+               start: null  # Use earliest available
                end: 2020
-               frequency: ${data.frequency}
-               drop: []
-               select: null
       
       validation:
          datasets:
             data:
-               dataset: ${dataloader.dataset}
                start: 2021
                end: 2021
-               frequency: ${data.frequency}
-               drop: []
-               select: null
       
       test:
          datasets:
             data:
-               dataset: ${dataloader.dataset}
                start: 2022
-               end: null
-               frequency: ${data.frequency}
-               drop: []
-               select: null
-
-   training:
-      lr:
-         rate: 1e-3
-      multistep_input: 2
-      multistep_output: 1
-      rollout:
-         start: 1
-         max: 12
-
-This configuration:
-
-- Loads a zarr dataset from ``/data/aifs-ea-an-oper-0001-mars-o96-2019-2022-6h.zarr``
-- Splits data temporally: 2019-2020 for training, 2021 for validation, 2022 for testing
-- Configures forcing variables (used as input but not predicted)
-- Configures diagnostic variables (predicted but not used as input)
-- Sets up normalization for different variable types
-- Uses 6-hourly data frequency
-- Configures multi-step prediction with 2 input steps and 1 output step
-- Sets rollout parameters for validation
+               end: null  # Use latest available
 
 Working with Multiple Datasets
 ===============================
