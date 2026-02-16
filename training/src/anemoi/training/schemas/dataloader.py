@@ -56,7 +56,7 @@ class Frequency(RootModel):
         return int(self.as_timedelta.total_seconds())
 
 
-class NativeDatasetSchema(PydanticBaseModel):
+class NativeDatasetSchema(BaseModel):
     """Dataset configuration schema."""
 
     dataset: str | dict | Path | list[dict] | None = None
