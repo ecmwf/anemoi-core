@@ -23,7 +23,7 @@ authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
 
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.14"
 
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -31,7 +31,6 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -49,7 +48,7 @@ dependencies = [
   "torch-geometric>=2.3",
 ]
 
-optional-dependencies.all = [  ]
+optional-dependencies.all = [ "anemoi-models[migrations]" ]
 
 optional-dependencies.dev = [
   "anemoi-models[all,docs,tests]",
@@ -59,13 +58,13 @@ optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
   "rstfmt",
-  "sphinx<8.2",          # Fixed until nbsphinx updates
+  "sphinx<8.2; python_version<'3.11'",   # Fixed until nbsphinx updates
+  "sphinx>=8.2; python_version>='3.11'",
   "sphinx-argparse<0.5",
   "sphinx-rtd-theme",
 ]
 
 optional-dependencies.migrations = [
-  "cloudpickle>=3.1",
   "jinja2>=3.1",
   "rich",
 ]

@@ -1,0 +1,9 @@
+dataset: ???
+graph: ???
+# To load the graph from a file, you need to provide a path here like: /path/to/your/graph.pt
+# Then for each dataset the graph /path/to/your/graph_{dataset_name}.pt will be loaded if it exists.
+# If no such file exists, the graph will be created from the config.
+truncation: null
+truncation_inv: null
+loss_matrices_path: null
+warm_start: null

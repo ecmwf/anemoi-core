@@ -27,30 +27,50 @@ LOGGER = logging.getLogger(__name__)
 class IndexCollection:
     """Collection of data and model indices."""
 
-    def __init__(self, config, name_to_index) -> None:
-        self.config = OmegaConf.to_container(config, resolve=True)
+    def __init__(self, data_config, name_to_index) -> None:
+        self.config = OmegaConf.to_container(data_config, resolve=True)
         self.name_to_index = dict(sorted(name_to_index.items(), key=operator.itemgetter(1)))
-        self.forcing = [] if config.data.forcing is None else OmegaConf.to_container(config.data.forcing, resolve=True)
+        self.forcing = [] if data_config.forcing is None else OmegaConf.to_container(data_config.forcing, resolve=True)
         self.diagnostic = (
-            [] if config.data.diagnostic is None else OmegaConf.to_container(config.data.diagnostic, resolve=True)
+            [] if data_config.diagnostic is None else OmegaConf.to_container(data_config.diagnostic, resolve=True)
         )
+        self.target = (
+            [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
+        )
+        defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
+        self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
             f"Diagnostic and forcing variables overlap: {set(self.diagnostic).intersection(self.forcing)}. ",
             "Please drop them at a dataset-level to exclude them from the training data.",
         )
+        assert set(self.diagnostic).isdisjoint(self.target), (
+            f"Diagnostic and target variables overlap: {set(self.diagnostic).intersection(self.target)}. ",
+            "Please drop them at a dataset-level to exclude them from the training data.",
+        )
         name_to_index_model_input = {
-            name: i for i, name in enumerate(key for key in self.name_to_index if key not in self.diagnostic)
+            name: i
+            for i, name in enumerate(key for key in self.name_to_index if key in self.forcing or key in self.prognostic)
         }
         name_to_index_model_output = {
-            name: i for i, name in enumerate(key for key in self.name_to_index if key not in self.forcing)
+            name: i
+            for i, name in enumerate(
+                key for key in self.name_to_index if key in self.prognostic or key in self.diagnostic
+            )
         }
-
-        self.data = DataIndex(self.diagnostic, self.forcing, self.name_to_index)
-        self.model = ModelIndex(self.diagnostic, self.forcing, name_to_index_model_input, name_to_index_model_output)
+        self.data = DataIndex(
+            diagnostic=self.diagnostic, forcing=self.forcing, target=self.target, name_to_index=self.name_to_index
+        )
+        self.model = ModelIndex(
+            diagnostic=self.diagnostic,
+            forcing=self.forcing,
+            target=self.target,
+            name_to_index_model_input=name_to_index_model_input,
+            name_to_index_model_output=name_to_index_model_output,
+        )
 
     def __repr__(self) -> str:
-        return f"IndexCollection(config={self.config}, name_to_index={self.name_to_index})"
+        return f"IndexCollection(data_config={self.config}, name_to_index={self.name_to_index})"
 
     def __eq__(self, other):
         if not isinstance(other, IndexCollection):

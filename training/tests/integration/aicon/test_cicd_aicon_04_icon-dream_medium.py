@@ -13,14 +13,13 @@
 # used for CI/CD!
 import os
 import pathlib
-import tempfile
-from collections.abc import Iterator
 from functools import reduce
 from operator import getitem
 
 import matplotlib as mpl
 import pytest
 import torch
+from conftest import GetTmpPath
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
@@ -29,6 +28,8 @@ from typeguard import typechecked
 import anemoi.training
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.utils.testing import GetTestArchive
+from anemoi.utils.testing import GetTestData
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
 os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
@@ -37,32 +38,36 @@ mpl.use("agg")
 
 @pytest.fixture
 @typechecked
-def aicon_config_with_tmp_dir() -> Iterator[DictConfig]:
+def aicon_config_with_tmp_dir(get_tmp_path: GetTmpPath, get_test_archive: GetTestArchive) -> DictConfig:
     """Get AICON config with temporary output paths."""
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
-    with tempfile.TemporaryDirectory() as output_dir:
-        config.hardware.paths.output = output_dir
-        config.hardware.paths.graph = output_dir
-        yield config
+    tmp_dir_dataset, url_dataset = get_tmp_path(config.system.input.dataset)
+    tmp_dir_forcing_dataset, url_forcing_dataset = get_tmp_path(config.system.input.forcing_dataset)
+    config.system.input.dataset = str(tmp_dir_dataset)
+    config.system.input.forcing_dataset = str(tmp_dir_forcing_dataset)
+
+    get_test_archive(url_dataset)
+    get_test_archive(url_forcing_dataset)
+
+    return config
 
 
 @pytest.fixture
 @typechecked
-def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig) -> Iterator[DictConfig]:
+def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data: GetTestData) -> DictConfig:
     """Temporarily download the ICON grid specified in the config.
 
     Downloading the grid is required as the AICON grid is currently required as a netCDF file.
     """
-    with tempfile.NamedTemporaryFile(suffix=".nc") as grid_fp:
-        grid_filename = aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename
-        if grid_filename.startswith(("http://", "https://")):
-            import urllib.request
-
-            urllib.request.urlretrieve(grid_filename, grid_fp.name)  # noqa: S310
-            aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = grid_fp.name
-        yield aicon_config_with_tmp_dir
+    aicon_config_with_tmp_dir.graph.nodes.data.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.data.node_builder.grid_filename,
+    )
+    aicon_config_with_tmp_dir.graph.nodes.hidden.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.hidden.node_builder.grid_filename,
+    )
+    return aicon_config_with_tmp_dir
 
 
 @pytest.fixture
@@ -87,7 +92,7 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
     for keys in metadata_keys:
         try:
             reduce(getitem, keys, metadata)
-        except KeyError:  # noqa: PERF203
+        except KeyError:
             keys = "".join(f"[{k!r}]" for k in keys)
             errors.append("missing metadata" + keys)
     if errors:
@@ -109,33 +114,45 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     """
     trainer = AnemoiTrainer(aicon_config_with_grid)
 
+    dataset_name = "data"
     assert_metadatakeys(
         trainer.metadata,
         ("config", "data", "timestep"),
-        ("config", "graph", "nodes", "icon_mesh", "node_builder", "max_level_dataset"),
+        ("config", "graph", "nodes", "data", "node_builder", "max_level"),
+        ("config", "graph", "nodes", "hidden", "node_builder", "max_level"),
         ("config", "training", "precision"),
-        ("data_indices", "data", "input", "diagnostic"),
-        ("data_indices", "data", "input", "full"),
-        ("data_indices", "data", "output", "full"),
-        ("data_indices", "model", "input", "forcing"),
-        ("data_indices", "model", "input", "full"),
-        ("data_indices", "model", "input", "prognostic"),
-        ("data_indices", "model", "output", "full"),
-        ("dataset", "shape"),
+        ("data_indices", dataset_name, "data", "input", "diagnostic"),
+        ("data_indices", dataset_name, "data", "input", "full"),
+        ("data_indices", dataset_name, "data", "output", "full"),
+        ("data_indices", dataset_name, "model", "input", "forcing"),
+        ("data_indices", dataset_name, "model", "input", "full"),
+        ("data_indices", dataset_name, "model", "input", "prognostic"),
+        ("data_indices", dataset_name, "model", "output", "full"),
+        ("dataset", dataset_name, "shape"),
     )
 
-    assert torch.is_tensor(trainer.graph_data["data"].x), "data coordinates not present"
+    assert torch.is_tensor(trainer.graph_data[dataset_name]["data"].x), "data coordinates not present"
 
     # Assert heterogeneity of num_chunks setting.
     assert aicon_config_with_grid.model.encoder.num_chunks != aicon_config_with_grid.model.decoder.num_chunks
 
     # Monitor path and setting of num_chunks
-    assert trainer.model.model.model.encoder.proc.num_chunks == aicon_config_with_grid.model.encoder.num_chunks
-    assert trainer.model.model.model.decoder.proc.num_chunks == aicon_config_with_grid.model.decoder.num_chunks
+    assert (
+        trainer.model.model.model.encoder[dataset_name].proc.num_chunks
+        == aicon_config_with_grid.model.encoder.num_chunks
+    )
+    assert (
+        trainer.model.model.model.decoder[dataset_name].proc.num_chunks
+        == aicon_config_with_grid.model.decoder.num_chunks
+    )
 
 
 @pytest.mark.slow
 @typechecked
 def test_aicon_training(trained_aicon: tuple) -> None:
-    trainer, initial_sum, final_sum = trained_aicon
+    _, initial_sum, final_sum = trained_aicon
     assert initial_sum != final_sum
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s", "-k", "test_aicon_metadata"])

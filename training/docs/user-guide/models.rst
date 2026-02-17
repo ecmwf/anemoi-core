@@ -10,6 +10,7 @@ anemoi-training:
 #. Deterministic Forecasting (GraphForecaster)
 #. Ensemble Forecasting (GraphEnsForecaster)
 #. Time Interpolation (GraphInterpolator)
+#. Multi-Output Time Interpolation (GraphMultiOutInterpolator)
 #. Diffusion-based Forecasting (GraphDiffusionForecaster)
 
 The model tasks specify the training objective and are specified in the
@@ -21,6 +22,7 @@ configuration through ``training.model_task``. They are our
 #. Graph Neural Network (GNN)
 #. Graph Transformer Neural Network
 #. Transformer Neural Network
+#. Point-wise Multilayer Perceptron
 
 The model types specify the model architecture and can be chosen
 independently of the model task. Currently, all models have a
@@ -44,7 +46,7 @@ For detailed instructions on creating models, see the
 
 The processor is the part of the model that performs the computation on
 the latent space. The processor can be chosen to be a GNN,
-GraphTransformer or Transformer with Flash attention.
+GraphTransformer, Transformer with Flash attention or Point-wise MLP.
 
 GNN
 ===
@@ -54,7 +56,7 @@ al. (2023).
 
 The physical data is encoded on to a multi-mesh latent space of
 decreasing resolution. This multi-mesh is defined by the graph given in
-``config.hardware.files.graph``.
+``config.system.input.graph``.
 
 .. figure:: ../images/gnn-encoder-decoder-multimesh.jpg
    :width: 500
@@ -99,13 +101,28 @@ coarser than the resolution of the base data.
 
    Attention windows (grid points highlighted in blue) for different grid points (red).
 
+.. note::
+
+   The Transformer does not require a subgraph.
+
+Point-wise MLP
+==============
+
+The Point-wise MLP applies the same multilayer perceptron independently
+to each node. Results for each node are not conditioned on other nodes,
+as there is no message passing or interaction between nodes.
+
+.. note::
+
+   The Point-wise MLP does not require a subgraph.
+
 *******************
  Encoders/Decoders
 *******************
 
-The encoder and decoder can be chosen to be a GNN, a GraphTransformer,
-or a Transformer. This choice is independent of the processor, but
-currently the encoder and decoder must be the same model type otherwise
+The encoders and decoders can be chosen to be GNNs, GraphTransformers,
+or Transformers. This choice is independent of the processor, but
+currently the encoders and decoders must be the same model type otherwise
 the code will break.
 
 *******************
@@ -133,22 +150,46 @@ For detailed information and examples, see
 ******************
 
 Field truncation is a pre-processing step applied during autoregressive
-rollout. It smooths the input data which helps maintain stability during
-rollout.
+rollout. It smooths the skipped connection data which helps maintain
+stability during rollout and can be used for multi-scale loss
+computation.
 
-The truncation process relies on pre-computed transformation matrices
-which can be specified in the configuration:
+**********
+ Overview
+**********
 
-.. code:: yaml
+Truncation matrices are sparse transformation matrices that filter
+high-frequency components from the input data. This process serves two
+main purposes:
 
-   path:
-      truncation: /path/to/truncation/matrix
-   files:
-      truncation: truncation_matrix.pt
-      truncation_inv: truncation_matrix_inv.pt
+#. **Stability Enhancement**: Smoothing the skipped connection data
+   helps maintain numerical stability during long autoregressive
+   rollouts by reducing noise amplification.
 
-Once set, the truncation matrices are used automatically during the
-rollout.
+#. **Multi-scale Loss Computation**: For ensemble training, truncation
+   matrices can be used to compute losses at different scales.
+
+**************
+ Matrix Types
+**************
+
+The truncation system supports several types of transformation matrices:
+
+**Truncation Matrix (``truncation``)**
+   The forward transformation matrix that applies the truncation filter
+   to the skipped connection.
+
+**Inverse Truncation Matrix (``truncation_inv``)**
+   The inverse transformation matrix.
+
+**Loss Matrices Path (``loss_matrices_path``)**
+   Path to the directory containing smoothing matrices for multi-scale
+   loss computation. The list of matrix filenames is configured directly
+   in the ``training_loss`` section as ``loss_matrices``. Works only for
+   ensemble training. Each matrix corresponds to a different scale for
+   loss evaluation. These need to be ordered so that the first matrix
+   corresponds to the largest scales. The following matrices then
+   include smaller and smaller scales.
 
 .. note::
 
@@ -175,3 +216,47 @@ configuration:
 This determines how many ensemble members are generated per device
 during training. Effective ensemble size is then the number of ensemble
 members per device times the number of GPUs per ensemble.
+
+*************
+ Compilation
+*************
+
+PyTorch supports JIT-compiliation of code. This can speed up execution
+and reduce peak memory usage. For more information, consult `the
+introduction to torch.compile
+<https://docs.pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>`__
+and `the official documentation
+<https://docs.pytorch.org/docs/stable/generated/torch.compile.html>`__.
+
+Compilation requires Triton. Normally Triton is pulled in as a
+dependancy when PyTorch is installed. Otherwise, Triton can be `built
+from source
+<https://github.com/triton-lang/triton?tab=readme-ov-file#install-from-source>`__
+. Compilation requires torch >= 2.6 and torch_geometric >= 2.6. If these
+versions are not met, or if Triton is not installed, then anemoi will
+run without compilation.
+
+Anemoi exposes 'torch.compile' at the module level through the model
+config. Below is an example:
+
+.. code:: yaml
+
+   #training/config/models/transformer_ens.yaml
+   compile:
+   - module: anemoi.models.layers.conv.GraphTransformerConv
+     options:
+       dynamic: false
+       mode: max-autotune
+   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+     options:
+       dynamic: false
+
+Under the 'compile' keyword, you provide a list of modules. These
+modules will be marked for compilation when the model is built. During
+their first forward pass, these modules will be compiled. No code
+modifications are required.
+
+You can optionally pass options to torch compile via the 'options'
+keyword. A full list of the possible options and their meanings can be
+found in the `torch.compile documentation
+<https://docs.pytorch.org/docs/stable/generated/torch.compile.html>`__.

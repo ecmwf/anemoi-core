@@ -8,6 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pytest
 import torch
@@ -17,22 +20,51 @@ from hydra import initialize
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+
+def _get_config_path() -> str:
+    """Get the config path relative to the project root, working from any directory."""
+    # Find the config directory by looking for src/anemoi/training/config
+    # This works whether running from training/ or training/tests/
+    current = Path.cwd()
+
+    # Try from current directory first (running from training/)
+    config_path = current / "src" / "anemoi" / "training" / "config"
+    if config_path.exists():
+        return str(config_path)
+
+    # Try from parent directory (running from training/tests/)
+    config_path = current.parent / "src" / "anemoi" / "training" / "config"
+    if config_path.exists():
+        return str(config_path)
+
+    # Fallback: use relative path from tests/ directory
+    return "../src/anemoi/training/config"
+
 
 pytest_plugins = "anemoi.utils.testing"
+
+PYTEST_MARKED_TESTS = [
+    "multigpu",
+    "mlflow",
+]
 
 
 @pytest.fixture
 def config(request: SubRequest) -> DictConfig:
     overrides = request.param
-    with initialize(version_base=None, config_path="../src/anemoi/training/config"):
+    config_path = _get_config_path()
+    with initialize(version_base=None, config_path=config_path):
         # config is relative to a module
         return compose(config_name="debug", overrides=overrides)
 
 
 @pytest.fixture
-def datamodule() -> AnemoiDatasetsDataModule:
-    with initialize(version_base=None, config_path="../src/anemoi/training/config"):
+def datamodule():  # noqa: ANN201
+    """Lazy-load AnemoiDatasetsDataModule to avoid expensive import at test collection time."""
+    from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+
+    config_path = _get_config_path()
+    with initialize(version_base=None, config_path=config_path):
         # config is relative to a module
         cfg = compose(config_name="config")
     return AnemoiDatasetsDataModule(cfg)
@@ -49,3 +81,47 @@ def graph_with_nodes() -> HeteroData:
     graph["test_nodes"].test_attr = (torch.tensor(coords) ** 2).sum(1)
     graph["test_nodes"].mask = torch.tensor([True] * len(coords))
     return graph
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--multigpu",
+        action="store_true",
+        dest="multigpu",
+        default=False,
+        help="enable tests marked as requiring multiple GPUs",
+    )
+    parser.addoption(
+        "--mlflow",
+        action="store_true",
+        dest="mlflow",
+        default=False,
+        help="enable tests marked as requiring MLFlow test server",
+    )
+    parser.addoption(
+        "--mlflow-server",
+        dest="mlflow_server",
+        default=None,
+        help="MLFlow server for tests requiring MLFlow (only if --mlflow is set)",
+    )
+
+
+@pytest.fixture
+def mlflow_server(pytestconfig: Any) -> str:
+    mlflow_server = pytestconfig.getoption("mlflow_server")
+    if pytestconfig.getoption("mlflow") and mlflow_server is None:
+        e = ValueError("MLFlow server must be provided via --mlflow-server when using --mlflow")
+        raise e
+    return mlflow_server
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Automatically skip PYTEST_MARKED_TESTS unless options are used in CLI."""
+    for option_name in PYTEST_MARKED_TESTS:
+        if not config.getoption(f"--{option_name}"):
+            skip_marker = pytest.mark.skip(
+                reason=f"Skipping tests requiring {option_name}, use --{option_name} to enable",
+            )
+            for item in items:
+                if item.get_closest_marker(option_name):
+                    item.add_marker(skip_marker)

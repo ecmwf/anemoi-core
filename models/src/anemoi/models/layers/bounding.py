@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
+from typing import Any
+from typing import Iterable
 from typing import Optional
 
 import torch
+from hydra.utils import instantiate
 from torch import nn
 
 from anemoi.models.data_indices.tensor import InputTensorIndex
@@ -56,7 +59,7 @@ class BaseBounding(nn.Module, ABC):
         self.name_to_index_stats = name_to_index_stats
 
     def _create_index(self, variables: list[str]) -> InputTensorIndex:
-        return InputTensorIndex(includes=variables, excludes=[], name_to_index=self.name_to_index)._only
+        return torch.tensor([i for name, i in self.name_to_index.items() if name in variables], dtype=torch.int)
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -301,3 +304,91 @@ class LeakyFractionBounding(FractionBounding):
         # Calculate the fraction of the total variable
         x[..., self.data_index] *= x[..., self.total_variable]
         return x
+
+
+def _build_dataset_boundings(
+    model_config: Any,
+    data_indices: Any,
+    statistics: dict | None,
+) -> nn.ModuleList:
+    """Build the list of model-output bounding modules from configuration.
+
+    This is a thin factory over Hydra's ``instantiate`` that reads the iterable
+    ``model_config.model.bounding`` and instantiates each entry while injecting
+    the common keyword arguments required by bounding modules:
+    ``name_to_index``, ``statistics``, and ``name_to_index_stats``. The result
+    is returned as an ``nn.ModuleList`` preserving the order of the config.
+
+    Parameters
+    ----------
+    model_config : Any
+        Object with a ``model`` attribute containing an iterable ``bounding``
+        (e.g. a list of Hydra configs). If absent or empty, an empty
+        ``nn.ModuleList`` is returned.
+    data_indices : Any
+        Object providing the mappings:
+        ``data_indices.model.output.name_to_index`` and
+        ``data_indices.data.input.name_to_index``. These are forwarded to each
+        instantiated bounding module as ``name_to_index`` and
+        ``name_to_index_stats`` respectively.
+    statistics : dict | None
+        Optional dataset/model statistics passed to each bounding module. Use
+        ``None`` if not required by the configured classes.
+
+    Returns
+    -------
+    torch.nn.ModuleList
+        The instantiated bounding modules, in the same order as specified in
+        ``model_config.model.bounding``. May be empty.
+    """
+
+    bounding_cfgs: Iterable[Any] = getattr(getattr(model_config, "model", object()), "bounding", []) or []
+
+    return nn.ModuleList(
+        [
+            instantiate(
+                cfg,
+                name_to_index=data_indices.model.output.name_to_index,
+                statistics=statistics,
+                name_to_index_stats=data_indices.data.input.name_to_index,
+            )
+            for cfg in bounding_cfgs
+        ]
+    )
+
+
+def build_boundings(
+    model_config: Any,
+    data_indices: Any,
+    statistics: dict | None,
+) -> nn.ModuleDict:
+    """Build the model-output bounding modules from configuration.
+
+    This is a thin factory that creates a ``nn.ModuleDict`` of bounding
+    modules by invoking ``_build_dataset_boundings`` for each dataset
+    specified in ``data_indices``.
+
+    Parameters
+    ----------
+    model_config : Any
+        Object with a ``model`` attribute containing an iterable ``bounding``
+        (e.g. a list of Hydra configs). If absent or empty, an empty
+        ``nn.ModuleDict`` is returned.
+    data_indices : Any
+        Dictionary mapping dataset names to data indices objects. Each
+        data indices object must provide the mappings:
+        ``data_indices.model.output.name_to_index`` and
+        ``data_indices.data.input.name_to_index``. These are forwarded to each
+        instantiated bounding module as ``name_to_index`` and
+        ``name_to_index_stats`` respectively.
+    statistics : dict | None
+        Dictionary mapping dataset names to optional dataset/model statistics
+        passed to each bounding module. Use ``None`` if not required by the
+        configured classes.
+    """
+    bounding_modules = nn.ModuleDict()
+    for dataset_name, dataset_indices in data_indices.items():
+        bounding_modules[dataset_name] = _build_dataset_boundings(
+            model_config, dataset_indices, statistics[dataset_name]
+        )
+    return bounding_modules

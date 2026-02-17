@@ -22,7 +22,7 @@ settings at the top as follows:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: gnn
    - training: default
@@ -32,14 +32,15 @@ These are group configs for each section. The options after the defaults
 are then used to override the configs, by assigning new features and
 keywords.
 
-You can also find these defaults in other configs, like the
-``hardware``, which implements:
+You can also find these defaults in other configs, like the ``system``,
+which implements:
 
 .. code:: yaml
 
    defaults:
-   - paths: example
-   - files: example
+   - hardware: example
+   - input: example
+   - output: example
 
 *****************************
  YAML-based config overrides
@@ -70,11 +71,48 @@ You can also change the GPU count to whatever you have available:
 
 .. code:: yaml
 
-   hardware:
-       num_gpus_per_node: 1
+   system:
+      hardware:
+         num_gpus_per_node: 1
 
 This matches the interface of the underlying defaults in Anemoi
 training.
+
+*********************************
+ Multistep Input and Output
+*********************************
+
+Anemoi uses ``multistep_input`` and ``multistep_output`` to control how many time
+steps the model injests as input and predicts in a single forward pass.
+
+-  ``multistep_input``: number of past timesteps provided as model input. When set to 1, only `t_{0}` is used.
+-  ``multistep_output``: number of future timesteps predicted per forward pass.
+
+Set ``multistep_output`` greater than 1 to enable multi-output prediction. This
+reduces the number of forward passes needed to cover a rollout horizon.
+
+Example:
+
+.. code:: yaml
+
+   training:
+      multistep_input: 3
+      multistep_output: 2
+      rollout:
+         start: 1
+         max: 4
+
+Rollout behavior:
+
+-  When time indices are inferred, the dataloader uses
+   ``multistep_input + rollout * multistep_output`` to determine how many timesteps
+   to load.
+-  If ``multistep_output`` is greater than ``multistep_input``, only the most recent
+   ``multistep_input`` outputs are fed into the next rollout step.
+
+Notes:
+
+-  Autoencoders require ``multistep_input == multistep_output``.
 
 Example Config File
 ===================
@@ -101,22 +139,22 @@ match the dataset you provide.
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
    - training: default
    - _self_
 
+   config_validation: True
    data:
       resolution: n320
 
-   hardware:
-      num_gpus_per_node: 1
-      paths:
-         output: /home/username/anemoi/training/output
-         data: /home/username/anemoi/datasets
-         graph: /home/username/anemoi/training/graphs
-      files:
+   system:
+      hardware:
+         num_gpus_per_node: 1
+      output:
+         root: /home/username/anemoi/training/output
+      input:
          dataset: datset-n320-2019-2021-6h.zarr
          graph: first_graph_n320.pt
 
@@ -220,7 +258,7 @@ correctly indented (in this case the `diagnostics.log` field):
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
    - training: default
@@ -272,7 +310,7 @@ typos that might still need to be fixed manually:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
    - training: default
@@ -333,7 +371,7 @@ let's say we have a config with a union of schemas like the following:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
    - training: default

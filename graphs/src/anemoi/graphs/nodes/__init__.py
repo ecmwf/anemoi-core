@@ -12,12 +12,10 @@ from .builders.from_file import LimitedAreaNPZFileNodes
 from .builders.from_file import NPZFileNodes
 from .builders.from_file import TextNodes
 from .builders.from_file import XArrayNodes
-from .builders.from_file import ZarrDatasetNodes
 from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
 from .builders.from_icon import ICONCellGridNodes
-from .builders.from_icon import ICONMultimeshNodes
-from .builders.from_icon import ICONNodes
+from .builders.from_icon import ICONMultiMeshNodes
 from .builders.from_reduced_gaussian import ReducedGaussianGridNodes
 from .builders.from_refined_icosahedron import HexNodes
 from .builders.from_refined_icosahedron import LimitedAreaHexNodes
@@ -28,7 +26,6 @@ from .builders.from_vectors import LatLonNodes
 
 __all__ = [
     "AnemoiDatasetNodes",
-    "ZarrDatasetNodes",
     "NPZFileNodes",
     "TriNodes",
     "HexNodes",
@@ -40,9 +37,8 @@ __all__ = [
     "LimitedAreaHexNodes",
     "ReducedGaussianGridNodes",
     "StretchedTriNodes",
-    "ICONMultimeshNodes",
+    "ICONMultiMeshNodes",
     "ICONCellGridNodes",
-    "ICONNodes",
     "TextNodes",
     "XArrayNodes",
 ]

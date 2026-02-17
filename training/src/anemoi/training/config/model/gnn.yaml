@@ -24,6 +24,7 @@ processor:
   num_chunks: 2
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
 encoder:
@@ -33,6 +34,7 @@ encoder:
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
 decoder:
@@ -42,11 +44,15 @@ decoder:
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
+
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
-
 
 trainable_parameters:
   data: 8
@@ -57,18 +63,17 @@ trainable_parameters:
 
 attributes:
   edges:
-  - edge_length
-  - edge_dirs
+    - edge_length
+    - edge_dirs
   nodes: []
 
 # Bounding configuration
 bounding: #These are applied in order
-
   # Bound tp (total precipitation) with a Relu bounding layer
   # ensuring a range of [0, infinity) to avoid negative precipitation values.
   - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
     variables:
-    - tp
+      - tp
 
   # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
   # This guarantees that cp is physically consistent with tp by restricting cp
