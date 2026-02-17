@@ -419,6 +419,7 @@ def plot_predicted_multilevel_flat_sample(
     datashader: bool = False,
     precip_and_related_fields: list | None = None,
     colormaps: dict[str, Colormap] | None = None,
+    time_label: str | None = None,
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
@@ -491,6 +492,7 @@ def plot_predicted_multilevel_flat_sample(
             precip_and_related_fields=precip_and_related_fields,
             cmap=cmap,
             error_cmap=error_cmap,
+            time_label=time_label,
         )
     return fig
 
@@ -509,6 +511,7 @@ def plot_flat_sample(
     precip_and_related_fields: list | None = None,
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
+    time_label: str | None = None,
 ) -> None:
     """Plot a "flat" 1D sample.
 
@@ -566,6 +569,8 @@ def plot_flat_sample(
         f"{vname} increment [pred - input]",
         f"{vname} persist err",
     ]
+    if time_label:
+        titles = [f"{title}\n{time_label}" for title in titles]
     # colormaps
     cmaps = [cmap] * 3 + [error_cmap] * 3
     # normalizations for significant colormaps

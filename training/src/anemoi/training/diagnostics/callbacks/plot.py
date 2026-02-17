@@ -47,6 +47,7 @@ from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sam
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1314,6 +1315,12 @@ class PlotSample(BasePlotAdditionalMetrics):
                         init_step = self._get_init_step(rollout_step, output_times[1])
                         for out_step in range(max_out_steps):
                             truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
+                            time_label = self._format_target_time_label(
+                                batch,
+                                dataset_name,
+                                batch_idx,
+                                truth_idx,
+                            )
                             fig = plot_predicted_multilevel_flat_sample(
                                 plot_parameters_dict,
                                 self.per_sample,
@@ -1325,6 +1332,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 datashader=self.datashader_plotting,
                                 precip_and_related_fields=self.precip_and_related_fields,
                                 colormaps=self.colormaps,
+                                time_label=time_label,
                             )
 
                             self._output_figure(
@@ -1347,6 +1355,12 @@ class PlotSample(BasePlotAdditionalMetrics):
                     for rollout_step in range(output_times[0]):
                         interp_step = rollout_step + 1
                         init_step = self._get_init_step(rollout_step, output_times[1])
+                        time_label = self._format_target_time_label(
+                            batch,
+                            dataset_name,
+                            batch_idx,
+                            rollout_step + 1,
+                        )
                         fig = plot_predicted_multilevel_flat_sample(
                             plot_parameters_dict,
                             self.per_sample,
@@ -1358,6 +1372,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                             datashader=self.datashader_plotting,
                             precip_and_related_fields=self.precip_and_related_fields,
                             colormaps=self.colormaps,
+                            time_label=time_label,
                         )
 
                         self._output_figure(
@@ -1374,6 +1389,52 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 f"rank{local_rank:01d}{self.focus_mask.tag}"
                             ),
                         )
+
+    def _extract_sample_times(self, batch: dict[str, torch.Tensor]) -> np.ndarray | None:
+        time_key_candidates = ("sample_time_ns", "__sample_time_ns__", "time_ns")
+        time_tensor = None
+        for key in time_key_candidates:
+            if key in batch:
+                time_tensor = batch[key]
+                break
+        if time_tensor is None or not torch.is_tensor(time_tensor):
+            return None
+
+        arr = time_tensor.detach().cpu().numpy()
+        if arr.ndim == 1:
+            sample_times = arr
+        elif arr.ndim >= 2:
+            if self.sample_idx >= arr.shape[0]:
+                return None
+            sample_times = arr[self.sample_idx]
+        else:
+            return None
+        return sample_times.astype("int64").astype("datetime64[ns]")
+
+    def _format_target_time_label(
+        self,
+        batch: dict[str, torch.Tensor],
+        dataset_name: str,
+        batch_idx: int,
+        target_offset: int,
+    ) -> str | None:
+        sample_times = self._extract_sample_times(batch)
+        if sample_times is not None and target_offset < sample_times.shape[0]:
+            dt = np.datetime_as_string(sample_times[target_offset], unit="s")
+            return f"time: {dt}"
+
+        try:
+            start = self.config.dataloader.validation.datasets[dataset_name].start
+            freq = self.config.data.frequency
+            if start and freq:
+                step = frequency_to_timedelta(freq)
+                step_s = int(step.total_seconds())
+                dt64 = np.datetime64(start) + np.timedelta64((batch_idx + target_offset) * step_s, "s")
+                dt = np.datetime_as_string(dt64, unit="s")
+                return f"time: {dt}"
+        except Exception:
+            return None
+        return None
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
