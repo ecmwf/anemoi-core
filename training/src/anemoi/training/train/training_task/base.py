@@ -130,7 +130,6 @@ class BaseTask(ABC):
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
-
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information.
 
