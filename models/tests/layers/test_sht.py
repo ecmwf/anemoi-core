@@ -38,19 +38,39 @@ def random_spectral_array(truncation: int, dtype: torch.dtype) -> torch.Tensor:
 def _lons_per_lat(nlat: int, grid_kind: str) -> list[int]:
     if grid_kind == "regular":
         return [2 * nlat] * nlat
+    if grid_kind == "reduced":
+        if nlat != 640:
+            raise ValueError("Only the N320 reduced Gaussian grid SHT (nlat = 640) is supported.")
+        # Fetch regular grid data
+        from anemoi.transform.grids.named import lookup
+        lats = lookup(f"n{nlat // 2}")["latitudes"]
+
+        # Get latitudes of this grid
+        unique_lats = sorted(set(lats))
+
+        # Calculate longitudes per latitude
+        lons = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
+
+        return lons
     if grid_kind == "octahedral":
         lons = [20 + 4 * i for i in range(nlat // 2)]
         return lons + list(reversed(lons))
+
     raise ValueError(f"Unknown grid_kind={grid_kind!r}")
 
 
-@pytest.fixture(params=["regular", "octahedral"])
+@pytest.fixture(params=["regular", "reduced", "octahedral"])
 def sht_setup(request):
     # Choose GPUs if available
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.set_default_device(device)
 
-    truncation = 39  # T39 corresponding to O40 grid
+    # We only support the N320 reduced Gaussian grid
+    if request.param == "reduced":
+        truncation = 319  # T319 corresponding to N320 grid
+    # Other grids, we can do what we like
+    else:
+        truncation = 39  # T39 corresponding to O40 grid
     dtype = torch.float64  # float64 for numerical correctness checking
     torch.manual_seed(0)  # fix RNG seed for reproducibility
     tolerance = 1e-11
