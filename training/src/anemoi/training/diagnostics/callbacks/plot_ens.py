@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     import pytorch_lightning as pl
     from omegaconf import DictConfig
 
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -72,14 +71,6 @@ class EnsemblePlotMixin:
 
         # Return batch (normalized data) and structured output like regular forecaster
         return batch, [loss, y_preds]
-
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
-        """Return times outputted by the model."""
-        if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
-            output_times = (len(config.training.explicit_times.target), "time_interp")
-        else:
-            output_times = (getattr(pl_module, "rollout", 0), "forecast")
-        return output_times
 
     def process(
         self,
@@ -123,8 +114,8 @@ class EnsemblePlotMixin:
             ].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
-        total_targets = output_times[0]
-        if output_times[1] == "forecast":
+        total_targets = output_times
+        if pl_module.task_type == "forecaster":
             total_targets *= pl_module.n_step_output
 
         input_tensor = (
@@ -149,7 +140,7 @@ class EnsemblePlotMixin:
                 for x in outputs[1]
             ),
         )
-        if output_times[1] == "time_interp" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
+        if pl_module.task_type == "temporal-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
             output_tensor = output_tensor.squeeze(0)
         output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
@@ -193,7 +184,7 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
-            output_times = self._get_output_times(self.config, pl_module)
+            output_times = pl_module.output_times
 
             self.plot(
                 trainer,
@@ -322,9 +313,9 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             local_rank = pl_module.local_rank
-            if output_times[1] == "forecast" and pl_module.n_step_output > 1:
+            if pl_module.task_type == "forecaster" and pl_module.n_step_output > 1:
                 max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
+                for rollout_step in range(output_times):
                     for out_step in range(max_out_steps):
                         truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_predicted_ensemble(
@@ -355,7 +346,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                             ),
                         )
             else:
-                for rollout_step in range(output_times[0]):
+                for rollout_step in range(output_times):
                     fig = plot_predicted_ensemble(
                         parameters=plot_parameters_dict,
                         n_plots_per_sample=4,
