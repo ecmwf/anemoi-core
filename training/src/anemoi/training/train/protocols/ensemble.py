@@ -183,15 +183,19 @@ class EnsembleProtocol(BaseGraphModule):
 
         return loss, metrics_next, y_pred_ens
 
-    def forward(self, x: dict[str, torch.Tensor], rollout_step: int, **kwargs) -> dict[str, torch.Tensor]:
+    def forward(self, x: dict[str, torch.Tensor], rollout_step: int | None = None, **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
         communication group and sharding information.
         """
+        if rollout_step is not None:
+            kwargs["fcstep"] = rollout_step
+        else:
+            kwargs["fcstep"] = 0 # TODO(Mario,Simon): set the conditioning on the step optional
+
         return self.model(
             x,
-            fcstep=rollout_step,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
             **kwargs,

@@ -130,6 +130,24 @@ class BaseTask(ABC):
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
+    def advance_input(self, *args, **kwargs) -> dict[str, torch.Tensor]:
+        """Advance the input state for each dataset based on the task's requirements.
+
+        This method can be overridden by specific tasks to implement custom logic for advancing the input state.
+
+        Returns
+        -------
+            dict[str, torch.Tensor]: The advanced input state for each dataset.
+        """
+        return args[0]
+
+    def log_extra(self, *args, **kwargs) -> None:
+        """Log any task-specific information."""
+        pass
+
+    def on_train_epoch_end(self, current_epoch: int) -> None:
+        pass
+
 
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information.
