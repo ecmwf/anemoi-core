@@ -176,6 +176,16 @@ class ExportPredictions(pl.Callback):
             raise ValueError(f"{name} has unexpected shape {arr.shape}, expected 3D (time,node,variable).")
         return arr
 
+    def _get_n_step_input(self, pl_module: pl.LightningModule) -> int:
+        """Return input-step count across Anemoi versions."""
+        n_step_input = getattr(pl_module, "n_step_input", None)
+        if n_step_input is None:
+            # Backward compatibility with older task attribute name.
+            n_step_input = getattr(pl_module, "multi_step", None)
+        if n_step_input is None:
+            raise AttributeError("Could not find input-step attribute on Lightning module (n_step_input/multi_step).")
+        return int(n_step_input)
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -193,6 +203,7 @@ class ExportPredictions(pl.Callback):
 
         output_times = self._get_output_times(pl_module)
         rollout = output_times[0]
+        n_step_input = self._get_n_step_input(pl_module)
         if rollout <= 0:
             LOGGER.warning("No rollout steps available to export.")
             return
@@ -213,7 +224,7 @@ class ExportPredictions(pl.Callback):
                 return
 
             time_len = data_batch.shape[1] if data_batch.ndim >= 2 else 1
-            needed_len = pl_module.multi_step + rollout
+            needed_len = n_step_input + rollout
             if time_len < needed_len:
                 LOGGER.warning(
                     "Batch time length too short for export (time_len=%s, needed=%s).",
@@ -253,7 +264,7 @@ class ExportPredictions(pl.Callback):
                     tuple(input_tensor.shape),
                     tuple(data.shape),
                     tuple(preds.shape),
-                    pl_module.multi_step,
+                    n_step_input,
                     rollout,
                 )
 
@@ -266,7 +277,7 @@ class ExportPredictions(pl.Callback):
 
         data_len = data.shape[0]
         pred_len = preds.shape[0]
-        target_len = min(rollout, data_len - pl_module.multi_step, pred_len)
+        target_len = min(rollout, data_len - n_step_input, pred_len)
         if target_len <= 0:
             LOGGER.warning(
                 "No target/prediction steps available to export (data_len=%s, pred_len=%s, rollout=%s).",
@@ -284,8 +295,8 @@ class ExportPredictions(pl.Callback):
                 batch_size=data_batch.shape[0],
                 sample_idx=self.sample_idx,
             )
-        input_time = time_coord[: pl_module.multi_step]
-        target_time = time_coord[pl_module.multi_step : pl_module.multi_step + target_len]
+        input_time = time_coord[:n_step_input]
+        target_time = time_coord[n_step_input : n_step_input + target_len]
         pred_time = target_time
         if batch_idx == 0:
             LOGGER.info(
@@ -297,10 +308,10 @@ class ExportPredictions(pl.Callback):
             )
         ds = xr.Dataset(
             data_vars={
-                "input": (("input_time", "node", "variable"), data[: pl_module.multi_step]),
+                "input": (("input_time", "node", "variable"), data[:n_step_input]),
                 "target": (
                     ("target_time", "node", "variable"),
-                    data[pl_module.multi_step : pl_module.multi_step + target_len],
+                    data[n_step_input : n_step_input + target_len],
                 ),
                 "prediction": (("pred_time", "node", "variable"), preds[:target_len]),
             },
