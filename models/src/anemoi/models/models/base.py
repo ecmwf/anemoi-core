@@ -98,21 +98,28 @@ class BaseGraphModel(nn.Module):
         self.num_input_channels = {}
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
+        self.num_input_channels_target_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
+        self._target_forcing_input_idx = {}
         self.input_dim = {}
-        self.output_dim = {}
         self.input_dim_latent = {}
+        self.target_dim = {}
+        self.output_dim = {}
 
         for dataset_name, dataset_indices in data_indices.items():
-            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
-            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
-            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
+            self._forcing_input_idx[dataset_name] = [] # TODO: Where do we define the target forcings?
+
+            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_input_channels_target_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
+            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
+
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
-            self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
             self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
+            self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
+            self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return (
@@ -120,11 +127,16 @@ class BaseGraphModel(nn.Module):
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
         )
 
-    def _calculate_output_dim(self, dataset_name: str) -> int:
-        return self.n_step_output * self.num_output_channels[dataset_name]
-
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
         return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
+    
+    def _calculate_target_dim(self, dataset_name: str) -> int:
+        return (
+            self.n_step_output * self.num_input_channels_target_forcings[dataset_name]
+            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+        )
+    def _calculate_output_dim(self, dataset_name: str) -> int:
+        return self.n_step_output * self.num_output_channels[dataset_name]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
