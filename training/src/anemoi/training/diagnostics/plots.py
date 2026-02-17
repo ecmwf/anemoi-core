@@ -677,16 +677,26 @@ def single_plot(
     """
     datashader = _require_datashader(datashader)
     datashader = _require_datashader(datashader)
+    lon_arr = np.asarray(lon).reshape(-1)
+    lat_arr = np.asarray(lat).reshape(-1)
+    data_arr = np.asarray(data).reshape(-1)
+
+    # Robustly support both degree and projected-radian inputs.
+    # If values look like degrees, project them to radians used by map_features.
+    if np.nanmax(np.abs(lon_arr)) > (2 * np.pi + 0.5) or np.nanmax(np.abs(lat_arr)) > (np.pi / 2 + 0.5):
+        projector = EquirectangularProjection()
+        lon_arr, lat_arr = projector(lon_arr, lat_arr)
+
     if cmap is None:
         cmap = "viridis"
     # Keep points visible on large unstructured grids when datashader is unavailable.
-    n_points = max(int(np.asarray(data).size), 1)
+    n_points = max(int(data_arr.size), 1)
     point_size = float(np.clip(3_000_000.0 / n_points, 2.0, 10.0))
     if not datashader:
         psc = ax.scatter(
-            lon,
-            lat,
-            c=data,
+            lon_arr,
+            lat_arr,
+            c=data_arr,
             cmap=cmap,
             s=point_size,
             alpha=1.0,
@@ -697,11 +707,11 @@ def single_plot(
         )
 
     else:
-        df = pd.DataFrame({"val": data, "x": lon, "y": lat})
+        df = pd.DataFrame({"val": data_arr, "x": lon_arr, "y": lat_arr})
         # Adjust binning to match the resolution of the data
         lower_limit = 25
         upper_limit = 500
-        n_pixels = max(min(int(np.floor(data.shape[0] * 0.004)), upper_limit), lower_limit)
+        n_pixels = max(min(int(np.floor(data_arr.shape[0] * 0.004)), upper_limit), lower_limit)
         psc = dsshow(
             df,
             dsh.Point("x", "y"),
@@ -715,12 +725,10 @@ def single_plot(
         )
 
     if transform is not None:
-        ax.set_extent([lon.min() - 0.1, lon.max() + 0.1, lat.min() - 0.1, lat.max() + 0.1], crs=transform)
+        ax.set_extent([lon_arr.min() - 0.1, lon_arr.max() + 0.1, lat_arr.min() - 0.1, lat_arr.max() + 0.1], crs=transform)
     else:
-        xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
-        ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
-        ax.set_xlim((xmin - 0.1, xmax + 0.1))
-        ax.set_ylim((ymin - 0.1, ymax + 0.1))
+        ax.set_xlim((float(np.nanmin(lon_arr)) - 0.1, float(np.nanmax(lon_arr)) + 0.1))
+        ax.set_ylim((float(np.nanmin(lat_arr)) - 0.1, float(np.nanmax(lat_arr)) + 0.1))
 
     # Add map features
     map_features.plot(ax)
