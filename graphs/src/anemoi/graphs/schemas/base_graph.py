@@ -52,8 +52,6 @@ class BaseGraphSchema(PydanticBaseModel):
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
     post_processors: list[ProcessorSchemas] = Field(default_factory=list)
-    hidden: str | list[str] = Field(example="hidden")
-    "Key name for the hidden nodes. Default to 'hidden'."
     # TODO(Helen): Needs to be adjusted for more complex graph setups
 
     @model_validator(mode="after")
