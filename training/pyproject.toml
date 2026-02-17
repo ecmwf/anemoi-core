@@ -98,11 +98,11 @@ optional-dependencies.remote = [
   "aiohttp>=3.8",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",      # required to load the gnn checkpoint as part of the tests
-  "anemoi-training[azure,mlflow,wandb,remote]",  # required to test the AzureMlflowLogger / remote checkpoints
+  "anemoi-graphs[tri]",                         # required to load the gnn checkpoint as part of the tests
+  "anemoi-training[azure,mlflow,remote,wandb]", # required to test the AzureMlflowLogger / remote checkpoints
   "hypothesis>=6.11",
   "pytest>=8",
-  "pytest-asyncio>=0.23",    # required for async checkpoint tests
+  "pytest-asyncio>=0.23",                       # required for async checkpoint tests
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",
