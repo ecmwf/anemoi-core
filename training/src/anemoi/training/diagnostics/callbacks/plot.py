@@ -158,6 +158,7 @@ class BasePlotCallback(Callback, ABC):
             # Save directly from matplotlib to preserve scatter visibility and avoid
             # potential resampling artifacts from RGBA buffer round-trips.
             fig.savefig(save_path, dpi=150)
+            LOGGER.info("Saved plot: %s", save_path)
             if logger and logger.logger_name == "wandb":
                 import wandb
 
