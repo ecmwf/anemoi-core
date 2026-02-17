@@ -151,7 +151,7 @@ class BasePlotCallback(Callback, ABC):
             save_path = Path(
                 self.save_basedir,
                 "plots",
-                f"{tag}_epoch{epoch:03d}.jpg",
+                f"{tag}_epoch{epoch:03d}.png",
             )
 
             save_path.parent.mkdir(parents=True, exist_ok=True)
