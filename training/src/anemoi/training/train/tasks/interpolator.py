@@ -21,6 +21,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -103,13 +105,7 @@ class GraphInterpolator(BaseGraphModule):
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
         self.n_step_input = 1
 
-    @property
-    def output_times(self) -> int:
-        """Number of interpolation times (outer loop in plot callbacks; one forward per step)."""
-        return len(self.interp_times)
-
-    def get_init_step(self, rollout_step: int) -> int:
-        return rollout_step
+        self._plot_adapter = InterpolatorPlotAdapter(self)
 
     def get_target_forcing(self, batch: dict[str, torch.Tensor], interp_step: int) -> dict[str, torch.Tensor]:
         batch_size = next(iter(batch.values())).shape[0]
@@ -250,10 +246,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         self.n_step_input = 1
 
-    @property
-    def output_times(self) -> int:
-        """Number of interpolation times (outer loop in plot callbacks; one forward, n_step_output steps)."""
-        return len(self.interp_times)
+        self._plot_adapter = InterpolatorMultiOutPlotAdapter(self)
 
     def _step(
         self,
@@ -287,13 +280,3 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         # All tasks return (loss, metrics, list of per-step dicts) for consistent plot callback contract.
         return loss, metrics, [y_pred]
-
-    def get_init_step(self, rollout_step: int) -> int:
-        return rollout_step
-
-    def prepare_plot_output_tensor(self, output_tensor: torch.Tensor) -> torch.Tensor:
-        #! TODO figure out why this is needed and if we can remove it
-        """Multi-out: (1, n_step_output, ...) -> (n_step_output, ...) for iter_plot_samples."""
-        if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:
-            return output_tensor.squeeze(0)
-        return output_tensor

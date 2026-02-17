@@ -842,16 +842,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             else:
                 LOGGER.warning("There are no trainable edge attributes to plot.")
 
-    @rank_zero_only
-    def on_validation_epoch_end(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        **kwargs,
-    ) -> None:
-
-        self.plot(trainer, pl_module, self.dataset_names, epoch=trainer.current_epoch, **kwargs)
-
 
 class PlotLoss(BasePerBatchPlotCallback):
     """Plots the unsqueezed loss over rollouts."""
@@ -1016,9 +1006,10 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            for rollout_step in range(pl_module.loss_plot_times):
+            adapter = pl_module.plot_adapter
+            for rollout_step in range(adapter.loss_plot_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
-                start = pl_module.n_step_input + rollout_step * pl_module.n_step_output
+                start = adapter.get_loss_plot_batch_start(rollout_step)
                 y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
                 var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
                 y_true = y_time.index_select(-1, var_idx)
@@ -1137,7 +1128,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = pl_module.get_total_plot_targets(pl_module.output_times)
+        total_targets = pl_module.plot_adapter.get_total_plot_targets()
 
         input_tensor = (
             batch[dataset_name][
@@ -1159,7 +1150,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             ),
         )
 
-        output_tensor = pl_module.prepare_plot_output_tensor(output_tensor)
+        output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
         output_tensor = (
             pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
         )
@@ -1270,10 +1261,10 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            for item in pl_module.iter_plot_samples(
+            for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
-                pl_module.output_times,
+                pl_module.plot_adapter.output_times,
                 max_out_steps=self.output_steps,
             ):
                 if len(item) == 3:
@@ -1390,10 +1381,10 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.iter_plot_samples(
+            for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
-                pl.module.output_times,
+                pl_module.plot_adapter.output_times,
                 max_out_steps=self.output_steps,
             ):
                 if len(item) == 3:
@@ -1513,10 +1504,10 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.iter_plot_samples(
+            for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
-                pl_module.output_times,
+                pl_module.plot_adapter.output_times,
                 max_out_steps=self.output_steps,
             ):
                 if len(item) == 3:

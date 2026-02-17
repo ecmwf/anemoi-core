@@ -13,10 +13,6 @@ dataloader:
       data:
         start: 2017-01-08 18:00:00
 
-focus_areas:
-  europe:
-    latlon_bbox: [30.0, -20.0, 60.0, 40.0]
-
 
 diagnostics:
   log:
@@ -24,7 +20,11 @@ diagnostics:
       authentication: True
       experiment_name: 'ci_hpc_mlflow'
   # autoencoder so far do not hanlde most of the plotting callbcaks
+
   plot:
+    focus_areas:
+      europe:
+        latlon_bbox: [30.0, -20.0, 60.0, 40.0]
     asynchronous: False # Whether to plot asynchronously
     callbacks:
       # Add plot callbacks here

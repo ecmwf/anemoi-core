@@ -40,7 +40,6 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from collections.abc import Mapping
 
     from torch.distributed.distributed_c10d import ProcessGroup
@@ -330,30 +329,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
-    @property
-    def output_times(self) -> int | None:
-        """Number of outer steps for plotting/validation (e.g. rollout steps or interp times).
-
-        Subclasses that support plot callbacks override this. Used as the length of the
-        outer loop in plot code (e.g. for rollout_step in range(output_times)).
-        """
-        return None
-
-    def get_total_plot_targets(self, output_times: int) -> int:
-        """Number of target time slices to include in plot data (for process() batch slicing).
-
-        Forecaster has n_step_output per rollout step; interpolator/autoencoder have 1 per step.
-        """
-        return output_times
-
-    def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
-        """Return output_tensor in the layout expected by iter_plot_samples (e.g. squeeze batch dim)."""
-        return output_tensor
+        # Concrete tasks set _plot_adapter in their __init__ (BasePlotAdapter is abstract).
+        self._plot_adapter: Any = None
 
     @property
-    def loss_plot_times(self) -> int:
-        """Number of loss plots to produce (1 for non-forecaster, output_times for forecaster)."""
-        return 1
+    def plot_adapter(self) -> Any:
+        """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
+        return self._plot_adapter
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
@@ -1100,43 +1082,3 @@ class BaseGraphModule(pl.LightningModule, ABC):
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)
-
-    def get_init_step(self, _rollout_step: int) -> int:
-        return 0
-
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-        max_out_steps: int | None = None,
-    ) -> Iterator[tuple[Any, Any, Any, str]]:
-        """Yield (x, y_true, y_pred, tag_suffix) for each plot to generate.
-
-        Used by plot callbacks so task-specific logic (e.g. forecaster multi-step,
-        autoencoder input=target) lives in the task instead of the callback.
-
-        Parameters
-        ----------
-        data : array-like
-            Processed data from the callback, shape (1 + total_targets, ...).
-        output_tensor : array-like
-            Model predictions, shape (output_times, ...) or (1, output_times, n_step_output, ...) for forecaster.
-        output_times : int
-            Number of outer steps (rollout steps or interp times).
-        max_out_steps : int, optional
-            Max inner output steps to plot (forecaster only). If None, all steps are yielded.
-
-        Yields
-        ------
-        x, y_true, y_pred, tag_suffix
-            Arrays for plot_predicted_multilevel_flat_sample and a suffix for the figure tag.
-        """
-        del max_out_steps
-        for rollout_step in range(output_times):
-            init_step = self.get_init_step(rollout_step)
-            x = data[init_step, ...].squeeze()
-            y_true = data[rollout_step + 1, ...].squeeze()
-            y_pred = output_tensor[rollout_step, ...]
-            tag_suffix = f"istep{rollout_step + 1:02d}"
-            yield x, y_true, y_pred, tag_suffix
