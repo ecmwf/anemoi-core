@@ -1,5 +1,6 @@
 asynchronous: True # Whether to plot asynchronously
 datashader: True # Choose which technique to use for plotting
+projection_kind: equirectangular  # or lambert_conformal (requires cartopy)
 frequency: # Frequency of the plotting
   batch: 750
   epoch: 5
