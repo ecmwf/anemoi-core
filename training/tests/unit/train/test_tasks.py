@@ -174,6 +174,7 @@ _CFG_FORECASTER = DictConfig(
     },
 )
 
+
 def test_graphinterpolator_preserves_time_dim_in_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression test: interpolator loss targets must keep singleton time dim."""
     forecaster = GraphInterpolator.__new__(GraphInterpolator)
