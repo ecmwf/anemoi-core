@@ -93,7 +93,7 @@ dataloader:
     datasets:
       data:
         dataset:
-        - dataset: /ec/ai/project/ai-ml/datasets/aifsdop-ea-ofb-oper-0001-mars-o96-2010-2024-6h-v1-observations-radiosondes.zarr
+        - dataset: /???/aifsdop-ea-ofb-oper-0001-mars-o96-2010-2024-6h-v1-observations-radiosondes.zarr
           start: 2013
           end: 2022
           select:
@@ -148,7 +148,7 @@ dataloader:
           - z
           - insolation
           frequency: ${data.frequency}
-        - dataset: /ec/ai/project/ai-ml/datasets/aifsdop-ea-ofb-oper-0001-mars-o96-2012-2024-6h-v1-observations-atms-radiances.zarr
+        - dataset: /???/aifsdop-ea-ofb-oper-0001-mars-o96-2012-2024-6h-v1-observations-atms-radiances.zarr
           start: 2013
           end: 2022
           select:
@@ -186,7 +186,7 @@ dataloader:
     datasets:
       data:
         dataset:
-        - dataset: /ec/ai/project/ai-ml/datasets/aifsdop-ea-ofb-oper-0001-mars-o96-2010-2024-6h-v1-observations-radiosondes.zarr
+        - dataset: /???/aifsdop-ea-ofb-oper-0001-mars-o96-2010-2024-6h-v1-observations-radiosondes.zarr
           start: 2023
           end: 2023
           select:
@@ -241,7 +241,7 @@ dataloader:
           - z
           - insolation
           frequency: ${data.frequency}
-        - dataset: /ec/ai/project/ai-ml/datasets/aifsdop-ea-ofb-oper-0001-mars-o96-2012-2024-6h-v1-observations-atms-radiances.zarr
+        - dataset: /???/aifsdop-ea-ofb-oper-0001-mars-o96-2012-2024-6h-v1-observations-atms-radiances.zarr
           start: 2023
           end: 2023
           select:
@@ -280,7 +280,7 @@ dataloader:
     datasets:
       data:
         dataset:
-        - dataset: /ec/ai/project/ai-ml/datasets/aifsdop-ea-ofb-oper-0001-mars-o96-2010-2024-6h-v1-observations-radiosondes.zarr
+        - dataset: /???/aifsdop-ea-ofb-oper-0001-mars-o96-2010-2024-6h-v1-observations-radiosondes.zarr
           start: 2013
           end: 2024
           select:
@@ -335,7 +335,7 @@ dataloader:
           - z
           - insolation
           frequency: ${data.frequency}
-        - dataset: /ec/ai/project/ai-ml/datasets/aifsdop-ea-ofb-oper-0001-mars-o96-2012-2024-6h-v1-observations-atms-radiances.zarr
+        - dataset: /???/aifsdop-ea-ofb-oper-0001-mars-o96-2012-2024-6h-v1-observations-atms-radiances.zarr
           start: 2013
           end: 2024
           select:
@@ -380,11 +380,11 @@ diagnostics:
       batch: 750
       epoch: 1
     parameters:
-    #- atms_6
+    - atms_6
     - atms_16
     - t_850
-    #- z_500
-    #- u_250
+    - z_500
+    - u_250
     sample_idx: 0
     precip_and_related_fields:
     - tp
@@ -499,9 +499,9 @@ diagnostics:
     mlflow:
       enabled: true
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
-      offline: false
-      authentication: true
-      tracking_uri: https://mlflow.ecmwf.int
+      offline: true
+      authentication: false
+      tracking_uri: ???
       experiment_name: dop-aifs1
       project_name: Anemoi
       system: true
@@ -536,7 +536,7 @@ system:
     plots: plots
     profiler: profiler
   input:
-    dataset: /ec/ai/project/ai-ml/datasets/aifsdop-ea-ofb-oper-0001-mars-o96-2010-2024-6h-v1-observations-radiosondes.zarr
+    dataset: /???/aifsdop-ea-ofb-oper-0001-mars-o96-2010-2024-6h-v1-observations-radiosondes.zarr
     graph: graph_enc_proc_dec_${data.resolution}.pt
     truncation: null
     truncation_inv: null
