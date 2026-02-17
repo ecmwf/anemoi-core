@@ -4,7 +4,7 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: encoder_decoder_only
-- model: graphtransformer
+- model: transformer
 - task: autoencoding
 - training: single
 - _self_
@@ -21,8 +21,8 @@ config_validation: False
 
 model:
   num_channels: 128
-  model:
-    _target_: anemoi.models.models.AnemoiModelAutoEncoder
+#  model:
+#    _target_: anemoi.models.models.AnemoiModelAutoEncoder
 
 system:
   input:
