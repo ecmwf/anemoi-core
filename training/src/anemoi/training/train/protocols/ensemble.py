@@ -192,7 +192,7 @@ class EnsembleProtocol(BaseGraphModule):
         if rollout_step is not None:
             kwargs["fcstep"] = rollout_step
         else:
-            kwargs["fcstep"] = 0 # TODO(Mario,Simon): set the conditioning on the step optional
+            kwargs["fcstep"] = 0  # TODO(Mario,Simon): set the conditioning on the step optional
 
         return self.model(
             x,
