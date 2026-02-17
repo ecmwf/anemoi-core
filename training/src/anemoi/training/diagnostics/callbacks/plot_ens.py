@@ -108,6 +108,12 @@ class EnsemblePlotMixin:
         if self.latlons is None:
             self.latlons = {}
 
+        # uniform handling of different ways to specify members
+        if members is None:
+            members = slice(members)
+        elif not isinstance(members, list):
+            members = [members]
+
         if dataset_name not in self.latlons:
             self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][
                 pl_module.model.model._graph_name_data
