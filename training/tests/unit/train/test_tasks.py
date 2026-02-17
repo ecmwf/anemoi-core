@@ -8,6 +8,11 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
+from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
@@ -198,12 +203,13 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     forecaster.loss = {"data": DummyLoss()}
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
+    forecaster._plot_adapter = ForecasterPlotAdapter(forecaster)
 
-    assert forecaster.output_times == 1
+    assert forecaster.plot_adapter.output_times == 1
     for i in range(1, _CFG_FORECASTER.training.rollout.max + 1):
         forecaster.rollout = i
-        assert forecaster.get_init_step(i) == 0
-        assert forecaster.output_times == i
+        assert forecaster.plot_adapter.get_init_step(i) == 0
+        assert forecaster.plot_adapter.output_times == i
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
@@ -397,9 +403,14 @@ _CFG_INTERP_STEP = DictConfig({"training": {"explicit_times": {"input": [0, 3], 
 _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}})
 
 
-@pytest.mark.parametrize("task_class", [GraphInterpolator, GraphMultiOutInterpolator], ids=["single_out", "multi_out"])
+@pytest.mark.parametrize(
+    ("task_class", "adapter_class"),
+    [(GraphInterpolator, InterpolatorPlotAdapter), (GraphMultiOutInterpolator, InterpolatorMultiOutPlotAdapter)],
+    ids=["single_out", "multi_out"],
+)
 def test_interpolator_output_times_and_get_init_step(
     task_class: type[GraphInterpolator] | type[GraphMultiOutInterpolator],
+    adapter_class: type[InterpolatorPlotAdapter] | type[InterpolatorMultiOutPlotAdapter],
 ) -> None:
     """Both interpolator task types: output_times == len(target), get_init_step(i) == i."""
     interpolator = task_class.__new__(task_class)
@@ -408,11 +419,11 @@ def test_interpolator_output_times_and_get_init_step(
     interpolator.n_step_output = len(_CFG_INTERP_TWO_TARGETS.training.explicit_times.target)
     interpolator.interp_times = _CFG_INTERP_TWO_TARGETS.training.explicit_times.target
     interpolator.model = None  # unused for this test
-    interpolator.get_init_step = lambda rollout: rollout
+    interpolator._plot_adapter = adapter_class(interpolator)
 
-    assert interpolator.output_times == 2
-    for i in range(interpolator.output_times):
-        assert interpolator.get_init_step(i) == i
+    assert interpolator.plot_adapter.output_times == 2
+    for i in range(interpolator.plot_adapter.output_times):
+        assert interpolator.plot_adapter.get_init_step(i) == i
 
 
 # ---- output_times / get_init_step / _step return format for all tasks ----
@@ -420,12 +431,11 @@ def test_interpolator_output_times_and_get_init_step(
 
 def test_graphdiffusionforecaster_output_times_and_get_init_step() -> None:
     """Diffusion has output_times=1 and uses base get_init_step (returns 0)."""
-    from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
-
     forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
     pl.LightningModule.__init__(forecaster)
-    assert forecaster.output_times == 1
-    assert forecaster.get_init_step(0) == 0
+    forecaster._plot_adapter = DiffusionPlotAdapter(forecaster)
+    assert forecaster.plot_adapter.output_times == 1
+    assert forecaster.plot_adapter.get_init_step(0) == 0
 
 
 def test_graphforecaster_get_init_step() -> None:
@@ -435,8 +445,9 @@ def test_graphforecaster_get_init_step() -> None:
     forecaster.rollout = 2
     forecaster.n_step_input = 1
     forecaster.n_step_output = 1
-    assert forecaster.get_init_step(0) == 0
-    assert forecaster.get_init_step(1) == 0
+    forecaster._plot_adapter = ForecasterPlotAdapter(forecaster)
+    assert forecaster.plot_adapter.get_init_step(0) == 0
+    assert forecaster.plot_adapter.get_init_step(1) == 0
 
 
 def test_graphautoencoder_output_times() -> None:
@@ -447,7 +458,8 @@ def test_graphautoencoder_output_times() -> None:
     ae = GraphAutoEncoder.__new__(GraphAutoEncoder)
     pl.LightningModule.__init__(ae)
     _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE)
-    assert ae.output_times == 1
+    ae._plot_adapter = AutoencoderPlotAdapter(ae)
+    assert ae.plot_adapter.output_times == 1
 
 
 def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
