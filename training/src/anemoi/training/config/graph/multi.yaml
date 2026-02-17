@@ -3,8 +3,6 @@
 # limited area resolution.
 overwrite: True
 
-hidden: "hidden"
-
 nodes:
   era5:
     node_builder:
@@ -24,7 +22,7 @@ nodes:
 edges:
 # Encoder
 - source_name: "era5"
-  target_name: ${graph.hidden}
+  target_name: "hidden"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
     num_nearest_neighbours: 12
@@ -32,7 +30,7 @@ edges:
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 - source_name: "cerra"
-  target_name: ${graph.hidden}
+  target_name: "hidden"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
     num_nearest_neighbours: 12
@@ -40,8 +38,8 @@ edges:
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Processor
-- source_name: ${graph.hidden}
-  target_name: ${graph.hidden}
+- source_name: "hidden"
+  target_name: "hidden"
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
@@ -50,7 +48,7 @@ edges:
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Decoder
-- source_name: ${graph.hidden}
+- source_name: "hidden"
   target_name: "era5"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
@@ -58,7 +56,7 @@ edges:
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
-- source_name: ${graph.hidden}
+- source_name: "hidden"
   target_name: "cerra"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges

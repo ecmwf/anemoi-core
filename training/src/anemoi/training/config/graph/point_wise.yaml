@@ -1,7 +1,6 @@
 ---
 overwrite: True
 
-hidden: "data"
 
 nodes:
   # Data nodes

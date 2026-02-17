@@ -8,6 +8,7 @@ keep_batch_sharded: True
 
 model:
   _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
+  hidden_nodes_name: "hidden"
 
 noise_injector:
   _target_: anemoi.models.layers.ensemble.NoiseConditioning

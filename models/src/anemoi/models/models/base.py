@@ -62,7 +62,7 @@ class BaseGraphModel(nn.Module):
         self.dataset_names = list(data_indices.keys())
 
         model_config = DotDict(model_config)
-        self._graph_name_hidden = model_config.graph.hidden
+        self._graph_name_hidden = model_config.model.hidden_nodes_name
 
         self.n_step_input = model_config.training.multistep_input
         self.n_step_output = model_config.training.multistep_output

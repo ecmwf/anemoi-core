@@ -1,8 +1,6 @@
 ---
 overwrite: True
 
-hidden: "hidden"
-
 nodes:
   # Data nodes
   data:
@@ -22,7 +20,7 @@ nodes:
 edges:
 # Encoder configuration
 - source_name: "data"
-  target_name: ${graph.hidden}
+  target_name: "hidden"
   edge_builders:
   - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
     cutoff_factor: 0.6 # only for cutoff method
@@ -34,8 +32,8 @@ edges:
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Processor configuration
-- source_name: ${graph.hidden}
-  target_name: ${graph.hidden}
+- source_name: "hidden"
+  target_name: "hidden"
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
@@ -44,7 +42,7 @@ edges:
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Decoder configuration
-- source_name: ${graph.hidden}
+- source_name: "hidden"
   target_name: "data"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges

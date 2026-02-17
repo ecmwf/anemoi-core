@@ -1,11 +1,6 @@
 ---
 overwrite: True
 
-hidden:
- - "hidden_1"
- - "hidden_2"
- - "hidden_3"
-
 
 nodes:
   # Data nodes
