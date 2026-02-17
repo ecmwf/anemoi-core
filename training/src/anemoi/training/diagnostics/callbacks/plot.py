@@ -155,9 +155,9 @@ class BasePlotCallback(Callback, ABC):
             )
 
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.canvas.draw()
-            image_array = np.array(fig.canvas.renderer.buffer_rgba())
-            plt.imsave(save_path, image_array, dpi=100)
+            # Save directly from matplotlib to preserve scatter visibility and avoid
+            # potential resampling artifacts from RGBA buffer round-trips.
+            fig.savefig(save_path, dpi=150)
             if logger and logger.logger_name == "wandb":
                 import wandb
 

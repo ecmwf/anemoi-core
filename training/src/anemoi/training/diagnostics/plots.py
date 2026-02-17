@@ -679,17 +679,21 @@ def single_plot(
     datashader = _require_datashader(datashader)
     if cmap is None:
         cmap = "viridis"
+    # Keep points visible on large unstructured grids when datashader is unavailable.
+    n_points = max(int(np.asarray(data).size), 1)
+    point_size = float(np.clip(3_000_000.0 / n_points, 2.0, 10.0))
     if not datashader:
         psc = ax.scatter(
             lon,
             lat,
             c=data,
             cmap=cmap,
-            s=1,
+            s=point_size,
             alpha=1.0,
             norm=norm,
-            rasterized=False,
+            rasterized=True,
             transform=transform,
+            edgecolors="none",
         )
 
     else:
