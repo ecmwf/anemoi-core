@@ -17,8 +17,11 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 from typing import Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class BasePlotAdapter(ABC):
@@ -48,6 +51,7 @@ class BasePlotAdapter(ABC):
         return 1
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
+        del rollout_step
         return 0
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
@@ -73,6 +77,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
         return max(1, self._task.rollout)
 
     def get_init_step(self, rollout_step: int) -> int:
+        del rollout_step
         return 0
 
     def get_total_plot_targets(self, output_times: int | None = None) -> int:
@@ -95,26 +100,14 @@ class ForecasterPlotAdapter(BasePlotAdapter):
         max_out_steps: int | None = None,
     ) -> Iterator[tuple[Any, Any, Any, str]]:
         task = self._task
-        ndim = getattr(output_tensor, "ndim", 0)
-        shp = getattr(output_tensor, "shape", ())
-        # Forecaster: 5D (1, output_times, n_step_output, ...) from plot callback, or 4D/3D. Normalize to (output_times, n_outs, ...).
-        if ndim == 5 and len(shp) > 0 and shp[0] == 1:
-            t = output_tensor[0]
-        else:
-            t = output_tensor[:, None, ...] if ndim == 3 else output_tensor
-        n_outs = min(
-            getattr(t, "shape", (0,))[1] if getattr(t, "ndim", 0) >= 4 else 1,
-            task.n_step_output,
-            max_out_steps or task.n_step_output,
-        )
-        n_outs = max(1, n_outs)
+        max_out_steps = min(task.n_step_output, max_out_steps or task.n_step_output)
         for rollout_step in range(output_times):
             init_step = self.get_init_step(rollout_step)
             x = data[init_step, ...].squeeze()
-            for out_step in range(n_outs):
+            for out_step in range(max_out_steps):
                 truth_idx = rollout_step * task.n_step_output + out_step + 1
                 y_true = data[truth_idx, ...].squeeze()
-                y_pred = t[rollout_step, out_step, ...]
+                y_pred = output_tensor[rollout_step, out_step, ...]
                 y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
                 yield x, y_true, y_pred, f"rstep{rollout_step:02d}_out{out_step:02d}"
 
@@ -127,6 +120,7 @@ class DiffusionPlotAdapter(BasePlotAdapter):
         return 1
 
     def get_init_step(self, rollout_step: int) -> int:
+        del rollout_step
         return 0
 
     def get_total_plot_targets(self, output_times: int | None = None) -> int:
@@ -168,6 +162,7 @@ class InterpolatorPlotAdapter(BasePlotAdapter):
         return rollout_step
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
+        del rollout_step
         return self._task.n_step_input
 
     def iter_plot_samples(
@@ -208,6 +203,7 @@ class AutoencoderPlotAdapter(BasePlotAdapter):
         return 1
 
     def get_init_step(self, rollout_step: int) -> int:
+        del rollout_step
         return 0
 
     def iter_plot_samples(

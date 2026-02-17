@@ -180,8 +180,6 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
-            output_times = pl_module.plot_adapter.output_times
-
             self.plot(
                 trainer,
                 pl_module,
@@ -190,7 +188,6 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                 processed_batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                output_times=output_times,
                 **kwargs,
             )
 
@@ -272,7 +269,6 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
     ) -> None:
         from anemoi.training.diagnostics.plots import plot_predicted_ensemble
 
@@ -330,6 +326,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                     datashader=self.datashader_plotting,
                     precip_and_related_fields=self.precip_and_related_fields,
                     colormaps=self.colormaps,
+                    projection_kind=self.projection_kind,
                 )
                 self._output_figure(
                     logger,

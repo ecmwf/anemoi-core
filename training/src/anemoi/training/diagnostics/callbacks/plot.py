@@ -80,6 +80,7 @@ class BasePlotCallback(Callback, ABC):
         self._executor = None
         self._error: BaseException = None
         self.datashader_plotting = config.diagnostics.plot.datashader
+        self.projection_kind = getattr(config.diagnostics.plot, "projection_kind", "equirectangular")
 
         if self.config.diagnostics.plot.asynchronous:
             LOGGER.info("Setting up asynchronous plotting ...")
@@ -592,7 +593,9 @@ class LongRolloutPlots(BasePlotCallback):
             data_0.squeeze(),
             data_rollout_step.squeeze(),
             output_tensor[0, 0, :, :],  # rolloutstep, first member
+            datashader=self.datashader_plotting,
             colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
         )
         self._output_figure(
             logger,
@@ -1283,6 +1286,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                     datashader=self.datashader_plotting,
                     precip_and_related_fields=self.precip_and_related_fields,
                     colormaps=self.colormaps,
+                    projection_kind=self.projection_kind,
                 )
 
                 self._output_figure(
