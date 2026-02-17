@@ -143,11 +143,9 @@ class BaseTask(ABC):
 
     def log_extra(self, *args, **kwargs) -> None:
         """Log any task-specific information."""
-        pass
 
     def on_train_epoch_end(self, current_epoch: int) -> None:
         pass
-
 
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information.
