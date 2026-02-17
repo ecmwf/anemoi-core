@@ -130,17 +130,30 @@ class ExportPredictions(pl.Callback):
     def _get_latlons(self, pl_module: pl.LightningModule, n_nodes: int) -> tuple[np.ndarray, np.ndarray] | None:
         """Get per-node lat/lon from graph coordinates used by the model."""
         latlons = getattr(pl_module, "latlons_data", None)
-        if latlons is None:
-            return None
-        if isinstance(latlons, dict):
-            if "data" in latlons:
-                coords = latlons["data"]
-            elif len(latlons) == 1:
-                coords = next(iter(latlons.values()))
+        coords = None
+        if latlons is not None:
+            if isinstance(latlons, dict):
+                if "data" in latlons:
+                    coords = latlons["data"]
+                elif len(latlons) == 1:
+                    coords = next(iter(latlons.values()))
             else:
-                return None
-        else:
-            coords = latlons
+                coords = latlons
+
+        # Fallback for current Anemoi training path: graph stores node coords on .x
+        if coords is None:
+            try:
+                graph_data = pl_module.model.model._graph_data
+                graph_name_data = pl_module.model.model._graph_name_data
+                if isinstance(graph_data, dict):
+                    if "data" in graph_data:
+                        coords = graph_data["data"][graph_name_data].x
+                    elif len(graph_data) == 1:
+                        coords = next(iter(graph_data.values()))[graph_name_data].x
+            except Exception:
+                coords = None
+        if coords is None:
+            return None
 
         arr = coords.detach().cpu().numpy() if hasattr(coords, "detach") else np.asarray(coords)
         if arr.ndim != 2 or arr.shape[1] < 2:

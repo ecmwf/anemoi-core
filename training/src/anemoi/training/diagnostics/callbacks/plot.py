@@ -1315,6 +1315,20 @@ class PlotSample(BasePlotAdditionalMetrics):
                         init_step = self._get_init_step(rollout_step, output_times[1])
                         for out_step in range(max_out_steps):
                             truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
+                            input_field = data[init_step, ...].squeeze()
+                            truth_field = data[truth_idx, ...].squeeze()
+                            pred_field = output_tensor[rollout_step, out_step, ...]
+                            self._log_plot_debug_stats(
+                                dataset_name=dataset_name,
+                                batch_idx=batch_idx,
+                                rollout_step=rollout_step,
+                                out_step=out_step,
+                                latlons=latlons,
+                                input_field=input_field,
+                                truth_field=truth_field,
+                                pred_field=pred_field,
+                                var_names=var_names,
+                            )
                             time_label = self._format_target_time_label(
                                 batch,
                                 dataset_name,
@@ -1326,9 +1340,9 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 self.per_sample,
                                 latlons,
                                 self.accumulation_levels_plot,
-                                data[init_step, ...].squeeze(),
-                                data[truth_idx, ...].squeeze(),
-                                output_tensor[rollout_step, out_step, ...],
+                                input_field,
+                                truth_field,
+                                pred_field,
                                 datashader=self.datashader_plotting,
                                 precip_and_related_fields=self.precip_and_related_fields,
                                 colormaps=self.colormaps,
@@ -1355,6 +1369,20 @@ class PlotSample(BasePlotAdditionalMetrics):
                     for rollout_step in range(output_times[0]):
                         interp_step = rollout_step + 1
                         init_step = self._get_init_step(rollout_step, output_times[1])
+                        input_field = data[init_step, ...].squeeze()
+                        truth_field = data[rollout_step + 1, ...].squeeze()
+                        pred_field = output_tensor[rollout_step, ...]
+                        self._log_plot_debug_stats(
+                            dataset_name=dataset_name,
+                            batch_idx=batch_idx,
+                            rollout_step=rollout_step,
+                            out_step=0,
+                            latlons=latlons,
+                            input_field=input_field,
+                            truth_field=truth_field,
+                            pred_field=pred_field,
+                            var_names=var_names,
+                        )
                         time_label = self._format_target_time_label(
                             batch,
                             dataset_name,
@@ -1366,9 +1394,9 @@ class PlotSample(BasePlotAdditionalMetrics):
                             self.per_sample,
                             latlons,
                             self.accumulation_levels_plot,
-                            data[init_step, ...].squeeze(),
-                            data[rollout_step + 1, ...].squeeze(),
-                            output_tensor[rollout_step, ...],
+                            input_field,
+                            truth_field,
+                            pred_field,
                             datashader=self.datashader_plotting,
                             precip_and_related_fields=self.precip_and_related_fields,
                             colormaps=self.colormaps,
@@ -1389,6 +1417,55 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 f"rank{local_rank:01d}{self.focus_mask.tag}"
                             ),
                         )
+
+    def _log_plot_debug_stats(
+        self,
+        dataset_name: str,
+        batch_idx: int,
+        rollout_step: int,
+        out_step: int,
+        latlons: np.ndarray,
+        input_field: np.ndarray,
+        truth_field: np.ndarray,
+        pred_field: np.ndarray,
+        var_names: list[str],
+    ) -> None:
+        def _stats(name: str, arr: np.ndarray) -> str:
+            a = np.asarray(arr)
+            finite = np.isfinite(a)
+            n_finite = int(finite.sum())
+            n_total = int(a.size)
+            if n_finite == 0:
+                return f"{name}: finite=0/{n_total} (all NaN/Inf)"
+            vals = a[finite]
+            return (
+                f"{name}: finite={n_finite}/{n_total} "
+                f"min={float(np.nanmin(vals)):.6g} max={float(np.nanmax(vals)):.6g}"
+            )
+
+        ll = np.asarray(latlons)
+        ll_finite = np.isfinite(ll).all(axis=1) if ll.ndim == 2 and ll.shape[1] >= 2 else np.zeros(0, dtype=bool)
+        latlon_msg = "latlon: unavailable"
+        if ll_finite.size > 0:
+            valid = ll[ll_finite]
+            latlon_msg = (
+                f"latlon: finite_nodes={int(ll_finite.sum())}/{int(ll.shape[0])} "
+                f"lat=[{float(np.min(valid[:, 0])):.6g},{float(np.max(valid[:, 0])):.6g}] "
+                f"lon=[{float(np.min(valid[:, 1])):.6g},{float(np.max(valid[:, 1])):.6g}]"
+            )
+
+        LOGGER.info(
+            "PlotSample debug dataset=%s batch=%04d rstep=%02d out=%02d vars=%s | %s | %s | %s | %s",
+            dataset_name,
+            batch_idx,
+            rollout_step,
+            out_step,
+            ",".join(var_names[:6]) + ("..." if len(var_names) > 6 else ""),
+            latlon_msg,
+            _stats("input", input_field),
+            _stats("target", truth_field),
+            _stats("pred", pred_field),
+        )
 
     def _extract_sample_times(self, batch: dict[str, torch.Tensor]) -> np.ndarray | None:
         time_key_candidates = ("sample_time_ns", "__sample_time_ns__", "time_ns")
