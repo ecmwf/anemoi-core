@@ -13,6 +13,7 @@ import matplotlib as mpl
 
 mpl.use("Agg")
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -21,7 +22,26 @@ from _pytest.fixtures import SubRequest
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+
+def _get_config_path() -> str:
+    """Get the config path relative to the project root, working from any directory."""
+    # Find the config directory by looking for src/anemoi/training/config
+    # This works whether running from training/ or training/tests/
+    current = Path.cwd()
+
+    # Try from current directory first (running from training/)
+    config_path = current / "src" / "anemoi" / "training" / "config"
+    if config_path.exists():
+        return str(config_path)
+
+    # Try from parent directory (running from training/tests/)
+    config_path = current.parent / "src" / "anemoi" / "training" / "config"
+    if config_path.exists():
+        return str(config_path)
+
+    # Fallback: use relative path from tests/ directory
+    return "../src/anemoi/training/config"
+
 
 pytest_plugins = "anemoi.utils.testing"
 
@@ -37,19 +57,22 @@ def config(request: SubRequest) -> DictConfig:
     from hydra import initialize
 
     overrides = request.param
-    with initialize(version_base=None, config_path="../src/anemoi/training/config"):
+    config_path = _get_config_path()
+    with initialize(version_base=None, config_path=config_path):
         # config is relative to a module
         return compose(config_name="debug", overrides=overrides)
 
 
 @pytest.fixture
-def datamodule() -> AnemoiDatasetsDataModule:
+def datamodule():  # noqa: ANN201
+    """Lazy-load AnemoiDatasetsDataModule to avoid expensive import at test collection time."""
     from hydra import compose
     from hydra import initialize
 
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
-    with initialize(version_base=None, config_path="../src/anemoi/training/config"):
+    config_path = _get_config_path()
+    with initialize(version_base=None, config_path=config_path):
         # config is relative to a module
         cfg = compose(config_name="config")
     return AnemoiDatasetsDataModule(cfg)
