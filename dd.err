@@ -1,115 +1,115 @@
-2026-02-17 04:38:45 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-verify', 'system.input.warm_start=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/005a8446-9cd2-4f59-b54b-9b224247ee98/inference-last.ckpt', 'dataloader.training.datasets.data.start=2024-05-05T00:00:00', 'dataloader.training.datasets.data.end=2024-05-05T23:00:00', 'dataloader.validation.datasets.data.start=2024-05-05T00:00:00', 'dataloader.validation.datasets.data.end=2024-05-05T23:00:00', 'dataloader.test.datasets.data.start=2024-05-05T00:00:00', 'dataloader.test.datasets.data.end=2024-05-05T23:00:00', 'data.frequency=1h']
-2026-02-17 04:40:51 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-02-17 04:40:51 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-[2026-02-17 04:40:52,172][anemoi.training.train.train][INFO] - Config validated.
-[2026-02-17 04:40:52,195][anemoi.training.train.train][INFO] - Starting from checkpoint: True
-[2026-02-17 04:40:52,195][anemoi.training.train.train][INFO] - Run id: 6a70bc7c-b4ec-44af-9161-eaf55f436045
-[2026-02-17 04:40:52,196][anemoi.training.train.train][INFO] - Checkpoints path: {'root': PosixPath('/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/6a70bc7c-b4ec-44af-9161-eaf55f436045'), 'every_n_epochs': 'anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}', 'every_n_train_steps': 'anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}', 'every_n_minutes': 'anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}'}
-[2026-02-17 04:40:52,196][anemoi.training.train.train][INFO] - Plots path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/plots/6a70bc7c-b4ec-44af-9161-eaf55f436045
-[2026-02-17 04:40:52,196][anemoi.training.train.train][INFO] - Creating graph for dataset 'data'
-[2026-02-17 04:41:00,821][anemoi.training.train.train][INFO] - Loading graph data from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-20km_data.pt
-[2026-02-17 04:41:01,062][anemoi.training.data.datamodule][INFO] - Initializing multi-dataset module with datasets: ['data']
-[2026-02-17 04:41:01,063][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-02-17 04:41:01,064][anemoi.training.data.grid_indices][INFO] - The graph attribute indices_connected_nodes of the data nodes will be used to masking the spatial dimension.
-[2026-02-17 04:41:01,071][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
-[2026-02-17 04:41:01,555][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-02-17 04:41:01,555][anemoi.training.data.multidataset][INFO] - Dataset 'data' has 22 valid indices
-[2026-02-17 04:41:01,555][anemoi.training.data.multidataset][INFO] - MultiDataset has 22 valid indices after intersection.
-[2026-02-17 04:41:01,555][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 22 valid indices each
-[2026-02-17 04:41:01,555][anemoi.training.train.train][INFO] - Dataset 'data' - Number of variables: 45
-[2026-02-17 04:41:01,555][anemoi.training.train.train][INFO] - Dataset 'data' - Variables: ['clmr_200', 'clmr_500', 'clmr_850', 'clmr_925', 'grle_200', 'grle_500', 'grle_850', 'grle_925', 'height_200', 'height_500', 'height_850', 'height_925', 'icmr_200', 'icmr_500', 'icmr_850', 'icmr_925', 'landcover', 'orography', 'pres_0g', 'refc', 'rwmr_200', 'rwmr_500', 'rwmr_850', 'rwmr_925', 'snmr_200', 'snmr_500', 'snmr_850', 'snmr_925', 'sphum_200', 'sphum_500', 'sphum_850', 'sphum_925', 'swdown', 'temp_200', 'temp_500', 'temp_850', 'temp_925', 'ugrd_200', 'ugrd_500', 'ugrd_850', 'ugrd_925', 'vgrd_200', 'vgrd_500', 'vgrd_850', 'vgrd_925']
-[2026-02-17 04:41:01,557][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of prognostic variables: 42
-[2026-02-17 04:41:01,557][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of auxiliary variables: 3
-[2026-02-17 04:41:01,558][anemoi.training.train.train][INFO] - Total GPU count / model group size: 1 - NB: the learning rate will be scaled by this factor!
-[2026-02-17 04:41:01,558][anemoi.training.train.train][INFO] - Effective learning rate: 6.250e-05
-[2026-02-17 04:41:01,558][anemoi.training.train.train][INFO] - Training limits: max_epochs=1, max_steps=1. Training will stop when either limit is reached first. Learning rate scheduler will run for 1 steps.
-[2026-02-17 04:41:01,882][anemoi.training.diagnostics.plots][WARNING] - Datashader unavailable (Numba needs NumPy 2.2 or less. Got NumPy 2.3.). Falling back to matplotlib plots.
-[2026-02-17 04:41:01,927][anemoi.training.diagnostics.callbacks.plot][INFO] - Using defined accumulation colormap for fields: []
-[2026-02-17 04:41:01,929][anemoi.training.diagnostics.callbacks][INFO] - Using progress bar: <class 'pytorch_lightning.callbacks.progress.tqdm_progress.TQDMProgressBar'>
-[2026-02-17 04:41:02,113][anemoi.models.migrations.migrator][INFO] - Loading migration 1755530253_initial
-[2026-02-17 04:41:02,114][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857427_deprecate_eda
-[2026-02-17 04:41:02,114][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857428_chunking_fix
-[2026-02-17 04:41:02,114][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479917_hardware_schema_update
-[2026-02-17 04:41:02,114][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479918_refactor_mapper
-[2026-02-17 04:41:02,114][anemoi.models.migrations.migrator][INFO] - Loading migration 1767108147_move_to_multiple_datasets
+2026-02-17 13:39:19 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-verify', 'system.input.warm_start=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/005a8446-9cd2-4f59-b54b-9b224247ee98/inference-last.ckpt', 'dataloader.training.datasets.data.start=2024-05-05T00:00:00', 'dataloader.training.datasets.data.end=2024-05-05T23:00:00', 'dataloader.validation.datasets.data.start=2024-05-05T00:00:00', 'dataloader.validation.datasets.data.end=2024-05-05T23:00:00', 'dataloader.test.datasets.data.start=2024-05-05T00:00:00', 'dataloader.test.datasets.data.end=2024-05-05T23:00:00', 'data.frequency=1h']
+2026-02-17 13:42:34 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-02-17 13:42:34 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+[2026-02-17 13:42:35,729][anemoi.training.train.train][INFO] - Config validated.
+[2026-02-17 13:42:35,753][anemoi.training.train.train][INFO] - Starting from checkpoint: True
+[2026-02-17 13:42:35,753][anemoi.training.train.train][INFO] - Run id: e3b842cd-b982-4427-a9f5-1cdd0d159f8f
+[2026-02-17 13:42:35,753][anemoi.training.train.train][INFO] - Checkpoints path: {'root': PosixPath('/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/e3b842cd-b982-4427-a9f5-1cdd0d159f8f'), 'every_n_epochs': 'anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}', 'every_n_train_steps': 'anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}', 'every_n_minutes': 'anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}'}
+[2026-02-17 13:42:35,754][anemoi.training.train.train][INFO] - Plots path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/plots/e3b842cd-b982-4427-a9f5-1cdd0d159f8f
+[2026-02-17 13:42:35,754][anemoi.training.train.train][INFO] - Creating graph for dataset 'data'
+[2026-02-17 13:42:46,870][anemoi.training.train.train][INFO] - Loading graph data from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-20km_data.pt
+[2026-02-17 13:42:47,181][anemoi.training.data.datamodule][INFO] - Initializing multi-dataset module with datasets: ['data']
+[2026-02-17 13:42:47,182][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
+[2026-02-17 13:42:47,183][anemoi.training.data.grid_indices][INFO] - The graph attribute indices_connected_nodes of the data nodes will be used to masking the spatial dimension.
+[2026-02-17 13:42:47,196][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
+[2026-02-17 13:42:47,898][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
+[2026-02-17 13:42:47,898][anemoi.training.data.multidataset][INFO] - Dataset 'data' has 22 valid indices
+[2026-02-17 13:42:47,898][anemoi.training.data.multidataset][INFO] - MultiDataset has 22 valid indices after intersection.
+[2026-02-17 13:42:47,899][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 22 valid indices each
+[2026-02-17 13:42:47,899][anemoi.training.train.train][INFO] - Dataset 'data' - Number of variables: 45
+[2026-02-17 13:42:47,899][anemoi.training.train.train][INFO] - Dataset 'data' - Variables: ['clmr_200', 'clmr_500', 'clmr_850', 'clmr_925', 'grle_200', 'grle_500', 'grle_850', 'grle_925', 'height_200', 'height_500', 'height_850', 'height_925', 'icmr_200', 'icmr_500', 'icmr_850', 'icmr_925', 'landcover', 'orography', 'pres_0g', 'refc', 'rwmr_200', 'rwmr_500', 'rwmr_850', 'rwmr_925', 'snmr_200', 'snmr_500', 'snmr_850', 'snmr_925', 'sphum_200', 'sphum_500', 'sphum_850', 'sphum_925', 'swdown', 'temp_200', 'temp_500', 'temp_850', 'temp_925', 'ugrd_200', 'ugrd_500', 'ugrd_850', 'ugrd_925', 'vgrd_200', 'vgrd_500', 'vgrd_850', 'vgrd_925']
+[2026-02-17 13:42:47,901][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of prognostic variables: 42
+[2026-02-17 13:42:47,901][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of auxiliary variables: 3
+[2026-02-17 13:42:47,901][anemoi.training.train.train][INFO] - Total GPU count / model group size: 1 - NB: the learning rate will be scaled by this factor!
+[2026-02-17 13:42:47,902][anemoi.training.train.train][INFO] - Effective learning rate: 6.250e-05
+[2026-02-17 13:42:47,902][anemoi.training.train.train][INFO] - Training limits: max_epochs=1, max_steps=1. Training will stop when either limit is reached first. Learning rate scheduler will run for 1 steps.
+[2026-02-17 13:42:48,345][anemoi.training.diagnostics.plots][WARNING] - Datashader unavailable (Numba needs NumPy 2.2 or less. Got NumPy 2.3.). Falling back to matplotlib plots.
+[2026-02-17 13:42:48,414][anemoi.training.diagnostics.callbacks.plot][INFO] - Using defined accumulation colormap for fields: []
+[2026-02-17 13:42:48,416][anemoi.training.diagnostics.callbacks][INFO] - Using progress bar: <class 'pytorch_lightning.callbacks.progress.tqdm_progress.TQDMProgressBar'>
+[2026-02-17 13:42:48,723][anemoi.models.migrations.migrator][INFO] - Loading migration 1755530253_initial
+[2026-02-17 13:42:48,723][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857427_deprecate_eda
+[2026-02-17 13:42:48,723][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857428_chunking_fix
+[2026-02-17 13:42:48,723][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479917_hardware_schema_update
+[2026-02-17 13:42:48,723][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479918_refactor_mapper
+[2026-02-17 13:42:48,723][anemoi.models.migrations.migrator][INFO] - Loading migration 1767108147_move_to_multiple_datasets
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/lightning_fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3.12 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3 ...
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/accelerator_connector.py:513: You passed `Trainer(accelerator='cpu', precision='16-mixed')` but AMP with fp16 is not supported on CPU. Using `precision='bf16-mixed'` instead.
-[2026-02-17 04:41:02,156][pytorch_lightning.utilities.rank_zero][INFO] - Using bfloat16 Automatic Mixed Precision (AMP)
-[2026-02-17 04:41:02,190][pytorch_lightning.utilities.rank_zero][INFO] - GPU available: False, used: False
-[2026-02-17 04:41:02,190][pytorch_lightning.utilities.rank_zero][INFO] - TPU available: False, using: 0 TPU cores
-[2026-02-17 04:41:02,190][pytorch_lightning.utilities.rank_zero][INFO] - HPU available: False, using: 0 HPUs
-[2026-02-17 04:41:02,190][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer(limit_train_batches=1)` was configured so 1 batch per epoch will be used.
-[2026-02-17 04:41:02,191][lightning_fabric.utilities.seed][INFO] - Seed set to 12345
-[2026-02-17 04:41:02,330][anemoi.training.train.train][INFO] - Initial seed: Rank 0, initial seed 12345, running with random seed: 12345
+[2026-02-17 13:42:48,780][pytorch_lightning.utilities.rank_zero][INFO] - Using bfloat16 Automatic Mixed Precision (AMP)
+[2026-02-17 13:42:48,815][pytorch_lightning.utilities.rank_zero][INFO] - GPU available: False, used: False
+[2026-02-17 13:42:48,815][pytorch_lightning.utilities.rank_zero][INFO] - TPU available: False, using: 0 TPU cores
+[2026-02-17 13:42:48,815][pytorch_lightning.utilities.rank_zero][INFO] - HPU available: False, using: 0 HPUs
+[2026-02-17 13:42:48,815][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer(limit_train_batches=1)` was configured so 1 batch per epoch will be used.
+[2026-02-17 13:42:48,816][lightning_fabric.utilities.seed][INFO] - Seed set to 12345
+[2026-02-17 13:42:48,951][anemoi.training.train.train][INFO] - Initial seed: Rank 0, initial seed 12345, running with random seed: 12345
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/provenance.py:143: UserWarning: The '__version__' attribute is deprecated and will be removed in MarkupSafe 3.1. Use feature detection, or `importlib.metadata.version("markupsafe")`, instead.
   versions[name] = str(module.__version__)
-[2026-02-17 04:43:58,928][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-02-17 04:43:59,274][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_850 is not normalized.
-[2026-02-17 04:43:59,274][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_925 is not normalized.
-[2026-02-17 04:43:59,274][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: landcover is not normalized.
-[2026-02-17 04:43:59,274][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: orography is not normalized.
-[2026-02-17 04:43:59,274][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: refc is not normalized.
-[2026-02-17 04:43:59,274][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_850 is not normalized.
-[2026-02-17 04:43:59,274][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_925 is not normalized.
-[2026-02-17 04:43:59,274][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: swdown is not normalized.
-[2026-02-17 04:43:59,458][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-17 04:43:59,459][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-17 04:43:59,459][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-17 04:43:59,489][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-17 04:43:59,490][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-17 04:43:59,556][anemoi.models.layers.block][WARNING] - GraphTransformerMapperBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:43:59,617][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-17 04:43:59,617][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-17 04:43:59,618][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-17 04:43:59,618][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-17 04:43:59,619][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-17 04:43:59,682][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:43:59,746][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:43:59,809][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:43:59,873][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:43:59,937][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,000][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,064][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,128][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,192][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,256][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,324][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,392][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,460][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,529][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,596][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,664][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,687][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-02-17 04:44:00,688][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
-[2026-02-17 04:44:00,688][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-02-17 04:44:00,689][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-17 04:44:00,689][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-02-17 04:44:00,757][anemoi.models.layers.block][WARNING] - GraphTransformerMapperBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
-[2026-02-17 04:44:00,819][anemoi.training.losses.scalers.variable_level][INFO] - Variable Level Scaling: Applying ReluVariableLevelScaler scaling to pl variables ({'param': ['q', 't', 'u', 'v', 'w', 'z']})
-[2026-02-17 04:44:00,819][anemoi.training.losses.scalers.variable_level][INFO] - with slope = 0.001 and y-intercept/minimum = 0.2.
+[2026-02-17 13:45:47,593][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
+[2026-02-17 13:45:47,989][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_850 is not normalized.
+[2026-02-17 13:45:47,989][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_925 is not normalized.
+[2026-02-17 13:45:47,989][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: landcover is not normalized.
+[2026-02-17 13:45:47,989][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: orography is not normalized.
+[2026-02-17 13:45:47,989][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: refc is not normalized.
+[2026-02-17 13:45:47,989][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_850 is not normalized.
+[2026-02-17 13:45:47,989][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_925 is not normalized.
+[2026-02-17 13:45:47,989][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: swdown is not normalized.
+[2026-02-17 13:45:48,107][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
+[2026-02-17 13:45:48,107][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
+[2026-02-17 13:45:48,108][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
+[2026-02-17 13:45:48,131][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
+[2026-02-17 13:45:48,132][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
+[2026-02-17 13:45:48,198][anemoi.models.layers.block][WARNING] - GraphTransformerMapperBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,283][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
+[2026-02-17 13:45:48,284][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
+[2026-02-17 13:45:48,284][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
+[2026-02-17 13:45:48,285][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
+[2026-02-17 13:45:48,285][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
+[2026-02-17 13:45:48,348][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,412][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,476][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,539][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,602][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,666][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,729][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,793][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,856][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,920][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:48,983][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:49,047][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:49,110][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:49,173][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:49,236][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:49,300][anemoi.models.layers.block][WARNING] - GraphTransformerProcessorBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:49,321][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
+[2026-02-17 13:45:49,322][anemoi.models.layers.utils][INFO] - LayerNorm kernel: torch.nn.LayerNorm.
+[2026-02-17 13:45:49,322][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
+[2026-02-17 13:45:49,323][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
+[2026-02-17 13:45:49,323][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
+[2026-02-17 13:45:49,386][anemoi.models.layers.block][WARNING] - GraphTransformerMapperBlock requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend.
+[2026-02-17 13:45:49,453][anemoi.training.losses.scalers.variable_level][INFO] - Variable Level Scaling: Applying ReluVariableLevelScaler scaling to pl variables ({'param': ['q', 't', 'u', 'v', 'w', 'z']})
+[2026-02-17 13:45:49,453][anemoi.training.losses.scalers.variable_level][INFO] - with slope = 0.001 and y-intercept/minimum = 0.2.
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:77: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
   warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
-[2026-02-17 04:44:00,850][anemoi.training.train.tasks.base][INFO] - GraphModule with n_step_input=2 and n_step_output=1
-[2026-02-17 04:44:00,851][anemoi.training.data.grid_indices][INFO] - The graph attribute indices_connected_nodes of the data nodes will be used to masking the spatial dimension.
-[2026-02-17 04:44:00,858][anemoi.training.train.train][INFO] - Resuming training from last checkpoint: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/005a8446-9cd2-4f59-b54b-9b224247ee98/inference-last.ckpt
-[2026-02-17 04:44:00,858][anemoi.training.train.train][INFO] - Restoring only model weights from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/005a8446-9cd2-4f59-b54b-9b224247ee98/inference-last.ckpt
-[2026-02-17 04:44:01,901][anemoi.training.train.train][INFO] - Warm start ckpt type: AnemoiModelInterface
-[2026-02-17 04:44:01,908][anemoi.models.data_indices.collection][INFO] - No variable order to compare. Skipping variable order check.
-[2026-02-17 04:44:01,908][anemoi.training.train.train][INFO] - The following submodules will NOT be trained: []
-[2026-02-17 04:44:07,092][anemoi.models.utils.compile][INFO] - The following modules will be compiled: ['anemoi.models.layers.conv.GraphTransformerConv']
-[2026-02-17 04:44:07,092][anemoi.training.train.train][INFO] - Recompile limit set to 32
+[2026-02-17 13:45:49,492][anemoi.training.train.tasks.base][INFO] - GraphModule with n_step_input=2 and n_step_output=1
+[2026-02-17 13:45:49,493][anemoi.training.data.grid_indices][INFO] - The graph attribute indices_connected_nodes of the data nodes will be used to masking the spatial dimension.
+[2026-02-17 13:45:49,500][anemoi.training.train.train][INFO] - Resuming training from last checkpoint: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/005a8446-9cd2-4f59-b54b-9b224247ee98/inference-last.ckpt
+[2026-02-17 13:45:49,500][anemoi.training.train.train][INFO] - Restoring only model weights from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/005a8446-9cd2-4f59-b54b-9b224247ee98/inference-last.ckpt
+[2026-02-17 13:45:50,377][anemoi.training.train.train][INFO] - Warm start ckpt type: AnemoiModelInterface
+[2026-02-17 13:45:50,380][anemoi.models.data_indices.collection][INFO] - No variable order to compare. Skipping variable order check.
+[2026-02-17 13:45:50,381][anemoi.training.train.train][INFO] - The following submodules will NOT be trained: []
+[2026-02-17 13:45:56,416][anemoi.models.utils.compile][INFO] - The following modules will be compiled: ['anemoi.models.layers.conv.GraphTransformerConv']
+[2026-02-17 13:45:56,416][anemoi.training.train.train][INFO] - Recompile limit set to 32
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/lightning_fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3.12 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3 ...
-[2026-02-17 04:44:07,182][lightning_fabric.utilities.distributed][INFO] - Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/1
-[2026-02-17 04:44:07,197][pytorch_lightning.utilities.rank_zero][INFO] - ----------------------------------------------------------------------------------------------------
+[2026-02-17 13:45:56,484][lightning_fabric.utilities.distributed][INFO] - Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/1
+[2026-02-17 13:45:56,496][pytorch_lightning.utilities.rank_zero][INFO] - ----------------------------------------------------------------------------------------------------
 distributed_backend=gloo
 All distributed processes registered. Starting with 1 processes
 ----------------------------------------------------------------------------------------------------
 
-[2026-02-17 04:44:23,045][anemoi.training.train.tasks.base][INFO] - Optimizer initialized: AdamW
-[2026-02-17 04:44:23,046][anemoi.training.train.tasks.base][INFO] - Optimizer settings: {'lr': 6.25e-05, 'betas': [0.9, 0.95], 'eps': 1e-08, 'weight_decay': 0.01, 'amsgrad': False, 'maximize': False, 'foreach': None, 'capturable': False, 'differentiable': False, 'fused': None, 'decoupled_weight_decay': True}
-[2026-02-17 04:44:23,046][timm.scheduler.cosine_lr][WARNING] - Cosine annealing scheduler will have no effect on the learning rate since t_initial = t_mul = eta_mul = 1.
-[2026-02-17 04:44:23,225][lightning_fabric.utilities.seed][INFO] - [rank: 0] Seed set to 12345
-[2026-02-17 04:44:23,253][pytorch_lightning.callbacks.model_summary][INFO] - 
+[2026-02-17 13:46:13,716][anemoi.training.train.tasks.base][INFO] - Optimizer initialized: AdamW
+[2026-02-17 13:46:13,716][anemoi.training.train.tasks.base][INFO] - Optimizer settings: {'lr': 6.25e-05, 'betas': [0.9, 0.95], 'eps': 1e-08, 'weight_decay': 0.01, 'amsgrad': False, 'maximize': False, 'foreach': None, 'capturable': False, 'differentiable': False, 'fused': None, 'decoupled_weight_decay': True}
+[2026-02-17 13:46:13,716][timm.scheduler.cosine_lr][WARNING] - Cosine annealing scheduler will have no effect on the learning rate since t_initial = t_mul = eta_mul = 1.
+[2026-02-17 13:46:13,882][lightning_fabric.utilities.seed][INFO] - [rank: 0] Seed set to 12345
+[2026-02-17 13:46:13,937][pytorch_lightning.callbacks.model_summary][INFO] - 
   | Name    | Type                 | Params | Mode 
 ---------------------------------------------------------
 0 | model   | AnemoiModelInterface | 255 M  | train
@@ -122,180 +122,180 @@ All distributed processes registered. Starting with 1 processes
 1,022.769 Total estimated model params size (MB)
 344       Modules in train mode
 0         Modules in eval mode
-Sanity Checking: |          | 0/? [00:00<?, ?it/s][2026-02-17 04:44:23,257][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-02-17 04:44:23,257][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
-[2026-02-17 04:44:23,260][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-02-17 04:44:23,261][anemoi.training.data.multidataset][INFO] - Dataset 'data' has 21 valid indices
-[2026-02-17 04:44:23,261][anemoi.training.data.multidataset][INFO] - MultiDataset has 21 valid indices after intersection.
-[2026-02-17 04:44:23,261][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 21 valid indices each
-[2026-02-17 04:44:23,261][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
+Sanity Checking: |          | 0/? [00:00<?, ?it/s][2026-02-17 13:46:13,940][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
+[2026-02-17 13:46:13,941][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
+[2026-02-17 13:46:13,944][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
+[2026-02-17 13:46:13,944][anemoi.training.data.multidataset][INFO] - Dataset 'data' has 21 valid indices
+[2026-02-17 13:46:13,945][anemoi.training.data.multidataset][INFO] - MultiDataset has 21 valid indices after intersection.
+[2026-02-17 13:46:13,945][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 21 valid indices each
+[2026-02-17 13:46:13,945][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
   warnings.warn(warn_msg)
-[2026-02-17 04:44:23,402][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
-[2026-02-17 04:44:23,462][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 411307, global_rank 0, model comm group 0)  has low/high range 0 / 6
-[2026-02-17 04:44:23,462][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 411310, global_rank 0, model comm group 0)  has low/high range 16 / 21
-[2026-02-17 04:44:23,462][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 411309, global_rank 0, model comm group 0)  has low/high range 11 / 16
-[2026-02-17 04:44:23,462][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 411308, global_rank 0, model comm group 0)  has low/high range 6 / 11
-[2026-02-17 04:44:23,482][anemoi.training.data.multidataset][INFO] - Worker 3 (validation, pid 411310, base_seed 12345, sanity rnd 0.227336)
-[2026-02-17 04:44:23,482][anemoi.training.data.multidataset][INFO] - Worker 2 (validation, pid 411309, base_seed 12345, sanity rnd 0.227336)
-[2026-02-17 04:44:23,482][anemoi.training.data.multidataset][INFO] - Worker 0 (validation, pid 411307, base_seed 12345, sanity rnd 0.227336)
-[2026-02-17 04:44:23,482][anemoi.training.data.multidataset][INFO] - Worker 1 (validation, pid 411308, base_seed 12345, sanity rnd 0.227336)
+[2026-02-17 13:46:14,061][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
+[2026-02-17 13:46:14,117][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 2737218, global_rank 0, model comm group 0)  has low/high range 0 / 6
+[2026-02-17 13:46:14,117][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 2737220, global_rank 0, model comm group 0)  has low/high range 11 / 16
+[2026-02-17 13:46:14,117][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 2737219, global_rank 0, model comm group 0)  has low/high range 6 / 11
+[2026-02-17 13:46:14,117][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 2737222, global_rank 0, model comm group 0)  has low/high range 16 / 21
+[2026-02-17 13:46:14,150][anemoi.training.data.multidataset][INFO] - Worker 2 (validation, pid 2737220, base_seed 12345, sanity rnd 0.227336)
+[2026-02-17 13:46:14,150][anemoi.training.data.multidataset][INFO] - Worker 1 (validation, pid 2737219, base_seed 12345, sanity rnd 0.227336)
+[2026-02-17 13:46:14,150][anemoi.training.data.multidataset][INFO] - Worker 0 (validation, pid 2737218, base_seed 12345, sanity rnd 0.227336)
+[2026-02-17 13:46:14,151][anemoi.training.data.multidataset][INFO] - Worker 3 (validation, pid 2737222, base_seed 12345, sanity rnd 0.227336)
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `on_after_batch_transfer` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
 Sanity Checking:   0%|          | 0/6 [00:00<?, ?it/s]Sanity Checking DataLoader 0:   0%|          | 0/6 [00:00<?, ?it/s]No ROCm runtime is found, using ROCM_HOME='/opt/rocm'
-[2026-02-17 04:45:29,078][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 04:45:29,135][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0000 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-33.0954 max=101507 | target: finite=12521124/12521124 min=-26.6969 max=101507 | pred: finite=12521124/12521124 min=-45.3384 max=104581
-[2026-02-17 04:47:01,835][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions shapes: data_batch=(1, 4, 1, 298122, 45) input=(1, 3, 1, 298122, 42) data=(3, 1, 298122, 42) preds=(1, 1, 1, 298122, 42) multi_step=2 rollout=1
-[2026-02-17 04:47:01,874][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions time window: input[2024-05-05T00:00:00..2024-05-05T01:00:00], target[2024-05-05T02:00:00..2024-05-05T02:00:00]
-[2026-02-17 04:47:07,186][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0000.*
-Sanity Checking DataLoader 0:  17%|█▋        | 1/6 [02:42<13:32,  0.01it/s][2026-02-17 04:47:52,593][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 04:47:52,650][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0001 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.705 max=101593 | target: finite=12521124/12521124 min=-25.7888 max=101420 | pred: finite=12521124/12521124 min=-29.5244 max=104773
-[2026-02-17 04:49:08,827][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0001.*
-Sanity Checking DataLoader 0:  33%|███▎      | 2/6 [04:44<09:28,  0.01it/s][2026-02-17 04:49:54,324][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 04:49:54,381][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0002 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-19.2093 max=101563 | target: finite=12521124/12521124 min=-18.8334 max=101656 | pred: finite=12521124/12521124 min=-21.5814 max=108190
-[2026-02-17 04:51:11,132][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0002.*
-Sanity Checking DataLoader 0:  50%|█████     | 3/6 [06:46<06:46,  0.01it/s][2026-02-17 04:51:55,378][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 04:51:55,438][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0003 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-14.2411 max=101689 | target: finite=12521124/12521124 min=-15.9036 max=101740 | pred: finite=12521124/12521124 min=-28.2815 max=107370
-[2026-02-17 04:53:12,032][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0003.*
-Sanity Checking DataLoader 0:  67%|██████▋   | 4/6 [08:47<04:23,  0.01it/s][2026-02-17 04:53:57,063][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 04:53:57,129][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0004 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.6969 max=101507 | target: finite=12521124/12521124 min=-28.2011 max=101421 | pred: finite=12521124/12521124 min=-35.4973 max=105026
-[2026-02-17 04:55:14,056][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0004.*
-Sanity Checking DataLoader 0:  83%|████████▎ | 5/6 [10:49<02:09,  0.01it/s][2026-02-17 04:55:59,992][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 04:56:00,062][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0005 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-25.7888 max=101420 | target: finite=12521124/12521124 min=-24.1821 max=101518 | pred: finite=12521124/12521124 min=-27.3177 max=106401
-[2026-02-17 04:57:16,691][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0005.*
-Sanity Checking DataLoader 0: 100%|██████████| 6/6 [12:51<00:00,  0.01it/s]                                                                           [2026-02-17 04:57:16,780][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
+[2026-02-17 13:47:19,366][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 13:47:19,483][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0000 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-33.0954 max=101507 | target: finite=12521124/12521124 min=-26.6969 max=101507 | pred: finite=12521124/12521124 min=-45.3384 max=104581
+[2026-02-17 13:48:53,503][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions shapes: data_batch=(1, 4, 1, 298122, 45) input=(1, 3, 1, 298122, 42) data=(3, 1, 298122, 42) preds=(1, 1, 1, 298122, 42) multi_step=2 rollout=1
+[2026-02-17 13:48:53,535][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions time window: input[2024-05-05T00:00:00..2024-05-05T01:00:00], target[2024-05-05T02:00:00..2024-05-05T02:00:00]
+[2026-02-17 13:49:02,064][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0000.*
+Sanity Checking DataLoader 0:  17%|█▋        | 1/6 [02:46<13:53,  0.01it/s][2026-02-17 13:49:47,798][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 13:49:47,856][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0001 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.705 max=101593 | target: finite=12521124/12521124 min=-25.7888 max=101420 | pred: finite=12521124/12521124 min=-29.5244 max=104773
+[2026-02-17 13:51:03,612][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0001.*
+Sanity Checking DataLoader 0:  33%|███▎      | 2/6 [04:48<09:36,  0.01it/s][2026-02-17 13:51:49,282][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 13:51:49,337][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0002 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-19.2093 max=101563 | target: finite=12521124/12521124 min=-18.8334 max=101656 | pred: finite=12521124/12521124 min=-21.5814 max=108190
+[2026-02-17 13:53:05,549][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0002.*
+Sanity Checking DataLoader 0:  50%|█████     | 3/6 [06:50<06:50,  0.01it/s][2026-02-17 13:53:49,218][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 13:53:49,274][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0003 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-14.2411 max=101689 | target: finite=12521124/12521124 min=-15.9036 max=101740 | pred: finite=12521124/12521124 min=-28.2815 max=107370
+[2026-02-17 13:55:05,521][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0003.*
+Sanity Checking DataLoader 0:  67%|██████▋   | 4/6 [08:50<04:25,  0.01it/s][2026-02-17 13:55:49,334][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 13:55:49,388][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0004 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.6969 max=101507 | target: finite=12521124/12521124 min=-28.2011 max=101421 | pred: finite=12521124/12521124 min=-35.4973 max=105026
+[2026-02-17 13:57:06,238][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0004.*
+Sanity Checking DataLoader 0:  83%|████████▎ | 5/6 [10:50<02:10,  0.01it/s][2026-02-17 13:57:50,345][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 13:57:50,403][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0005 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-25.7888 max=101420 | target: finite=12521124/12521124 min=-24.1821 max=101518 | pred: finite=12521124/12521124 min=-27.3177 max=106401
+[2026-02-17 13:59:07,046][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0005.*
+Sanity Checking DataLoader 0: 100%|██████████| 6/6 [12:51<00:00,  0.01it/s]                                                                           [2026-02-17 13:59:07,125][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
   warnings.warn(warn_msg)
-[2026-02-17 04:57:16,986][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 430664, global_rank 0, model comm group 0)  has low/high range 12 / 17
-[2026-02-17 04:57:16,986][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 430659, global_rank 0, model comm group 0)  has low/high range 0 / 6
-[2026-02-17 04:57:16,986][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 430663, global_rank 0, model comm group 0)  has low/high range 6 / 12
-Training: |          | 0/? [00:00<?, ?it/s][2026-02-17 04:57:17,017][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
-[2026-02-17 04:57:17,020][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 430665, global_rank 0, model comm group 0)  has low/high range 17 / 22
-[2026-02-17 04:57:17,031][anemoi.training.data.multidataset][INFO] - Worker 3 (training, pid 430665, base_seed 12345, sanity rnd 0.227336)
-[2026-02-17 04:57:17,031][anemoi.training.data.multidataset][INFO] - Worker 0 (training, pid 430659, base_seed 12345, sanity rnd 0.227336)
-[2026-02-17 04:57:17,031][anemoi.training.data.multidataset][INFO] - Worker 2 (training, pid 430664, base_seed 12345, sanity rnd 0.227336)
-[2026-02-17 04:57:17,031][anemoi.training.data.multidataset][INFO] - Worker 1 (training, pid 430663, base_seed 12345, sanity rnd 0.227336)
-Training:   0%|          | 0/1 [00:00<?, ?it/s]Epoch 0:   0%|          | 0/1 [00:00<?, ?it/s] Epoch 0: 100%|██████████| 1/1 [02:49<00:00,  0.01it/s]Epoch 0: 100%|██████████| 1/1 [02:49<00:00,  0.01it/s, train_multi_dataset_loss_step=0.655]
-Validation: |          | 0/? [00:00<?, ?it/s][A[2026-02-17 05:00:10,944][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
+[2026-02-17 13:59:07,343][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 2775983, global_rank 0, model comm group 0)  has low/high range 12 / 17
+[2026-02-17 13:59:07,343][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 2775981, global_rank 0, model comm group 0)  has low/high range 0 / 6
+[2026-02-17 13:59:07,343][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 2775982, global_rank 0, model comm group 0)  has low/high range 6 / 12
+Training: |          | 0/? [00:00<?, ?it/s][2026-02-17 13:59:07,351][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
+[2026-02-17 13:59:07,352][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 2775984, global_rank 0, model comm group 0)  has low/high range 17 / 22
+[2026-02-17 13:59:07,397][anemoi.training.data.multidataset][INFO] - Worker 0 (training, pid 2775981, base_seed 12345, sanity rnd 0.227336)
+[2026-02-17 13:59:07,397][anemoi.training.data.multidataset][INFO] - Worker 1 (training, pid 2775982, base_seed 12345, sanity rnd 0.227336)
+[2026-02-17 13:59:07,397][anemoi.training.data.multidataset][INFO] - Worker 3 (training, pid 2775984, base_seed 12345, sanity rnd 0.227336)
+[2026-02-17 13:59:07,397][anemoi.training.data.multidataset][INFO] - Worker 2 (training, pid 2775983, base_seed 12345, sanity rnd 0.227336)
+Training:   0%|          | 0/1 [00:00<?, ?it/s]Epoch 0:   0%|          | 0/1 [00:00<?, ?it/s] Epoch 0: 100%|██████████| 1/1 [02:51<00:00,  0.01it/s]Epoch 0: 100%|██████████| 1/1 [02:51<00:00,  0.01it/s, train_multi_dataset_loss_step=0.655]
+Validation: |          | 0/? [00:00<?, ?it/s][A[2026-02-17 14:02:02,503][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
 
 Validation: |          | 0/? [00:00<?, ?it/s][A
-Validation DataLoader 0: |          | 0/? [00:00<?, ?it/s][A[2026-02-17 05:00:55,545][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:00:55,601][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0000 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-33.0954 max=101507 | target: finite=12521124/12521124 min=-26.6969 max=101507 | pred: finite=12521124/12521124 min=-45.3384 max=104581
-[2026-02-17 05:02:13,019][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions shapes: data_batch=(1, 4, 1, 298122, 45) input=(1, 3, 1, 298122, 42) data=(3, 1, 298122, 42) preds=(1, 1, 1, 298122, 42) multi_step=2 rollout=1
-[2026-02-17 05:02:13,052][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions time window: input[2024-05-05T00:00:00..2024-05-05T01:00:00], target[2024-05-05T02:00:00..2024-05-05T02:00:00]
-[2026-02-17 05:02:13,138][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0000.*
+Validation DataLoader 0: |          | 0/? [00:00<?, ?it/s][A[2026-02-17 14:02:48,538][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:02:48,594][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0000 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-33.0954 max=101507 | target: finite=12521124/12521124 min=-26.6969 max=101507 | pred: finite=12521124/12521124 min=-45.3384 max=104581
+[2026-02-17 14:04:05,186][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions shapes: data_batch=(1, 4, 1, 298122, 45) input=(1, 3, 1, 298122, 42) data=(3, 1, 298122, 42) preds=(1, 1, 1, 298122, 42) multi_step=2 rollout=1
+[2026-02-17 14:04:05,232][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - ExportPredictions time window: input[2024-05-05T00:00:00..2024-05-05T01:00:00], target[2024-05-05T02:00:00..2024-05-05T02:00:00]
+[2026-02-17 14:04:05,304][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0000.*
 
-Validation DataLoader 0: |          | 1/? [02:02<00:00,  0.01it/s][A[2026-02-17 05:02:58,812][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:02:58,870][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0001 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.705 max=101593 | target: finite=12521124/12521124 min=-25.7888 max=101420 | pred: finite=12521124/12521124 min=-29.5244 max=104773
-[2026-02-17 05:04:15,271][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0001.*
+Validation DataLoader 0: |          | 1/? [02:02<00:00,  0.01it/s][A[2026-02-17 14:04:50,533][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:04:50,589][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0001 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.705 max=101593 | target: finite=12521124/12521124 min=-25.7888 max=101420 | pred: finite=12521124/12521124 min=-29.5244 max=104773
+[2026-02-17 14:06:07,151][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0001.*
 
-Validation DataLoader 0: |          | 2/? [04:04<00:00,  0.01it/s][A[2026-02-17 05:05:01,424][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:05:01,490][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0002 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-19.2093 max=101563 | target: finite=12521124/12521124 min=-18.8334 max=101656 | pred: finite=12521124/12521124 min=-21.5814 max=108190
-[2026-02-17 05:06:18,224][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0002.*
+Validation DataLoader 0: |          | 2/? [04:04<00:00,  0.01it/s][A[2026-02-17 14:06:53,358][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:06:53,434][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0002 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-19.2093 max=101563 | target: finite=12521124/12521124 min=-18.8334 max=101656 | pred: finite=12521124/12521124 min=-21.5814 max=108190
+[2026-02-17 14:08:10,483][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0002.*
 
-Validation DataLoader 0: |          | 3/? [06:07<00:00,  0.01it/s][A[2026-02-17 05:07:03,869][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:07:03,926][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0003 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-14.2411 max=101689 | target: finite=12521124/12521124 min=-15.9036 max=101740 | pred: finite=12521124/12521124 min=-28.2815 max=107370
-[2026-02-17 05:08:19,763][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0003.*
+Validation DataLoader 0: |          | 3/? [06:07<00:00,  0.01it/s][A[2026-02-17 14:08:56,452][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:08:56,526][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0003 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-14.2411 max=101689 | target: finite=12521124/12521124 min=-15.9036 max=101740 | pred: finite=12521124/12521124 min=-28.2815 max=107370
+[2026-02-17 14:10:13,417][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0003.*
 
-Validation DataLoader 0: |          | 4/? [08:08<00:00,  0.01it/s][A[2026-02-17 05:09:05,206][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:09:05,276][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0004 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.6969 max=101507 | target: finite=12521124/12521124 min=-28.2011 max=101421 | pred: finite=12521124/12521124 min=-35.4973 max=105026
-[2026-02-17 05:10:22,251][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0004.*
+Validation DataLoader 0: |          | 4/? [08:10<00:00,  0.01it/s][A[2026-02-17 14:10:59,907][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:10:59,968][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0004 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.6969 max=101507 | target: finite=12521124/12521124 min=-28.2011 max=101421 | pred: finite=12521124/12521124 min=-35.4973 max=105026
+[2026-02-17 14:12:17,477][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0004.*
 
-Validation DataLoader 0: |          | 5/? [10:11<00:00,  0.01it/s][A[2026-02-17 05:11:07,690][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:11:07,745][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0005 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-25.7888 max=101420 | target: finite=12521124/12521124 min=-24.1821 max=101518 | pred: finite=12521124/12521124 min=-27.3177 max=106401
-[2026-02-17 05:12:24,918][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0005.*
+Validation DataLoader 0: |          | 5/? [10:14<00:00,  0.01it/s][A[2026-02-17 14:13:03,903][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:13:03,979][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0005 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-25.7888 max=101420 | target: finite=12521124/12521124 min=-24.1821 max=101518 | pred: finite=12521124/12521124 min=-27.3177 max=106401
+[2026-02-17 14:14:20,564][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0005.*
 
-Validation DataLoader 0: |          | 6/? [12:13<00:00,  0.01it/s][A[2026-02-17 05:13:10,385][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:13:10,451][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0006 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-18.8334 max=101656 | target: finite=12521124/12521124 min=-17.7845 max=101631 | pred: finite=12521124/12521124 min=-32.1062 max=107977
-[2026-02-17 05:14:26,347][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0006.*
+Validation DataLoader 0: |          | 6/? [12:18<00:00,  0.01it/s][A[2026-02-17 14:15:07,284][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:15:07,362][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0006 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-18.8334 max=101656 | target: finite=12521124/12521124 min=-17.7845 max=101631 | pred: finite=12521124/12521124 min=-32.1062 max=107977
+[2026-02-17 14:16:23,568][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0006.*
 
-Validation DataLoader 0: |          | 7/? [14:15<00:00,  0.01it/s][A[2026-02-17 05:15:12,319][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:15:12,376][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0007 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-15.9036 max=101740 | target: finite=12521124/12521124 min=-19.5117 max=101720 | pred: finite=12521124/12521124 min=-28.6383 max=106985
-[2026-02-17 05:16:29,039][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0007.*
+Validation DataLoader 0: |          | 7/? [14:21<00:00,  0.01it/s][A[2026-02-17 14:17:09,800][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:17:09,868][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0007 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-15.9036 max=101740 | target: finite=12521124/12521124 min=-19.5117 max=101720 | pred: finite=12521124/12521124 min=-28.6383 max=106985
+[2026-02-17 14:18:26,733][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0007.*
 
-Validation DataLoader 0: |          | 8/? [16:18<00:00,  0.01it/s][A[2026-02-17 05:17:14,406][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:17:14,465][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0008 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-28.2011 max=101421 | target: finite=12521124/12521124 min=-25.1943 max=101525 | pred: finite=12521124/12521124 min=-35.5147 max=106552
-[2026-02-17 05:18:30,575][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0008.*
+Validation DataLoader 0: |          | 8/? [16:24<00:00,  0.01it/s][A[2026-02-17 14:19:12,533][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:19:12,591][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0008 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-28.2011 max=101421 | target: finite=12521124/12521124 min=-25.1943 max=101525 | pred: finite=12521124/12521124 min=-35.5147 max=106552
+[2026-02-17 14:20:29,333][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0008.*
 
-Validation DataLoader 0: |          | 9/? [18:19<00:00,  0.01it/s][A[2026-02-17 05:19:16,667][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:19:16,732][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0009 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-24.1821 max=101518 | target: finite=12521124/12521124 min=-23.305 max=101510 | pred: finite=12521124/12521124 min=-27.1389 max=105940
-[2026-02-17 05:20:32,698][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0009.*
+Validation DataLoader 0: |          | 9/? [18:26<00:00,  0.01it/s][A[2026-02-17 14:21:15,501][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:21:15,565][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0009 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-24.1821 max=101518 | target: finite=12521124/12521124 min=-23.305 max=101510 | pred: finite=12521124/12521124 min=-27.1389 max=105940
+[2026-02-17 14:22:31,767][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0009.*
 
-Validation DataLoader 0: |          | 10/? [20:21<00:00,  0.01it/s][A[2026-02-17 05:21:18,139][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:21:18,205][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0010 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-17.7845 max=101631 | target: finite=12521124/12521124 min=-17.1405 max=101687 | pred: finite=12521124/12521124 min=-28.5851 max=107184
-[2026-02-17 05:22:34,575][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0010.*
+Validation DataLoader 0: |          | 10/? [20:29<00:00,  0.01it/s][A[2026-02-17 14:23:17,780][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:23:17,840][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0010 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-17.7845 max=101631 | target: finite=12521124/12521124 min=-17.1405 max=101687 | pred: finite=12521124/12521124 min=-28.5851 max=107184
+[2026-02-17 14:24:34,510][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0010.*
 
-Validation DataLoader 0: |          | 11/? [22:23<00:00,  0.01it/s][A[2026-02-17 05:23:20,469][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:23:20,536][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0011 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-19.5117 max=101720 | target: finite=12521124/12521124 min=-23.5037 max=101508 | pred: finite=12521124/12521124 min=-28.4236 max=107395
-[2026-02-17 05:24:36,822][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0011.*
+Validation DataLoader 0: |          | 11/? [22:31<00:00,  0.01it/s][A[2026-02-17 14:25:20,569][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:25:20,638][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0011 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-19.5117 max=101720 | target: finite=12521124/12521124 min=-23.5037 max=101508 | pred: finite=12521124/12521124 min=-28.4236 max=107395
+[2026-02-17 14:26:37,384][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0011.*
 
-Validation DataLoader 0: |          | 12/? [24:25<00:00,  0.01it/s][A[2026-02-17 05:25:22,952][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:25:23,006][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0012 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-25.1943 max=101525 | target: finite=12521124/12521124 min=-29.622 max=101484 | pred: finite=12521124/12521124 min=-31.1428 max=105263
-[2026-02-17 05:26:38,984][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0012.*
+Validation DataLoader 0: |          | 12/? [24:34<00:00,  0.01it/s][A[2026-02-17 14:27:23,286][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:27:23,355][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0012 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-25.1943 max=101525 | target: finite=12521124/12521124 min=-29.622 max=101484 | pred: finite=12521124/12521124 min=-31.1428 max=105263
+[2026-02-17 14:28:39,829][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0012.*
 
-Validation DataLoader 0: |          | 13/? [26:28<00:00,  0.01it/s][A[2026-02-17 05:27:24,974][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:27:25,043][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0013 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-23.305 max=101510 | target: finite=12521124/12521124 min=-27.59 max=101481 | pred: finite=12521124/12521124 min=-26.7806 max=105889
-[2026-02-17 05:28:41,562][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0013.*
+Validation DataLoader 0: |          | 13/? [26:37<00:00,  0.01it/s][A[2026-02-17 14:29:25,653][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:29:25,712][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0013 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-23.305 max=101510 | target: finite=12521124/12521124 min=-27.59 max=101481 | pred: finite=12521124/12521124 min=-26.7806 max=105889
+[2026-02-17 14:30:42,350][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0013.*
 
-Validation DataLoader 0: |          | 14/? [28:30<00:00,  0.01it/s][A[2026-02-17 05:29:27,103][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:29:27,172][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0014 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-17.1405 max=101687 | target: finite=12521124/12521124 min=-16.961 max=101792 | pred: finite=12521124/12521124 min=-29.4656 max=107751
-[2026-02-17 05:30:44,078][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0014.*
+Validation DataLoader 0: |          | 14/? [28:39<00:00,  0.01it/s][A[2026-02-17 14:31:28,184][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:31:28,253][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0014 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-17.1405 max=101687 | target: finite=12521124/12521124 min=-16.961 max=101792 | pred: finite=12521124/12521124 min=-29.4656 max=107751
+[2026-02-17 14:32:45,028][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0014.*
 
-Validation DataLoader 0: |          | 15/? [30:33<00:00,  0.01it/s][A[2026-02-17 05:31:30,257][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:31:30,325][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0015 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-23.5037 max=101508 | target: finite=12521124/12521124 min=-24.4818 max=101447 | pred: finite=12521124/12521124 min=-32.2964 max=107213
-[2026-02-17 05:32:46,437][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0015.*
+Validation DataLoader 0: |          | 15/? [30:42<00:00,  0.01it/s][A[2026-02-17 14:33:31,245][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:33:31,332][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0015 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-23.5037 max=101508 | target: finite=12521124/12521124 min=-24.4818 max=101447 | pred: finite=12521124/12521124 min=-32.2964 max=107213
+[2026-02-17 14:34:47,398][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0015.*
 
-Validation DataLoader 0: |          | 16/? [32:35<00:00,  0.01it/s][A[2026-02-17 05:33:31,811][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:33:31,868][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0016 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-29.622 max=101484 | target: finite=12521124/12521124 min=-26.4508 max=101482 | pred: finite=12521124/12521124 min=-32.5446 max=105124
-[2026-02-17 05:34:48,386][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0016.*
+Validation DataLoader 0: |          | 16/? [32:44<00:00,  0.01it/s][A[2026-02-17 14:35:33,656][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:35:33,728][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0016 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-29.622 max=101484 | target: finite=12521124/12521124 min=-26.4508 max=101482 | pred: finite=12521124/12521124 min=-32.5446 max=105124
+[2026-02-17 14:36:51,450][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0016.*
 
-Validation DataLoader 0: |          | 17/? [34:37<00:00,  0.01it/s][A[2026-02-17 05:35:34,394][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:35:34,449][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0017 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-27.59 max=101481 | target: finite=12521124/12521124 min=-19.2093 max=101563 | pred: finite=12521124/12521124 min=-27.681 max=108067
-[2026-02-17 05:36:50,894][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0017.*
+Validation DataLoader 0: |          | 17/? [34:48<00:00,  0.01it/s][A[2026-02-17 14:37:37,973][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:37:38,033][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0017 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-27.59 max=101481 | target: finite=12521124/12521124 min=-19.2093 max=101563 | pred: finite=12521124/12521124 min=-27.681 max=108067
+[2026-02-17 14:38:55,072][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0017.*
 
-Validation DataLoader 0: |          | 18/? [36:39<00:00,  0.01it/s][A[2026-02-17 05:37:36,777][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:37:36,835][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0018 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-16.961 max=101792 | target: finite=12521124/12521124 min=-14.2411 max=101689 | pred: finite=12521124/12521124 min=-27.1896 max=107300
-[2026-02-17 05:38:52,774][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0018.*
+Validation DataLoader 0: |          | 18/? [36:52<00:00,  0.01it/s][A[2026-02-17 14:39:41,374][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:39:41,444][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0018 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-16.961 max=101792 | target: finite=12521124/12521124 min=-14.2411 max=101689 | pred: finite=12521124/12521124 min=-27.1896 max=107300
+[2026-02-17 14:40:57,855][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0018.*
 
-Validation DataLoader 0: |          | 19/? [38:41<00:00,  0.01it/s][A[2026-02-17 05:39:38,416][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:39:38,498][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0019 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-24.4818 max=101447 | target: finite=12521124/12521124 min=-23.2379 max=101590 | pred: finite=12521124/12521124 min=-30.6325 max=106870
-[2026-02-17 05:40:55,407][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0019.*
+Validation DataLoader 0: |          | 19/? [38:55<00:00,  0.01it/s][A[2026-02-17 14:41:43,826][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:41:43,893][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0019 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-24.4818 max=101447 | target: finite=12521124/12521124 min=-23.2379 max=101590 | pred: finite=12521124/12521124 min=-30.6325 max=106870
+[2026-02-17 14:43:01,234][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0019.*
 
-Validation DataLoader 0: |          | 20/? [40:44<00:00,  0.01it/s][A[2026-02-17 05:41:40,975][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
-[2026-02-17 05:41:41,042][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0020 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.4508 max=101482 | target: finite=12521124/12521124 min=-26.705 max=101593 | pred: finite=12521124/12521124 min=-29.8661 max=105954
-[2026-02-17 05:42:57,323][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0020.*
+Validation DataLoader 0: |          | 20/? [40:58<00:00,  0.01it/s][A[2026-02-17 14:43:47,097][anemoi.training.diagnostics.callbacks.plot][WARNING] - Skipping 1 plot parameters not present in model outputs (data): ['swdown']
+[2026-02-17 14:43:47,164][anemoi.training.diagnostics.callbacks.plot][INFO] - PlotSample debug dataset=data batch=0020 rstep=00 out=00 vars=height_500,temp_850,ugrd_850,vgrd_850,pres_0g | latlon: finite_nodes=298122/298122 lat=[25,39.9842] lon=[-105,-90.0966] | input: finite=12521124/12521124 min=-26.4508 max=101482 | target: finite=12521124/12521124 min=-26.705 max=101593 | pred: finite=12521124/12521124 min=-29.8661 max=105954
+[2026-02-17 14:45:04,012][anemoi.training.diagnostics.callbacks.export_predictions][INFO] - Exported predictions/targets to /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/predictions/pred_target_epoch000_batch0020.*
 
-Validation DataLoader 0: |          | 21/? [42:46<00:00,  0.01it/s][A
-                                                                   [AEpoch 0: 100%|██████████| 1/1 [45:37<00:00,  0.00it/s, train_multi_dataset_loss_step=0.655, val_multi_dataset_loss_step=0.683, val_multi_dataset_loss_epoch=0.897][2026-02-17 05:42:58,800][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/6a70bc7c-b4ec-44af-9161-eaf55f436045/inference-last.ckpt
-[2026-02-17 05:42:58,800][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-last/anemoi-metadata/ai-models.json
-[2026-02-17 05:42:58,801][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-last/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:42:58,805][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-last/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:42:58,809][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-last/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
-[2026-02-17 05:43:06,849][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/6a70bc7c-b4ec-44af-9161-eaf55f436045/last.ckpt
-[2026-02-17 05:43:06,849][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
-[2026-02-17 05:43:06,850][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:06,854][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:06,857][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
-[2026-02-17 05:43:08,117][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/6a70bc7c-b4ec-44af-9161-eaf55f436045/inference-anemoi-by_epoch-epoch_000-step_000001.ckpt
-[2026-02-17 05:43:08,117][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/ai-models.json
-[2026-02-17 05:43:08,118][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:08,121][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:08,125][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
-[2026-02-17 05:43:15,350][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/6a70bc7c-b4ec-44af-9161-eaf55f436045/anemoi-by_epoch-epoch_000-step_000001.ckpt
-[2026-02-17 05:43:15,350][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
-[2026-02-17 05:43:15,351][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:15,356][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:15,359][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
-[2026-02-17 05:43:16,805][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/6a70bc7c-b4ec-44af-9161-eaf55f436045/inference-last.ckpt
-[2026-02-17 05:43:16,805][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-last/anemoi-metadata/ai-models.json
-[2026-02-17 05:43:16,806][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-last/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:16,809][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-last/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:16,813][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-last/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
-[2026-02-17 05:43:24,353][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/6a70bc7c-b4ec-44af-9161-eaf55f436045/last.ckpt
-[2026-02-17 05:43:24,353][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
-[2026-02-17 05:43:24,354][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:24,358][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-02-17 05:43:24,361][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
-Epoch 0: 100%|██████████| 1/1 [46:04<00:00,  0.00it/s, train_multi_dataset_loss_step=0.655, val_multi_dataset_loss_step=0.683, val_multi_dataset_loss_epoch=0.897, train_multi_dataset_loss_epoch=0.655][2026-02-17 05:43:24,410][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer.fit` stopped: `max_steps=1` reached.
-Epoch 0: 100%|██████████| 1/1 [46:04<00:00,  0.00it/s, train_multi_dataset_loss_step=0.655, val_multi_dataset_loss_step=0.683, val_multi_dataset_loss_epoch=0.897, train_multi_dataset_loss_epoch=0.655]
-[2026-02-17 05:43:25,005][anemoi.training.diagnostics.callbacks.plot][INFO] - Teardown of the Plot Callback ...
+Validation DataLoader 0: |          | 21/? [43:01<00:00,  0.01it/s][A
+                                                                   [AEpoch 0: 100%|██████████| 1/1 [45:53<00:00,  0.00it/s, train_multi_dataset_loss_step=0.655, val_multi_dataset_loss_step=0.683, val_multi_dataset_loss_epoch=0.897][2026-02-17 14:45:05,585][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/e3b842cd-b982-4427-a9f5-1cdd0d159f8f/inference-last.ckpt
+[2026-02-17 14:45:05,585][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-last/anemoi-metadata/ai-models.json
+[2026-02-17 14:45:05,586][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-last/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:05,591][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-last/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:05,594][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-last/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
+[2026-02-17 14:45:15,072][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/e3b842cd-b982-4427-a9f5-1cdd0d159f8f/last.ckpt
+[2026-02-17 14:45:15,072][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
+[2026-02-17 14:45:15,073][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:15,078][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:15,082][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
+[2026-02-17 14:45:16,453][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/e3b842cd-b982-4427-a9f5-1cdd0d159f8f/inference-anemoi-by_epoch-epoch_000-step_000001.ckpt
+[2026-02-17 14:45:16,453][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/ai-models.json
+[2026-02-17 14:45:16,454][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:16,458][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:16,461][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
+[2026-02-17 14:45:24,502][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/e3b842cd-b982-4427-a9f5-1cdd0d159f8f/anemoi-by_epoch-epoch_000-step_000001.ckpt
+[2026-02-17 14:45:24,503][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
+[2026-02-17 14:45:24,505][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:24,508][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:24,512][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
+[2026-02-17 14:45:26,267][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/e3b842cd-b982-4427-a9f5-1cdd0d159f8f/inference-last.ckpt
+[2026-02-17 14:45:26,268][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-last/anemoi-metadata/ai-models.json
+[2026-02-17 14:45:26,269][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-last/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:26,273][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-last/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:26,276][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-last/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
+[2026-02-17 14:45:33,950][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/checkpoint/e3b842cd-b982-4427-a9f5-1cdd0d159f8f/last.ckpt
+[2026-02-17 14:45:33,950][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/ai-models.json
+[2026-02-17 14:45:33,951][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:33,956][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
+[2026-02-17 14:45:33,960][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(298122,), dtype=int64)
+Epoch 0: 100%|██████████| 1/1 [46:23<00:00,  0.00it/s, train_multi_dataset_loss_step=0.655, val_multi_dataset_loss_step=0.683, val_multi_dataset_loss_epoch=0.897, train_multi_dataset_loss_epoch=0.655][2026-02-17 14:45:34,018][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer.fit` stopped: `max_steps=1` reached.
+Epoch 0: 100%|██████████| 1/1 [46:23<00:00,  0.00it/s, train_multi_dataset_loss_step=0.655, val_multi_dataset_loss_step=0.683, val_multi_dataset_loss_epoch=0.897, train_multi_dataset_loss_epoch=0.655]
+[2026-02-17 14:45:34,676][anemoi.training.diagnostics.callbacks.plot][INFO] - Teardown of the Plot Callback ...
