@@ -39,7 +39,7 @@ from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
 
 if is_triton_available():
-    from anemoi.models.triton.gt import GraphTransformerFunction
+    from anemoi.models.triton.gt import GraphTransformer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -497,10 +497,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.projection = Linear(out_channels, out_channels)
 
-        if self.qk_norm:
-            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
-            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
-
         self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
         self.node_dst_mlp = nn.Sequential(
@@ -530,11 +526,28 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             )
             self.graph_attention_backend = "pyg"
 
+        fused_qk_norm = int(os.getenv("FUSED_QK_NORM", "1"))  # TODO(cathal) replace with config
+        if not self.qk_norm:
+            fused_qk_norm = 0  # if not using qk norm, ensure fused_qk_norm is set to 0
         if self.graph_attention_backend == "triton":
-            LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
-            self.conv = GraphTransformerFunction.apply
+            LOGGER.info(
+                f"{self.__class__.__name__} using triton graph attention backend with qk_normalisation mode: {'no fused normalisation' if fused_qk_norm == 0 else 'fused RMS normalisation' if fused_qk_norm == 1 else 'fused layer normalisation'} ({fused_qk_norm})."
+            )
+            assert fused_qk_norm in (
+                0,
+                1,
+                2,
+            ), "FUSED_QK_NORM must be 0 (no normalisation), 1 (RMS normalisation) or 2 (layer normalisation)"
+
+            self.conv = GraphTransformer(self.out_channels_conv, fused_qk_norm)
         else:
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+
+        # Triton graph attention has a fused QK norm which will be used instead to perform QK normalisation
+        if self.qk_norm and (self.graph_attention_backend != "triton" or fused_qk_norm == 0):
+            LOGGER.info("Using standalone QK Norms")
+            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
+            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
@@ -601,7 +614,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
     ) -> Tensor:
-        # self.conv requires size to be a tuple
+
         conv_size = (size, size) if isinstance(size, int) else size
 
         if self.graph_attention_backend == "triton":
@@ -918,7 +931,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
-        if self.qk_norm:
+        # Triton graphtransformer has a fused qk_norm option which is used instead
+        if self.qk_norm and (self.graph_attention_backend != "triton" or os.getenv("FUSED", "1") == "0"):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
