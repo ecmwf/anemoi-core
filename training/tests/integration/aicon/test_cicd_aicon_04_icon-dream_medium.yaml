@@ -153,6 +153,7 @@ model:
 
   model:
     _target_: anemoi.models.models.AnemoiModelEncProcDec
+    hidden_nodes_name: "hidden"
 
   keep_batch_sharded: True
 
