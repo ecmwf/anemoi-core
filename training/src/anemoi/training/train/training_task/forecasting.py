@@ -43,7 +43,7 @@ class ForecastingTask(BaseTask):
         self.rollout_max = rollout_max
 
     def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:
-        return list(range(0, self.num_input_steps))
+        return list(range(self.num_input_steps))
 
     def get_batch_output_time_indices(self, *args, **kwargs) -> list[int]:
         return list(range(self.num_input_steps, self.num_input_steps + self.num_output_steps))
