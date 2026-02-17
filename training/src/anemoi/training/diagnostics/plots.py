@@ -49,6 +49,20 @@ def _plot_debug_enabled() -> bool:
     return os.getenv("ANEMOI_PLOT_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _plot_renderer_mode() -> str:
+    """Choose renderer for non-datashader plotting.
+
+    Supported:
+    - auto (default): use hexbin for large clouds, scatter otherwise
+    - scatter
+    - hexbin
+    """
+    mode = os.getenv("ANEMOI_PLOT_RENDERER", "auto").strip().lower()
+    if mode not in {"auto", "scatter", "hexbin"}:
+        return "auto"
+    return mode
+
+
 @dataclass
 class LatLonData:
     latitudes: np.ndarray
@@ -728,32 +742,57 @@ def single_plot(
     n_points = max(int(data_arr.size), 1)
     point_size = float(np.clip(3_000_000.0 / n_points, 2.0, 10.0))
     if not datashader:
-        psc = ax.scatter(
-            lon_arr,
-            lat_arr,
-            c=data_arr,
-            cmap=cmap,
-            s=point_size,
-            alpha=1.0,
-            norm=norm,
-            rasterized=False,
-            transform=transform,
-            edgecolors="none",
-            linewidths=0.0,
-            marker="s",
-            zorder=3,
-        )
+        renderer = _plot_renderer_mode()
+        use_hexbin = renderer == "hexbin" or (renderer == "auto" and n_points >= 100_000)
         if debug:
-            try:
-                offsets = psc.get_offsets()
-                LOGGER.info(
-                    "single_plot scatter artist offsets=%s facecolors=%s title=%s",
-                    tuple(offsets.shape),
-                    tuple(psc.get_facecolors().shape),
-                    title,
-                )
-            except Exception as exc:  # pragma: no cover - debug only
-                LOGGER.warning("single_plot failed to introspect scatter artist: %s", exc)
+            LOGGER.info("single_plot renderer=%s use_hexbin=%s n_points=%d title=%s", renderer, use_hexbin, n_points, title)
+
+        if use_hexbin:
+            # Robust on large unstructured clouds and avoids backend-specific scatter rendering issues.
+            psc = ax.hexbin(
+                lon_arr,
+                lat_arr,
+                C=data_arr,
+                reduce_C_function=np.mean,
+                gridsize=220,
+                mincnt=1,
+                cmap=cmap,
+                norm=norm,
+                linewidths=0.0,
+            )
+            if debug:
+                try:
+                    arr = psc.get_array()
+                    LOGGER.info("single_plot hexbin cells=%d finite=%d title=%s", int(arr.size), int(np.isfinite(arr).sum()), title)
+                except Exception as exc:  # pragma: no cover - debug only
+                    LOGGER.warning("single_plot failed to introspect hexbin artist: %s", exc)
+        else:
+            psc = ax.scatter(
+                lon_arr,
+                lat_arr,
+                c=data_arr,
+                cmap=cmap,
+                s=point_size,
+                alpha=1.0,
+                norm=norm,
+                rasterized=False,
+                transform=transform,
+                edgecolors="none",
+                linewidths=0.0,
+                marker="s",
+                zorder=3,
+            )
+            if debug:
+                try:
+                    offsets = psc.get_offsets()
+                    LOGGER.info(
+                        "single_plot scatter artist offsets=%s facecolors=%s title=%s",
+                        tuple(offsets.shape),
+                        tuple(psc.get_facecolors().shape),
+                        title,
+                    )
+                except Exception as exc:  # pragma: no cover - debug only
+                    LOGGER.warning("single_plot failed to introspect scatter artist: %s", exc)
 
     else:
         df = pd.DataFrame({"val": data_arr, "x": lon_arr, "y": lat_arr})
