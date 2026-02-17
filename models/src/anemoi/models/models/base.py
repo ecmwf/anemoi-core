@@ -39,6 +39,8 @@ class BaseGraphModel(nn.Module):
         model_config: DotDict,
         data_indices: dict,
         statistics: dict,
+        n_step_input: int,
+        n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
@@ -58,6 +60,8 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
+        self.n_step_input = n_step_input
+        self.n_step_output = n_step_output
 
         model_config = DotDict(model_config)
         self._graph_name_data = (
@@ -66,8 +70,7 @@ class BaseGraphModel(nn.Module):
         self._graph_name_hidden = (
             model_config.graph.hidden
         )  # assumed to be all the same because this is how we construct the graphs
-        self.n_step_input = 2  # model_config.task.multistep_input
-        self.n_step_output = 1  # model_config.task.multistep_output
+
         self.num_channels = model_config.model.num_channels
 
         self.node_attributes = torch.nn.ModuleDict()

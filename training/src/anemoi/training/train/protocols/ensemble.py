@@ -132,20 +132,9 @@ class EnsembleProtocol(BaseGraphModule):
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
         x = {}
         for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = torch.cat([dataset_batch] * self.nens_per_device, dim=2)
-            # shape == (bs, ms, nens_per_device, latlon, nvar)
+            x[dataset_name] = dataset_batch.tile(1, 1, self.nens_per_device)
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
 
-            assert (
-                len(x[dataset_name].shape) == 5
-            ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
-            # assert (x[dataset_name].shape[1] == self.multi_step) and (
-            #    x[dataset_name].shape[2] == self.nens_per_device
-            # ), (
-            #    "Shape mismatch in x! "
-            #    f"Expected ({self.multi_step}, {self.nens_per_device}), "
-            #    f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
-            # )
         return x
 
     def compute_dataset_loss_metrics(
@@ -153,7 +142,7 @@ class EnsembleProtocol(BaseGraphModule):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         dataset_name: str,
-        step: int | None = None,
+        rollout_step: int | None = None,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         y_pred_ens = gather_tensor(
@@ -178,12 +167,26 @@ class EnsembleProtocol(BaseGraphModule):
             metrics_next = self._compute_metrics(
                 y_pred_ens,
                 y,
-                step=step,
+                rollout_step=rollout_step,
                 dataset_name=dataset_name,
                 grid_shard_slice=self.grid_shard_slice[dataset_name],
             )
 
         return loss, metrics_next, y_pred_ens
+
+    def forward(self, x: dict[str, torch.Tensor], rollout_step: int, **kwargs) -> dict[str, torch.Tensor]:
+        """Forward method.
+
+        This method calls the model's forward method with the appropriate
+        communication group and sharding information.
+        """
+        return self.model(
+            x,
+            fcstep=rollout_step,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+            **kwargs,
+        )
 
     def _step(
         self,
@@ -198,15 +201,16 @@ class EnsembleProtocol(BaseGraphModule):
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         x = self._expand_ens_dim(x)
 
-        for step in self.task.steps():
-            y_pred = self(x, fcstep=step)
-            y = self.task.get_targets(batch, data_indices=self.data_indices, step=step)
+        for task_kwargs in self.task.steps:
+            y_pred = self(x, **task_kwargs)
+            y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
+            # y = self._expand_ens_dim(y)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                step=step,
+                **task_kwargs,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
@@ -216,7 +220,7 @@ class EnsembleProtocol(BaseGraphModule):
                 x,
                 y_preds_next,
                 batch,
-                step=step,
+                **task_kwargs,
                 data_indices=self.data_indices,
             )
 
@@ -224,5 +228,5 @@ class EnsembleProtocol(BaseGraphModule):
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / len(self.task.steps())
+        loss *= 1.0 / self.task.num_steps
         return loss, metrics, y_preds

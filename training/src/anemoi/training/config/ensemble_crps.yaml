@@ -19,6 +19,7 @@ config_validation: False
 #   num_gpus_per_node: 1
 
 diagnostics:
+  callbacks: []
   plot:
     callbacks: []
   log:

@@ -13,3 +13,5 @@ from anemoi.training.train.training_task.base import BaseTimelessTask
 
 class AutoencodingTask(BaseTimelessTask):
     """Autoencoding task implementation."""
+
+    name: str = "downscaling"

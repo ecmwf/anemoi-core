@@ -68,15 +68,15 @@ class SingleProtocol(BaseGraphModule):
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
 
-        for step in self.task.steps():
+        for task_kwargs in self.task.steps:
             y_pred = self(x)
-            y = self.task.get_targets(batch, data_indices=self.data_indices, step=step)
+            y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                step=step,
+                **task_kwargs,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
@@ -86,7 +86,7 @@ class SingleProtocol(BaseGraphModule):
                 x,
                 y_preds_next,
                 batch,
-                step=step,
+                **task_kwargs,
                 data_indices=self.data_indices,
             )
 
@@ -94,5 +94,5 @@ class SingleProtocol(BaseGraphModule):
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / len(self.task.steps())
+        loss *= 1.0 / self.task.num_steps
         return loss, metrics, y_preds

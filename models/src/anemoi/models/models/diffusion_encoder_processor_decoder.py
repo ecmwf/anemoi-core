@@ -44,6 +44,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         model_config: DotDict,
         data_indices: dict,
         statistics: dict,
+        n_step_input: int,
+        n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
 
@@ -62,6 +64,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
+            n_step_input=n_step_input,
+            n_step_output=n_step_output,
         )
 
         self.noise_embedder = instantiate(diffusion_config.noise_embedder)

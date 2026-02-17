@@ -184,13 +184,16 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        # metadata["metadata_inference"]["task"] = self.task_type
+        self.n_step_input = self.task.num_inputs
+        self.n_step_output = self.task.num_outputs
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
+            n_step_input=self.n_step_input,
+            n_step_output=self.n_step_output,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             config=config,
@@ -233,6 +236,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
+                task=self.task,
                 graph_data=graph_data[dataset_name],
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
@@ -272,8 +276,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
-        self.n_step_input = config.task.multistep_input
-        self.n_step_output = config.task.multistep_output  # defaults to 1 via pydantic
+
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.lr = (
             config.system.hardware.num_nodes

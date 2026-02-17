@@ -8,17 +8,34 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import logging
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Iterable
+from functools import cached_property
 
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.utils.dates import frequency_to_seconds
 
+LOGGER = logging.getLogger(__name__)
+
 
 class BaseTask(ABC):
-    """Base class for all tasks."""
+    """Base class for all tasks.
+
+    Attributes
+    ----------
+    name : str
+        Name of the task.
+    num_inputs : int
+        Number of input time steps for the task.
+    num_outputs : int
+        Number of output time steps for the task.
+    num_steps : int
+        Number of steps in the task (for multi-step tasks).
+    """
 
     name: str
 
@@ -38,6 +55,17 @@ class BaseTask(ABC):
             list[int]: List of relative time indices.
         """
         raise NotImplementedError
+
+    @cached_property
+    @abstractmethod
+    def steps(self) -> Iterable[dict]:
+        """Get the steps for the task."""
+        raise NotImplementedError
+
+    @property
+    def num_steps(self) -> int:
+        """Get the number of steps in the task."""
+        return len(self.steps)
 
     @abstractmethod
     def get_inputs(
@@ -62,14 +90,18 @@ class BaseTask(ABC):
             md_dict (dict): The metadata dictionary to fill.
         """
         md_dict["task"] = self.name
-        md_dict["timestep"] = self.timestep
+        # md_dict["timestep"] = self.timestep
         # Save relative time indices
 
 
 class BaseTimelessTask(BaseTask):
     """Base class for timeless tasks."""
 
-    def get_relative_time_indices(self) -> list[int]:
+    def __init__(self, **_kwargs) -> None:
+        self.num_outputs = 1
+        self.num_inputs = 1
+
+    def get_relative_time_indices(self, *_args, **_kwargs) -> list[int]:
         """Get the relative time indices for the model input sequence.
 
         Returns
@@ -78,8 +110,31 @@ class BaseTimelessTask(BaseTask):
         """
         return [0]
 
-    def get_inputs(self, index: int) -> list[int]:
-        return index
+    @cached_property
+    def steps(self) -> Iterable[dict]:
+        """Get the steps for the task."""
+        return ({},)
 
-    def get_targets(self, index: int) -> list[int]:
-        return index
+    def get_inputs(
+        self,
+        batch: dict[str, torch.Tensor],
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, torch.Tensor]:
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[:, :, ..., data_indices[dataset_name].data.input.full]
+            # shape: (bs, multi_step, latlon, nvar)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+        return x
+
+    def get_targets(
+        self,
+        batch: dict[str, torch.Tensor],
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, torch.Tensor]:
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            var_indices = data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+            y[dataset_name] = dataset_batch[..., var_indices]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+        return y

@@ -8,8 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from collections.abc import Iterable
+from functools import cached_property
 from operator import itemgetter
 
+import numpy as np
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -111,3 +114,59 @@ class TimeInterpolationTask(BaseTask):
             ]
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
+
+    @cached_property
+    def steps(self) -> Iterable[dict[str, int]]:
+        """Get the range of rollout steps to perform."""
+        return ({"step": i} for i in self.interp_times)
+
+
+class MultiOutTimeInterpolationTask(BaseTask):
+    """Time interpolation task implementation."""
+
+    name: str = "timeinterpolation"
+
+    def __init__(
+        self,
+        explicit_input_times: list[int],
+        explicit_output_times: list[int],
+        target_forcings: dict[str, list[int]],
+        **_kwargs,
+    ) -> None:
+        self.boundary_times = explicit_input_times  # [0, 6]
+        self.interp_times = explicit_output_times  # [1, 2, 3, 4, 5]
+        self.target_forcings = target_forcings  # {"data": []}
+        self.num_outputs = len(self.interp_times)
+        self.use_time_fraction = True
+
+        self.num_tfi = {name: len(elements) for name, elements in self.target_forcings.items()}
+        self.imap = np.array(sorted(set(self.boundary_times + self.interp_times)))
+
+    def get_inputs(
+        self,
+        batch: dict[str, torch.Tensor],
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, torch.Tensor]:
+        x_bound = {}
+        for dataset_name, dataset_batch in batch.items():
+            time_indices = itemgetter(*self.boundary_times)(self.imap)
+            x_bound[dataset_name] = dataset_batch[:, time_indices, ..., data_indices[dataset_name].data.input.full]
+        return x_bound
+
+    def get_targets(
+        self,
+        batch: dict[str, torch.Tensor],
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, torch.Tensor]:
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            time_indices = itemgetter(*self.interp_times)(self.imap)
+            var_indices = data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+            y[dataset_name] = dataset_batch[:, time_indices, None, :, :, var_indices]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+        return y
+
+    @cached_property
+    def steps(self) -> Iterable[dict[str, int]]:
+        """Get the range of rollout steps to perform."""
+        return ({},)

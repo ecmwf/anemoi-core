@@ -36,6 +36,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        n_step_input: int,
+        n_step_output: int,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -65,6 +67,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
+            n_step_input=n_step_input,
+            n_step_output=n_step_output,
         )
 
         self.latent_skip = model_config.model.latent_skip

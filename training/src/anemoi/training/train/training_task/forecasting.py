@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+from functools import cached_property
 
 import torch
 
@@ -66,6 +67,14 @@ class ForecastingTask(BaseTask):
             ),
         )
 
+    @property
+    def num_inputs(self) -> int:
+        return self.num_input_steps
+
+    @property
+    def num_outputs(self) -> int:
+        return self.num_output_steps
+
     def get_relative_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
         """Get the relative time indices for the model input sequence.
 
@@ -92,14 +101,15 @@ class ForecastingTask(BaseTask):
         self,
         batch: dict[str, torch.Tensor],
         data_indices: dict[str, IndexCollection],
-        step: int = 0,
+        rollout_step: int = 0,
     ) -> dict[str, torch.Tensor]:
-        start = self.num_input_steps + self.num_output_steps * step
+        start = self.num_input_steps + self.num_output_steps * rollout_step
+        time_indices = slice(start, start + self.num_output_steps)
+
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            y_time = dataset_batch.narrow(1, start, self.num_output_steps)
             var_indices = data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = y_time.index_select(-1, var_indices)
+            y[dataset_name] = dataset_batch[:, time_indices, ..., var_indices]
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
@@ -153,7 +163,7 @@ class ForecastingTask(BaseTask):
         x: dict[str, torch.Tensor],
         y_pred: dict[str, torch.Tensor],
         batch: dict[str, torch.Tensor],
-        step: int = 0,
+        rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
     ) -> dict[str, torch.Tensor]:
         """Advance the input state for the next rollout step."""
@@ -162,14 +172,15 @@ class ForecastingTask(BaseTask):
                 x[dataset_name],
                 y_pred[dataset_name],
                 batch[dataset_name],
-                rollout_step=step,
+                rollout_step=rollout_step,
                 data_indices=data_indices[dataset_name],
             )
         return x
 
-    def steps(self) -> range:
+    @cached_property
+    def steps(self) -> tuple[dict[str, int]]:
         """Get the range of rollout steps to perform."""
-        return range(self.rollout)
+        return tuple({"rollout_step": i} for i in range(self.rollout))
 
     def log_extra(self, logger, logger_enabled) -> None:
         """Log any task-specific information."""
