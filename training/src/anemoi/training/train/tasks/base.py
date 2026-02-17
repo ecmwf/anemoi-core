@@ -329,14 +329,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
-    @property
-    def output_times(self) -> int | None:
-        """Number of outer steps for plotting/validation (e.g. rollout steps or interp times).
+        # Concrete tasks set _plot_adapter in their __init__ (BasePlotAdapter is abstract).
+        self._plot_adapter: Any = None
 
-        Subclasses that support plot callbacks override this. Used as the length of the
-        outer loop in plot code (e.g. for rollout_step in range(output_times)).
-        """
-        return None
+    @property
+    def plot_adapter(self) -> Any:
+        """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
+        return self._plot_adapter
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
@@ -1083,6 +1082,3 @@ class BaseGraphModule(pl.LightningModule, ABC):
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)
-
-    def get_init_step(self, _rollout_step: int) -> int:
-        return 0

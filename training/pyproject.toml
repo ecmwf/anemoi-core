@@ -85,6 +85,7 @@ optional-dependencies.mlflow = [
 ]
 
 optional-dependencies.plotting = [
+  "cartopy>=0.25",
   "distinctipy>=1",
   "pyshtools>=4.13",
 ]

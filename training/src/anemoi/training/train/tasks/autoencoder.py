@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -76,9 +77,7 @@ class GraphAutoEncoder(BaseGraphModule):
             self.n_step_input == self.n_step_output
         ), "Autoencoders must have the same number of input and output steps."
 
-    @property
-    def output_times(self) -> int:
-        return 1  # Autoencoder doesn't have rollout
+        self._plot_adapter = AutoencoderPlotAdapter(self)
 
     def _step(
         self,
