@@ -132,10 +132,19 @@ class EnsembleProtocol(BaseGraphModule):
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
         x = {}
         for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch.tile(1, 1, self.nens_per_device)
+            x[dataset_name] = dataset_batch.tile(1, 1, self.nens_per_device, 1, 1)
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
 
         return x
+
+    def _collapse_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Collapse the ensemble dimension in the input batch by taking the first element along the ensemble dimension."""
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            y[dataset_name] = dataset_batch[:, :, 0, ...]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+
+        return y
 
     def compute_dataset_loss_metrics(
         self,
@@ -204,7 +213,7 @@ class EnsembleProtocol(BaseGraphModule):
         for task_kwargs in self.task.steps:
             y_pred = self(x, **task_kwargs)
             y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
-            # y = self._expand_ens_dim(y)
+            y = self._collapse_ens_dim(y)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
