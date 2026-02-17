@@ -181,7 +181,20 @@ class ReducedSHT(SpectralTransform):
         # e.g. N320
         # self.nlat = nlat
         # self.lons_per_lat = [nlon] * nlat
-        raise NotImplementedError("ReducedSHT is not yet implemented.")
+        if grid != "n320":
+            raise ValueError("Only the N320 reduced Gaussian grid SHT is supported.")
+        else:
+            self.nlat = 640
+
+        # Fetch regular grid data
+        from anemoi.transform.grids.named import lookup
+        lats = lookup(grid)["latitudes"]
+
+        # Get latitudes of this grid
+        unique_lats = sorted(set(lats))
+
+        # Calculate longitudes per latitude
+        self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
 
         self._sht = SphericalHarmonicTransform(
             nlat=self.nlat, lons_per_lat=self.lons_per_lat, lmax=self.nlat // 2, mmax=self.nlat // 2
