@@ -149,7 +149,7 @@ def test_training_cycle_lam_with_existing_graph(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_lam(lam_config: DictConfig) -> None:
+def test_config_validation_lam(lam_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = lam_config
     BaseSchema(**cfg)
 
@@ -198,6 +198,23 @@ def test_training_cycle_autoencoder(
 
 def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = autoencoder_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_downscaler(
+    downscaler_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = downscaler_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_downscaler(downscaler_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = downscaler_config
     BaseSchema(**cfg)
 
 

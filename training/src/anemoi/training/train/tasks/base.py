@@ -20,6 +20,7 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 
@@ -46,7 +47,6 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def __init__(
         self,
         *,
-        config: BaseSchema,
+        config: DictConfig,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
