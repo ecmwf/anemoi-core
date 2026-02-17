@@ -583,7 +583,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="ensemble_crps")
+@hydra.main(version_base=None, config_path="../config", config_name="autoencoder")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 

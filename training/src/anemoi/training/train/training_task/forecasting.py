@@ -42,7 +42,13 @@ class ForecastingTask(BaseTask):
         self.rollout_epoch_increment = rollout_epoch_increment
         self.rollout_max = rollout_max
 
-    def get_relative_input_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
+    def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:
+        return list(range(0, self.num_input_steps))
+
+    def get_batch_output_time_indices(self, *args, **kwargs) -> list[int]:
+        return list(range(self.num_input_steps, self.num_input_steps + self.num_output_steps))
+
+    def get_dataset_input_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
         """Get the relative time indices for the model input sequence.
 
         Returns
@@ -51,7 +57,7 @@ class ForecastingTask(BaseTask):
         """
         return list(range(0, self.timeincrement(frequency) * self.num_input_steps, self.timeincrement(frequency)))
 
-    def get_relative_target_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
+    def get_dataset_target_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
         """Get the relative time indices for the model target sequence.
 
         Returns
@@ -67,14 +73,6 @@ class ForecastingTask(BaseTask):
             ),
         )
 
-    @property
-    def num_inputs(self) -> int:
-        return self.num_input_steps
-
-    @property
-    def num_outputs(self) -> int:
-        return self.num_output_steps
-
     def get_relative_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
         """Get the relative time indices for the model input sequence.
 
@@ -82,36 +80,7 @@ class ForecastingTask(BaseTask):
         -------
             list[int]: List of relative time indices.
         """
-        return self.get_relative_input_time_indices(frequency) + self.get_relative_target_time_indices(frequency)
-
-    def get_inputs(
-        self,
-        batch: dict[str, torch.Tensor],
-        data_indices: dict[str, IndexCollection],
-    ) -> dict[str, torch.Tensor]:
-        timesteps = slice(0, self.num_input_steps)
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch[:, timesteps, ..., data_indices[dataset_name].data.input.full]
-            # shape: (bs, multi_step, latlon, nvar)
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-        return x
-
-    def get_targets(
-        self,
-        batch: dict[str, torch.Tensor],
-        data_indices: dict[str, IndexCollection],
-        rollout_step: int = 0,
-    ) -> dict[str, torch.Tensor]:
-        start = self.num_input_steps + self.num_output_steps * rollout_step
-        time_indices = slice(start, start + self.num_output_steps)
-
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            var_indices = data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = dataset_batch[:, time_indices, ..., var_indices]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-        return y
+        return self.get_dataset_input_time_indices(frequency) + self.get_dataset_target_time_indices(frequency)
 
     def _advance_dataset_input(
         self,
