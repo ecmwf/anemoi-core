@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -203,8 +204,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.statistics_tendencies = statistics_tendencies
 
-        self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
-
         # Initialize components for multi-dataset
         self.target_dataset_names = []  # list of dataset names used for loss computation
         self.scalers = {}  # dict of dict of tensors
@@ -331,6 +330,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
+    @property
+    def output_times(self) -> int | None:
+        """Number of outer steps for plotting/validation (e.g. rollout steps or interp times).
+
+        Subclasses that support plot callbacks override this. Used as the length of the
+        outer loop in plot code (e.g. for rollout_step in range(output_times)).
+        """
+        return None
+
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
         # For multi-dataset, use a generic name or combine dataset names
@@ -365,6 +373,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 "This may lead to increased memory usage and slower training.",
                 ", ".join(unsupported_metrics),
             )
+
+    @cached_property
+    def logger_enabled(self) -> bool:
+        return self.trainer.logger is not None
 
     def _build_metrics_for_dataset(
         self,
@@ -1054,7 +1066,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if hasattr(opt_cfg, "model_dump"):
             opt_cfg = opt_cfg.model_dump(by_alias=True)
 
-        return instantiate(opt_cfg, params=params, lr=self.lr)
+        optimizer = instantiate(opt_cfg, params=params, lr=self.lr)
+
+        # Log the actual optimizer settings to help users verify configuration
+        defaults_to_log = {k: v for k, v in optimizer.defaults.items() if k != "params"}
+        LOGGER.info("Optimizer initialized: %s", type(optimizer).__name__)
+        LOGGER.info("Optimizer settings: %s", defaults_to_log)
+
+        return optimizer
 
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
         """Helper to create the cosine LR scheduler."""
@@ -1075,3 +1094,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)
+
+    def get_init_step(self, _rollout_step: int) -> int:
+        return 0

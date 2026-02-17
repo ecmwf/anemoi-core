@@ -56,10 +56,27 @@ def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
 
-    logger = get_mlflow_logger(config)
+    from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
-    if config.diagnostics.log.mlflow.enabled:
-        assert Path(config.diagnostics.log.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
+    config = convert_to_omegaconf(config)
+
+    # Minimal inputs required by get_mlflow_logger
+    run_id = None
+    fork_run_id = None
+    paths = config.system.output
+    logger_config = config.diagnostics.log
+
+    logger_cfg = getattr(logger_config, "mlflow", None)
+    if getattr(logger_cfg, "enabled", False):
+        LOGGER.info("%s logger enabled", "MLFLOW")
+
+        logger = get_mlflow_logger(
+            run_id=run_id,
+            fork_run_id=fork_run_id,
+            paths=paths,
+            logger_config=logger_config,
+        )
+        assert Path(logger_config.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
         assert isinstance(logger, AnemoiMLflowLogger)
 
 
@@ -247,6 +264,18 @@ def test_training_cycle_interpolator(
     AnemoiTrainer(cfg).train()
 
 
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_output_interpolator(
+    multi_output_interpolator_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Full training-cycle smoke-test for the temporal interpolation task."""
+    cfg, url = multi_output_interpolator_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
 def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
     """Schema-level validation for the temporal interpolation config."""
     cfg, _ = interpolator_config
@@ -293,12 +322,11 @@ def test_training_cycle_mlflow_dry_run(
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_imerg_target(
-    imerg_target_config: tuple[DictConfig, list[str]],
+    imerg_target_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, urls = imerg_target_config
-    for url in urls:
-        get_test_archive(url)
+    cfg, url = imerg_target_config
+    get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 

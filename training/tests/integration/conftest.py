@@ -501,6 +501,7 @@ def interpolator_config(
     return cfg, url_dataset
 
 
+@pytest.fixture
 def multi_output_interpolator_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
