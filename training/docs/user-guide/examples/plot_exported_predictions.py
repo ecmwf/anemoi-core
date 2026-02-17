@@ -77,6 +77,10 @@ def _align_node_length(
     return targ[:n_data], pred[:n_data], err[:n_data], (lat[:n_data], lon[:n_data])
 
 
+def _node_count(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> int:
+    return min(a.shape[0], b.shape[0], c.shape[0])
+
+
 def _select_var(ds: xr.Dataset, var: str) -> int:
     if "variable" not in ds.coords:
         raise ValueError("Export file is missing 'variable' coordinate.")
@@ -119,16 +123,30 @@ def main() -> None:
 
     latlon = None
     latlon_source = "none"
+    export_latlon = _export_latlon(ds)
     if args.prefer_dataset_latlon and args.dataset:
         latlon = _open_latlon(args.dataset)
         latlon_source = "dataset"
     else:
-        latlon = _export_latlon(ds)
+        latlon = export_latlon
         if latlon is not None:
             latlon_source = "export"
         elif args.dataset:
             latlon = _open_latlon(args.dataset)
             latlon_source = "dataset"
+
+    # Guardrail: if dataset lat/lon mismatches exported node count, auto-fallback to export lat/lon.
+    if latlon is not None and latlon_source == "dataset" and export_latlon is not None:
+        n_data = _node_count(targ, pred, err)
+        n_ll = min(latlon[0].shape[0], latlon[1].shape[0])
+        n_export = min(export_latlon[0].shape[0], export_latlon[1].shape[0])
+        if n_ll != n_data and n_export == n_data:
+            print(
+                "WARNING: dataset lat/lon node count does not match export data; "
+                "falling back to export latitude/longitude."
+            )
+            latlon = export_latlon
+            latlon_source = "export"
 
     if latlon is not None:
         print(f"Using lat/lon from: {latlon_source} (n={latlon[0].shape[0]})")
