@@ -9,6 +9,7 @@
 
 
 import logging
+import os
 from dataclasses import dataclass
 
 try:
@@ -41,6 +42,11 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 LOGGER = logging.getLogger(__name__)
 LAYOUT = "tight"
+
+
+def _plot_debug_enabled() -> bool:
+    """Enable extra plot diagnostics with ANEMOI_PLOT_DEBUG=1/true/yes."""
+    return os.getenv("ANEMOI_PLOT_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass
@@ -677,9 +683,38 @@ def single_plot(
     """
     datashader = _require_datashader(datashader)
     datashader = _require_datashader(datashader)
+    debug = _plot_debug_enabled()
     lon_arr = np.asarray(lon).reshape(-1)
     lat_arr = np.asarray(lat).reshape(-1)
     data_arr = np.asarray(data).reshape(-1)
+
+    if debug:
+        finite = np.isfinite(lon_arr) & np.isfinite(lat_arr) & np.isfinite(data_arr)
+        n = int(data_arr.size)
+        nf = int(finite.sum())
+        if nf > 0:
+            vals = data_arr[finite]
+            LOGGER.info(
+                "single_plot pre-scatter n=%d finite=%d lon=[%.6g,%.6g] lat=[%.6g,%.6g] data=[%.6g,%.6g] title=%s",
+                n,
+                nf,
+                float(np.nanmin(lon_arr[finite])),
+                float(np.nanmax(lon_arr[finite])),
+                float(np.nanmin(lat_arr[finite])),
+                float(np.nanmax(lat_arr[finite])),
+                float(np.nanmin(vals)),
+                float(np.nanmax(vals)),
+                title,
+            )
+            sample_idx = np.flatnonzero(finite)[:5]
+            if sample_idx.size:
+                sample = [
+                    (float(lon_arr[i]), float(lat_arr[i]), float(data_arr[i]))
+                    for i in sample_idx
+                ]
+                LOGGER.info("single_plot samples (lon,lat,val): %s", sample)
+        else:
+            LOGGER.warning("single_plot pre-scatter has no finite points, title=%s", title)
 
     # Robustly support both degree and projected-radian inputs.
     # If values look like degrees, project them to radians used by map_features.
@@ -701,10 +736,24 @@ def single_plot(
             s=point_size,
             alpha=1.0,
             norm=norm,
-            rasterized=True,
+            rasterized=False,
             transform=transform,
             edgecolors="none",
+            linewidths=0.0,
+            marker="s",
+            zorder=3,
         )
+        if debug:
+            try:
+                offsets = psc.get_offsets()
+                LOGGER.info(
+                    "single_plot scatter artist offsets=%s facecolors=%s title=%s",
+                    tuple(offsets.shape),
+                    tuple(psc.get_facecolors().shape),
+                    title,
+                )
+            except Exception as exc:  # pragma: no cover - debug only
+                LOGGER.warning("single_plot failed to introspect scatter artist: %s", exc)
 
     else:
         df = pd.DataFrame({"val": data_arr, "x": lon_arr, "y": lat_arr})
@@ -729,6 +778,16 @@ def single_plot(
     else:
         ax.set_xlim((float(np.nanmin(lon_arr)) - 0.1, float(np.nanmax(lon_arr)) + 0.1))
         ax.set_ylim((float(np.nanmin(lat_arr)) - 0.1, float(np.nanmax(lat_arr)) + 0.1))
+    if debug:
+        try:
+            LOGGER.info(
+                "single_plot axes xlim=%s ylim=%s title=%s",
+                ax.get_xlim(),
+                ax.get_ylim(),
+                title,
+            )
+        except Exception:
+            pass
 
     # Add map features
     map_features.plot(ax)
@@ -759,9 +818,12 @@ def get_scatter_frame(
         cmap=cmap,
         s=5,
         alpha=1.0,
-        rasterized=True,
+        rasterized=False,
         vmin=vmin,
         vmax=vmax,
+        linewidths=0.0,
+        marker="s",
+        zorder=3,
     )
     ax.set_xlim((-np.pi, np.pi))
     ax.set_ylim((-np.pi / 2, np.pi / 2))
