@@ -68,12 +68,14 @@ def sht_setup(request):
     # We only support the N320 reduced Gaussian grid
     if request.param == "reduced":
         truncation = 319  # T319 corresponding to N320 grid
+        tolerance = 1e-8 # Higher resolution grids need higher tolerance -> larger accumulated errors
     # Other grids, we can do what we like
     else:
         truncation = 39  # T39 corresponding to O40 grid
+        tolerance = 1e-11
+
     dtype = torch.float64  # float64 for numerical correctness checking
     torch.manual_seed(0)  # fix RNG seed for reproducibility
-    tolerance = 1e-11
 
     nlat = 2 * (truncation + 1)
     lons_per_lat = _lons_per_lat(nlat=nlat, grid_kind=request.param)
