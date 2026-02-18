@@ -155,20 +155,15 @@ class SphericalHarmonicTransform(Module):
             Fourier space field [..., latitude, zonal wavenumber m]
         """
 
-        rfft = [
-            torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
-            for slon, nlon in zip(self.slon, self.lons_per_lat)
-        ]
+        # Prepare zero-padded output tensor for filling with rfft
+        output_tensor = torch.zeros(*x.shape[:-1], self.nlat, max(self.lons_per_lat) // 2 + 1, device=x.device,
+                                    dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128)
 
-        rfft = [
-            torch.cat([x, torch.zeros((*x.shape[:-1], rlon), device=x.device)], dim=-1)
-            for x, rlon in zip(rfft, self.rlon)
-        ]
+        # Do a real-to-complex FFT on each latitude
+        for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
+            output_tensor[..., i, : nlon // 2 + 1] = torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
 
-        return torch.stack(
-            tensors=rfft,
-            dim=-2,
-        )
+        return output_tensor
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
         """Performs direct real-to-complex FFT on each latitude ring of a regular grid.
