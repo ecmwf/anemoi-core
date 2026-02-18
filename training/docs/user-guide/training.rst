@@ -223,7 +223,9 @@ time of each section of the data.
 This can be given as a full date, or just the year, or year and month,
 in these cases the first of the month/first of the year is used.
 
-We also define the dataset used and the frequency. These can be set
+We also define the dataset reader options under ``dataset_config``.
+This includes the dataset source (``dataset``) and optional keys such as
+``frequency``, ``drop``, ``select`` and ``statistics``. These can be set
 separately for the different training/validation/test parts of the
 dataset `your_dataset_name`, for example, if test data is stored in a
 different file.

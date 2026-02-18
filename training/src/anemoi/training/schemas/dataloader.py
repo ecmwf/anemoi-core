@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from typing import Literal
 
-from pydantic import AliasChoices
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -62,7 +61,7 @@ class DatasetConfigSchema(PydanticBaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
-    dataset: str | Path | dict | list[dict] = Field(validation_alias=AliasChoices("dataset", "name"))
+    dataset: str | Path | dict | list[dict]
     "Dataset source identifier."
     frequency: Frequency | None = Field(default=None)
     "Optional frequency requested from open_dataset."
@@ -80,10 +79,7 @@ class DatasetConfigSchema(PydanticBaseModel):
 class NativeDatasetSchema(BaseModel):
     """Dataset configuration schema."""
 
-    dataset_config: str | DatasetConfigSchema | Path | list[dict] | None = Field(
-        default=None,
-        validation_alias=AliasChoices("dataset_config", "dataset"),
-    )
+    dataset_config: str | DatasetConfigSchema | Path | list[dict] | None = None
     "Dataset definition passed to open_dataset."
     start: str | int | None = Field(default=None)
     "Starting datetime for sample of the dataset."
