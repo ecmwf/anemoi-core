@@ -35,7 +35,11 @@ The ``AnemoiDatasetNodes`` supports an optional ``thinning`` argument
 which can be used to sampling points from the regional dataset to reduce
 computation during development stage. In addition, the ``max_distance_km``
 arguments can be used to avoid loading (global) grid points that are far
-from the area of interest, which helps reduce memory usage.
+from the area of interest, which helps reduce memory usage. To this aim, 
+you want to specify a value for ``max_distance_km`` that is large enough
+to include all the boundary nodes connected. You should consider at least
+the ``margin_radius_km`` (from the ``LimitedAreaTriNodes``) and the
+connectivity of your encoding edges.
 
 In addition, this node builder class will create an additional node
 attribute with a mask showing which node correspond to each of the two
