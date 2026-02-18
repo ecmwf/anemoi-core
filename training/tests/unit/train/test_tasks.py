@@ -277,7 +277,7 @@ def test_graphmultioutinterpolator_uses_data_output_target_layout(monkeypatch: p
     loss, metrics, y_pred = forecaster._step(batch=batch, validation_mode=False)
     assert isinstance(loss, torch.Tensor)
     assert metrics == {}
-    assert y_pred["data"].shape == (b, 2, e, g, 2)
+    assert y_pred[0]["data"].shape == (b, 2, e, g, 2)
 
 
 def test_calculate_val_metrics_rejects_variable_scaled_filtered_metric() -> None:
