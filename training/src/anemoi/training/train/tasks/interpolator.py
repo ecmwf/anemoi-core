@@ -102,7 +102,14 @@ class GraphInterpolator(BaseGraphModule):
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
         self.n_step_input = 1
-        self.rollout = 1
+
+    @property
+    def output_times(self) -> int:
+        """Number of interpolation times (outer loop in plot callbacks; one forward per step)."""
+        return len(self.interp_times)
+
+    def get_init_step(self, rollout_step: int) -> int:
+        return rollout_step
 
     def get_target_forcing(self, batch: dict[str, torch.Tensor], interp_step: int) -> dict[str, torch.Tensor]:
         batch_size = next(iter(batch.values())).shape[0]
@@ -242,7 +249,11 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
 
         self.n_step_input = 1
-        self.rollout = 1
+
+    @property
+    def output_times(self) -> int:
+        """Number of interpolation times (outer loop in plot callbacks; one forward, n_step_output steps)."""
+        return len(self.interp_times)
 
     def _step(
         self,
@@ -274,4 +285,8 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        # All tasks return (loss, metrics, list of per-step dicts) for consistent plot callback contract.
+        return loss, metrics, [y_pred]
+
+    def get_init_step(self, rollout_step: int) -> int:
+        return rollout_step
