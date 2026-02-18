@@ -14,6 +14,7 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
+from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.train.tasks.interpolator import GraphInterpolator
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
 from anemoi.training.utils.masks import NoOutputMask
