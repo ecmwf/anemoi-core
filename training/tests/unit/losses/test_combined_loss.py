@@ -167,6 +167,7 @@ def test_combined_loss_filtered_and_unfiltered_with_scalers() -> None:
     # Create scalers with variable dimension
     scaler_pressure = (4, torch.ones(n_vars) * 2.0)  # shape [3], dim 4 is VARIABLE
     scaler_general = (4, torch.ones(n_vars) * 0.5)
+    scaler_weights = (3, torch.ones(4))
 
     loss = get_loss_function(
         DictConfig(
@@ -177,19 +178,23 @@ def test_combined_loss_filtered_and_unfiltered_with_scalers() -> None:
                         "_target_": "anemoi.training.losses.MSELoss",
                         "predicted_variables": ["tp"],
                         "target_variables": ["tp"],
-                        "scalers": ["pressure_level", "general_variable"],
+                        "scalers": ["pressure_level", "general_variable", "uniform_weight"],
                     },
                     {
                         "_target_": "anemoi.training.losses.MSELoss",
                         # No variable filtering - uses all variables
-                        "scalers": ["pressure_level", "general_variable"],
+                        "scalers": ["pressure_level", "general_variable", "uniform_weight"],
                     },
                 ],
                 "loss_weights": [1.0, 1.0],
                 "scalers": ["*"],
             },
         ),
-        scalers={"pressure_level": scaler_pressure, "general_variable": scaler_general},
+        scalers={
+            "pressure_level": scaler_pressure,
+            "general_variable": scaler_general,
+            "uniform_weight": scaler_weights,
+        },
         data_indices=data_indices,
     )
 
