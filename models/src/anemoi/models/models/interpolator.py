@@ -20,7 +20,6 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -107,7 +106,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
         )
 
         return x_data_latent, x_skip, shard_shapes_data
-    
+
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype, dataset_name: str):
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
 
@@ -135,7 +134,6 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
         return x_out
-
 
     def forward(
         self,
@@ -254,7 +252,6 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             )
 
         return x_out_dict
-
 
     def fill_metadata(self, md_dict):
         for dataset in self.input_dim.keys():
