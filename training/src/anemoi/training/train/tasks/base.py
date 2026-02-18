@@ -329,6 +329,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
+    @property
+    def output_times(self) -> int | None:
+        """Number of outer steps for plotting/validation (e.g. rollout steps or interp times).
+
+        Subclasses that support plot callbacks override this. Used as the length of the
+        outer loop in plot code (e.g. for rollout_step in range(output_times)).
+        """
+        return None
+
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
         # For multi-dataset, use a generic name or combine dataset names
@@ -1073,6 +1082,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
-            self.logger.log_hyperparams(
-                hyper_params,
-            )
+            self.logger.log_hyperparams(hyper_params)
+
+    def get_init_step(self, _rollout_step: int) -> int:
+        return 0
