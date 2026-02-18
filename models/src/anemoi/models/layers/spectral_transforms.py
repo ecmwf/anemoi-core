@@ -177,10 +177,6 @@ class ReducedSHT(SpectralTransform):
     ) -> None:
         super().__init__()
 
-        # TODO implement logic for deriving nlat and lons_per_lat from given reduced grid spec
-        # e.g. N320
-        # self.nlat = nlat
-        # self.lons_per_lat = [nlon] * nlat
         if grid != "n320":
             raise ValueError("Only the N320 reduced Gaussian grid SHT is supported.")
         else:
