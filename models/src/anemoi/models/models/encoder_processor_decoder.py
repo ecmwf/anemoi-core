@@ -220,8 +220,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
 
-        in_out_sharded = grid_shard_shapes is not None
-        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
+        in_out_sharded = {}
+        for dataset_name, shard_shapes in grid_shard_shapes.items():
+            in_out_sharded[dataset_name] = shard_shapes is not None
+            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
@@ -259,7 +261,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_attr=encoder_edge_attr,
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
-                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                x_src_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 edge_shard_shapes=enc_edge_shard_shapes,
@@ -310,8 +312,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=True,  # x_latent always comes sharded
-                x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+                x_dst_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
+                keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
                 edge_shard_shapes=dec_edge_shard_shapes,
             )
 
