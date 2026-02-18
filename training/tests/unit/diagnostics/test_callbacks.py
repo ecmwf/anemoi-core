@@ -21,6 +21,10 @@ from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
+from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
+from anemoi.training.diagnostics.callbacks.plot import PlotSample
+from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
+from anemoi.training.diagnostics.callbacks.plot_ens import PlotEnsSample
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
