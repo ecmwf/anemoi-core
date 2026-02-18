@@ -189,6 +189,7 @@ class ReducedSHT(SpectralTransform):
 
         # Fetch regular grid data
         from anemoi.transform.grids.named import lookup
+
         lats = lookup(grid)["latitudes"]
 
         # Get latitudes of this grid
