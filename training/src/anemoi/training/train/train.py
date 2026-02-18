@@ -243,8 +243,27 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            for dataset_name, data_indices in self.data_indices.items():
+                # Handle both single-dataset and multi-dataset checkpoints
+                if (
+                    isinstance(model._ckpt_model_name_to_index, dict)
+                    and dataset_name in model._ckpt_model_name_to_index
+                ):
+                    # Multi-dataset checkpoint: compare dataset-specific name_to_index
+                    ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
+                elif not isinstance(model._ckpt_model_name_to_index, dict):
+                    # Single-dataset checkpoint: use the name_to_index directly
+                    ckpt_name_to_index = model._ckpt_model_name_to_index
+                else:
+                    # Multi-dataset checkpoint but dataset not found
+                    LOGGER.warning(
+                        "Dataset '%s' not found in checkpoint. Available datasets in checkpoint: %s",
+                        dataset_name,
+                        list(model._ckpt_model_name_to_index.keys()),
+                    )
+                    continue
+
+                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
