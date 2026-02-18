@@ -1,1 +1,1 @@
-_target_: anemoi.training.train.training_task.AutoencodingTask
+_target_: anemoi.training.tasks.AutoencodingTask

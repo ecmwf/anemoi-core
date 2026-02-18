@@ -1,4 +1,4 @@
-_target_: anemoi.training.train.training_task.ForecastingTask
+_target_: anemoi.training.tasks.ForecastingTask
 multistep_input: 2
 multistep_output: 1
 timestep: "6H"

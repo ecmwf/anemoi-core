@@ -17,7 +17,6 @@ from functools import cached_property
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,13 +37,6 @@ class BaseTask(ABC):
     """
 
     name: str
-
-    def __init__(self, timestep: str, **_kwargs) -> None:
-        self.timestep = frequency_to_seconds(timestep)
-
-    def timeincrement(self, frequency: str | datetime.timedelta) -> int:
-        freq_seconds = frequency_to_seconds(frequency)
-        return self.timestep // freq_seconds
 
     @abstractmethod
     def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:
@@ -130,17 +122,6 @@ class BaseTask(ABC):
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
-    def advance_input(self, *args, **kwargs) -> dict[str, torch.Tensor]:
-        """Advance the input state for each dataset based on the task's requirements.
-
-        This method can be overridden by specific tasks to implement custom logic for advancing the input state.
-
-        Returns
-        -------
-            dict[str, torch.Tensor]: The advanced input state for each dataset.
-        """
-        return args[0]
-
     def log_extra(self, *args, **kwargs) -> None:
         """Log any task-specific information."""
 
@@ -160,28 +141,22 @@ class BaseTask(ABC):
         md_dict["relative_output_time_indices"] = self.get_batch_output_time_indices()
 
 
-class BaseTimelessTask(BaseTask):
-    """Base class for timeless tasks."""
+class BaseSingleStepTask(BaseTask):
+    """Base class for single-step tasks."""
 
-    def __init__(self, **_kwargs) -> None:
-        pass
+    def advance_input(self, *args, **kwargs) -> dict[str, torch.Tensor]:
+        """Advance the input state for each dataset based on the task's requirements.
 
-    def get_relative_time_indices(self, *_args, **_kwargs) -> list[int]:
-        """Get the relative time indices for the model input sequence.
+        This method can be overridden by specific tasks to implement custom logic for advancing the input state.
 
         Returns
         -------
-            list[int]: List of relative time indices.
+            dict[str, torch.Tensor]: The advanced input state for each dataset.
         """
-        return [0]
-
-    def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:
-        return [0]
-
-    def get_batch_output_time_indices(self, *args, **kwargs) -> list[int]:
-        return [0]
+        return args[0]
 
     @cached_property
-    def steps(self) -> Iterable[dict]:
-        """Get the steps for the task."""
+    def steps(self) -> Iterable[dict[str, int]]:
+        """Get the range of rollout steps to perform."""
         return ({},)
+

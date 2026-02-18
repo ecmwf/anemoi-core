@@ -14,7 +14,8 @@ from functools import cached_property
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.train.training_task.base import BaseTask
+from anemoi.training.tasks.base import BaseTask
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,13 +35,18 @@ class ForecastingTask(BaseTask):
         rollout_max: int = 1,
         **_kwargs,
     ) -> None:
-        super().__init__(timestep)
+        self.timestep = frequency_to_seconds(timestep)
+
         self.num_input_steps = multistep_input
         self.num_output_steps = multistep_output
 
         self.rollout = rollout_start
         self.rollout_epoch_increment = rollout_epoch_increment
         self.rollout_max = rollout_max
+
+    def timeincrement(self, frequency: str | datetime.timedelta) -> int:
+        freq_seconds = frequency_to_seconds(frequency)
+        return self.timestep // freq_seconds
 
     def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:
         return list(range(self.num_input_steps))
@@ -133,7 +139,7 @@ class ForecastingTask(BaseTask):
         y_pred: dict[str, torch.Tensor],
         batch: dict[str, torch.Tensor],
         rollout_step: int = 0,
-        data_indices: IndexCollection | None = None,
+        data_indices: dict[str, IndexCollection] | None = None,
     ) -> dict[str, torch.Tensor]:
         """Advance the input state for the next rollout step."""
         for dataset_name in x:

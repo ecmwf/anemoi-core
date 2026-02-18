@@ -1,4 +1,4 @@
-_target_: anemoi.training.train.training_task.MultiOutTimeInterpolationTask
+_target_: anemoi.training.tasks.MultiOutTimeInterpolationTask
 explicit_times:
   input: [0, 6]
   target: [1, 2, 3, 4, 5]

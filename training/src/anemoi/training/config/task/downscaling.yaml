@@ -1,1 +1,1 @@
-_target_: anemoi.training.train.training_task.DownscalingTask
+_target_: anemoi.training.tasks.DownscalingTask
