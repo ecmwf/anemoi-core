@@ -907,12 +907,12 @@ class TritonAttention(torch.autograd.Function):
         n_ctx_rounded = math.ceil(n_ctx / 16) * 16 #TODO(cathal) use block size from autotuning results instead of hardcoding 16 here
         
         # Pad q, k, v if necessary
-        #if n_ctx_rounded != n_ctx:
-        #    pad_size = n_ctx_rounded - n_ctx
-        #    q = torch.nn.functional.pad(q, (0, 0, 0, pad_size), value=0.0)
-        #    k = torch.nn.functional.pad(k, (0, 0, 0, pad_size), value=0.0)
-        #    v = torch.nn.functional.pad(v, (0, 0, 0, pad_size), value=0.0)
-        #    o = torch.nn.functional.pad(o, (0, 0, 0, pad_size), value=0.0)
+        if n_ctx_rounded != n_ctx:
+            pad_size = n_ctx_rounded - n_ctx
+            q = torch.nn.functional.pad(q, (0, 0, 0, pad_size), value=0.0)
+            k = torch.nn.functional.pad(k, (0, 0, 0, pad_size), value=0.0)
+            v = torch.nn.functional.pad(v, (0, 0, 0, pad_size), value=0.0)
+            o = torch.nn.functional.pad(o, (0, 0, 0, pad_size), value=0.0)
         
         M = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
