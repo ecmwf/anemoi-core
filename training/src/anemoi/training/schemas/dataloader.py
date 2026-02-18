@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from typing import Literal
 
+from pydantic import AliasChoices
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -56,21 +57,38 @@ class Frequency(RootModel):
         return int(self.as_timedelta.total_seconds())
 
 
+class DatasetConfigSchema(PydanticBaseModel):
+    """Dictionary-style dataset config passed directly to open_dataset."""
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+    dataset: str | Path | dict | list[dict] = Field(validation_alias=AliasChoices("dataset", "name"))
+    "Dataset source identifier."
+    frequency: Frequency | None = Field(default=None)
+    "Optional frequency requested from open_dataset."
+    drop: list[str] | None = Field(default=None)
+    "Optional list of variables to drop from the dataset."
+    select: list[str] | None = Field(default=None)
+    "Optional list of variables to select from the dataset."
+    statistics: str | Path | None = Field(default=None)
+    "Optional path to custom statistics file."
+
+    # Note this should be extended in the future to have a full schema for the keys
+    # supported by open_dataset and be moved to anemoi-datasets.
+
+
 class NativeDatasetSchema(BaseModel):
     """Dataset configuration schema."""
 
-    dataset: str | dict | Path | list[dict] | None = None
-    "Dataset, see anemoi-datasets"
+    dataset_config: str | DatasetConfigSchema | Path | list[dict] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("dataset_config", "dataset"),
+    )
+    "Dataset definition passed to open_dataset."
     start: str | int | None = Field(default=None)
     "Starting datetime for sample of the dataset."
     end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
-    frequency: Frequency
-    "Temporal resolution, frequency must be >= to dataset frequency."
-    drop: list | None = Field(default=None)
-    "List of variables to drop from dataset"
-    select: list | None = Field(default=None)
-    "List of variables to select from dataset, if not provided all variables are selected."
 
 
 class TrajectorySchema(PydanticBaseModel):

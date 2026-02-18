@@ -59,11 +59,12 @@ model_run_info: null  # Add for non-analysis training
 training:
   datasets:
     data:
-      dataset: ${dataloader.dataset}
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
       start: null
       end: 2020
-      frequency: ${data.frequency}
-      drop: []
       trajectory: ${dataloader.model_run_info}
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
@@ -71,19 +72,21 @@ validation_rollout: 1 # number of rollouts to use for validation, must be equal
 validation:
   datasets:
     data:
-      dataset: ${dataloader.dataset}
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
       start: 2021
       end: 2021
-      frequency: ${data.frequency}
-      drop: []
       trajectory: ${dataloader.model_run_info}
 
 test:
   datasets:
     data:
-      dataset: ${dataloader.dataset}
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
       start: 2022
       end: null
-      frequency: ${data.frequency}
-      drop: []
       trajectory: ${dataloader.model_run_info}

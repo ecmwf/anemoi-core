@@ -24,30 +24,59 @@ from anemoi.utils.dates import frequency_to_seconds
 LOGGER = logging.getLogger(__name__)
 
 
+def _normalize_dataset_argument(dataset: str | dict) -> str | dict:
+    """Normalize dataset payload to the open_dataset dictionary contract."""
+    if isinstance(dataset, DictConfig):
+        dataset = dict(dataset)
+
+    if not isinstance(dataset, dict):
+        return dataset
+
+    normalized = dict(dataset)
+    if "name" in normalized and "dataset" not in normalized:
+        normalized["dataset"] = normalized.pop("name")
+    return normalized
+
+
+def _normalize_reader_config(dataset_config: dict) -> dict:
+    """Move non-reader keys under dataset dictionary for open_dataset."""
+    normalized = dict(dataset_config)
+
+    base_dataset = normalized.pop("dataset_config", normalized.pop("dataset", None))
+    if isinstance(base_dataset, DictConfig):
+        base_dataset = dict(base_dataset)
+
+    if isinstance(base_dataset, dict):
+        dataset_payload = _normalize_dataset_argument(base_dataset)
+    else:
+        dataset_payload = {"dataset": base_dataset}
+
+    reserved_keys = {"dataset_config", "dataset", "start", "end", "trajectory"}
+    extra_keys = [key for key in normalized if key not in reserved_keys]
+    for key in extra_keys:
+        dataset_payload[key] = normalized.pop(key)
+
+    normalized["dataset_config"] = dataset_payload
+    return normalized
+
+
 class BaseAnemoiReader:
     """Anemoi data reader for native grid datasets."""
 
     def __init__(
         self,
-        dataset: str | dict,
+        dataset: str | dict | None = None,
+        dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
-        frequency: str | None = None,
-        drop: list[str] | None = None,
-        select: list[str] | None = None,
     ):
         """Initialize Anemoi data reader."""
-        ds_kwargs = {}
-        if drop is not None:
-            ds_kwargs["drop"] = drop
-
-        if select is not None:
-            ds_kwargs["select"] = select
-
-        if frequency is not None:
-            ds_kwargs["frequency"] = frequency
-
-        self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
+        dataset = dataset_config if dataset_config is not None else dataset
+        if dataset is None:
+            msg = "Either dataset or dataset_config must be provided."
+            raise ValueError(msg)
+        dataset = _normalize_dataset_argument(dataset)
+        self.data = open_dataset(dataset, start=start, end=end)
 
     @property
     def dates(self) -> np.ndarray:
@@ -163,15 +192,14 @@ class TrajectoryDataset(BaseAnemoiReader):
 
     def __init__(
         self,
-        dataset: str | dict,
         trajectory_start: datetime.datetime,
         trajectory_length: int,
+        dataset: str | dict | None = None,
+        dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
-        frequency: str | None = None,
-        drop: list[str] | None = None,
     ):
-        super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
         self.trajectory_start = trajectory_start
         self.trajectory_length = trajectory_length
 
@@ -196,6 +224,7 @@ def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     if isinstance(dataset_config, DictConfig):
         dataset_config = dict(dataset_config)
+    dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
         LOGGER.info("Creating TrajectoryDataset...")

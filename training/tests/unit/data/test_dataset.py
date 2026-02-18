@@ -55,7 +55,13 @@ class TestNativeGridDataset:
         frequency: str,
         drop: list[str],
     ) -> None:
-        dataset = NativeGridDataset(dataset=dataset_path, frequency=frequency, drop=drop)
+        dataset_cfg = {"dataset": dataset_path}
+        if frequency is not None:
+            dataset_cfg["frequency"] = frequency
+        if drop is not None:
+            dataset_cfg["drop"] = drop
+
+        dataset = NativeGridDataset(dataset=dataset_cfg)
 
         assert dataset.data is not None
         assert not dataset.has_trajectories
@@ -92,7 +98,7 @@ class TestNativeGridDataset:
             pytest.skip("Dataset needs at least 2 variables for drop test")
 
         drop_vars = [original_vars[0]]
-        dataset = NativeGridDataset(dataset=dataset_path, drop=drop_vars)
+        dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": drop_vars})
 
         assert dataset.data is not None
         assert drop_vars[0] not in dataset.variables
