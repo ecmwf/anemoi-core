@@ -21,7 +21,8 @@ import os
 import torch
 import triton
 import triton.language as tl
-from triton.tools.tensor_descriptor import TensorDescriptor
+import math
+from triton.tools.tensor_descriptor import TensorDescriptor #TODO(cathal) doesnt seem to work for torch 2.7 and less, guard 
 
 from anemoi.models.triton.utils import is_blackwell
 from anemoi.models.triton.utils import is_hip
@@ -107,12 +108,16 @@ def _attn_fwd_inner(
         if lo % BLOCK_ITER != 0:
             lo = (lo // BLOCK_ITER) * BLOCK_ITER
         # round up to highest multiple if not even
-        if hi % BLOCK_ITER != 0:
-            hi = tl.minimum(N_CTX, (hi // BLOCK_ITER) * BLOCK_ITER + BLOCK_ITER)
-
-        # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
+        #if hi % BLOCK_ITER != 0:
+        #    hi = (hi // BLOCK_ITER) * BLOCK_ITER + BLOCK_ITER
+        
+        # Apply bounds and inform compiler about multiples
         lo = tl.multiple_of(lo, BLOCK_ITER)
-        hi = tl.multiple_of(hi, BLOCK_ITER)
+        # Only assert hi is a multiple if it wasn't clamped by N_CTX
+        #if hi <= N_CTX:
+        #    hi = tl.multiple_of(hi, BLOCK_ITER)
+        #else:
+        #    hi = tl.minimum(hi, N_CTX)
     else:
         # Attends within the following range
         # X X X X X
@@ -127,7 +132,6 @@ def _attn_fwd_inner(
     MINUS_INF : tl.constexpr = -1.0e8
     
     iter_offset = iter_offset + lo
-    mask_fixed = start_fixed * BLOCK_FIXED + offs_fixed < N_CTX
     # loop over k, v and update accumulator
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
         curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
@@ -140,8 +144,11 @@ def _attn_fwd_inner(
         #k = tl.where(mask_iter[None, :] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
         k = tl.where(mask_iter[:, None] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
         qk = tl.dot(q, tl.trans(k)) * qk_scale
-        qk += tl.where(mask_iter[None, :] < N_CTX, 0, float("-inf")) #TODO replace with MINUS_INF
-        qk += tl.where(mask_fixed[:, None], 0, float("-inf"))  # mask out-of-bounds Q rows
+        
+        # Apply out-of-bounds masking first
+        #qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
+        qk += tl.where((curr_iter + offs_iter)[None, :] < N_CTX, 0, MINUS_INF)
+        #qk = tl.where(offs_fixed[:, None] < N_CTX, qk, MINUS_INF) # i think tridaos triton flash attn doesnt have this line
 
         # apply masking
         if WINDOW > 0:
@@ -254,9 +261,10 @@ def _generate_configs(try_warp_spec=True):
 
     if "PYTEST_VERSION" in os.environ:
         # Use a single config in testing for reproducibility
+        # Use BLOCK_FIXED=16 to avoid issues with small N_CTX in tests
         configs = [ 
             triton.Config(
-                dict(BLOCK_FIXED=32, BLOCK_ITER=32, WARP_SPECIALIZE=False),
+                dict(BLOCK_FIXED=16, BLOCK_ITER=16, WARP_SPECIALIZE=False),
                 num_stages=1,
                 num_warps=4,
                 pre_hook=_host_descriptor_pre_hook,
@@ -271,7 +279,7 @@ def _prune_invalid_configs_fwd(configs, named_args, **kwargs):
 
     # Filter out configs where BLOCK_FIXED > N_CTX
     # And configs where BLOCK_* does not divide evenly into N_CTX
-    valid_configs=[conf for conf in configs if (conf.kwargs.get("BLOCK_FIXED", 0) <= N_CTX and N_CTX % conf.kwargs.get("BLOCK_FIXED", 0) == 0 and N_CTX % conf.kwargs.get("BLOCK_ITER", 0) == 0)]
+    valid_configs=[conf for conf in configs if (conf.kwargs.get("BLOCK_FIXED", 0) <= N_CTX)]
         
     if len(valid_configs) == 0:
         raise ValueError(f"Autotuning found no valid runtime configurations for your setup (mode=fwd, {N_CTX=}, {HEAD_DIM=}). Please use an alternate attention backend or open a ticket on the anemoi-core repository describing your use case.")
@@ -321,7 +329,6 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 def _attn_fwd(
     sm_scale,
     M,
-    L,
     Z,
     H,
     desc_q,
@@ -336,6 +343,7 @@ def _attn_fwd(
     CAUSAL: tl.constexpr,  #
     WARP_SPECIALIZE: tl.constexpr,  #
     dtype: tl.constexpr,
+    n_ctx_rounded: tl.constexpr,
 ):
     tl.static_assert(BLOCK_ITER <= HEAD_DIM)
                      
@@ -344,8 +352,8 @@ def _attn_fwd(
     off_z = off_hz // H
     off_h = off_hz % H
 
-    # number of elements in all non-head-dim dimensions
-    y_dim = Z * H * N_CTX
+    # number of elements in all non-head-dim dimensions (use rounded value for actual tensor layout)
+    y_dim = Z * H * n_ctx_rounded
 
     # If tensor_descriptors weren't created on host (in system_specific_settings())
     # Then they are created here
@@ -367,15 +375,19 @@ def _attn_fwd(
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_ITER, HEAD_DIM],
     )
+    output_block_size = BLOCK_FIXED
+    if (start_fixed + 1) * BLOCK_FIXED > N_CTX: 
+        output_block_size = N_CTX - start_fixed * BLOCK_FIXED
     desc_o = _maybe_make_tensor_descriptor(
         desc_o,
         shape=[y_dim, HEAD_DIM],
         strides=[HEAD_DIM, 1],
-        block_shape=[BLOCK_FIXED, HEAD_DIM],
+        block_shape=[output_block_size, HEAD_DIM],
     )
     
     # Offsets into the start of the tensor which this kernel will iterate over
-    iter_offset = off_z * (N_CTX * H) + off_h * N_CTX
+    # Use n_ctx_rounded for calculating offsets since tensor is padded
+    iter_offset = off_z * (n_ctx_rounded * H) + off_h * n_ctx_rounded
     # Offsets into the region of the tensor which this kernel will keep in memory
     fixed_offset = iter_offset + start_fixed * BLOCK_FIXED  # (used for Tensor Descriptors)
     # initialize offset pointers
@@ -384,7 +396,7 @@ def _attn_fwd(
     
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) - float("inf") # list of maximum values, will be updated after each BLOCK_ITER. used to compute online softmax
-    l_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) #+ 1.0
+    l_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) #- float("inf") #+ 1.0
     acc = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
     # load scales
     qk_scale = sm_scale
@@ -416,11 +428,18 @@ def _attn_fwd(
     # epilogue
     m_i += tl.math.log2(l_i)
     #o_scale = tl.exp(m_i - l_i)
+    # Guard against division by zero when entire rows are masked out
+    #acc = tl.where(l_i[:, None] > 0, acc / l_i[:, None], 0.0)
     acc = acc / l_i[:, None]
     #acc = acc * o_scale[:,None]
-    m_ptrs = M + off_hz * N_CTX + offs_fixed
-    tl.store(m_ptrs, m_i)
-    acc = tl.where(offs_fixed[:, None] < N_CTX, acc, 0.0)  # mask out-of-bounds output values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
+    #m_ptrs = M + off_hz * N_CTX + offs_fixed
+    #ctx_rounded = N_CTX
+    #if N_CTX % BLOCK_FIXED != 0:
+    #    ctx_rounded = (N_CTX // BLOCK_FIXED + 1) * BLOCK_FIXED
+    m_ptrs = M + off_hz * N_CTX + offs_fixed 
+    #m_ptrs = M + off_hz * n_ctx_rounded + offs_fixed 
+    tl.store(m_ptrs, m_i, mask=offs_fixed < N_CTX) # TODO(cathal) might be overwiriting block boundarys in m where offs_fixed goes beyond ctx and into the next
+    #acc = tl.where(offs_fixed[:, None] < N_CTX, acc, 0.0)  # mask out-of-bounds output values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
     desc_o.store([fixed_offset, 0], acc.to(dtype))
 
 
@@ -882,8 +901,20 @@ class TritonAttention(torch.autograd.Function):
             window = 0
         assert not (causal and window > 0), "causal and window not supported in combination"
 
-        M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
-        L = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        # Pad tensors to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_ITER
+        # This ensures tensor descriptors don't read past the end of the flattened array
+        n_ctx = q.shape[2]
+        n_ctx_rounded = math.ceil(n_ctx / 16) * 16 #TODO(cathal) use block size from autotuning results instead of hardcoding 16 here
+        
+        # Pad q, k, v if necessary
+        #if n_ctx_rounded != n_ctx:
+        #    pad_size = n_ctx_rounded - n_ctx
+        #    q = torch.nn.functional.pad(q, (0, 0, 0, pad_size), value=0.0)
+        #    k = torch.nn.functional.pad(k, (0, 0, 0, pad_size), value=0.0)
+        #    v = torch.nn.functional.pad(v, (0, 0, 0, pad_size), value=0.0)
+        #    o = torch.nn.functional.pad(o, (0, 0, 0, pad_size), value=0.0)
+        
+        M = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
 
@@ -894,35 +925,42 @@ class TritonAttention(torch.autograd.Function):
         # Depending on BLOCK_FIXED, the context window might also be split across SMs
         # BLOCK_FIXED is a hyperparameter which triton sets at runtime by running small performance tests
         def grid(META):
-            return (triton.cdiv(q.shape[2], META["BLOCK_FIXED"]), q.shape[0] * q.shape[1], 1)
+            return (triton.cdiv(n_ctx_rounded, META["BLOCK_FIXED"]), q.shape[0] * q.shape[1], 1)
 
         _attn_fwd[grid](
             sm_scale,
             M, 
-            L,
+            #L,
             q.shape[0],
             q.shape[1],  #
             desc_q,
             desc_k,
             desc_v,
             desc_o,  #
-            N_CTX=q.shape[2],  #
+            N_CTX=n_ctx,  # Use original context length for masking
             HEAD_DIM=HEAD_DIM_K,  #
             WINDOW=window,
             CAUSAL=causal,  #
             dtype=torch_dtype_to_triton(q.dtype),
+            n_ctx_rounded=n_ctx_rounded,
             **extra_kern_args,
         )
 
-        ctx.save_for_backward(q, k, v, o, M, L)
+        ctx.save_for_backward(q, k, v, o, M)
         ctx.sm_scale = sm_scale
         ctx.causal = causal
         ctx.window = window
+        ctx.n_ctx = n_ctx
+        
+        # Remove padding from output
+        if n_ctx_rounded != n_ctx:
+            o = o[:, :, :n_ctx, :]
+        
         return o
 
     @staticmethod
     def backward(ctx, do):
-        q, k, v, o, M, L= ctx.saved_tensors
+        q, k, v, o, M= ctx.saved_tensors
 
         if do.shape == o.shape and do.stride() != o.stride():
             do = do.reshape(o.shape)
@@ -933,6 +971,8 @@ class TritonAttention(torch.autograd.Function):
         dk = torch.empty_like(k).contiguous()
         dv = torch.empty_like(v).contiguous()
         BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
+
+        L = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
         k = k * (ctx.sm_scale * RCP_LN2) # TODO move to kernel
