@@ -698,6 +698,52 @@ def test_graphdiffusionforecaster_target_helpers_reduce_data_output_to_model_out
     torch.testing.assert_close(y_model["data"], y_model_from_data_output["data"])
 
 
+def test_graphdiffusionforecaster_target_reduction_fast_paths() -> None:
+    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    pl.LightningModule.__init__(forecaster)
+
+    # Identity mapping: model.output == data.output -> return same tensor object.
+    data_indices_identity = {"data": _make_minimal_index_collection({"A": 0, "B": 1})}
+    _set_base_task_attrs(forecaster, data_indices=data_indices_identity, config=_CFG_DIFFUSION)
+    y_identity = {"data": torch.randn((2, 1, 1, 4, 2), dtype=torch.float32)}
+    y_model_identity = forecaster.reduce_data_output_target_to_model_output(y_identity)
+    assert y_model_identity["data"] is y_identity["data"]
+
+    # Contiguous subset mapping: should use view (narrow) and share storage.
+    data_indices_contiguous = {
+        "data": _make_minimal_index_collection(
+            {"obs_A": 0, "obs_B": 1, "A": 2, "B": 3},
+            target=["obs_A", "obs_B"],
+        ),
+    }
+    _set_base_task_attrs(forecaster, data_indices=data_indices_contiguous, config=_CFG_DIFFUSION)
+    y_contiguous = {"data": torch.randn((2, 1, 1, 4, 4), dtype=torch.float32)}
+    y_model_contiguous = forecaster.reduce_data_output_target_to_model_output(y_contiguous)
+    expected_contiguous = y_contiguous["data"].narrow(-1, 2, 2)
+    torch.testing.assert_close(y_model_contiguous["data"], expected_contiguous)
+    assert y_model_contiguous["data"].untyped_storage().data_ptr() == y_contiguous["data"].untyped_storage().data_ptr()
+
+    # Non-contiguous mapping: fallback to index_select.
+    data_indices_non_contiguous = {
+        "data": _make_minimal_index_collection(
+            {"A": 0, "obs_A": 1, "B": 2},
+            target=["obs_A"],
+        ),
+    }
+    _set_base_task_attrs(forecaster, data_indices=data_indices_non_contiguous, config=_CFG_DIFFUSION)
+    y_non_contiguous = {"data": torch.randn((2, 1, 1, 4, 3), dtype=torch.float32)}
+    y_model_non_contiguous = forecaster.reduce_data_output_target_to_model_output(y_non_contiguous)
+    expected_non_contiguous = y_non_contiguous["data"].index_select(
+        -1,
+        torch.tensor([0, 2], dtype=torch.long),
+    )
+    torch.testing.assert_close(y_model_non_contiguous["data"], expected_non_contiguous)
+    assert (
+        y_model_non_contiguous["data"].untyped_storage().data_ptr()
+        != y_non_contiguous["data"].untyped_storage().data_ptr()
+    )
+
+
 def test_graphdiffusiontendforecaster_uses_reduced_model_target_and_data_output_loss_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

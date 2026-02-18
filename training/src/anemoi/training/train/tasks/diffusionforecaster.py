@@ -97,12 +97,22 @@ class BaseDiffusionForecaster(BaseGraphModule):
         """Reduce a data-output tensor to model-output variable space."""
         y_reduced = {}
         for dataset_name, y_dataset in y_data_output.items():
-            var_idx = torch.as_tensor(
-                self.data_indices[dataset_name].model_output_positions_in_data_output,
-                device=y_dataset.device,
-                dtype=torch.long,
-            )
-            y_reduced[dataset_name] = y_dataset.index_select(-1, var_idx)
+            dataset_indices = self.data_indices[dataset_name]
+            if dataset_indices.model_output_in_data_output_is_identity:
+                y_reduced[dataset_name] = y_dataset
+            elif dataset_indices.model_output_in_data_output_is_contiguous:
+                y_reduced[dataset_name] = y_dataset.narrow(
+                    -1,
+                    dataset_indices.model_output_in_data_output_contiguous_start,
+                    dataset_indices.model_output_in_data_output_contiguous_length,
+                )
+            else:
+                var_idx = torch.as_tensor(
+                    dataset_indices.model_output_positions_in_data_output,
+                    device=y_dataset.device,
+                    dtype=torch.long,
+                )
+                y_reduced[dataset_name] = y_dataset.index_select(-1, var_idx)
             LOGGER.debug("SHAPE: y_model_output[%s].shape = %s", dataset_name, list(y_reduced[dataset_name].shape))
         return y_reduced
 
