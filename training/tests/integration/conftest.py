@@ -537,7 +537,7 @@ def multi_output_interpolator_config(
 def imerg_target_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
-) -> tuple[DictConfig, list[str]]:
+) -> tuple[DictConfig, str]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_filtering"):
         template = compose(config_name="config")
 
@@ -554,7 +554,7 @@ def imerg_target_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, [url_dataset]
+    return cfg, url_dataset
 
 
 @pytest.fixture(

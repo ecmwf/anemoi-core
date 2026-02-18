@@ -331,7 +331,7 @@ def test_training_cycle_imerg_target(
 
 
 def test_config_validation_imerg_target(
-    imerg_target_config: tuple[DictConfig, list[str]],
+    imerg_target_config: tuple[DictConfig, str],
 ) -> None:
     cfg, _ = imerg_target_config
     BaseSchema(**cfg)
