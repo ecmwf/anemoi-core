@@ -469,7 +469,6 @@ def global_config_with_checkpoint(
     return cfg, dataset_url
 
 
-
 @pytest.fixture
 def multi_output_interpolator_config(
     testing_modifications_with_temp_dir: DictConfig,
