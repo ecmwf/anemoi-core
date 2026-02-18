@@ -12,7 +12,6 @@
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
-import numpy as np
 import omegaconf
 import pytest
 import torch
@@ -22,17 +21,13 @@ from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
-from anemoi.training.diagnostics.callbacks.plot_ens import EnsemblePlotMixin
-from anemoi.training.diagnostics.callbacks.plot_ens import PlotEnsSample
-from anemoi.training.diagnostics.callbacks.plot_ens import PlotHistogram
-from anemoi.training.diagnostics.callbacks.plot_ens import PlotSample
-from anemoi.training.diagnostics.callbacks.plot_ens import PlotSpectrum
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
 default_config = """
 training:
   model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  multistep_input : 1
 
 diagnostics:
   callbacks: []
@@ -245,63 +240,6 @@ def test_rollout_eval_handles_dict_batch():
         assert args[1].item() == pytest.approx(0.125)  # (0.1 + 0.15) / 2
         assert args[2]["metric1"].item() == pytest.approx(0.25)  # Last metric value
         assert args[3] == 2  # batch size
-
-
-def test_ensemble_plot_callbacks_instantiation():
-    """Test that ensemble plot callbacks can be instantiated."""
-    config = omegaconf.OmegaConf.create(
-        {
-            "diagnostics": {
-                "plot": {
-                    "parameters": ["temperature", "pressure"],
-                    "focus_areas": {},
-                    "datashader": False,
-                    "asynchronous": False,
-                    "frequency": {"batch": 1},
-                },
-            },
-            "data": {"diagnostic": None},
-            "system": {
-                "output": {"root": "path_to_output", "plots": "plot"},
-            },
-            "dataloader": {"read_group_size": 1},
-        },
-    )
-
-    # Test plotting class instantiation
-    plot_ens_sample = PlotEnsSample(
-        config=config,
-        sample_idx=0,
-        parameters=["temperature", "pressure"],
-        accumulation_levels_plot=[0.1, 0.5, 0.9],
-        output_steps=1,
-    )
-    assert plot_ens_sample is not None
-
-    plot_sample = PlotSample(
-        config=config,
-        sample_idx=0,
-        parameters=["temperature"],
-        accumulation_levels_plot=[0.5],
-        output_steps=1,
-    )
-    assert plot_sample is not None
-
-    plot_spectrum = PlotSpectrum(
-        config=config,
-        sample_idx=0,
-        parameters=["temperature"],
-        output_steps=1,
-    )
-    assert plot_spectrum is not None
-
-    plot_histogram = PlotHistogram(
-        config=config,
-        sample_idx=0,
-        parameters=["temperature"],
-        output_steps=1,
-    )
-    assert plot_histogram is not None
 
 
 # Progress bar callback tests

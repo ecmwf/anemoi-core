@@ -264,6 +264,18 @@ def test_training_cycle_interpolator(
     AnemoiTrainer(cfg).train()
 
 
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multi_output_interpolator(
+    multi_output_interpolator_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Full training-cycle smoke-test for the temporal interpolation task."""
+    cfg, url = multi_output_interpolator_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
 def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
     """Schema-level validation for the temporal interpolation config."""
     cfg, _ = interpolator_config

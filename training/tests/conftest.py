@@ -7,16 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# Use non-GUI backend before any test (or plot) code imports matplotlib.
+# Avoids slow backend probing (Tk/Qt) in headless/CI and speeds up plotting tests.
+import matplotlib as mpl
+
+mpl.use("Agg")
 
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
-import torch
 from _pytest.fixtures import SubRequest
-from hydra import compose
-from hydra import initialize
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
@@ -51,6 +53,9 @@ PYTEST_MARKED_TESTS = [
 
 @pytest.fixture
 def config(request: SubRequest) -> DictConfig:
+    from hydra import compose
+    from hydra import initialize
+
     overrides = request.param
     config_path = _get_config_path()
     with initialize(version_base=None, config_path=config_path):
@@ -61,6 +66,9 @@ def config(request: SubRequest) -> DictConfig:
 @pytest.fixture
 def datamodule():  # noqa: ANN201
     """Lazy-load AnemoiDatasetsDataModule to avoid expensive import at test collection time."""
+    from hydra import compose
+    from hydra import initialize
+
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
     config_path = _get_config_path()
@@ -73,6 +81,9 @@ def datamodule():  # noqa: ANN201
 @pytest.fixture
 def graph_with_nodes() -> HeteroData:
     """Graph with 12 nodes."""
+    import torch
+    from torch_geometric.data import HeteroData
+
     lats = [-0.15, 0, 0.15]
     lons = [0, 0.25, 0.5, 0.75]
     coords = np.array([[lat, lon] for lat in lats for lon in lons])
