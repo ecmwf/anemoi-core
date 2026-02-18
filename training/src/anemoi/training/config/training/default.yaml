@@ -20,8 +20,6 @@ precision: 16-mixed
 # Deepmind use k = 2 in their model
 multistep_input: 2
 
-include_future_forcing: false
-
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1

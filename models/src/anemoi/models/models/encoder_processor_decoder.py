@@ -67,7 +67,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
         )
 
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, future_forcing=None):
+    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -76,19 +76,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
-        cat_tensors = [
-            einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-        ]
-
-        # Append future forcing features (flattened from (batch, 1, ensemble, grid, nf) -> (batch ensemble grid) nf)
-        if future_forcing is not None:
-            cat_tensors.append(
-                einops.rearrange(future_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-            )
-
-        cat_tensors.append(node_attributes_data)
-
-        x_data_latent = torch.cat(cat_tensors, dim=-1)
+        x_data_latent = torch.cat(
+            (
+                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                node_attributes_data,
+            ),
+            dim=-1,  # feature dimension
+        )
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
@@ -121,7 +115,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
-        future_forcing: Optional[Tensor] = None,
         **kwargs,
     ) -> Tensor:
         """Forward pass of the model.
@@ -134,12 +127,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Model communication group, by default None
         grid_shard_shapes : list, optional
             Shard shapes of the grid, by default None
-        future_forcing : Optional[Tensor], optional
-            Forcing fields at the target time step, shape (batch, 1, ensemble, grid, n_forcing).
-            Concatenated to the input features if provided. By default None.
-        **kwargs : dict
-            Additional keyword arguments.
-
+        kwargs
+            Additional arguments
         Returns
         -------
         Tensor
@@ -150,13 +139,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
-        x_data_latent, shard_shapes_data = self._assemble_input(
-            x,
-            batch_size,
-            grid_shard_shapes,
-            model_comm_group,
-            future_forcing=future_forcing,
-        )
+        x_data_latent, shard_shapes_data = self._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
 
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)

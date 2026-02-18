@@ -65,14 +65,6 @@ class BaseGraphModel(nn.Module):
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
-        self._include_future_forcing = getattr(model_config.training, "include_future_forcing", False)
-        self._num_forcing = len(data_indices.forcing) if self._include_future_forcing else 0
-        # Store forcing indices in data space for use in predict_step
-        if self._include_future_forcing:
-            self._future_forcing_indices = data_indices.data.input.forcing
-        else:
-            self._future_forcing_indices = None
-
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
 
@@ -127,10 +119,7 @@ class BaseGraphModel(nn.Module):
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
     def _calculate_input_dim(self):
-        dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        if self._include_future_forcing:
-            dim += self._num_forcing
-        return dim
+        return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
     def _calculate_input_dim_latent(self):
         return self.node_attributes.attr_ndims[self._graph_name_hidden]
@@ -155,7 +144,6 @@ class BaseGraphModel(nn.Module):
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
-        future_forcing: Optional[Tensor] = None,
         **kwargs,
     ) -> Tensor:
         """Forward pass of the model.
@@ -168,12 +156,8 @@ class BaseGraphModel(nn.Module):
             Model communication group, by default None
         grid_shard_shapes : list, optional
             Shard shapes of the grid, by default None
-        future_forcing : Optional[Tensor], optional
-            Forcing fields at the target time step, shape (batch, 1, ensemble, grid, n_forcing).
-            Concatenated to the input features if provided. By default None.
-        **kwargs : dict
-            Additional keyword arguments.
-
+        kwargs
+            Additional arguments
         Returns
         -------
         Tensor
@@ -211,8 +195,7 @@ class BaseGraphModel(nn.Module):
         gather_out : bool
             Whether to gather output tensors across distributed processes
         **kwargs
-            Additional arguments. Supports 'future_forcing' tensor for models
-            that use future forcing fields.
+            Additional arguments
 
         Returns
         -------
@@ -228,34 +211,17 @@ class BaseGraphModel(nn.Module):
             # batch, timesteps, grid, variables
             x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
 
-            # Extract and normalize future forcing from the batch if the model uses it.
-            # batch[:, multi_step] is the target time step which contains the future forcing fields.
-            future_forcing = kwargs.pop("future_forcing", None)
-            if future_forcing is None and self._include_future_forcing and batch.shape[1] > multi_step:
-                # Normalize the target time step through pre_processors to get normalized forcing
-                target_step = batch[:, multi_step : multi_step + 1, None, ...]  # (batch, 1, 1, grid, all_vars)
-                target_step_norm = pre_processors(target_step, in_place=False)
-                future_forcing = target_step_norm[..., self._future_forcing_indices]  # (batch, 1, 1, grid, n_forcing)
-
             # Handle distributed processing
             grid_shard_shapes = None
             if model_comm_group is not None:
                 shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
                 grid_shard_shapes = [shape[-2] for shape in shard_shapes]
                 x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-                if future_forcing is not None:
-                    future_forcing = shard_tensor(future_forcing, -2, shard_shapes, model_comm_group)
 
             x = pre_processors(x, in_place=False)
 
             # Perform forward pass
-            y_hat = self.forward(
-                x,
-                model_comm_group=model_comm_group,
-                grid_shard_shapes=grid_shard_shapes,
-                future_forcing=future_forcing,
-                **kwargs,
-            )
+            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
 
             # Apply post-processing
             y_hat = post_processors(y_hat, in_place=False)

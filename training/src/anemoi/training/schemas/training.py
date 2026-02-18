@@ -325,10 +325,6 @@ class BaseTrainingSchema(BaseModel):
     multistep_input: PositiveInt = Field(example=2)
     """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
     k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""
-    include_future_forcing: bool = Field(default=False)
-    """Include forcing fields at the target time step (t+6) as additional model input.
-    When enabled, the model receives future forcing (e.g. solar angles, time-of-day)
-    alongside the standard input, allowing it to condition predictions on known future forcings."""
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
