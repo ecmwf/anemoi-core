@@ -236,15 +236,15 @@ with ``norm: l1`` should be used as ``edge_weight_attribute`` (commonly
      projections:
        multiscale:
          matrices:
-           - edges_name: [smooth_1x, "to", smooth_1x]
+           - edges_name: ["smooth_1x", "to", "smooth_1x"]
              edge_weight_attribute: gauss_weight
-           - edges_name: [smooth_2x, "to", smooth_2x]
+           - edges_name: ["smooth_2x", "to", "smooth_2x"]
              edge_weight_attribute: gauss_weight
          nodes: ...
          edges: ...
        residual:
-         down_edges_name: [${graph.data}, "to", truncation]
-         up_edges_name: [truncation, "to", ${graph.data}]
+         down_edges_name: ["${graph.data}", "to", "truncation"]
+         up_edges_name: ["truncation", "to", "${graph.data}"]
          edge_weight_attribute: gauss_weight
          nodes: ...
          edges: ...

@@ -2,6 +2,8 @@
 defaults:
   # Load graph/projections/smooth_knn*_n320.yaml and mount each config under
   # the matching local path in "smoothers" (e.g. smoothers.smooth_1x).
+  # Hydra composition: each entry is loaded first, then `_self_` applies this
+  # file so we can reference composed values via ${graph.projections.multiscale...}.
   # Use graph/projections/multiscale=4scale_o96 to switch to o96 smoothers.
   - /graph/projections@smoothers.smooth_1x: smooth_knn16_n320
   - /graph/projections@smoothers.smooth_2x: smooth_knn32_n320

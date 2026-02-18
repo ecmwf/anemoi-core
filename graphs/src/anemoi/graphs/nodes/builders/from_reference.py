@@ -20,7 +20,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ReferenceNodes(BaseNodeBuilder):
-    """Nodes copied from another node set already present in the graph."""
+    """Nodes copied from another node set already present in the graph.
+
+    Useful for projection configs that need separate node names per scale while
+    reusing the same underlying coordinates.
+    """
 
     def __init__(self, reference_node_name: str, name: str) -> None:
         self.reference_node_name = reference_node_name

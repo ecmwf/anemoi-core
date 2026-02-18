@@ -248,10 +248,9 @@ class NoiseInjector(BaseNoiseInjector):
         noise_matrix : str, optional
             Optional path to noise truncation matrix
         graph_data : Optional[HeteroData], optional
-            Unused. Accepted for interface compatibility, by default None.
+            Graph data for noise conditioning.
         """
         super().__init__()
-        _ = graph_data
 
         self._noise_conditioning = NoiseConditioning(
             noise_std=noise_std,
@@ -259,6 +258,7 @@ class NoiseInjector(BaseNoiseInjector):
             noise_mlp_hidden_dim=noise_mlp_hidden_dim,
             layer_kernels=layer_kernels,
             noise_matrix=noise_matrix,
+            graph_data=graph_data,
         )
         self.noise_channels = noise_channels_dim
         self.projection = nn.Linear(num_channels + self.noise_channels, num_channels)
