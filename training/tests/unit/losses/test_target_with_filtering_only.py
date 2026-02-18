@@ -214,6 +214,7 @@ class TestCombinedLossWithTargetOnlyVariables:
         return {
             "pressure_level": (4, torch.ones(n_variables) * 2.0),
             "general_variable": (4, torch.tensor([1.0, 0.5, 0.5, 0.5, 0.8, 10.0])),
+            "uniform_weight": (3, torch.ones(100)),
         }
 
     def test_combined_loss_with_target_only_variable(
@@ -281,13 +282,13 @@ class TestCombinedLossWithTargetOnlyVariables:
                             "_target_": "anemoi.training.losses.MSELoss",
                             "predicted_variables": variables,
                             "target_variables": variables,
-                            "scalers": ["uniform_grid", "pressure_level"],
+                            "scalers": ["pressure_level", "uniform_weight"],
                         },
                         {
                             "_target_": "anemoi.training.losses.MSELoss",
                             "predicted_variables": ["tp"],
                             "target_variables": ["imerg"],
-                            "scalers": ["uniform_grid", "pressure_level"],
+                            "scalers": ["pressure_level", "uniform_weight"],
                         },
                     ],
                     "scalers": ["*"],
@@ -865,10 +866,7 @@ class TestLossVariableMapperForward:
 
         # Now compute loss WITH scalers (2x weight for all variables)
         n_vars = len(data_indices_with_target_only.name_to_index)
-        scalers = {
-            "grid_uniform": (3, torch.ones(4)),
-            "double_weight": (4, torch.ones(n_vars) * 2.0),
-        }
+        scalers = {"double_weight": (4, torch.ones(n_vars) * 2.0), "uniform_weight": (3, torch.ones(4))}
 
         loss_with_scalers = get_loss_function(
             DictConfig(
@@ -879,13 +877,13 @@ class TestLossVariableMapperForward:
                             "_target_": "anemoi.training.losses.MSELoss",
                             "predicted_variables": prognostic_variables,
                             "target_variables": prognostic_variables,
-                            "scalers": ["grid_uniform", "double_weight"],
+                            "scalers": ["double_weight", "uniform_weight"],
                         },
                         {
                             "_target_": "anemoi.training.losses.MSELoss",
                             "predicted_variables": ["var_0"],
                             "target_variables": ["imerg"],
-                            "scalers": ["grid_uniform", "double_weight"],
+                            "scalers": ["double_weight", "uniform_weight"],
                         },
                     ],
                     "loss_weights": [1.0, 1.0],
