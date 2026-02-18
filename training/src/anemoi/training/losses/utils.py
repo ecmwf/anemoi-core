@@ -14,8 +14,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from anemoi.training.losses.combined import CombinedLoss
-from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -53,16 +53,20 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     # https://github.com/ecmwf/anemoi-core/pull/723#discussion_r2597831922
     if isinstance(loss, CombinedLoss):
         variable_scaling = {}
+        key_count_by_name: dict[str, int] = {}
         for sub_loss in loss.losses:
-            variable_scaling[sub_loss.__class__.__name__] = print_variable_scaling(sub_loss, data_indices)
+            base_key = sub_loss.__class__.__name__
+            key_count_by_name[base_key] = key_count_by_name.get(base_key, 0) + 1
+            suffix = "" if key_count_by_name[base_key] == 1 else f"_{key_count_by_name[base_key]}"
+            variable_scaling[f"{base_key}{suffix}"] = print_variable_scaling(sub_loss, data_indices)
         return variable_scaling
 
     if isinstance(loss, MultiscaleLossWrapper):
         return print_variable_scaling(loss.loss, data_indices)
 
-    if isinstance(loss, FilteringLossWrapper):
+    if isinstance(loss, LossVariableMapper):
         subset_vars = enumerate(loss.predicted_variables)
-        # FilteringLossWrapper forwards scalers to its inner loss, so get scaling from there
+        # LossVariableMapper forwards scalers to its inner loss, so get scaling from there
         scaler_source = loss.loss.scaler
     else:
         subset_vars = enumerate(data_indices.model.output.name_to_index.keys())
@@ -77,8 +81,8 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
         scaling_values[name] = value
         scaling_sum += value
 
-        log_text += f"Total scaling sum: {scaling_sum:.4g}, "
-        scaling_values["total_sum"] = scaling_sum
+    log_text += f"Total scaling sum: {scaling_sum:.4g}, "
+    scaling_values["total_sum"] = scaling_sum
     LOGGER.debug(log_text)
 
     return scaling_values

@@ -12,7 +12,8 @@ from omegaconf import DictConfig
 
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.losses.index_space import IndexSpace
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 
@@ -36,24 +37,34 @@ def test_instantiation_with_filtering() -> None:
         ),
         data_indices=data_indices,
     )
-    assert isinstance(loss, FilteringLossWrapper)
+    assert isinstance(loss, LossVariableMapper)
     assert isinstance(loss.loss, BaseLoss)
     assert hasattr(loss.loss, "y_dim")
     assert hasattr(loss.loss, "x_dim")
 
-    assert hasattr(loss, "predicted_indices")
+    assert IndexSpace.MODEL_OUTPUT in loss.predicted_indices_by_layout
 
     assert loss.predicted_variables == ["tp"]
     # tensors are of size (batch, output_steps, ens, latlon, vars)
     right_shaped_pred_output_pair = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
-    loss_value = loss(*right_shaped_pred_output_pair, squash=False)
+    loss_value = loss(
+        *right_shaped_pred_output_pair,
+        squash=False,
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_FULL,
+    )
     assert loss_value.shape[0] == len(
         name_to_index.keys(),
     ), "Loss output with squash=False should match length of all variables"
     assert (
-        torch.nonzero(loss_value)[0].tolist() == loss.predicted_indices
+        torch.nonzero(loss_value)[0].tolist() == loss.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT]
     ), "Filtered out variables should have zero loss"
-    loss_total = loss(*right_shaped_pred_output_pair, squash=True)
+    loss_total = loss(
+        *right_shaped_pred_output_pair,
+        squash=True,
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_FULL,
+    )
     assert (
         loss_total == loss_value[0]
     ), "Loss output with squash=True should be the value of loss for predicted variables"
@@ -111,6 +122,6 @@ def test_print_variable_scaling() -> None:
         scalers=scalers,
     )
     scaling_dict = print_variable_scaling(loss, data_indices)
-    assert "FilteringLossWrapper" in scaling_dict  # loss is filtered
-    assert "tp" in scaling_dict["FilteringLossWrapper"]
-    assert [var not in scaling_dict["FilteringLossWrapper"] for var in data_indices.name_to_index if var != "tp"]
+    assert "LossVariableMapper" in scaling_dict  # loss is filtered
+    assert "tp" in scaling_dict["LossVariableMapper"]
+    assert [var not in scaling_dict["LossVariableMapper"] for var in data_indices.name_to_index if var != "tp"]

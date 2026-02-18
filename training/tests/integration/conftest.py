@@ -554,7 +554,7 @@ def imerg_target_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, url_dataset
+    return cfg, [url_dataset]
 
 
 @pytest.fixture(

@@ -17,6 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.losses.index_space import IndexSpace
 
 from .base import BaseGraphModule
 
@@ -111,6 +112,8 @@ class BaseDiffusionForecaster(BaseGraphModule):
         dataset_name: str,
         weights: torch.Tensor | None = None,
         grid_shard_slice: slice | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the diffusion loss with noise weighting.
@@ -141,6 +144,8 @@ class BaseDiffusionForecaster(BaseGraphModule):
             weights=weights[dataset_name],
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
         )
 
     def _noise_target(self, x: dict[str, torch.Tensor], sigma: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -237,6 +242,8 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
             target,
             validation_mode=validation_mode,
             weights=noise_weights,
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
             use_reentrant=False,
         )
 
@@ -441,12 +448,15 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 dataset_name=dataset_name,
             )
 
+            metric_kwargs = {k: v for k, v in kwargs.items() if k not in {"pred_layout", "target_layout"}}
             metrics_next = self._compute_metrics(
                 y_pred_state_full,
                 y_state_full,
                 grid_shard_slice=grid_shard_slice,
                 dataset_name=dataset_name,
-                **kwargs,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
+                **metric_kwargs,
             )
 
         return loss, metrics_next, y_pred_state_full if validation_mode else None
@@ -495,13 +505,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
         tendency_target = self._compute_tendency_target(y, x_ref)
-        tendency_target_full = {
-            d: data.narrow(1, self.n_step_input, self.n_step_output).clone() for d, data in batch.items()
-        }
-        for d in batch:
-            idx = self.data_indices[d].data.output.full
-            tendency_target_full[d][..., idx] = tendency_target[d]
-
+        state_target = {d: data.narrow(1, self.n_step_input, self.n_step_output).clone() for d, data in batch.items()}
         # get noise level and associated loss weights
         shapes = {k: target.shape for k, target in tendency_target.items()}
         sigma, noise_weights = self._get_noise_level(
@@ -521,16 +525,16 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         y_pred = None
         if validation_mode:
             y_pred = self._reconstruct_state(x_ref, tendency_pred)
-        target = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
-
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             tendency_pred,
-            tendency_target_full,
+            tendency_target,
             y_pred_state=y_pred,
-            y_state=target,
+            y_state=state_target,
             validation_mode=validation_mode,
             weights=noise_weights,
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_OUTPUT,
             use_reentrant=False,
         )
 

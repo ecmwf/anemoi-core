@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
@@ -84,6 +85,8 @@ class GraphForecaster(BaseRolloutGraphModule):
                 y,
                 step=rollout_step,
                 validation_mode=validation_mode,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 

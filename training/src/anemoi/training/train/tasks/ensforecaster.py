@@ -16,6 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 from anemoi.training.utils.enums import TensorDim
 
@@ -133,6 +134,9 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         dataset_name: str,
         step: int | None = None,
         validation_mode: bool = False,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
+        **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
@@ -148,6 +152,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             grid_dim=self.grid_dim,
             grid_shard_shape=self.grid_shard_shapes,
             dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
         )
 
         # Compute metrics if in validation mode
@@ -159,6 +165,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 step=step,
                 dataset_name=dataset_name,
                 grid_shard_slice=self.grid_shard_slice[dataset_name],
+                pred_layout=pred_layout,
+                target_layout=target_layout,
             )
 
         return loss, metrics_next, y_pred_ens
@@ -244,6 +252,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 y,
                 step=rollout_step,
                 validation_mode=validation_mode,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 

@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for FilteringLossWrapper with target-only variables.
+"""Tests for LossVariableMapper with target-only variables.
 
 Tests scenarios where some variables exist only in data.output (e.g. satellite
 observations used as targets) but not in model.output.
@@ -20,7 +20,8 @@ from omegaconf import DictConfig
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import get_loss_function
-from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.losses.index_space import IndexSpace
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 
 
 class TestScalerFilteringWithTargetOnlyVariables:
@@ -77,7 +78,7 @@ class TestScalerFilteringWithTargetOnlyVariables:
             data_indices=data_indices_with_target_only,
         )
 
-        assert isinstance(loss, FilteringLossWrapper)
+        assert isinstance(loss, LossVariableMapper)
 
         # Verify scaler shapes are filtered correctly
         # Scalers are forwarded to the inner loss, so access them there
@@ -113,7 +114,7 @@ class TestScalerFilteringWithTargetOnlyVariables:
             data_indices=data_indices_with_target_only,
         )
 
-        assert isinstance(loss, FilteringLossWrapper)
+        assert isinstance(loss, LossVariableMapper)
 
         # Scalers are forwarded to the inner loss, so access them there
         pressure_scaler = loss.loss.scaler.tensors["pressure_level"][1]
@@ -253,9 +254,9 @@ class TestCombinedLossWithTargetOnlyVariables:
         assert isinstance(loss, CombinedLoss)
         assert len(loss.losses) == 2
 
-        # Both losses should be FilteringLossWrapper
-        assert isinstance(loss.losses[0], FilteringLossWrapper)
-        assert isinstance(loss.losses[1], FilteringLossWrapper)
+        # Both losses should be LossVariableMapper
+        assert isinstance(loss.losses[0], LossVariableMapper)
+        assert isinstance(loss.losses[1], LossVariableMapper)
 
         # Scalers are forwarded to the inner loss, so access them there
         # First loss: 5 variables
@@ -269,6 +270,8 @@ class TestCombinedLossWithTargetOnlyVariables:
     def test_combined_loss_forward_pass(self, data_indices_with_imerg: IndexCollection, scalers_custom: dict) -> None:
         """Test that forward pass works with correct tensor shapes."""
         variables = ["tp", "t2m", "u10", "v10", "msl"]
+        scalers_with_grid = dict(scalers_custom)
+        scalers_with_grid["uniform_grid"] = (3, torch.ones(100))
 
         loss = get_loss_function(
             DictConfig(
@@ -291,7 +294,7 @@ class TestCombinedLossWithTargetOnlyVariables:
                     "scalers": ["*"],
                 },
             ),
-            scalers=scalers_custom,
+            scalers=scalers_with_grid,
             data_indices=data_indices_with_imerg,
         )
 
@@ -301,7 +304,13 @@ class TestCombinedLossWithTargetOnlyVariables:
         target = torch.randn(2, 1, 1, 100, n_variables)
 
         # Should not raise any errors
-        loss_value = loss(pred, target, squash_mode="sum")
+        loss_value = loss(
+            pred,
+            target,
+            squash_mode="sum",
+            pred_layout=IndexSpace.DATA_FULL,
+            target_layout=IndexSpace.DATA_FULL,
+        )
         assert loss_value.ndim == 0 or loss_value.shape == torch.Size([])  # scalar
         assert not torch.isnan(loss_value)
         assert loss_value > 0  # Non-zero loss
@@ -334,8 +343,8 @@ class TestScalerOverrideWithDifferentSizes:
         torch.testing.assert_close(scale.tensors["test"][1], new_values)
 
 
-class TestFilteringLossWrapperSetDataIndices:
-    """Test FilteringLossWrapper.set_data_indices with target-only variables."""
+class TestLossVariableMapperSetDataIndices:
+    """Test LossVariableMapper.set_data_indices with target-only variables."""
 
     @pytest.fixture
     def data_indices_with_target_only(self) -> IndexCollection:
@@ -380,18 +389,18 @@ class TestFilteringLossWrapperSetDataIndices:
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
-        wrapper = FilteringLossWrapper(
+        wrapper = LossVariableMapper(
             loss=base_loss,
             predicted_variables=["var_0"],  # From model.output
             target_variables=["imerg"],  # Target-only, not in model.output
         )
         wrapper.set_data_indices(data_indices_with_target_only)
 
-        # predicted_indices should be from model.output
-        assert wrapper.predicted_indices == [0]  # var_0 index in model.output
+        # predicted indices should be from model.output layout
+        assert wrapper.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [0]  # var_0 index in model.output
 
         # target_indices: imerg has name_to_index=9
-        assert wrapper.target_indices == [9]
+        assert wrapper.target_indices_by_layout[IndexSpace.DATA_FULL] == [9]
 
     def test_set_data_indices_with_forcing_gaps(self) -> None:
         """Reindexing when forcing variables create gaps in data.output.
@@ -425,20 +434,23 @@ class TestFilteringLossWrapperSetDataIndices:
         assert data_indices.data.output.full.tolist() == [0, 2, 3]
 
         base_loss = MSELoss()
-        wrapper = FilteringLossWrapper(
+        wrapper = LossVariableMapper(
             loss=base_loss,
             predicted_variables=["var_0"],
             target_variables=["imerg"],
         )
         wrapper.set_data_indices(data_indices)
 
-        # predicted_indices: var_0 is at position 0 in model.output
-        assert wrapper.predicted_indices == [0]
+        # predicted indices: var_0 is at position 0 in model.output
+        assert wrapper.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [0]
 
         # target_indices: imerg has name_to_index=3
-        assert wrapper.target_indices == [
+        assert wrapper.target_indices_by_layout[IndexSpace.DATA_FULL] == [
             3,
-        ], f"Expected imerg at position 2 in data.output tensor, got {wrapper.target_indices}"
+        ], (
+            "Expected imerg at position 2 in data.output tensor, "
+            f"got {wrapper.target_indices_by_layout[IndexSpace.DATA_FULL]}"
+        )
 
     def test_set_data_indices_same_predicted_and_target(self, data_indices_with_target_only: IndexCollection) -> None:
         """Test set_data_indices when predicted and target variables are the same.
@@ -450,18 +462,18 @@ class TestFilteringLossWrapperSetDataIndices:
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
-        wrapper = FilteringLossWrapper(
+        wrapper = LossVariableMapper(
             loss=base_loss,
             predicted_variables=["var_0", "var_1", "var_2"],
             target_variables=["var_0", "var_1", "var_2"],
         )
         wrapper.set_data_indices(data_indices_with_target_only)
 
-        # predicted_indices come from model.output.name_to_index
-        assert wrapper.predicted_indices == [0, 1, 2]
+        # predicted indices come from model.output.name_to_index
+        assert wrapper.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [0, 1, 2]
         # var_0, var_1 are at positions 0, 1 in data.output.full
         # var_2 has name_to_index=4
-        assert wrapper.target_indices == [0, 1, 4]
+        assert wrapper.target_indices_by_layout[IndexSpace.DATA_FULL] == [0, 1, 4]
 
     def test_set_data_indices_all_variables(self, data_indices_with_target_only: IndexCollection) -> None:
         """Test set_data_indices when no variables are specified (use all).
@@ -472,7 +484,7 @@ class TestFilteringLossWrapperSetDataIndices:
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
-        wrapper = FilteringLossWrapper(
+        wrapper = LossVariableMapper(
             loss=base_loss,
             predicted_variables=None,
             target_variables=None,
@@ -482,13 +494,46 @@ class TestFilteringLossWrapperSetDataIndices:
         # Both default to model.output.full (5 prognostic variables)
         # imerg is ignored though it is present as a target
         # They must have the same length for loss computation
-        assert len(wrapper.predicted_indices) == 5
-        assert len(wrapper.target_indices) == 5
+        assert len(wrapper.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT]) == 5
+        assert len(wrapper.target_indices_by_layout[IndexSpace.DATA_FULL]) == 5
         assert wrapper.predicted_variables == wrapper.target_variables
 
+    def test_set_data_indices_defaults_target_to_predicted_order(
+        self,
+        data_indices_with_target_only: IndexCollection,
+    ) -> None:
+        """Default target mapping keeps predicted variable order."""
+        from anemoi.training.losses.mse import MSELoss
 
-class TestFilteringLossWrapperForward:
-    """Test FilteringLossWrapper.forward method."""
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_3", "var_0"],
+            target_variables=None,
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+
+        assert wrapper.target_variables == ["var_3", "var_0"]
+        assert wrapper.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [3, 0]
+        assert wrapper.target_indices_by_layout[IndexSpace.DATA_FULL] == [5, 0]
+
+    def test_set_data_indices_uses_model_output_index_order_for_defaults(self) -> None:
+        """Default predicted variable order must follow model-output tensor order."""
+        from anemoi.training.losses.mse import MSELoss
+
+        data_indices = IndexCollection(
+            DictConfig({"forcing": [], "diagnostic": [], "target": []}),
+            {"z_var": 0, "a_var": 1, "m_var": 2},
+        )
+        wrapper = LossVariableMapper(loss=MSELoss(), predicted_variables=None, target_variables=None)
+        wrapper.set_data_indices(data_indices)
+
+        assert wrapper.predicted_variables == ["z_var", "a_var", "m_var"]
+        assert wrapper.target_variables == ["z_var", "a_var", "m_var"]
+        assert wrapper.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [0, 1, 2]
+
+
+class TestLossVariableMapperForward:
+    """Test LossVariableMapper.forward method."""
 
     @pytest.fixture
     def data_indices_with_target_only(self) -> IndexCollection:
@@ -533,7 +578,7 @@ class TestFilteringLossWrapperForward:
         from anemoi.training.losses.mse import MSELoss
 
         base_loss = MSELoss()
-        wrapper = FilteringLossWrapper(
+        wrapper = LossVariableMapper(
             loss=base_loss,
             predicted_variables=["var_0"],
             target_variables=["imerg"],
@@ -556,9 +601,231 @@ class TestFilteringLossWrapperForward:
         # Forward should compare pred[..., 0]=1.0 with target[..., 9]=2.0
         # MSE per element = (1.0 - 2.0)² = 1.0
         # Loss reduction: sum over grid (8 points), avg over batch/ensemble
-        loss = wrapper(pred, target)
+        loss = wrapper(
+            pred,
+            target,
+            pred_layout=IndexSpace.DATA_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
 
         torch.testing.assert_close(loss, torch.tensor(8.0))
+
+    def test_forward_requires_explicit_layout_kwargs(self, data_indices_with_target_only: IndexCollection) -> None:
+        """Forward should fail fast when layout metadata is missing."""
+        from anemoi.training.losses.mse import MSELoss
+
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_0"],
+            target_variables=["imerg"],
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+
+        pred = torch.zeros(1, 1, 1, 2, 6)
+        target = torch.zeros(1, 1, 1, 2, len(data_indices_with_target_only.name_to_index))
+
+        with pytest.raises(ValueError, match="requires both 'pred_layout' and 'target_layout'"):
+            wrapper(pred, target)
+
+    def test_forward_remaps_scaler_indices_from_layout_space_to_filtered_space(
+        self,
+        data_indices_with_target_only: IndexCollection,
+    ) -> None:
+        """Variable scaler_indices should be remapped from layout indices to filtered tensor indices."""
+        from anemoi.training.losses.mse import MSELoss
+
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_0", "var_3"],
+            target_variables=["var_0", "var_3"],
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+
+        # Add required GRID scaler and a VARIABLE scaler to exercise scaler_indices in BaseLoss.scale.
+        wrapper.add_scaler(dimension=3, scaler=torch.ones(8), name="grid_uniform")
+        wrapper.add_scaler(dimension=4, scaler=torch.tensor([2.0, 3.0]), name="variable_weight")
+
+        pred = torch.zeros(1, 1, 1, 8, 6)
+        target = torch.zeros(1, 1, 1, 8, 10)
+        pred[..., 0] = 1.0  # var_0 in data.output space
+        pred[..., 3] = 1.0  # var_3 in data.output space
+
+        # Request only global index 3 (var_3). Wrapper should remap to local filtered index 1.
+        loss = wrapper(
+            pred,
+            target,
+            scaler_indices=(..., [3]),
+            pred_layout=IndexSpace.DATA_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
+
+        # MSE=(1-0)^2=1, weighted by variable_weight[1]=3, summed over 8 grid points.
+        torch.testing.assert_close(loss, torch.tensor(24.0))
+
+    def test_forward_with_empty_remapped_scaler_indices_returns_zero(
+        self,
+        data_indices_with_target_only: IndexCollection,
+    ) -> None:
+        """If scaler_indices selects no filtered variables, the wrapper should return zero instead of crashing."""
+        from anemoi.training.losses.mse import MSELoss
+
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_0"],
+            target_variables=["var_0"],
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+        wrapper.add_scaler(dimension=3, scaler=torch.ones(8), name="grid_uniform")
+        wrapper.add_scaler(dimension=4, scaler=torch.tensor([2.0]), name="variable_weight")
+
+        pred = torch.zeros(1, 1, 1, 8, 6)
+        target = torch.zeros(1, 1, 1, 8, 10)
+        pred[..., 0] = 1.0
+
+        # Global index 3 is outside the filtered selection ["var_0"] for DATA_OUTPUT layout.
+        loss = wrapper(
+            pred,
+            target,
+            scaler_indices=(..., [3]),
+            pred_layout=IndexSpace.DATA_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
+        torch.testing.assert_close(loss, torch.tensor(0.0))
+
+    def test_add_scaler_filters_variable_axis_for_mixed_dim_scalers(
+        self,
+        data_indices_with_target_only: IndexCollection,
+    ) -> None:
+        """Mixed-dimension scalers containing VARIABLE must be subset to predicted vars."""
+        from anemoi.training.losses.mse import MSELoss
+
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_0"],
+            target_variables=["imerg"],
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+
+        n_model_vars = len(data_indices_with_target_only.model.output.full)
+        mixed_scaler = torch.ones(2, 8, n_model_vars)  # (BATCH, GRID, VARIABLE)
+        wrapper.add_scaler(dimension=(0, 3, 4), scaler=mixed_scaler, name="batch_grid_variable")
+
+        dims, scaler = wrapper.loss.scaler.tensors["batch_grid_variable"]
+        assert dims == (0, 3, 4)
+        assert scaler.shape == (2, 8, 1)
+
+    def test_add_scaler_keeps_broadcast_variable_axis_for_mixed_dim_scalers(
+        self,
+        data_indices_with_target_only: IndexCollection,
+    ) -> None:
+        """Broadcast VARIABLE axis (size 1) must not be index-selected."""
+        from anemoi.training.losses.mse import MSELoss
+
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_0"],
+            target_variables=["imerg"],
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+
+        mixed_scaler = torch.ones(2, 8, 1)  # (BATCH, GRID, VARIABLE[broadcast])
+        wrapper.add_scaler(dimension=(0, 3, 4), scaler=mixed_scaler, name="broadcast_variable")
+
+        dims, scaler = wrapper.loss.scaler.tensors["broadcast_variable"]
+        assert dims == (0, 3, 4)
+        assert scaler.shape == (2, 8, 1)
+
+    def test_add_scaler_filters_data_full_variable_axis_with_forcing_gaps(self) -> None:
+        """VARIABLE scalers in data-full space should use DATA_FULL indices when sizes match."""
+        from anemoi.training.losses.mse import MSELoss
+
+        data_indices = IndexCollection(
+            DictConfig({"data": {"forcing": ["f0"], "diagnostic": [], "target": []}}),
+            {"f0": 0, "var_0": 1, "var_1": 2},
+        )
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_1"],
+            target_variables=["var_1"],
+        )
+        wrapper.set_data_indices(data_indices)
+
+        data_full_scaler = torch.tensor([10.0, 20.0, 30.0])  # data-full order
+        wrapper.add_scaler(dimension=4, scaler=data_full_scaler, name="data_full_variable")
+
+        dims, scaler = wrapper.loss.scaler.tensors["data_full_variable"]
+        assert dims == (4,)
+        torch.testing.assert_close(scaler, torch.tensor([30.0]))
+
+    def test_update_scaler_preserves_variable_axis_filtering(
+        self,
+        data_indices_with_target_only: IndexCollection,
+    ) -> None:
+        """Updating variable scalers should keep the filtered variable subset."""
+        from anemoi.training.losses.mse import MSELoss
+
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_2"],
+            target_variables=["var_2"],
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+
+        full_var_scaler = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+        wrapper.add_scaler(dimension=4, scaler=full_var_scaler, name="variable_weights")
+        torch.testing.assert_close(wrapper.loss.scaler.tensors["variable_weights"][1], torch.tensor([3.0]))
+
+        updated_full_var_scaler = torch.tensor([10.0, 20.0, 30.0, 40.0, 50.0])
+        wrapper.update_scaler("variable_weights", updated_full_var_scaler, override=True)
+
+        dims, scaler = wrapper.loss.scaler.tensors["variable_weights"]
+        assert dims == (4,)
+        assert scaler.shape == (1,)
+        torch.testing.assert_close(scaler, torch.tensor([30.0]))
+
+    def test_forward_rejects_unavailable_target_layout(self, data_indices_with_target_only: IndexCollection) -> None:
+        """Target-only mappings are not available in model-output layout."""
+        from anemoi.training.losses.mse import MSELoss
+
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_0"],
+            target_variables=["imerg"],
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+
+        pred = torch.zeros(1, 1, 1, 2, 6)
+        target = torch.zeros(1, 1, 1, 2, len(data_indices_with_target_only.name_to_index))
+
+        with pytest.raises(ValueError, match="target_layout 'model_output' is not available"):
+            wrapper(
+                pred,
+                target,
+                pred_layout=IndexSpace.DATA_OUTPUT,
+                target_layout=IndexSpace.MODEL_OUTPUT,
+            )
+
+    def test_forward_rejects_invalid_layout_value(self, data_indices_with_target_only: IndexCollection) -> None:
+        """Invalid layout names should fail with a clear message."""
+        from anemoi.training.losses.mse import MSELoss
+
+        wrapper = LossVariableMapper(
+            loss=MSELoss(),
+            predicted_variables=["var_0"],
+            target_variables=["imerg"],
+        )
+        wrapper.set_data_indices(data_indices_with_target_only)
+
+        pred = torch.zeros(1, 1, 1, 2, 6)
+        target = torch.zeros(1, 1, 1, 2, len(data_indices_with_target_only.name_to_index))
+
+        with pytest.raises(ValueError, match="Invalid pred_layout"):
+            wrapper(
+                pred,
+                target,
+                pred_layout="not_a_layout",
+                target_layout=IndexSpace.DATA_FULL,
+            )
 
     def test_forward_multiple_variables_and_target_only(self, data_indices_with_target_only: IndexCollection) -> None:
         """Test CombinedLoss with prognostic variables in first loss and target-only in second.
@@ -631,17 +898,19 @@ class TestFilteringLossWrapperForward:
         assert isinstance(loss_with_scalers, CombinedLoss)
         assert len(loss_no_scalers.losses) == 2
         assert len(loss_with_scalers.losses) == 2
-        assert isinstance(loss_no_scalers.losses[0], FilteringLossWrapper)
-        assert isinstance(loss_with_scalers.losses[0], FilteringLossWrapper)
+        assert isinstance(loss_no_scalers.losses[0], LossVariableMapper)
+        assert isinstance(loss_with_scalers.losses[0], LossVariableMapper)
 
         # Verify first loss uses 5 prognostic variables
-        assert loss_no_scalers.losses[0].predicted_indices == [0, 1, 2, 3, 4]
-        assert loss_no_scalers.losses[0].target_indices == [0, 1, 4, 5, 8]
-        assert len(loss_no_scalers.losses[0].predicted_indices) == len(prognostic_variables)
+        assert loss_no_scalers.losses[0].predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [0, 1, 2, 3, 4]
+        assert loss_no_scalers.losses[0].target_indices_by_layout[IndexSpace.DATA_FULL] == [0, 1, 4, 5, 8]
+        assert len(loss_no_scalers.losses[0].predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT]) == len(
+            prognostic_variables,
+        )
 
         # Verify indices for second loss
-        assert loss_no_scalers.losses[1].predicted_indices == [0]
-        assert loss_no_scalers.losses[1].target_indices == [9]
+        assert loss_no_scalers.losses[1].predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [0]
+        assert loss_no_scalers.losses[1].target_indices_by_layout[IndexSpace.DATA_FULL] == [9]
 
         # Create tensors with controlled values
         # Shape: (batch=2, ensemble=1, grid=4, variables=6) - 6 variables in data.output
@@ -660,7 +929,13 @@ class TestFilteringLossWrapperForward:
         target[..., 9] = 5.0  # imerg target
 
         # Compute combined loss without scalers
-        loss_value_no_scalers = loss_no_scalers(pred, target, squash_mode="sum")
+        loss_value_no_scalers = loss_no_scalers(
+            pred,
+            target,
+            squash_mode="sum",
+            pred_layout=IndexSpace.DATA_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
 
         # First loss: MSE on prognostic variables
         # (1-2)² + (2-2)² + (3-2)² + (4-2)² + (5-2)² = 1 + 0 + 1 + 4 + 9 = 15 per grid point
@@ -671,7 +946,13 @@ class TestFilteringLossWrapperForward:
         torch.testing.assert_close(loss_value_no_scalers, torch.tensor(124.0))
 
         # Compute combined loss WITH scalers
-        loss_value_with_scalers = loss_with_scalers(pred, target, squash_mode="sum")
+        loss_value_with_scalers = loss_with_scalers(
+            pred,
+            target,
+            squash_mode="sum",
+            pred_layout=IndexSpace.DATA_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
 
         # With 2x scaler applied, loss should be 2x: 124 * 2 = 248
         torch.testing.assert_close(loss_value_with_scalers, torch.tensor(248.0))

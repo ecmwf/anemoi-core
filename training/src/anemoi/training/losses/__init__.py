@@ -9,6 +9,7 @@
 
 from .combined import CombinedLoss
 from .huber import HuberLoss
+from .index_space import IndexSpace
 from .kcrps import AlmostFairKernelCRPS
 from .kcrps import KernelCRPS
 from .logcosh import LogCoshLoss
@@ -20,6 +21,7 @@ from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogSpectralDistance
 from .spectral import SpectralL2Loss
+from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
@@ -27,9 +29,11 @@ __all__ = [
     "CombinedLoss",
     "FourierCorrelationLoss",
     "HuberLoss",
+    "IndexSpace",
     "KernelCRPS",
     "LogCoshLoss",
     "LogSpectralDistance",
+    "LossVariableMapper",
     "MAELoss",
     "MSELoss",
     "MultiscaleLossWrapper",

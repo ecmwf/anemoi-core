@@ -21,6 +21,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -167,10 +168,8 @@ class GraphInterpolator(BaseGraphModule):
             y_pred = self(x_bound, target_forcing)
             y = {}
             for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[
-                    :,
-                    self.imap[interp_step],
-                ]
+                # prevent silent broadcast over batch when computing losses.
+                y[dataset_name] = dataset_batch.narrow(1, self.imap[interp_step], self.n_step_output)
 
             loss_step, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
@@ -178,6 +177,8 @@ class GraphInterpolator(BaseGraphModule):
                 y,
                 step=interp_step - 1,
                 validation_mode=validation_mode,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 
@@ -278,6 +279,8 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             y_pred,
             y,
             validation_mode=validation_mode,
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_OUTPUT,
             use_reentrant=False,
         )
 
