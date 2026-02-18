@@ -98,8 +98,8 @@ optional-dependencies.remote = [
   "aiohttp>=3.8",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",                  # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",             # required to test the DCT2D spectral loss
+  "anemoi-graphs[tri]",                         # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]",                    # required to test the DCT2D spectral loss
   "anemoi-training[azure,mlflow,remote,wandb]", # required to test the AzureMlflowLogger / remote checkpoints
   "hypothesis>=6.11",
   "pytest>=8",

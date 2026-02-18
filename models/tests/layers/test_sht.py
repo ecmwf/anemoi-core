@@ -43,6 +43,7 @@ def _lons_per_lat(nlat: int, grid_kind: str) -> list[int]:
             raise ValueError("Only the N320 reduced Gaussian grid SHT (nlat = 640) is supported.")
         # Fetch regular grid data
         from anemoi.transform.grids.named import lookup
+
         lats = lookup(f"n{nlat // 2}")["latitudes"]
 
         # Get latitudes of this grid
@@ -68,7 +69,7 @@ def sht_setup(request):
     # We only support the N320 reduced Gaussian grid
     if request.param == "reduced":
         truncation = 319  # T319 corresponding to N320 grid
-        tolerance = 1e-8 # Higher resolution grids need higher tolerance -> larger accumulated errors
+        tolerance = 1e-8  # Higher resolution grids need higher tolerance -> larger accumulated errors
     # Other grids, we can do what we like
     else:
         truncation = 39  # T39 corresponding to O40 grid
