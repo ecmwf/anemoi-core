@@ -156,8 +156,13 @@ class SphericalHarmonicTransform(Module):
         """
 
         # Prepare zero-padded output tensor for filling with rfft
-        output_tensor = torch.zeros(*x.shape[:-1], self.nlat, max(self.lons_per_lat) // 2 + 1, device=x.device,
-                                    dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128)
+        output_tensor = torch.zeros(
+            *x.shape[:-1],
+            self.nlat,
+            max(self.lons_per_lat) // 2 + 1,
+            device=x.device,
+            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
+        )
 
         # Do a real-to-complex FFT on each latitude
         for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
