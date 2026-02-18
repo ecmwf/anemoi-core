@@ -94,6 +94,17 @@ def test_output_tensor_index_getattr(output_tensor_index) -> None:
         output_tensor_index.z
 
 
+def test_output_tensor_index_name_position_mapping(output_tensor_index) -> None:
+    assert output_tensor_index.ordered_names == ["z", "q", "other"]
+    assert output_tensor_index.name_to_position == {"z": 0, "q": 1, "other": 2}
+    assert output_tensor_index.positions_for_names(["q", "other"]) == [1, 2]
+
+
+def test_output_tensor_index_positions_for_names_missing(output_tensor_index) -> None:
+    with pytest.raises(ValueError, match="not available in this tensor index-space"):
+        output_tensor_index.positions_for_names(["x"])
+
+
 def test_input_tensor_index_full(input_tensor_index) -> None:
     expected_output = torch.Tensor([0, 1, 3, 4]).to(torch.int)
     assert torch.allclose(input_tensor_index.full, expected_output)
@@ -130,3 +141,9 @@ def test_input_tensor_index_getattr(input_tensor_index) -> None:
     assert input_tensor_index.full is not None
     with pytest.raises(AttributeError):
         input_tensor_index.z
+
+
+def test_input_tensor_index_name_position_mapping(input_tensor_index) -> None:
+    assert input_tensor_index.ordered_names == ["x", "y", "q", "other"]
+    assert input_tensor_index.name_to_position == {"x": 0, "y": 1, "q": 2, "other": 3}
+    assert input_tensor_index.positions_for_names(["x", "other"]) == [0, 3]

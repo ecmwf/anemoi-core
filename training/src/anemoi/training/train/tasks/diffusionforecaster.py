@@ -81,15 +81,30 @@ class BaseDiffusionForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
-    def get_target(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Get target tensor shape for diffusion model."""
+    def get_data_output_target(self, target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Project full targets into data-output variable space."""
         y = {}
-        for dataset_name, dataset_batch in batch.items():
-            y_time = dataset_batch.narrow(1, self.n_step_input, self.n_step_output)
-            var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = y_time.index_select(-1, var_idx)  # (bs, n_step_output, ens, latlon, nvar)
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+        for dataset_name, target_dataset in target_full.items():
+            var_idx = self.data_indices[dataset_name].data.output.full.to(device=target_dataset.device)
+            y[dataset_name] = target_dataset.index_select(-1, var_idx)
+            LOGGER.debug("SHAPE: y_data_output[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
+
+    def reduce_data_output_target_to_model_output(
+        self,
+        y_data_output: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Reduce a data-output tensor to model-output variable space."""
+        y_reduced = {}
+        for dataset_name, y_dataset in y_data_output.items():
+            var_idx = torch.as_tensor(
+                self.data_indices[dataset_name].model_output_positions_in_data_output,
+                device=y_dataset.device,
+                dtype=torch.long,
+            )
+            y_reduced[dataset_name] = y_dataset.index_select(-1, var_idx)
+            LOGGER.debug("SHAPE: y_model_output[%s].shape = %s", dataset_name, list(y_reduced[dataset_name].shape))
+        return y_reduced
 
     def forward(
         self,
@@ -194,6 +209,20 @@ class BaseDiffusionForecaster(BaseGraphModule):
 class GraphDiffusionForecaster(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion."""
 
+    def _get_diffusion_targets(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        start: int | None = None,
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """Get reduced (model-output) and full targets for diffusion tasks."""
+        if start is None:
+            start = self.n_step_input
+        target_full = super().get_target(batch, start=start)
+        target_data_output = self.get_data_output_target(target_full)
+        target_model = self.reduce_data_output_target_to_model_output(target_data_output)
+        return target_model, target_full
+
     def _step(
         self,
         batch: dict[str, torch.Tensor],
@@ -217,7 +246,7 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
             Loss value, metrics, and predictions (per step)
         """
         x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        y, target = self._get_diffusion_targets(batch)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -233,8 +262,6 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         y_noised = self._noise_target(y, sigma)
         # prediction, fwd_with_preconditioning
         y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
-        target = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
-
         # Use checkpoint for compute_loss_metrics
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
@@ -484,9 +511,10 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             Loss value, metrics, and predictions (per step)
         """
         # batch is already normalized in BaseGraphModule._normalize_batch
-        # x: data.input.full (normalized), y: data.output.full (normalized)
+        # x: data.input.full (normalized), state_target: data.full (normalized slice view)
         x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        state_target = self.get_target(batch)
+        y_data_output = self.get_data_output_target(state_target)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
@@ -504,8 +532,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         # x_ref is normalized model.input.prognostic (subset), aligned to output steps
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
-        tendency_target = self._compute_tendency_target(y, x_ref)
-        state_target = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
+        tendency_target_data_output = self._compute_tendency_target(y_data_output, x_ref)
+        tendency_target = self.reduce_data_output_target_to_model_output(tendency_target_data_output)
 
         # get noise level and associated loss weights
         shapes = {k: target.shape for k, target in tendency_target.items()}
@@ -529,7 +557,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             tendency_pred,
-            tendency_target,
+            tendency_target_data_output,
             y_pred_state=y_pred,
             y_state=state_target,
             validation_mode=validation_mode,
