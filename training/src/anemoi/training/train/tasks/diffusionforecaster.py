@@ -495,9 +495,12 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
         tendency_target = self._compute_tendency_target(y, x_ref)
-        tendency_target_full = {d: data.narrow(1, self.n_step_input, self.n_step_output) for d, data in batch.items()}
+        tendency_target_full = {
+            d: data.narrow(1, self.n_step_input, self.n_step_output).clone() for d, data in batch.items()
+        }
         for d in batch:
-            tendency_target_full[d][..., self.data_indices[d].data.output.full] = tendency_target[d]
+            idx = self.data_indices[d].data.output.full
+            tendency_target_full[d][..., idx] = tendency_target[d]
 
         # get noise level and associated loss weights
         shapes = {k: target.shape for k, target in tendency_target.items()}
