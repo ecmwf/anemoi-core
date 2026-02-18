@@ -171,6 +171,34 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         return loss, metrics_next, y_pred_ens
 
+    def _make_targets(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        start: int,
+    ) -> dict[str, torch.Tensor]:
+        """Build loss targets for ensemble rollout.
+
+        Ground-truth targets are provided with a singleton ensemble axis and
+        are reduced to `(batch, time, grid, vars)` for loss computation.
+        """
+        y_full = self.get_target(
+            batch,
+            start=start,
+        )
+
+        y: dict[str, torch.Tensor] = {}
+        for dataset_name, target in y_full.items():
+            msg = (
+                "Expected singleton ensemble dimension in target for "
+                f"{dataset_name}, got shape {tuple(target.shape)}."
+            )
+            assert target.ndim == 5 and target.shape[2] == 1, msg
+            y[dataset_name] = target[:, :, 0, :, :]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+
+        return y
+
     def _rollout_step(
         self,
         batch: dict[str, torch.Tensor],
@@ -240,11 +268,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         for rollout_step in range(rollout_steps):
             # prediction at rollout step rollout_step, shape = (bs, n_step_output, ens_size, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
-            y = {}
-            for dataset_name, dataset_batch in batch.items():
-                start = self.n_step_input + rollout_step * self.n_step_output
-                y[dataset_name] = dataset_batch.narrow(1, start, self.n_step_output)[:, :, 0, :, :]
-                LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+            start = self.n_step_input + rollout_step * self.n_step_output
+            y = self._make_targets(batch, start=start)
 
             loss, metrics_next, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,

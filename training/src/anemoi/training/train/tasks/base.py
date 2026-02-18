@@ -391,6 +391,40 @@ class BaseGraphModule(pl.LightningModule, ABC):
             },
         )
 
+    def get_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        start: int | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Get full targets for a time slice.
+
+        Parameters
+        ----------
+        batch : dict[str, torch.Tensor]
+            Input batch keyed by dataset.
+        start : int | None, optional
+            Time index where targets start. Defaults to ``self.n_step_input``.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Full target tensor view for each dataset.
+        """
+        if start is None:
+            start = self.n_step_input
+
+        target_full: dict[str, torch.Tensor] = {}
+        for dataset_name, dataset_batch in batch.items():
+            msg = (
+                f"Batch length not sufficient for requested target slice for {dataset_name}! "
+                f"{dataset_batch.shape[1]} !>= {start + self.n_step_output}"
+            )
+            assert dataset_batch.shape[1] >= start + self.n_step_output, msg
+            target_full[dataset_name] = dataset_batch.narrow(1, start, self.n_step_output)
+
+        return target_full
+
     def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
 

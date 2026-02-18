@@ -13,6 +13,7 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
+from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionTendForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.train.tasks.interpolator import GraphInterpolator
@@ -229,8 +230,8 @@ def test_graphinterpolator_preserves_time_dim_in_targets(monkeypatch: pytest.Mon
     assert y_preds[0]["data"].shape == (b, 1, e, g, v)
 
 
-def test_graphmultioutinterpolator_uses_data_output_target_layout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Multi-out interpolator should label pre-sliced targets as DATA_OUTPUT."""
+def test_graphmultioutinterpolator_uses_data_full_target_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Multi-out interpolator should label targets as DATA_FULL."""
     forecaster = GraphMultiOutInterpolator.__new__(GraphMultiOutInterpolator)
     pl.LightningModule.__init__(forecaster)
 
@@ -264,8 +265,8 @@ def test_graphmultioutinterpolator_uses_data_output_target_layout(monkeypatch: p
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         del self, y_pred
         assert kwargs["pred_layout"] == IndexSpace.MODEL_OUTPUT
-        assert kwargs["target_layout"] == IndexSpace.DATA_OUTPUT
-        assert y["data"].shape[-1] == len(data_indices.data.output.full)
+        assert kwargs["target_layout"] == IndexSpace.DATA_FULL
+        assert y["data"].shape[-1] == len(data_indices.name_to_index)
         return torch.tensor(0.0), {}, y
 
     monkeypatch.setattr(GraphMultiOutInterpolator, "forward", _forward_stub, raising=True)
@@ -274,10 +275,12 @@ def test_graphmultioutinterpolator_uses_data_output_target_layout(monkeypatch: p
     b, e, g, v = 2, 1, 4, len(data_indices.name_to_index)
     batch = {"data": torch.randn((b, 3, e, g, v), dtype=torch.float32)}
 
-    loss, metrics, y_pred = forecaster._step(batch=batch, validation_mode=False)
+    loss, metrics, y_preds = forecaster._step(batch=batch, validation_mode=False)
     assert isinstance(loss, torch.Tensor)
     assert metrics == {}
-    assert y_pred[0]["data"].shape == (b, 2, e, g, 2)
+    assert isinstance(y_preds, list)
+    assert len(y_preds) == 1
+    assert y_preds[0]["data"].shape == (b, 2, e, g, 2)
 
 
 def test_calculate_val_metrics_rejects_variable_scaled_filtered_metric() -> None:
@@ -475,6 +478,49 @@ def _set_base_task_attrs(
     obj.grid_shard_slice = {"data": None}
 
 
+def test_base_get_target_returns_time_slice_view() -> None:
+    data_indices = _data_indices_single()
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER, n_step_input=1, n_step_output=2)
+
+    b, t, e, g, v = 1, 4, 1, 1, len(_NAME_TO_INDEX)
+    batch = {"data": torch.arange(b * t * e * g * v, dtype=torch.float32).reshape(b, t, e, g, v)}
+
+    target = forecaster.get_target(batch, start=1)
+    assert target["data"].shape == (b, 2, e, g, v)
+
+    before = target["data"][0, 0, 0, 0, 0].item()
+    batch["data"][0, 1, 0, 0, 0] = before + 123.0
+    assert target["data"][0, 0, 0, 0, 0].item() == before + 123.0
+
+
+def test_base_get_target_rejects_short_batch() -> None:
+    data_indices = _data_indices_single()
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER, n_step_input=1, n_step_output=2)
+
+    b, t, e, g, v = 1, 2, 1, 1, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn((b, t, e, g, v), dtype=torch.float32)}
+
+    with pytest.raises(AssertionError, match="Batch length not sufficient for requested target slice"):
+        forecaster.get_target(batch, start=1)
+
+
+def test_graphensforecaster_make_targets_requires_singleton_ensemble_dim() -> None:
+    data_indices = _data_indices_single()
+    forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER, n_step_input=1, n_step_output=1)
+
+    b, t, e, g, v = 2, 2, 2, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn((b, t, e, g, v), dtype=torch.float32)}
+
+    with pytest.raises(AssertionError, match="Expected singleton ensemble dimension"):
+        forecaster._make_targets(batch, start=1)
+
+
 def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forecaster output_times, get_init_step, and _step return shape (one instantiation)."""
     data_indices = _data_indices_single()
@@ -575,6 +621,175 @@ def test_graphdiffusionforecaster() -> None:
     y_pred = y_preds[0]["data"]
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, 1, e, g, v)
+
+
+def test_graphdiffusionforecaster_uses_reduced_model_target_and_full_loss_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyDiffusion:
+        def __init__(self, model: DummyDiffusionModel) -> None:
+            self.model = model
+
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyDiffusion(
+        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    )
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    captured: dict[str, Any] = {}
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured["pred_vars"] = y_pred["data"].shape[-1]
+        captured["target_vars"] = y["data"].shape[-1]
+        captured["pred_layout"] = kwargs["pred_layout"]
+        captured["target_layout"] = kwargs["target_layout"]
+        pred = y_pred["data"]
+        return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t_in = _CFG_DIFFUSION.training.multistep_input
+    t_out = _CFG_DIFFUSION.training.multistep_output
+    batch = torch.randn((b, t_in + t_out, e, g, v), dtype=torch.float32)
+    loss, _, _ = forecaster._step(batch={"data": batch}, validation_mode=False)
+
+    assert isinstance(loss, torch.Tensor)
+    assert captured["pred_vars"] == len(data_indices["data"].model.output.full)
+    assert captured["target_vars"] == len(data_indices["data"].name_to_index)
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_FULL
+
+
+def test_graphdiffusionforecaster_target_helpers_reduce_data_output_to_model_output() -> None:
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t_in = _CFG_DIFFUSION.training.multistep_input
+    t_out = _CFG_DIFFUSION.training.multistep_output
+    batch = {"data": torch.randn((b, t_in + t_out, e, g, v), dtype=torch.float32)}
+
+    y_model, y_full = forecaster._get_diffusion_targets(batch)
+    y_data_output = forecaster.get_data_output_target(y_full)
+    y_model_from_data_output = forecaster.reduce_data_output_target_to_model_output(y_data_output)
+
+    assert y_model["data"].shape[-1] == len(data_indices["data"].model.output.full)
+    assert y_data_output["data"].shape[-1] == len(data_indices["data"].data.output.full)
+    torch.testing.assert_close(y_model["data"], y_model_from_data_output["data"])
+
+
+def test_graphdiffusiontendforecaster_uses_reduced_model_target_and_data_output_loss_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTendencyDiffusionInner:
+        sigma_max = 4.0
+        sigma_min = 1.0
+        sigma_data = 0.5
+
+        def apply_reference_state_truncation(
+            self,
+            x: dict[str, torch.Tensor],
+            _grid_shard_shapes: dict[str, Any],
+            _model_comm_group: Any,
+        ) -> dict[str, torch.Tensor]:
+            out = {}
+            for dataset_name, x_tensor in x.items():
+                b, _t, e, g, _v = x_tensor.shape
+                out[dataset_name] = torch.zeros((b, 1, e, g, 2), dtype=x_tensor.dtype, device=x_tensor.device)
+            return out
+
+        def fwd_with_preconditioning(
+            self,
+            x: dict[str, torch.Tensor],
+            y_noised: dict[str, torch.Tensor],
+            sigma: dict[str, torch.Tensor],
+            **_kwargs: Any,
+        ) -> dict[str, torch.Tensor]:
+            del x, sigma
+            out = {}
+            for dataset_name, y_tensor in y_noised.items():
+                # Regression guard: tendency model input must be reduced to model.output vars.
+                assert y_tensor.shape[-1] == 2
+                out[dataset_name] = y_tensor
+            return out
+
+    class DummyTendencyDiffusion:
+        def __init__(self) -> None:
+            self.model = DummyTendencyDiffusionInner()
+            self.pre_processors_tendencies = {"data": [object()]}
+
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionTendForecaster.__new__(GraphDiffusionTendForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyTendencyDiffusion()
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    captured: dict[str, Any] = {}
+
+    def _compute_tendency_target_stub(
+        y: dict[str, torch.Tensor],
+        _x_ref: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        captured["tendency_target_input_vars"] = y["data"].shape[-1]
+        # Keep data-output width (includes target-only variable) before reduction.
+        return y
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured["pred_vars"] = y_pred["data"].shape[-1]
+        captured["target_vars"] = y["data"].shape[-1]
+        captured["pred_layout"] = kwargs["pred_layout"]
+        captured["target_layout"] = kwargs["target_layout"]
+        pred = y_pred["data"]
+        return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "_compute_tendency_target", _compute_tendency_target_stub)
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t_in = _CFG_DIFFUSION.training.multistep_input
+    t_out = _CFG_DIFFUSION.training.multistep_output
+    batch = {"data": torch.randn((b, t_in + t_out, e, g, v), dtype=torch.float32)}
+    loss, _, _ = forecaster._step(batch=batch, validation_mode=False)
+
+    assert isinstance(loss, torch.Tensor)
+    assert captured["tendency_target_input_vars"] == len(data_indices["data"].data.output.full)
+    assert captured["pred_vars"] == len(data_indices["data"].model.output.full)
+    assert captured["target_vars"] == len(data_indices["data"].data.output.full)
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_OUTPUT
 
 
 def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.MonkeyPatch) -> None:

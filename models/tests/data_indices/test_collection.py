@@ -141,3 +141,18 @@ def test_data_indices_with_target(data_indices_with_target) -> None:
         == {"tp_point": 0, "tp_radar": 1, "tp": 2, "dem": 3}
     )
     assert data_indices_with_target.model.output.name_to_index == {"tp": 0}
+
+
+def test_data_indices_cross_space_positions(data_indices) -> None:
+    assert data_indices.data_full_ordered_names == ["x", "y", "z", "q", "e", "d", "other"]
+    assert data_indices.data_full_name_to_position == {"x": 0, "y": 1, "z": 2, "q": 3, "e": 4, "d": 5, "other": 6}
+    assert data_indices.data_output_positions_in_data_full == [1, 2, 3, 5, 6]
+    assert data_indices.model_output_positions_in_data_full == [1, 2, 3, 5, 6]
+    assert data_indices.model_output_positions_in_data_output == [0, 1, 2, 3, 4]
+
+
+def test_data_indices_cross_space_positions_with_target(data_indices_with_target) -> None:
+    assert data_indices_with_target.data_full_ordered_names == ["tp_point", "tp_radar", "tp", "dem"]
+    assert data_indices_with_target.data_output_positions_in_data_full == [0, 1, 2]
+    assert data_indices_with_target.model_output_positions_in_data_full == [2]
+    assert data_indices_with_target.model_output_positions_in_data_output == [2]

@@ -63,10 +63,6 @@ class LossVariableMapper(BaseLoss):
         self.predicted_indices_by_layout: dict[IndexSpace, list[int]] = {}
         self.target_indices_by_layout: dict[IndexSpace, list[int]] = {}
 
-    @staticmethod
-    def _ordered_names_by_index(name_to_index: dict[str, int]) -> list[str]:
-        return [name for name, _ in sorted(name_to_index.items(), key=lambda item: item[1])]
-
     def _get_predicted_indices_for_scaler_variable_axis(self, variable_size: int) -> list[int] | None:
         if variable_size == 1:
             # Broadcast scalers do not need filtering.
@@ -162,13 +158,6 @@ class LossVariableMapper(BaseLoss):
             raise ValueError(msg) from e
 
     @staticmethod
-    def _build_data_output_positions(data_indices: IndexCollection) -> dict[str, int]:
-        data_full_to_pos = {int(var_idx): pos for pos, var_idx in enumerate(data_indices.data.output.full.tolist())}
-        return {
-            name: data_full_to_pos[idx] for name, idx in data_indices.name_to_index.items() if idx in data_full_to_pos
-        }
-
-    @staticmethod
     def _resolve_indices(
         variables: list[str],
         lookup: dict[str, int],
@@ -188,13 +177,12 @@ class LossVariableMapper(BaseLoss):
     def set_data_indices(self, data_indices: IndexCollection) -> BaseLoss:
         """Hook to set the data indices for the loss."""
         self.data_indices = data_indices
-        model_name_to_index = data_indices.model.output.name_to_index
-        data_full_name_to_index = data_indices.name_to_index
-        data_output_name_to_pos = self._build_data_output_positions(data_indices)
+        model_output_name_to_position = data_indices.model.output.name_to_position
+        data_full_name_to_pos = data_indices.data_full_name_to_position
+        data_output_name_to_pos = data_indices.data.output.name_to_position
 
         if self.predicted_variables is None:
-            # Preserve tensor index order, not alphabetical includes order.
-            self.predicted_variables = self._ordered_names_by_index(model_name_to_index)
+            self.predicted_variables = list(data_indices.model.output.ordered_names)
         if self.target_variables is None:
             # Default to one-to-one mapping with preserved order.
             self.target_variables = list(self.predicted_variables)
@@ -206,7 +194,7 @@ class LossVariableMapper(BaseLoss):
         self.predicted_indices_by_layout = {
             IndexSpace.MODEL_OUTPUT: self._resolve_indices(
                 self.predicted_variables,
-                model_name_to_index,
+                model_output_name_to_position,
                 layout=IndexSpace.MODEL_OUTPUT,
                 role="predicted",
             ),
@@ -218,7 +206,7 @@ class LossVariableMapper(BaseLoss):
             ),
             IndexSpace.DATA_FULL: self._resolve_indices(
                 self.predicted_variables,
-                data_full_name_to_index,
+                data_full_name_to_pos,
                 layout=IndexSpace.DATA_FULL,
                 role="predicted",
             ),
@@ -232,15 +220,15 @@ class LossVariableMapper(BaseLoss):
             ),
             IndexSpace.DATA_FULL: self._resolve_indices(
                 self.target_variables,
-                data_full_name_to_index,
+                data_full_name_to_pos,
                 layout=IndexSpace.DATA_FULL,
                 role="target",
             ),
         }
-        if all(name in model_name_to_index for name in self.target_variables):
+        if all(name in model_output_name_to_position for name in self.target_variables):
             self.target_indices_by_layout[IndexSpace.MODEL_OUTPUT] = self._resolve_indices(
                 self.target_variables,
-                model_name_to_index,
+                model_output_name_to_position,
                 layout=IndexSpace.MODEL_OUTPUT,
                 role="target",
             )

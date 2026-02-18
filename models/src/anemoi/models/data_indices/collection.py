@@ -74,6 +74,19 @@ class IndexCollection:
             name_to_index_model_input=name_to_index_model_input,
             name_to_index_model_output=name_to_index_model_output,
         )
+        self.data_full_ordered_names = [
+            name for name, _ in sorted(self.name_to_index.items(), key=operator.itemgetter(1))
+        ]
+        self.data_full_name_to_position = {name: position for position, name in enumerate(self.data_full_ordered_names)}
+        self.data_output_positions_in_data_full = [
+            self.data_full_name_to_position[name] for name in self.data.output.ordered_names
+        ]
+        self.model_output_positions_in_data_full = [
+            self.data_full_name_to_position[name] for name in self.model.output.ordered_names
+        ]
+        self.model_output_positions_in_data_output = self.data.output.positions_for_names(
+            self.model.output.ordered_names
+        )
 
     def __repr__(self) -> str:
         return f"IndexCollection(data_config={self.config}, name_to_index={self.name_to_index})"

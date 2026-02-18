@@ -166,10 +166,10 @@ class GraphInterpolator(BaseGraphModule):
             target_forcing = self.get_target_forcing(batch, interp_step)
 
             y_pred = self(x_bound, target_forcing)
-            y = {}
-            for dataset_name, dataset_batch in batch.items():
-                # prevent silent broadcast over batch when computing losses.
-                y[dataset_name] = dataset_batch.narrow(1, self.imap[interp_step], self.n_step_output)
+            y = self.get_target(
+                batch,
+                start=self.imap[interp_step],
+            )
 
             loss_step, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
@@ -265,10 +265,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
                 self.data_indices[dataset_name].data.input.full,
             ]  # (bs, time, ens, latlon, nvar)
 
-            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)][
-                ...,
-                self.data_indices[dataset_name].data.output.full,
-            ]
+            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)]
 
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
@@ -280,7 +277,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             y,
             validation_mode=validation_mode,
             pred_layout=IndexSpace.MODEL_OUTPUT,
-            target_layout=IndexSpace.DATA_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
             use_reentrant=False,
         )
 
