@@ -40,7 +40,6 @@ datasets:
     # Scalers from node attributes
     node_weights:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: era5
       nodes_attribute_name: area_weight
       norm: unit-sum
 
@@ -84,7 +83,6 @@ datasets:
     # Scalers from node attributes
     node_weights:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: cerra
       nodes_attribute_name: area_weight
       norm: unit-sum
 

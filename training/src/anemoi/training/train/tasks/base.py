@@ -239,6 +239,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
                 ),
                 metadata_extractor=metadata_extractor,
+                nodes_name=dataset_name,
                 output_mask=self.output_mask[dataset_name],
             )
             self.scalers[dataset_name] = dataset_scalers
