@@ -178,7 +178,7 @@ class LossVariableMapper(BaseLoss):
         """Hook to set the data indices for the loss."""
         self.data_indices = data_indices
         model_output_name_to_position = data_indices.model.output.name_to_position
-        data_full_name_to_pos = data_indices.data_full_name_to_position
+        data_full_name_to_position = data_indices.data_full_name_to_position
         data_output_name_to_pos = data_indices.data.output.name_to_position
 
         if self.predicted_variables is None:
@@ -206,7 +206,7 @@ class LossVariableMapper(BaseLoss):
             ),
             IndexSpace.DATA_FULL: self._resolve_indices(
                 self.predicted_variables,
-                data_full_name_to_pos,
+                data_full_name_to_position,
                 layout=IndexSpace.DATA_FULL,
                 role="predicted",
             ),
@@ -220,7 +220,7 @@ class LossVariableMapper(BaseLoss):
             ),
             IndexSpace.DATA_FULL: self._resolve_indices(
                 self.target_variables,
-                data_full_name_to_pos,
+                data_full_name_to_position,
                 layout=IndexSpace.DATA_FULL,
                 role="target",
             ),
