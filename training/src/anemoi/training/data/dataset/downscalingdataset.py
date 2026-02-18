@@ -53,6 +53,7 @@ class DownscalingDataset(NativeGridDataset):
         )
         self.lres_grid_indices = lres_grid_indices
         self.hres_grid_indices = hres_grid_indices
+        LOGGER.info("dataset %s len valid date indices %d", label, len(self.valid_date_indices))
 
     def __iter__(self):
         """Return an iterator over the dataset.
@@ -88,12 +89,8 @@ class DownscalingDataset(NativeGridDataset):
 
         for i in shuffled_chunk_indices:
 
-            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
-            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
+            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(self.reader_group_rank)
+            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(self.reader_group_rank)
 
             # Load full grid in CPU memory, select grid_shard after
             # Note that anemoi-datasets currently doesn't support slicing + indexing
