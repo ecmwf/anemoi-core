@@ -21,7 +21,7 @@ jobs:
             This issue has been marked as stale due to inactivity.
             It will be closed if no further activity occurs.
           exempt-issue-labels: good first issue
-          
+
           # PR settings
           days-before-pr-stale: 30
           days-before-pr-close: 7 #! could be set to -1 to never auto-close PRs - TO BE DISCUSSED
@@ -30,5 +30,5 @@ jobs:
             This PR has been marked as stale due to inactivity.
             It will be closed if no further activity occurs.
           exempt-pr-labels: autorelease: pending
-          
+
           remove-stale-when-updated: true
