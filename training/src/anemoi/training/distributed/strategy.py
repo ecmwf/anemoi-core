@@ -58,7 +58,7 @@ def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
     initial_seed = base_seed * (model_comm_group_id + 1)
     rnd_seed = pl.seed_everything(initial_seed)  # note: workers are seeded independently in dataloader
     np_rng = np.random.default_rng(rnd_seed)
-    sanity_rnd = (torch.rand(1), np_rng.random())
+    sanity_rnd = (torch.rand(1)[0], np_rng.random())
     LOGGER.debug(
         (
             "Strategy: Rank %d, model comm group id %d, base seed %d, seeded with %d, "

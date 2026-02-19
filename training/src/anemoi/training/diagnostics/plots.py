@@ -224,7 +224,7 @@ def plot_power_spectrum(
     regular_pc_lat = np.linspace(pc_lat.min(), pc_lat.max(), n_pix_lat)
     grid_pc_lon, grid_pc_lat = np.meshgrid(regular_pc_lon, regular_pc_lat)
 
-    for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
+    for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate[tuple[str, int]](parameters.items()):
         yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
@@ -449,7 +449,7 @@ def plot_predicted_multilevel_flat_sample(
     if colormaps is None:
         colormaps = {}
 
-    for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
+    for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate[tuple[str, int]](parameters.items()):
         xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
         yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
