@@ -41,4 +41,4 @@ class DownscalingTask(BaseTimelessTask):
 class AutoencodingTask(BaseTimelessTask):
     """Autoencoding task implementation."""
 
-    name: str = "downscaling"
+    name: str = "autoencoding"

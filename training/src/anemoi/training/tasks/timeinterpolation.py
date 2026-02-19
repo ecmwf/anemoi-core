@@ -34,10 +34,10 @@ class TimeInterpolationTask(BaseSingleStepTask):
         self.imap = np.array(sorted(set(self.boundary_times + self.interp_times)))
 
     def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:
-        return itemgetter(*self.boundary_times)(self.imap)
+        return list(itemgetter(*self.boundary_times)(self.imap))
 
     def get_batch_output_time_indices(self, *args, **kwargs) -> list[int]:
-        return itemgetter(*self.interp_times)(self.imap)
+        return list(itemgetter(*self.interp_times)(self.imap))
 
     def get_relative_time_indices(self, *args, **kwargs) -> list[int]:
         return self.imap.tolist()
