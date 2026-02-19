@@ -87,6 +87,12 @@ class KernelCRPS(BaseLoss):
         y_target = einops.rearrange(y_target, "bs t latlon v -> bs t v latlon")
         y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
 
+        if self.ignore_nans:
+            nan_mask = torch.isnan(y_target)
+            y_target = y_target.masked_fill(nan_mask, 0.0)
+            # Expand mask for ensemble dimension: (bs, v, latlon) -> (bs, v, latlon, e)
+            y_pred = y_pred.masked_fill(nan_mask.unsqueeze(-1), 0.0)
+
         kcrps_ = self._kernel_crps(y_pred, y_target)
 
         kcrps_ = einops.rearrange(kcrps_, "bs t v latlon -> bs t 1 latlon v")
@@ -181,6 +187,12 @@ class AlmostFairKernelCRPS(BaseLoss):
 
         y_target = einops.rearrange(y_target, "bs t latlon v -> bs t v latlon")
         y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
+
+        if self.ignore_nans:
+            nan_mask = torch.isnan(y_target)
+            y_target = y_target.masked_fill(nan_mask, 0.0)
+            # Expand mask for ensemble dimension: (bs, v, latlon) -> (bs, v, latlon, e)
+            y_pred = y_pred.masked_fill(nan_mask.unsqueeze(-1), 0.0)
 
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
