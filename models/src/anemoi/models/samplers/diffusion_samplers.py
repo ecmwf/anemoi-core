@@ -17,7 +17,13 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 DenoisingFunction = Callable[
-    [dict[str, torch.Tensor], dict[str, torch.Tensor], torch.Tensor, Optional[ProcessGroup], dict[str, Optional[list]]],
+    [
+        dict[str, torch.Tensor],
+        dict[str, torch.Tensor],
+        dict[str, torch.Tensor],
+        Optional[ProcessGroup],
+        dict[str, Optional[list]],
+    ],
     dict[str, torch.Tensor],
 ]
 
@@ -221,8 +227,6 @@ class EDMHeunSampler(DiffusionSampler):
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
 
-        y_shape = next(iter(y.values())).shape
-        batch_size, time_size, ensemble_size = y_shape[0], y_shape[1], y_shape[2]
         num_steps = len(sigmas) - 1
 
         # Heun sampling loop
@@ -244,13 +248,14 @@ class EDMHeunSampler(DiffusionSampler):
             for dataset_name in y:
                 y[dataset_name] = y[dataset_name].to(x[dataset_name].dtype)
 
-            D1 = denoising_fn(
-                x,
-                y,
-                sigma_effective.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype),
-                model_comm_group,
-                grid_shard_shapes,
-            )
+            sigma_effective_expanded = {
+                dataset_name: sigma_effective.view(1, 1, 1, 1, 1)
+                .expand(y_data.shape[0], 1, y_data.shape[2], 1, 1)
+                .to(y_data.dtype)
+                for dataset_name, y_data in y.items()
+            }
+
+            D1 = denoising_fn(x, y, sigma_effective_expanded, model_comm_group, grid_shard_shapes)
 
             for dataset_name in D1:
                 D1[dataset_name] = D1[dataset_name].to(dtype)
@@ -262,13 +267,14 @@ class EDMHeunSampler(DiffusionSampler):
                 y_next[dataset_name] = y_next[dataset_name].to(x[dataset_name].dtype)
 
             if sigma_next > eps_prec:
-                D2 = denoising_fn(
-                    x,
-                    y_next,
-                    sigma_next.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1).to(dtype),
-                    model_comm_group,
-                    grid_shard_shapes,
-                )
+                sigma_next_expanded = {
+                    dataset_name: sigma_next.view(1, 1, 1, 1, 1)
+                    .expand(y_next_data.shape[0], 1, y_next_data.shape[2], 1, 1)
+                    .to(y_next_data.dtype)
+                    for dataset_name, y_next_data in y_next.items()
+                }
+
+                D2 = denoising_fn(x, y_next, sigma_next_expanded, model_comm_group, grid_shard_shapes)
 
                 for dataset_name in D2:
                     D2[dataset_name] = D2[dataset_name].to(dtype)
@@ -306,8 +312,6 @@ class DPMpp2MSampler(DiffusionSampler):
             y[dataset_name] = y[dataset_name].to(x[dataset_name].dtype)
         sigmas = sigmas.to(dtype)
 
-        y_shape = next(iter(y.values())).shape
-        batch_size, time_size, ensemble_size = y_shape[0], y_shape[1], y_shape[2]
         num_steps = len(sigmas) - 1
 
         # Storage for previous denoised predictions
@@ -318,7 +322,12 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = sigma.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1)
+            sigma_expanded = {
+                dataset_name: sigma.view(1, 1, 1, 1, 1)
+                .expand(y_data.shape[0], 1, y_data.shape[2], 1, 1)
+                .to(y_data.dtype)
+                for dataset_name, y_data in y.items()
+            }
             denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
 
             if sigma_next == 0:

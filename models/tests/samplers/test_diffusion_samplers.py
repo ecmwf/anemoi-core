@@ -40,27 +40,29 @@ class MockDenoisingFunction:
         self,
         x: dict[str, torch.Tensor],
         y: dict[str, torch.Tensor],
-        sigma: torch.Tensor,
+        sigma: torch.Tensor | dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[dict[str, Optional[list]]] = None,
     ) -> torch.Tensor:
         """Mock denoising function that reduces noise proportionally to sigma."""
         self.call_count += 1
 
-        # Simple denoising: reduce noise proportional to sigma
-        # At high sigma (high noise), return mostly the conditioning x
-        # At low sigma (low noise), return mostly the noisy y
-        sigma_normalized = sigma / (sigma.max() + 1e-8)
+        if isinstance(sigma, dict):
+            sigma_normalized = {k: s / (s.max() + 1e-8) for k, s in sigma.items()}
+        else:
+            sigma_norm = sigma / (sigma.max() + 1e-8)
+            sigma_normalized = {k: sigma_norm for k in y}
 
         denoised = {}
         for dataset_name, y_ in y.items():
+            sigma_norm = sigma_normalized[dataset_name]
             if self.deterministic:
                 # Deterministic denoising for reproducible tests
-                denoised[dataset_name] = (1 - sigma_normalized * self.noise_reduction_factor) * y_
+                denoised[dataset_name] = (1 - sigma_norm * self.noise_reduction_factor) * y_
             else:
                 # Add some controlled randomness
-                denoised[dataset_name] = (1 - sigma_normalized * self.noise_reduction_factor) * y_
-                denoised[dataset_name] += 0.01 * sigma_normalized * torch.randn_like(y_)
+                denoised[dataset_name] = (1 - sigma_norm * self.noise_reduction_factor) * y_
+                denoised[dataset_name] += 0.01 * sigma_norm * torch.randn_like(y_)
 
         return denoised
 
@@ -252,6 +254,23 @@ class TestEDMHeunSampler:
                 final_norm[dataset_name] < initial_norm[dataset_name]
             ), f"Expected noise reduction: final_norm ({final_norm[dataset_name]}) should be < initial_norm ({initial_norm[dataset_name]})"
 
+    def test_sigma_dtype_matches_model_input_at_denoiser_boundary(self):
+        x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+        sigmas = torch.linspace(1.0, 0.0, 4, dtype=torch.float64)
+
+        class SigmaDtypeCheckingDenoiser:
+            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
+                del model_comm_group, grid_shard_shapes
+                for dataset_name in y:
+                    assert sigma[dataset_name].dtype == x[dataset_name].dtype == y[dataset_name].dtype
+                    assert sigma[dataset_name].shape[1] == 1
+                return {dataset_name: y_data for dataset_name, y_data in y.items()}
+
+        sampler = EDMHeunSampler(dtype=torch.float64)
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=SigmaDtypeCheckingDenoiser())
+        assert set(result.keys()) == set(y.keys())
+
 
 class TestDPMPP2MSampler:
     """Test suite for DPM++ 2M sampler."""
@@ -384,6 +403,23 @@ class TestDPMPP2MSampler:
             assert result[dataset_name].shape == y[dataset_name].shape
             assert torch.isfinite(result[dataset_name]).all()
             assert not torch.isnan(result[dataset_name]).any()
+
+    def test_sigma_time_dim_is_one_at_denoiser_boundary(self):
+        x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+        sigmas = torch.linspace(1.0, 0.0, 4, dtype=torch.float64)
+
+        class SigmaShapeCheckingDenoiser:
+            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
+                del model_comm_group, grid_shard_shapes
+                for dataset_name in y:
+                    assert sigma[dataset_name].shape[1] == 1
+                    assert sigma[dataset_name].dtype == x[dataset_name].dtype == y[dataset_name].dtype
+                return {dataset_name: y_data for dataset_name, y_data in y.items()}
+
+        sampler = DPMpp2MSampler(dtype=torch.float64)
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=SigmaShapeCheckingDenoiser())
+        assert set(result.keys()) == set(y.keys())
 
 
 class TestSamplerComparison:
