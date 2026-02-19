@@ -387,9 +387,6 @@ class MultiDataset(IterableDataset):
         time_steps = slice(start, end, timeincrement)
         return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
 
-        
-        
-
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
 
@@ -417,7 +414,7 @@ class MultiDataset(IterableDataset):
             self.worker_id,
             shuffled_chunk_indices[:10],
         )
-        
+
         fake_dataloading = os.getenv("AIFS_FAKE_DATALOADING", "0") == "1"
         if fake_dataloading:
             LOGGER.info("Using fake data loading mode, serving initial sample repeatedly")
@@ -425,7 +422,7 @@ class MultiDataset(IterableDataset):
             for _ in shuffled_chunk_indices:
                 yield initial_sample
             return
-        
+
         # TODO(): improve this...
         for i in shuffled_chunk_indices:
             yield self.get_sample(i)
