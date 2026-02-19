@@ -46,4 +46,3 @@ class TimeInterpolationTask(BaseSingleStepTask):
 
     def get_relative_time_indices(self, *args, **kwargs) -> list[int]:
         return self.imap.tolist()
-

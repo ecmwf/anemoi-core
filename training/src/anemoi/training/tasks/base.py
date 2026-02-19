@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -159,4 +158,3 @@ class BaseSingleStepTask(BaseTask):
     def steps(self) -> Iterable[dict[str, int]]:
         """Get the range of rollout steps to perform."""
         return ({},)
-
