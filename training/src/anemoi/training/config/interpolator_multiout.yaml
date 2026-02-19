@@ -5,13 +5,14 @@ defaults:
 - system: example
 - graph: multi_scale
 - model: graphtransformer
-- training: interpolator
+- task: timeinterpolating
+- training: single
 - _self_
 
-config_validation: True
+config_validation: False
 
 data:
-  frequency: 1h
+  frequency: 6h
   resolution: o96
 
   diagnostics: [] # Default behaviour is to interpolate between observed fields, not predict unseen fields
@@ -22,17 +23,34 @@ data:
 #  length: 18 #in number of dates (* frequency for actual time)
 
 model:
-  model:
-    _target_: anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator
-  residual:
-    _target_: anemoi.models.layers.residual.SkipConnection
-    step: 0 # use the previous step as skip connection
-  latent_skip: False # True/False for skip connection on latent mesh
+  num_channels: 128
 
-training:
-  # Instead of inferred using multistep and timeincrement, specify time indices explicitly
-  explicit_times:
-    input: [0, 6]
-    target: [1, 2, 3, 4, 5]
-  multistep_output: 5
-  model_task: anemoi.training.train.tasks.GraphMultiOutInterpolator
+system:
+  input:
+    graph: graph_anemoi_new_${data.resolution}.pt
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
+  hardware:
+    accelerator: auto
+    num_gpus_per_ensemble: 1
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
+
+dataloader:
+  limit_batches:
+    training: 100
+    validation: 100
+
+diagnostics:
+  callbacks: []
+  plot:
+    callbacks: []
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: None
+    wandb:
+      enabled: False
+      entity: example
