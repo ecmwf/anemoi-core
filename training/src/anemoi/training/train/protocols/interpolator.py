@@ -80,14 +80,9 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
-        self.boundary_times = config.training.explicit_times.input
-        self.interp_times = config.training.explicit_times.target
-        self.n_step_output = len(self.interp_times)
-        sorted_indices = sorted(set(self.boundary_times + self.interp_times))
-        self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
-
-        self.n_step_input = 1
-        self.rollout = 1
+        assert (
+            self.n_step_input == self.n_step_output
+        ), "Autoencoders must have the same number of input and output steps."
 
     def _step(
         self,
@@ -119,4 +114,8 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        # All tasks return (loss, metrics, list of per-step dicts) for consistent plot callback contract.
+        return loss, metrics, [y_pred]
+
+    def on_train_epoch_end(self) -> None:
+        pass
