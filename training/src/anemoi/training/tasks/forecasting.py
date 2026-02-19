@@ -52,10 +52,12 @@ class ForecastingTask(BaseTask):
         return list(range(self.num_input_steps))
 
     def get_batch_output_time_indices(self, rollout_step: int = 1) -> list[int]:
-        return list(range(
-            self.num_input_steps + rollout_step * self.num_output_steps,
-            self.num_input_steps + (rollout_step + 1) * self.num_output_steps,
-        ))
+        return list(
+            range(
+                self.num_input_steps + rollout_step * self.num_output_steps,
+                self.num_input_steps + (rollout_step + 1) * self.num_output_steps,
+            ),
+        )
 
     def get_dataset_input_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
         """Get the relative time indices for the model input sequence.
