@@ -110,7 +110,7 @@ class BaseGraphModel(nn.Module):
         for dataset_name, dataset_indices in data_indices.items():
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
-            self._forcing_input_idx[dataset_name] = [] # TODO: Where do we define the target forcings?
+            self._forcing_input_idx[dataset_name] = []  # TODO: Where do we define the target forcings?
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
             self.num_input_channels_target_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
@@ -129,12 +129,13 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
         return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
-    
+
     def _calculate_target_dim(self, dataset_name: str) -> int:
         return (
             self.n_step_output * self.num_input_channels_target_forcings[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
         )
+
     def _calculate_output_dim(self, dataset_name: str) -> int:
         return self.n_step_output * self.num_output_channels[dataset_name]
 
