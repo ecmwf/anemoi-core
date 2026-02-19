@@ -136,8 +136,8 @@ class BaseTask(ABC):
         md_dict["task"] = self.name
         # md_dict["timestep"] = self.timestep
         # Save relative time indices
-        #md_dict["relative_input_time_indices"] = self.get_batch_input_time_indices()
-        #md_dict["relative_output_time_indices"] = self.get_batch_output_time_indices()
+        # md_dict["relative_input_time_indices"] = self.get_batch_input_time_indices()
+        # md_dict["relative_output_time_indices"] = self.get_batch_output_time_indices()
 
 
 class BaseSingleStepTask(BaseTask):
