@@ -358,17 +358,17 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
 
 @pytest.fixture(
     params=[  # selects different test cases
-        #"lam",
-        #"graphtransformer",
-        #"stretched",
-        #"ensemble_crps",
+        # "lam",
+        # "graphtransformer",
+        # "stretched",
+        # "ensemble_crps",
         "diffusiontend",
     ],
     ids=[
-        #"lam",
-        #"graphtransformer",
-        #"stretched",
-        #"ensemble_crps",
+        # "lam",
+        # "graphtransformer",
+        # "stretched",
+        # "ensemble_crps",
         "diffusiontend",
     ],
 )
@@ -395,7 +395,10 @@ def benchmark_config(
         overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
         base_config = "ensemble_crps"
     elif test_case == "diffusiontend":
-        overrides = ["model=graphtransformer_diffusiontend", "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",]
+        overrides = [
+            "model=graphtransformer_diffusiontend",
+            "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+        ]
         base_config = "diffusion"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
