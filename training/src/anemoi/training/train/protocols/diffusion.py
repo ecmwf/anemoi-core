@@ -59,7 +59,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         )
 
         self.rho = config.model.model.diffusion.rho
-å
+
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
         x = {}

@@ -26,16 +26,11 @@ class TimeInterpolationTask(BaseSingleStepTask):
         self,
         explicit_input_times: list[int],
         explicit_output_times: list[int],
-        target_forcings: dict[str, list[int]],
         **_kwargs,
     ) -> None:
         self.boundary_times = explicit_input_times  # [0, 6]
         self.interp_times = explicit_output_times  # [1, 2, 3, 4, 5]
-        self.target_forcings = target_forcings  # {"data": []}
-        self.num_outputs = len(self.interp_times)
-        self.use_time_fraction = True
 
-        self.num_tfi = {name: len(elements) for name, elements in self.target_forcings.items()}
         self.imap = np.array(sorted(set(self.boundary_times + self.interp_times)))
 
     def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:

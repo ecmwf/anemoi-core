@@ -1,0 +1,3 @@
+_target_: anemoi.training.tasks.TimeInterpolationTask
+explicit_input_times: [0, 6]
+explicit_output_times: [1, 2, 3, 4, 5]
