@@ -37,18 +37,20 @@ class BaseTask(ABC):
 
     name: str
 
-    @abstractmethod
-    def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:
+    def __init__(self, input_time_indices: list[int], target_input_indices: list[int]) -> None:
+        self.input_time_indices = input_time_indices
+        self.target_input_indices = target_input_indices
+
+    def get_batch_input_time_indices(self) -> list[int]:
         """Get the relative time indices for the model input sequence.
 
         Returns
         -------
             list[int]: List of relative time indices.
         """
-        raise NotImplementedError
+        return self.input_time_indices
 
-    @abstractmethod
-    def get_batch_output_time_indices(self, *args, **kwargs) -> list[int]:
+    def get_batch_output_time_indices(self) -> list[int]:
         """Get the relative time indices for the model target sequence.
 
         By default, this is the same as the input time indices, but it can be overridden by specific tasks.
@@ -57,7 +59,7 @@ class BaseTask(ABC):
         -------
             list[int]: List of relative time indices.
         """
-        raise NotImplementedError
+        return self.target_input_indices
 
     @abstractmethod
     def get_relative_time_indices(self, *args, **kwargs) -> list[int]:
@@ -94,8 +96,9 @@ class BaseTask(ABC):
         self,
         batch: dict[str, torch.Tensor],
         data_indices: dict[str, IndexCollection],
+        **kwargs,
     ) -> dict[str, torch.Tensor]:
-        time_indices = self.get_batch_input_time_indices()
+        time_indices = self.get_batch_input_time_indices(**kwargs)
 
         x = {}
         for dataset_name, dataset_batch in batch.items():
@@ -138,6 +141,8 @@ class BaseTask(ABC):
         # Save relative time indices
         # md_dict["relative_input_time_indices"] = self.get_batch_input_time_indices()
         # md_dict["relative_output_time_indices"] = self.get_batch_output_time_indices()
+        md_dict["num_inputs"] = self.num_inputs
+        md_dict["num_outputs"] = self.num_outputs
 
 
 class BaseSingleStepTask(BaseTask):
