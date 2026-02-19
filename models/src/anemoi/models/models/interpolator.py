@@ -1,4 +1,4 @@
-# (C) Copyright 2024 ECMWF.
+# (C) Copyright 2024 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -20,13 +20,12 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
+class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
     """Message passing interpolating graph neural network."""
 
     def __init__(
@@ -49,14 +48,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             Graph definition
         """
         model_config = DotDict(model_config)
-        target_forcing_config = get_multiple_datasets_config(model_config.training.target_forcing)
-
-        self.num_target_forcings = {}
-        for dataset_name, target_forcing in target_forcing_config.items():
-            self.num_target_forcings[dataset_name] = len(target_forcing.data) + target_forcing.time_fraction
-
         self.input_times = model_config.training.explicit_times.input
         self.output_times = model_config.training.explicit_times.target
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -71,13 +65,11 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         return (
             len(self.input_times) * self.num_input_channels[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-            + self.num_target_forcings[dataset_name]
         )
 
     def _assemble_input(
         self,
         x,
-        target_forcing,
         batch_size,
         grid_shard_shapes: dict | None = None,
         model_comm_group=None,
@@ -87,7 +79,12 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+            n_step_output=self.n_step_output,
+        )
 
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -99,11 +96,11 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(target_forcing, "batch ensemble grid vars -> (batch ensemble grid) (vars)"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
         )
+
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
@@ -116,9 +113,10 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         x_out = (
             einops.rearrange(
                 x_out,
-                "(batch ensemble grid) vars -> batch ensemble grid vars",
+                "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
+                time=self.n_step_output,
             )
             .to(dtype=dtype)
             .clone()
@@ -126,7 +124,10 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
         # residual connection (just for the prognostic variables)
         if x_skip is not None:
-            # residual connection (just for the prognostic variables)
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            assert (
+                x_skip.shape[1] == x_out.shape[1]
+            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
             x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
@@ -136,13 +137,12 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
     def forward(
         self,
-        x: Tensor,
+        x: dict[str, Tensor],
         *,
-        target_forcing: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, Tensor]:
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
@@ -161,7 +161,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
                 x[dataset_name],
-                target_forcing[dataset_name],
                 batch_size,
                 grid_shard_shapes,
                 model_comm_group,

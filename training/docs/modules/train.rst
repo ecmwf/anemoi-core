@@ -87,7 +87,7 @@ Current supported graphmodules include:
 #. **Ensemble Forecasting** —
    :class:`~anemoi.training.train.tasks.ensforecaster.GraphEnsForecaster`
 #. **Time Interpolation** —
-   :class:`~anemoi.training.train.tasks.interpolator.GraphInterpolator`
+   :class:`~anemoi.training.train.tasks.interpolator.GraphMultiOutInterpolator`
 #. **AutoEncoder** —
    :class:`~anemoi.training.train.tasks.autoencoder.GraphAutoEncoder`
 

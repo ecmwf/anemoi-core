@@ -34,11 +34,23 @@ class BaseAnemoiReader:
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
+        select: list[str] | None = None,
     ):
-        self.data = open_dataset(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        """Initialize Anemoi data reader."""
+        ds_kwargs = {}
+        if drop is not None:
+            ds_kwargs["drop"] = drop
+
+        if select is not None:
+            ds_kwargs["select"] = select
+
+        if frequency is not None:
+            ds_kwargs["frequency"] = frequency
+
+        self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
 
     @property
-    def dates(self) -> list[datetime.datetime]:
+    def dates(self) -> np.ndarray:
         """Return dataset dates."""
         return self.data.dates
 
@@ -47,8 +59,16 @@ class BaseAnemoiReader:
         """Return dataset statistics."""
         return self.data.statistics
 
-    def statistics_tendencies(self, timestep: datetime.timedelta | None = None) -> dict | None:
+    def statistics_tendencies(
+        self,
+        timestep: int | str | datetime.timedelta | None = None,
+    ) -> dict | None:
         """Return dataset tendency statistics."""
+        if timestep is None:
+            timestep = getattr(self, "timestep", None)
+        if timestep is None:
+            msg = "timestep must be provided to compute tendency statistics."
+            raise ValueError(msg)
         try:
             return self.data.statistics_tendencies(timestep)
         except (KeyError, AttributeError):
@@ -60,7 +80,7 @@ class BaseAnemoiReader:
         return self.data.variables
 
     @property
-    def missing(self) -> np.ndarray:
+    def missing(self) -> set[int]:
         """Return dataset missing values mask."""
         return self.data.missing
 
