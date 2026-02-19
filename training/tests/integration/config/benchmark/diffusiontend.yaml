@@ -9,8 +9,8 @@ system:
 
 dataloader:
   num_workers:
-    training: 2
-    validation: 2
+    training: 8
+    validation: 8
   training:
     datasets:
       data:
