@@ -160,7 +160,7 @@ class RegularSHT(SpectralTransform):
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
         assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
-        x = einops.rearrange(data, "b t e (y x) v -> (b t e v) y x", y=self.nlat, x=self.nlon)
+        x = einops.rearrange(data, "b t e p v -> b t e v p")
         coeffs = self._sht(x)
 
         # -> [b,t,e,L,M,v] == [b,t,e,y_freq,x_freq,v]
