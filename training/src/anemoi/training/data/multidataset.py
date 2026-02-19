@@ -350,7 +350,7 @@ class MultiDataset(IterableDataset):
         torch.manual_seed(base_seed)
         random.seed(base_seed)
         self.rng = np.random.default_rng(seed=base_seed)
-        sanity_rnd = self.rng.random(1)
+        sanity_rnd = self.rng.random(1)[0]
         LOGGER.info(
             ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
             worker_id,
