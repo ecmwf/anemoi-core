@@ -141,7 +141,7 @@ def attention_varlen_ref(
     [False]
     #[0]
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
-@pytest.mark.parametrize("mode", ["fwd"])
+@pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("dtype", [torch.float16])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     """Compares Triton flash attention against a naive torch implementation, and optionally flash attention
