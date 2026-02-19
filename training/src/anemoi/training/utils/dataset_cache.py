@@ -6,6 +6,7 @@ from pathlib import Path
 import http.server
 import socketserver
 from functools import partial
+from multiprocessing import Value
 
 from anemoi.datasets import open_dataset
 
@@ -39,7 +40,7 @@ class CachedDataWrapper:
         """Intercept array access and route through cache."""
         self._access_count += 1
         if self._access_count <= 5:
-            LOGGER.info(f"CachedDataWrapper.__getitem__ called (access #{self._access_count}) with index type: {type(index).__name__}, value: {index if not isinstance(index, (tuple, slice)) or len(str(index)) < 50 else '...'}")
+            LOGGER.debug(f"CachedDataWrapper.__getitem__ called (access #{self._access_count}) with index type: {type(index).__name__}, value: {index if not isinstance(index, (tuple, slice)) or len(str(index)) < 50 else '...'}")
         
         # Handle different index types
         if isinstance(index, tuple):
@@ -50,7 +51,7 @@ class CachedDataWrapper:
             if isinstance(time_idx, slice):
                 # Slice access - fetch multiple time steps
                 start, stop, step = time_idx.indices(len(self.original_data))
-                LOGGER.info(f"CachedDataWrapper: Fetching slice [{start}:{stop}:{step}] (total {(stop-start)//max(1,step or 1)} samples)")
+                LOGGER.debug(f"CachedDataWrapper: Fetching slice [{start}:{stop}:{step}] (total {(stop-start)//max(1,step or 1)} samples)")
                 results = []
                 for i in range(start, stop, step or 1):
                     single_result = self.cache.fetch(i, verbose=False)
@@ -60,7 +61,7 @@ class CachedDataWrapper:
                 return np.stack(results, axis=0)
             elif isinstance(time_idx, int):
                 # Single time index
-                LOGGER.info(f"CachedDataWrapper: Fetching single time index {time_idx}")
+                LOGGER.debug(f"CachedDataWrapper: Fetching single time index {time_idx}")
                 result = self.cache.fetch(time_idx, verbose=False)
                 if rest_idx:
                     result = result[rest_idx]
@@ -71,12 +72,12 @@ class CachedDataWrapper:
                 return self.original_data[index]
         elif isinstance(index, (int, np.integer)):
             # Single integer index
-            LOGGER.info(f"CachedDataWrapper: Fetching single integer index {index}")
+            LOGGER.debug(f"CachedDataWrapper: Fetching single integer index {index}")
             return self.cache.fetch(int(index), verbose=False)
         elif isinstance(index, slice):
             # Simple slice
             start, stop, step = index.indices(len(self.original_data))
-            LOGGER.info(f"CachedDataWrapper: Fetching simple slice [{start}:{stop}:{step}]")
+            LOGGER.debug(f"CachedDataWrapper: Fetching simple slice [{start}:{stop}:{step}]")
             results = []
             for i in range(start, stop, step or 1):
                 results.append(self.cache.fetch(i, verbose=False))
@@ -109,11 +110,11 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         self.is_initalised = False
         
-        # Cache statistics
-        self.cache_hits_local = 0
-        self.cache_hits_remote = 0
-        self.cache_misses = 0
-        self.total_fetches = 0
+        # Cache statistics - use shared memory for cross-process visibility
+        self.cache_hits_local = Value('i', 0)  # 'i' = signed int
+        self.cache_hits_remote = Value('i', 0)
+        self.cache_misses = Value('i', 0)
+        self.total_fetches = Value('i', 0)
         
         # Store the wrapped dataset to prevent it from being recreated
         self._cached_ds_train = None
@@ -253,9 +254,15 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         handler = partial(handler, directory=str(directory))
         
+        # Allow socket reuse to avoid "Address already in use" errors
+        socketserver.TCPServer.allow_reuse_address = True
         httpd = socketserver.TCPServer(("", port), handler)
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
+        
+        # Store server metadata for proper shutdown
+        self.httpd = httpd
+        self.server_thread = thread
         
         LOGGER.info(f"Serving {directory} on http://{self._get_hostname(self.rank)}:{port}")
         
@@ -285,13 +292,18 @@ class DatasetCache(AnemoiDatasetsDataModule):
         return roots
     
     def _shutdown_server(self):
-        try: 
-            if self.server_metadata is not None:
-                httpd, thread = self.server_metadata
-                httpd.shutdown()
-                thread.join()
-        except AttributeError:
-            pass
+        """Shutdown the HTTP server and close the socket."""
+        try:
+            if hasattr(self, 'httpd') and self.httpd is not None:
+                LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
+                self.httpd.shutdown()
+                if hasattr(self, 'server_thread') and self.server_thread is not None:
+                    self.server_thread.join(timeout=5)
+                # Close the socket to free the port
+                self.httpd.server_close()
+                LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
+        except Exception as e:
+            LOGGER.warning(f"Rank {self.rank}: Error shutting down server: {e}")
 
     def __del__(self):
        self._shutdown_server()
@@ -305,20 +317,22 @@ class DatasetCache(AnemoiDatasetsDataModule):
     
     def print_cache_stats(self) -> None:
         """Print cache statistics."""
-        total = self.total_fetches
+        total = self.total_fetches.value
+
+        #LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local}, hits_remote={self.cache_hits_remote}, misses={self.cache_misses})")
         if total == 0:
             LOGGER.info(f"Rank {self.rank}: No cache accesses yet")
             return
         
-        hit_rate_local = (self.cache_hits_local / total) * 100 if total > 0 else 0
-        hit_rate_remote = (self.cache_hits_remote / total) * 100 if total > 0 else 0
-        miss_rate = (self.cache_misses / total) * 100 if total > 0 else 0
+        hit_rate_local = (self.cache_hits_local.value / total) * 100 if total > 0 else 0
+        hit_rate_remote = (self.cache_hits_remote.value / total) * 100 if total > 0 else 0
+        miss_rate = (self.cache_misses.value / total) * 100 if total > 0 else 0
         
         LOGGER.info(f"Rank {self.rank}: Cache Statistics:")
         LOGGER.info(f"  Total fetches: {total}")
-        LOGGER.info(f"  Local hits: {self.cache_hits_local} ({hit_rate_local:.1f}%)")
-        LOGGER.info(f"  Remote hits: {self.cache_hits_remote} ({hit_rate_remote:.1f}%)")
-        LOGGER.info(f"  Misses: {self.cache_misses} ({miss_rate:.1f}%)")
+        LOGGER.info(f"  Local hits: {self.cache_hits_local.value} ({hit_rate_local:.1f}%)")
+        LOGGER.info(f"  Remote hits: {self.cache_hits_remote.value} ({hit_rate_remote:.1f}%)")
+        LOGGER.info(f"  Misses: {self.cache_misses.value} ({miss_rate:.1f}%)")
         LOGGER.info(f"  Items in local cache: {(self.cache_registry != -1).sum().item()}")
         
             
@@ -344,12 +358,12 @@ class DatasetCache(AnemoiDatasetsDataModule):
         cache_hits = [int(x) for x in cache_subset if int(x) != -1]
         return cache_hits
 
-    def fetch(self, date, verbose=True) -> np.ndarray:
+    def fetch(self, date, verbose=False) -> np.ndarray:
         """ Reads cache regsitry, based on result fetches file from local SSD, remote SSD or filesytem"""
 
         #LOGGER.info(f"Rank {self.rank}: Fetching date {date} (verbose={verbose})")
         
-        self.total_fetches += 1
+        self.total_fetches.value += 1
         cache_hits = self.check_cache(date)
         
         # Get the primary dataset's raw data for caching
@@ -365,7 +379,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         #if cache_hits.numel() == 0:
             #Cache miss, go to filesystem
             
-            self.cache_misses += 1
+            self.cache_misses.value += 1
             data = primary_data[date]
             
             # add data to local cache
@@ -373,22 +387,22 @@ class DatasetCache(AnemoiDatasetsDataModule):
             self.cache[date] = data
             self.cache_registry[date] = self.rank
             
-            if verbose or (self.total_fetches % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local}, hits_remote={self.cache_hits_remote}, misses={self.cache_misses})")
+            if verbose or (self.total_fetches.value % 10 == 0):
+                LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
         elif self.rank in cache_hits:
             #Cache hit on local SSD
             
-            self.cache_hits_local += 1
+            self.cache_hits_local.value += 1
             data = self.cache[date]            
             
-            if verbose or (self.total_fetches % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local}, hits_remote={self.cache_hits_remote}, misses={self.cache_misses})")
+            if verbose or (self.total_fetches.value % 10 == 0):
+                LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
                 
         else:
             #cache hit on remote SSD
             
-            self.cache_hits_remote += 1
+            self.cache_hits_remote.value += 1
             #take the first cache hit
             remote_rank = cache_hits[0] # TODO could be smarter by picking local ranks 
             remote_cache_url=self._get_remote_cache_url(remote_rank)
@@ -401,8 +415,8 @@ class DatasetCache(AnemoiDatasetsDataModule):
                 LOGGER.info(f"Error loading remote date {date} from {remote_rank} to {self.rank}. full error: {e}. falling back to filesystem.")
                 data = primary_data[date]
             
-            if verbose or (self.total_fetches % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (rank {remote_rank}) on date {date} (total: hits_local={self.cache_hits_local}, hits_remote={self.cache_hits_remote}, misses={self.cache_misses})")
+            if verbose or (self.total_fetches.value % 10 == 0):
+                LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (rank {remote_rank}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
         return data
 

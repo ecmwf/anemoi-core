@@ -64,16 +64,20 @@ def _init_parallel() -> None:
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
 
     #dist.init_process_group(backend="nccl", device_id=device(f"cuda:{local_rank}"))
-    dist.init_process_group(backend="gloo", device_id=device(f"cuda:{local_rank}"))
-    LOGGER.info("Initialized distributed process group for benchmarking: global_rank=%d, world_size=%d, local_rank=%d", global_rank, world_size, local_rank)
+    if not dist.is_initialized():
+        dist.init_process_group(backend="gloo", device_id=device(f"cuda:{local_rank}"))
+        LOGGER.info("Initialized distributed process group for benchmarking: global_rank=%d, world_size=%d, local_rank=%d", global_rank, world_size, local_rank)
 
 @pytest.mark.slow
 @pytest.mark.multigpu
 #@pytest.mark.parametrize("cache_dir", [None, os.getenv("TMPDIR")], ids=["no_cache", "with_cache"])
 @pytest.mark.parametrize("cache_dir", [ os.getenv("TMPDIR")], ids=[ "with_cache"])
+#@pytest.mark.parametrize("overlap", [False, True], ids=["no_overlap", "overlap"])
+@pytest.mark.parametrize("overlap", [True], ids=["overlap"])
 def test_benchmark_dataloader(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
     cache_dir: str | None,
+    overlap: bool,
 ) -> None:
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
     import time
@@ -97,6 +101,8 @@ def test_benchmark_dataloader(
     # Initialize the forecaster to get graph data
     graph = GraphCreator(config=cfg.graph).create(overwrite=True)
 
+    assert dist.is_initialized(), "Distributed process group is not initialized. Make sure to call _init_parallel() before this point."
+    assert dist.get_world_size() == 2, "Only 2 GPus supported in this test case"
     # Initialize datamodule with graph data
     datamodule = AnemoiDatasetsDataModule(config=cfg, graph_data={"data": graph})
     if cache_dir is not None:
@@ -133,6 +139,19 @@ def test_benchmark_dataloader(
         batch_count = 0
 
         dl_iter=iter(train_dataloader)
+        
+        if overlap and dist.get_rank() == 1:
+            # Change data iter to simulate overlap of dataloader
+            # Skip ahead by num_batches_to_test//2 to simulate starting dataloader work 
+            # while other rank is still working on batches
+            skip_batches = num_batches_to_test // 2
+            LOGGER.info(f"Rank 1: Skipping {skip_batches} batches to simulate overlap")
+            for _ in range(skip_batches):
+                next(dl_iter)  # Consume and discard batches to advance the iterator
+            LOGGER.info(f"Rank 1: Starting from batch {skip_batches}")
+        
+        if overlap:
+            datamodule.update_global_view()
 
         #for batch_idx, batch in enumerate(train_dataloader):
         for batch_idx in range(num_batches_to_test):
@@ -171,4 +190,10 @@ def test_benchmark_dataloader(
                 datamodule.update_global_view()
                 LOGGER.info("Global cache registry updated. Second epoch should benefit from shared cache awareness.")
 
-    datamodule._shutdown_server()
+    # Cleanup
+    if cache_dir is not None:
+        datamodule._shutdown_server()
+    
+    if dist.is_initialized():
+        dist.destroy_process_group()
+        LOGGER.info("Destroyed distributed process group")
