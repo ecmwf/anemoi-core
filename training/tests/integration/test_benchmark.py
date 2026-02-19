@@ -23,7 +23,7 @@ from anemoi.training.train.profiler import AnemoiProfiler
 
 from anemoi.training.utils.dataset_cache import DatasetCache
 import torch.distributed as dist
-from torch import device
+from torch import device, manual_seed
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
@@ -81,6 +81,9 @@ def test_benchmark_dataloader(
 ) -> None:
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
     import time
+    import random
+    import numpy as np
+    import torch
 
     from anemoi.graphs.create import GraphCreator
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
@@ -89,12 +92,23 @@ def test_benchmark_dataloader(
     cfg.graph.nodes.data.node_builder.dataset = cfg.system.input.dataset
     LOGGER.info("Benchmarking dataloader for configuration: %s", test_case)
 
+    # Set seeds for reproducibility
+    seed = 42
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    os.environ["ANEMOI_BASE_SEED"] = str(seed)  # ensure base seed is set for consistent benchmarking
+    LOGGER.info(f"Set random seeds to {seed} for reproducibility")
+
     # Reset memory logging and free all possible memory between runs
     # this ensures we report the peak memory used during each run,
     # and not the peak memory used by the run with the highest memory usage
     reset_peak_memory_stats()
     empty_cache()
     gc.collect()
+
 
     _init_parallel()
 
@@ -124,9 +138,6 @@ def test_benchmark_dataloader(
             is_wrapped = isinstance(dataset.data, CachedDataWrapper)
             LOGGER.info(f"Dataset '{dataset_name}' data is {'WRAPPED' if is_wrapped else 'NOT WRAPPED'} (type: {type(dataset.data).__name__})")
     
-    # Get training dataloader
-    train_dataloader = datamodule.train_dataloader()
-
     # Benchmark batch sampling speed
     num_batches_to_test = 100
     LOGGER.info("Testing %d batches per epoch, %d epochs from MultiDataset", num_batches_to_test, 2)
@@ -134,38 +145,72 @@ def test_benchmark_dataloader(
     if cache_dir is not None and not datamodule.is_initalised:
          raise ValueError(f"DatasetCache was not properly initialized with cache_dir '{cache_dir}'")
 
+    rank = dist.get_rank()
+    
+    # Define explicit index ranges for each rank and epoch to ensure predictable access patterns
+    # Epoch 0: Rank 0 gets indices 0-99, Rank 1 gets indices 100-199
+    # Epoch 1: SWAP - Rank 0 gets indices 100-199, Rank 1 gets indices 0-99
+    # This ensures each rank accesses data the OTHER rank cached in epoch 0
+    if overlap:
+        index_ranges = {
+            0: {  # Rank 0
+                0: range(0, num_batches_to_test),      # Epoch 0: indices 0-99
+                1: range(num_batches_to_test, num_batches_to_test * 2)  # Epoch 1: indices 100-199
+            },
+            1: {  # Rank 1
+                0: range(num_batches_to_test, num_batches_to_test * 2),  # Epoch 0: indices 100-199
+                1: range(0, num_batches_to_test)       # Epoch 1: indices 0-99
+            }
+        }
+    else:
+        # No overlap - same indices for both epochs
+        index_ranges = {
+            0: {  # Rank 0
+                0: range(0, num_batches_to_test),      # Epoch 0: indices 0-99
+                1: range(0, num_batches_to_test)       # Epoch 1: indices 0-99
+            },
+            1: {  # Rank 1
+                0: range(num_batches_to_test, num_batches_to_test * 2),  # Epoch 0: indices 100-199
+                1: range(num_batches_to_test, num_batches_to_test * 2)   # Epoch 1: indices 100-199
+            }
+        }
+
     for epoch_idx in range(2):
         start_time = time.perf_counter()
         batch_count = 0
 
-        dl_iter=iter(train_dataloader)
+        dist.barrier()  # Synchronize before starting epoch to ensure fair timing
+
+        # Get the index range for this rank and epoch
+        indices_to_access = index_ranges[rank][epoch_idx]
+        LOGGER.info(f"Rank {rank}: Epoch {epoch_idx} - Accessing indices {list(indices_to_access)[0]}-{list(indices_to_access)[-1]}")
         
-        if overlap and dist.get_rank() == 1:
-            # Change data iter to simulate overlap of dataloader
-            # Skip ahead by num_batches_to_test//2 to simulate starting dataloader work 
-            # while other rank is still working on batches
-            skip_batches = num_batches_to_test // 2
-            LOGGER.info(f"Rank 1: Skipping {skip_batches} batches to simulate overlap")
-            for _ in range(skip_batches):
-                next(dl_iter)  # Consume and discard batches to advance the iterator
-            LOGGER.info(f"Rank 1: Starting from batch {skip_batches}")
-        
-        if overlap:
+        # Update global view before processing batches (after epoch 0 to share cache info)
+        if overlap and epoch_idx > 0:
+            LOGGER.info(f"Rank {rank}: Updating global cache registry before epoch {epoch_idx}")
             datamodule.update_global_view()
 
-        #for batch_idx, batch in enumerate(train_dataloader):
-        for batch_idx in range(num_batches_to_test):
-
-            if batch_idx >= num_batches_to_test:
-                break
+        # Access data by explicit index through the cached dataset
+        # Since MultiDataset doesn't implement __getitem__, we access the underlying cached data directly
+        if cache_dir is not None:
+            # Access through the cached wrapper which will route through cache.fetch()
+            primary_dataset_name = datamodule.primary_dataset_name
+            cached_data = datamodule.ds_train.datasets[primary_dataset_name].data
+        else:
+            # Without cache, access the raw dataset
+            primary_dataset_name = list(datamodule.ds_train.datasets.keys())[0]
+            cached_data = datamodule.ds_train.datasets[primary_dataset_name].data
+            
+        for idx in indices_to_access:
+            # Access the cached data directly by index
+            # This calls CachedDataWrapper.__getitem__ -> cache.fetch()
+            data = cached_data[idx]
             batch_count += 1
-            batch = next(dl_iter)
 
-            # Log first batch structure
-            if batch_idx == 0 and epoch_idx == 0:
-                LOGGER.info("First batch structure:")
-                for dataset_name, data in batch.items():
-                    LOGGER.info("  Dataset '%s': shape %s, dtype %s", dataset_name, data.shape, data.dtype)
+            # Log first data access
+            if idx == list(indices_to_access)[0] and epoch_idx == 0:
+                LOGGER.info(f"First data access (rank {rank}, epoch {epoch_idx}):")
+                LOGGER.info(f"  Index: {idx}, shape: {data.shape}, dtype: {data.dtype}")
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -190,6 +235,7 @@ def test_benchmark_dataloader(
                 datamodule.update_global_view()
                 LOGGER.info("Global cache registry updated. Second epoch should benefit from shared cache awareness.")
 
+    dist.barrier()  # Synchronize before cleanup to ensure all ranks have finished processing
     # Cleanup
     if cache_dir is not None:
         datamodule._shutdown_server()
