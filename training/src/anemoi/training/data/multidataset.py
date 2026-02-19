@@ -379,17 +379,6 @@ class MultiDataset(IterableDataset):
 
         return x
 
-    def get_initial_sampe(self) -> dict[str, torch.Tensor]:
-        """Return initial sample from all datasets."""
-        start = self.data_relative_date_indices[0]
-        end = self.data_relative_date_indices[-1] + 1
-        timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
-        time_steps = slice(start, end, timeincrement)
-        return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
-
-        
-        
-
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
 
@@ -418,13 +407,6 @@ class MultiDataset(IterableDataset):
             shuffled_chunk_indices[:10],
         )
         
-        fake_dataloading = os.getenv("AIFS_FAKE_DATALOADING", "0") == "1"
-        if fake_dataloading:
-            LOGGER.info("Using fake data loading mode, serving initial sample repeatedly")
-            initial_sample = self.get_initial_sampe()
-            for _ in shuffled_chunk_indices:
-                yield initial_sample
-            return
         
         # TODO(): improve this...
         for i in shuffled_chunk_indices:
