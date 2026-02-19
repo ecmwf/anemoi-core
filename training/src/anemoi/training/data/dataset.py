@@ -38,7 +38,14 @@ def _normalize_dataset_config(dataset_config: str | dict | DictConfig) -> str | 
     if "dataset" not in dataset_config:
         msg = "dataset_config must contain the 'dataset' key."
         raise ValueError(msg)
-    return dataset_config
+
+    if dataset_config["dataset"] is None:
+        msg = "dataset_config.dataset cannot be None."
+        raise ValueError(msg)
+
+    # Keep only explicitly set options to avoid passing None-valued kwargs
+    # (e.g. select=None), which can trigger downstream subset selection issues.
+    return {key: value for key, value in dataset_config.items() if value is not None}
 
 
 def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
