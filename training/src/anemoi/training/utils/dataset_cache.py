@@ -451,34 +451,3 @@ class DatasetCache(AnemoiDatasetsDataModule):
         if trainer.current_epoch == 0:
             self.update_global_view()
         
-if __name__ == "__main__":
-    #run with 'torchrun --nproc-per-node 2 remote_cache.py'
-    dataset_path=Path("/home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr")
-    cache_dir=Path(os.getenv("TMPDIR"))
-    ds = open_dataset(dataset_path)
-    cached_ds = DatasetCache(ds, cache_root=cache_dir, dataset_path=dataset_path)
-    rank=cached_ds.rank
-    start=rank * 10
-    end = start + 10
-    LOGGER.info(f"rank {rank}: loading from {start} to {end}")
-    for x in range(start, end):
-        cached_ds[x] 
-        dist.barrier()
-        #LOGGER.info(f"rank {rank}: loaded date {x}: {cached_ds[x]}")
-        
-    cached_ds.update_global_view()
-
-    # for the 2nd round, half data will be seen locally, other half will be seen remotely
-    start = start + 5
-    end = end + 5
-    LOGGER.info(f"rank {rank}: loading from {start} to {end}")
-    #while True:
-    for x in range(start, end):
-        cached_ds[x] 
-        dist.barrier()
-        #if rank == 0:
-        #    LOGGER.info(f"rank {rank}: loaded date {x}: {cached_ds[x]}")
-        
-    #import pdb
-    #breakpoint()
-    cached_ds._shutdown_server()
