@@ -3,3 +3,4 @@ accelerator: auto
 num_gpus_per_node: 1
 num_nodes: 1
 num_gpus_per_model: 1
+cache_dir: ${oc.decode:${oc.env:TMPDIR}} #if not none, will cache input data under cache_dir

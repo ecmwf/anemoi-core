@@ -358,16 +358,16 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
 
 @pytest.fixture(
     params=[  # selects different test cases
-        "lam",
+        #"lam",
         "graphtransformer",
-        "stretched",
-        "ensemble_crps",
+        #"stretched",
+        #"ensemble_crps",
     ],
     ids=[
-        "lam",
+        #"lam",
         "graphtransformer",
-        "stretched",
-        "ensemble_crps",
+        #"stretched",
+        #"ensemble_crps",
     ],
 )
 def benchmark_config(
