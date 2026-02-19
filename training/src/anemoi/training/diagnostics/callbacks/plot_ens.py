@@ -140,7 +140,7 @@ class EnsemblePlotMixin:
                 for x in outputs[1]
             ),
         )
-        if pl_module.task_type == "temporal-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
+        if pl_module.task_type == "time-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
             output_tensor = output_tensor.squeeze(0)
         output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
