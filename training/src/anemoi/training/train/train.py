@@ -188,9 +188,12 @@ class AnemoiTrainer(ABC):
         dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
         for dataset_name, dataset_config in dataset_configs.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            dataset_source = getattr(dataset_config, "dataset_config", None)
-            if dataset_source is None:
-                dataset_source = dataset_config.dataset
+            dataset_reader_config = dataset_config.dataset_config
+            dataset_source = (
+                dataset_reader_config.get("dataset")
+                if hasattr(dataset_reader_config, "get")
+                else dataset_reader_config["dataset"]
+            )
             graphs[dataset_name] = self._create_graph_for_dataset(dataset_source, dataset_name)
         return graphs
 
