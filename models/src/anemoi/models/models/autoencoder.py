@@ -49,7 +49,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
+                in_channels_dst=self.input_dim_latent[dataset_name],
                 hidden_dim=self.num_channels,
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
@@ -75,26 +75,6 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
-
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        super()._calculate_shapes_and_indices(data_indices)
-
-        self._forcing_input_idx = {}
-        self.num_input_channels_forcings = {}
-        self.target_dim = {}
-
-        for dataset_name, dataset_indices in data_indices.items():
-            forcing_names = dataset_indices.model._forcing
-            self._forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in forcing_names]
-            self.num_input_channels_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
-
-            self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
-
-    def _calculate_target_dim(self, dataset_name: str) -> int:
-        return (
-            self.n_step_output * self.num_input_channels_forcings[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-        )
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
