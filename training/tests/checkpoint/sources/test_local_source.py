@@ -11,31 +11,24 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
 import torch
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.sources.local import LocalSource
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
     from pathlib import Path
-    from typing import Any
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _run(coro: Coroutine[Any, Any, Any]) -> Any:
-    """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _save_checkpoint(path: Path, data: dict) -> Path:
@@ -86,9 +79,9 @@ def lightning_ckpt_file(tmp_path: Path, simple_state_dict: dict) -> Path:
 class TestLocalSourceProcess:
     """Tests for LocalSource.process()."""
 
-    def test_load_valid_ckpt(self, source: LocalSource, ckpt_file: Path) -> None:
+    async def test_load_valid_ckpt(self, source: LocalSource, ckpt_file: Path) -> None:
         context = CheckpointContext(checkpoint_path=ckpt_file)
-        result = _run(source.process(context))
+        result = await source.process(context)
 
         assert result.checkpoint_data is not None
         assert "state_dict" in result.checkpoint_data
@@ -96,13 +89,13 @@ class TestLocalSourceProcess:
         assert result.metadata["source_type"] == "local"
         assert result.metadata["source_path"] == str(ckpt_file)
 
-    def test_load_lightning_checkpoint(
+    async def test_load_lightning_checkpoint(
         self,
         source: LocalSource,
         lightning_ckpt_file: Path,
     ) -> None:
         context = CheckpointContext(checkpoint_path=lightning_ckpt_file)
-        result = _run(source.process(context))
+        result = await source.process(context)
 
         assert result.checkpoint_data is not None
         assert result.checkpoint_format == "lightning"
@@ -110,37 +103,44 @@ class TestLocalSourceProcess:
         assert result.checkpoint_data["epoch"] == 10
         assert result.metadata["source_type"] == "local"
 
-    def test_file_not_found_raises(self, source: LocalSource, tmp_path: Path) -> None:
+    async def test_file_not_found_raises(self, source: LocalSource, tmp_path: Path) -> None:
         missing = tmp_path / "nonexistent.ckpt"
         context = CheckpointContext(checkpoint_path=missing)
 
         with pytest.raises(CheckpointNotFoundError) as exc_info:
-            _run(source.process(context))
+            await source.process(context)
 
         assert missing.name in str(exc_info.value)
 
-    def test_invalid_file_raises(self, source: LocalSource, tmp_path: Path) -> None:
+    async def test_invalid_file_raises(self, source: LocalSource, tmp_path: Path) -> None:
         bad_file = tmp_path / "garbage.ckpt"
         bad_file.write_text("this is not a valid checkpoint")
 
         context = CheckpointContext(checkpoint_path=bad_file)
 
         with pytest.raises(CheckpointLoadError) as exc_info:
-            _run(source.process(context))
+            await source.process(context)
 
         assert str(bad_file) in str(exc_info.value)
 
-    def test_string_path_is_normalised(
+    async def test_string_path_is_normalised(
         self,
         source: LocalSource,
         ckpt_file: Path,
     ) -> None:
         """Passing a string path should work the same as a Path object."""
         context = CheckpointContext(checkpoint_path=str(ckpt_file))
-        result = _run(source.process(context))
+        result = await source.process(context)
 
         assert result.checkpoint_data is not None
         assert result.metadata["source_type"] == "local"
+
+    async def test_none_path_raises_config_error(self, source: LocalSource) -> None:
+        """Passing None checkpoint_path should raise CheckpointConfigError."""
+        context = CheckpointContext(checkpoint_path=None)
+
+        with pytest.raises(CheckpointConfigError, match="checkpoint_path"):
+            await source.process(context)
 
 
 class TestLocalSourceSupports:

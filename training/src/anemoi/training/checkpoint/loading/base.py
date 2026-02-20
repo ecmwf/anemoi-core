@@ -130,12 +130,18 @@ class LoadingStrategy(PipelineStage):
         model: nn.Module,
         checkpoint_data: dict[str, Any],
     ) -> None:
-        """Preserve Anemoi-specific metadata from checkpoint onto model.
+        """Restore Anemoi-specific metadata from checkpoint onto model.
 
-        Restores ``_ckpt_model_name_to_index`` from the checkpoint's
-        hyper_parameters, which maps variable names to their tensor
-        indices. This mapping is required by diagnostics callbacks
-        (e.g. sanity checks) and downstream inference.
+        Sets ``model._ckpt_model_name_to_index`` from the checkpoint's
+        ``hyper_parameters.data_indices.name_to_index``, which maps
+        variable names to their tensor indices. This mapping is required
+        by diagnostics callbacks (e.g. sanity checks) and downstream
+        inference.
+
+        The attribute is set unconditionally when available in the
+        checkpoint data — fresh models do **not** have it by default
+        (it is only set during checkpoint loading in the existing
+        codebase via ``on_load_checkpoint``).
 
         Parameters
         ----------
@@ -144,9 +150,6 @@ class LoadingStrategy(PipelineStage):
         checkpoint_data : dict
             Full checkpoint data dictionary (not just the state dict)
         """
-        if not hasattr(model, "_ckpt_model_name_to_index"):
-            return
-
         hyper_params = checkpoint_data.get("hyper_parameters", {})
         data_indices = hyper_params.get("data_indices")
         if data_indices is not None and hasattr(data_indices, "name_to_index"):
@@ -154,8 +157,8 @@ class LoadingStrategy(PipelineStage):
             LOGGER.debug("Restored _ckpt_model_name_to_index from checkpoint hyper_parameters")
         else:
             LOGGER.debug(
-                "Could not restore _ckpt_model_name_to_index: "
-                "hyper_parameters.data_indices.name_to_index not found in checkpoint",
+                "Checkpoint does not contain hyper_parameters.data_indices.name_to_index; "
+                "skipping _ckpt_model_name_to_index restoration",
             )
 
     def _mark_weights_loaded(self, model: nn.Module) -> None:
