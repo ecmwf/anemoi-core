@@ -262,7 +262,7 @@ def _generate_configs(try_warp_spec=True):
         # Use BLOCK_FIXED=16 to avoid issues with small N_CTX in tests
         configs = [ 
             triton.Config(
-                dict(BLOCK_FIXED=16, BLOCK_ITER=16, WARP_SPECIALIZE=False),
+                dict(BLOCK_FIXED=32, BLOCK_ITER=16, WARP_SPECIALIZE=False),
                 num_stages=1,
                 num_warps=4,
                 pre_hook=_host_descriptor_pre_hook,
@@ -934,7 +934,11 @@ class TritonAttention(torch.autograd.Function):
         # Pad tensors to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_ITER
         # This ensures tensor descriptors don't read past the end of the flattened array
         n_ctx = q.shape[2]
-        n_ctx_rounded = math.ceil(n_ctx / 16) * 16 #TODO(cathal) use block size from autotuning results instead of hardcoding 16 here
+        MAX_BLOCK_SIZE = 128
+        n_ctx_rounded = math.ceil(n_ctx / MAX_BLOCK_SIZE) * MAX_BLOCK_SIZE
+        #TODO(cathal) use block size from autotuning results instead of hardcoding 128 here
+        # Currently it works so long as block size is lte 128.
+        # TODO(cathal) ensure grid is based on real ctx not rounded ctx, to avoid launching extra blocks which do no work when ctx is not divisible by block size
         
         # Pad q, k, v if necessary
         #TODO(cathal) need a better way to do this
@@ -1017,7 +1021,8 @@ class TritonAttention(torch.autograd.Function):
         # Pad tensors to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_ITER
         # This ensures tensor descriptors don't read past the end of the flattened array
         n_ctx = q.shape[2]
-        n_ctx_rounded = math.ceil(n_ctx / 16) * 16 #TODO(cathal) use block size from autotuning results instead of hardcoding 16 here
+        MAX_BLOCK_SIZE = 128
+        n_ctx_rounded = math.ceil(n_ctx / MAX_BLOCK_SIZE) * MAX_BLOCK_SIZE #TODO(cathal) use block size from autotuning results instead of hardcoding 64 here
         #pre_grid = (triton.cdiv(N_CTX, PRE_BLOCK), BATCH * N_HEAD)
         pre_grid = (triton.cdiv(n_ctx_rounded, PRE_BLOCK), BATCH * N_HEAD)
         L = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
