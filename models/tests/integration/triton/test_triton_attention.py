@@ -32,7 +32,7 @@ try:
 except BaseException:
     HAS_FLASH = False
 
-HAS_FLASH= True
+HAS_FLASH = True
 
 
 def attention_varlen_ref(
@@ -45,9 +45,8 @@ def attention_varlen_ref(
     causal: bool = False,
     window_size: int = -1,
 ) -> torch.Tensor:
-    """
-    Reference implementation for global attention with variable-length sequences.
-    
+    """Reference implementation for global attention with variable-length sequences.
+
     Args:
         q: Query tensor of shape [Total_Q_tokens, H, D]
         k: Key tensor of shape [Total_K_tokens, H, D]
@@ -57,7 +56,7 @@ def attention_varlen_ref(
         sm_scale: Softmax scale (typically 1/sqrt(d))
         causal: Whether to apply causal masking
         window_size: Sliding window size (-1 for no window)
-    
+
     Returns:
         Output tensor of shape [Total_Q_tokens, H, D]
     """
@@ -66,80 +65,82 @@ def attention_varlen_ref(
     batch_size = len(cu_seqlens_q) - 1
     num_heads = q.shape[1]
     head_dim = q.shape[2]
-    
+
     # Collect outputs for each sequence
     outputs = []
-    
+
     for b in range(batch_size):
         # Extract the current sequence
         q_start, q_end = cu_seqlens_q[b].item(), cu_seqlens_q[b + 1].item()
         k_start, k_end = cu_seqlens_k[b].item(), cu_seqlens_k[b + 1].item()
-        
+
         q_seq = q[q_start:q_end]  # [seq_len_q, H, D]
         k_seq = k[k_start:k_end]  # [seq_len_k, H, D]
         v_seq = v[k_start:k_end]  # [seq_len_k, H, D]
-        
+
         seq_len_q = q_end - q_start
         seq_len_k = k_end - k_start
-        
+
         # Reshape for batch matrix multiplication
         # [seq_len, H, D] -> [H, seq_len, D]
         q_seq = q_seq.transpose(0, 1)
         k_seq = k_seq.transpose(0, 1)
         v_seq = v_seq.transpose(0, 1)
-        
+
         # Compute attention scores: [H, seq_len_q, D] @ [H, D, seq_len_k] -> [H, seq_len_q, seq_len_k]
         scores = torch.matmul(q_seq, k_seq.transpose(1, 2)) * sm_scale
-        
+
         # Apply masks
         if causal:
             # Causal mask: each query position can only attend to positions <= its own position
             causal_mask = torch.triu(torch.ones(seq_len_q, seq_len_k, device=device), diagonal=1).bool()
             scores = scores.masked_fill(causal_mask.unsqueeze(0), float("-inf"))
-        
+
         if window_size != -1:
             # Sliding window mask
             positions_q = torch.arange(seq_len_q, device=device)
             positions_k = torch.arange(seq_len_k, device=device)
             window_mask = torch.abs(positions_q[:, None] - positions_k[None, :]) > window_size
             scores = scores.masked_fill(window_mask.unsqueeze(0), float("-inf"))
-        
+
         # Apply softmax
         attn_weights = torch.softmax(scores.float(), dim=-1).to(dtype)
-        
+
         # Compute output: [H, seq_len_q, seq_len_k] @ [H, seq_len_k, D] -> [H, seq_len_q, D]
         out_seq = torch.matmul(attn_weights, v_seq)
-        
+
         # Reshape back: [H, seq_len_q, D] -> [seq_len_q, H, D]
         out_seq = out_seq.transpose(0, 1)
-        
+
         outputs.append(out_seq)
-    
+
     # Concatenate all sequences
     output = torch.cat(outputs, dim=0)  # [Total_Q_tokens, H, D]
-    
+
     return output
 
 
-#def test_triton_attention_deterministic():
+# def test_triton_attention_deterministic():
 #    """ Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic. """
 #    raise NotImplementedError("TODO(cathal): implement this test.")
 
+
 @pytest.mark.gpu
 @pytest.mark.slow
-@pytest.mark.parametrize("Z", [1, 2]) #4, 8, 16])
+@pytest.mark.parametrize("Z", [1, 2])  # 4, 8, 16])
 @pytest.mark.parametrize("H", [1])
 @pytest.mark.parametrize(
-    "N_CTX", [1, 4, 8, 16, 18, 32, 33, 34, 38, 42, 48, 52, 64, 65, 68] 
-    #"N_CTX", [32]
+    "N_CTX",
+    [1, 4, 8, 16, 18, 32, 33, 34, 38, 42, 48, 52, 64, 65, 68],
+    # "N_CTX", [32]
     # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
 @pytest.mark.parametrize("HEAD_DIM", [64])
 @pytest.mark.parametrize("causal", [False])  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
 @pytest.mark.parametrize(
     "window",
-    [True, False]
-    #[0]
+    [True, False],
+    # [0]
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("dtype", [torch.float16])
@@ -150,9 +151,11 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     to be tested (in this case, an o96 processor setup).
     """
     attention = TritonAttention.apply
-    
+
     if N_CTX > 2048 and not HAS_FLASH:
-        pytest.skip("N_CTX > 2048 will cause OOM for naive pytorch reference implementation, so we skip these tests when flash attention is not available.")
+        pytest.skip(
+            "N_CTX > 2048 will cause OOM for naive pytorch reference implementation, so we skip these tests when flash attention is not available."
+        )
 
     if not is_triton_available():
         pytest.skip("Triton not available")
@@ -175,11 +178,10 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     q = q.to(ref_dtype)
     k = k.to(ref_dtype)
     v = v.to(ref_dtype)
-    
+
     window_size = -1
     if window:
         window_size = int(torch.randint(0, N_CTX, (1,))[0])
-        
 
     # Compute reference values
     if not HAS_FLASH:
@@ -193,7 +195,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         if window_size != -1:
             # Create sliding window mask
             positions = torch.arange(N_CTX, device="cuda")
-            mask = abs(positions[:, None] - positions[None, :]) <= window_size  
+            mask = abs(positions[:, None] - positions[None, :]) <= window_size
             p[:, :, ~mask] = float("-inf")
 
         p = torch.softmax(p.float(), dim=-1)
@@ -242,7 +244,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     else:
         atol = 1e-3
         rtol = 0.0
-    
+
     if mode == "fwd":
         try:
             torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=rtol)
@@ -268,10 +270,8 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
                 )
 
                 # Print a small slice around the offending token to inspect cross-batch/head behaviour.
-                print("[triton-attn debug] tri_out[z, h, t, :8] =",
-                      tri_out[z, h, t, :8].detach().cpu())
-                print("[triton-attn debug] ref_out[z, h, t, :8] =",
-                      ref_out[z, h, t, :8].detach().cpu())
+                print("[triton-attn debug] tri_out[z, h, t, :8] =", tri_out[z, h, t, :8].detach().cpu())
+                print("[triton-attn debug] ref_out[z, h, t, :8] =", ref_out[z, h, t, :8].detach().cpu())
 
             # Re-raise so the test still fails, but with extra context.
             raise
@@ -284,7 +284,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 
     # compare
     torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=rtol)
-    
+
     # Backward pass may have additional hardware-specific requirements
     bwd_rtol = rtol
     # Relative tolerance workaround for known hardware limitation of CDNA2 GPU.
@@ -316,10 +316,8 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
             )
 
             # Print a small slice around the offending token to inspect cross-batch/head behaviour.
-            print("[triton-attn debug] tri_dv[z, h, t, :8] =",
-                    tri_dv[z, h, t, :8].detach().cpu())
-            print("[triton-attn debug] ref_dv[z, h, t, :8] =",
-                    ref_dv[z, h, t, :8].detach().cpu())
+            print("[triton-attn debug] tri_dv[z, h, t, :8] =", tri_dv[z, h, t, :8].detach().cpu())
+            print("[triton-attn debug] ref_dv[z, h, t, :8] =", ref_dv[z, h, t, :8].detach().cpu())
 
         # Re-raise so the test still fails, but with extra context.
         raise
