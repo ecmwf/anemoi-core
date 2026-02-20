@@ -269,11 +269,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 
             # gather tensors if necessary
             batch = {
-                dataset_name: pl_module.allgather_batch(
-                    dataset_tensor,
-                    pl_module.grid_indices[dataset_name],
-                    pl_module.grid_dim,
-                )
+                dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
                 for dataset_name, dataset_tensor in batch.items()
             }
             # output: (loss, [pred_dict1, pred_dict2, ...]); all tasks return a list of per-step dicts.
@@ -285,11 +281,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 output[0],
                 [
                     {
-                        dataset_name: pl_module.allgather_batch(
-                            dataset_pred,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
-                        )
+                        dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
                         for dataset_name, dataset_pred in pred.items()
                     }
                     for pred in preds
@@ -304,8 +296,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                     if hasattr(post_processor, "nan_locations"):
                         post_processor.nan_locations = pl_module.allgather_batch(
                             post_processor.nan_locations,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
+                            dataset_name,
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 

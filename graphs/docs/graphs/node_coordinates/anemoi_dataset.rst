@@ -24,10 +24,11 @@ the following YAML configuration:
 where `dataset` is the path to the anemoi dataset.
 
 The ``AnemoiDatasetNodes`` class supports operations over multiple
-datasets. For example, the `cutout` operation supports combining a
-regional dataset and a global dataset to enable both limited area and
-stretched grids. To define the `node coordinates` that combine multiple
-anemoi datasets, you can use the following YAML configuration:
+datasets. For example, the :ref:`cutout <anemoi-datasets:combining-cutout>`
+operation supports combining a regional dataset and a global dataset to
+enable both limited area and stretched grids. To define the `node coordinates`
+that combine multiple anemoi datasets, you can use the following YAML
+configuration:
 
 .. code:: yaml
 
@@ -39,4 +40,11 @@ anemoi datasets, you can use the following YAML configuration:
          - dataset: /path/to/lam_dataset.zarr
            thinning: 25 # sample every n-th point (only for lam_dataset), optional
          - dataset: /path/to/boundary_forcing.zarr
+         min_distance_km: 10
+         max_distance_km: null
        attributes: ...
+
+.. note::
+    The parameter `max_distance_km` is typically used in Limited Area Models (LAMs) to avoid
+    loading (global) grid points that are far from the area of interest, which helps reduce
+    memory usage.
