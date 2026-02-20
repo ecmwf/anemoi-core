@@ -1,17 +1,12 @@
 ---
 overwrite: True
 
-data: "data"
-hidden:
- - "hidden_1"
- - "hidden_2"
-
 nodes:
   # Data nodes
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.dataset}
+      dataset: ${dataloader.training.datasets.data.dataset}
     attributes: ${graph.attributes.nodes}
   hidden_1:
     node_builder:

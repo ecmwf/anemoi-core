@@ -65,5 +65,5 @@ model:
   num_channels: 512
   output_mask:
     _target_: anemoi.training.utils.masks.Boolean1DMask
-    nodes_name: ${graph.data}
+    nodes_name: "data"
     attribute_name: cutout_mask

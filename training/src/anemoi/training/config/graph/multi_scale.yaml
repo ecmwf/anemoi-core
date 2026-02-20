@@ -1,15 +1,12 @@
 ---
 overwrite: True
 
-data: "data"
-hidden: "hidden"
-
 nodes:
   # Data nodes
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
-      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"  # Always overridden from dataloader config
+      dataset: ${dataloader.training.datasets.data.dataset}
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
@@ -19,8 +16,8 @@ nodes:
 
 edges:
 # Encoder configuration
-- source_name: ${graph.data}
-  target_name: ${graph.hidden}
+- source_name: "data"
+  target_name: "hidden"
   edge_builders:
   - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
     cutoff_factor: 0.6 # only for cutoff method
@@ -28,8 +25,8 @@ edges:
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
   # Processor configuration
-- source_name: ${graph.hidden}
-  target_name: ${graph.hidden}
+- source_name: "hidden"
+  target_name: "hidden"
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
@@ -38,8 +35,8 @@ edges:
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
   # Decoder configuration
-- source_name: ${graph.hidden}
-  target_name: ${graph.data}
+- source_name: "hidden"
+  target_name: "data"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
     num_nearest_neighbours: 3 # only for knn method

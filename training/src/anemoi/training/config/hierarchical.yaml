@@ -22,6 +22,7 @@ model:
   keep_batch_sharded: False # not yet supported for Hierarchical
   model:
     _target_: anemoi.models.models.AnemoiModelEncProcDecHierarchical
+    hidden_nodes_name: ["hidden1", "hidden2", "hidden3"]
   enable_hierarchical_level_processing: True
   level_process_num_layers: 2
   processor:

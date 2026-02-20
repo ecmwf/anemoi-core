@@ -48,8 +48,6 @@ system:
 
 graph:
   overwrite: True
-  data: "data"
-  hidden: "hidden"
   nodes:
     # Data nodes
     data:
@@ -66,20 +64,20 @@ graph:
         grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
   edges:
     # Processor configuration
-    - source_name: ${graph.hidden}
-      target_name: ${graph.hidden}
+    - source_name: "hidden"
+      target_name: "hidden"
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
       attributes: ${graph.attributes.edges}
     # Encoder configuration
-    - source_name: ${graph.data}
-      target_name: ${graph.hidden}
+    - source_name: "data"
+      target_name: "hidden"
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalEncoderEdges
       attributes: ${graph.attributes.edges}
     # Decoder configuration
-    - source_name: ${graph.hidden}
-      target_name: ${graph.data}
+    - source_name: "hidden"
+      target_name: "data"
       edge_builders:
         - _target_: anemoi.graphs.edges.ICONTopologicalDecoderEdges
       attributes: ${graph.attributes.edges}
@@ -155,6 +153,7 @@ model:
 
   model:
     _target_: anemoi.models.models.AnemoiModelEncProcDec
+    hidden_nodes_name: "hidden"
 
   keep_batch_sharded: True
 
@@ -260,7 +259,6 @@ training:
           slope: 0.001
         node_weights:
           _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-          nodes_name: ${graph.data}
           nodes_attribute_name: area_weight
           norm: unit-sum
   metrics:

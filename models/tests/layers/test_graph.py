@@ -77,7 +77,7 @@ class TestNamedNodesAttributes:
 
     nodes_names: list[str] = ["nodes1", "nodes2"]
     ndim: int = 2
-    num_trainable_params: int = 8
+    num_trainable_params: dict[str, int] = {"nodes1": 3, "nodes2": 5, "nodes1tonodes2": 4}
 
     @pytest.fixture
     def graph_data(self):
@@ -104,7 +104,7 @@ class TestNamedNodesAttributes:
             assert isinstance(nodes_attributes.num_nodes[nodes_name], int)
             assert (
                 nodes_attributes.attr_ndims[nodes_name] - 2 * TestNamedNodesAttributes.ndim
-                == TestNamedNodesAttributes.num_trainable_params
+                == TestNamedNodesAttributes.num_trainable_params[nodes_name]
             )
             assert isinstance(nodes_attributes.trainable_tensors[nodes_name], TrainableTensor)
 
@@ -115,7 +115,7 @@ class TestNamedNodesAttributes:
 
             expected_shape = (
                 batch_size * graph_data[nodes_name].num_nodes,
-                2 * TestNamedNodesAttributes.ndim + TestNamedNodesAttributes.num_trainable_params,
+                2 * TestNamedNodesAttributes.ndim + TestNamedNodesAttributes.num_trainable_params[nodes_name],
             )
             assert output.shape == expected_shape
 
@@ -128,7 +128,7 @@ class TestNamedNodesAttributes:
             assert output[:, 2 * TestNamedNodesAttributes.ndim :].requires_grad
 
     def test_forward_no_trainable(self, graph_data):
-        no_trainable_attributes = NamedNodesAttributes(0, graph_data)
+        no_trainable_attributes = NamedNodesAttributes({nodes_name: 0 for nodes_name in self.nodes_names}, graph_data)
         batch_size = 2
 
         for nodes_name in self.nodes_names:

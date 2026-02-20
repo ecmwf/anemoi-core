@@ -3,25 +3,33 @@
 # limited area resolution.
 overwrite: True
 
-
 nodes:
-  data:
+  era5:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.data.dataset}
+      dataset: ${dataloader.training.datasets.era5.dataset}
+    attributes: ${graph.attributes.nodes}
+  cerra:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.training.datasets.cerra.dataset}
     attributes: ${graph.attributes.nodes}
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.StretchedTriNodes
-      lam_resolution: 8
-      global_resolution: 5
-      reference_node_name: "data"
-      mask_attr_name: cutout_mask
-      margin_radius_km: 11
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 5
 
 edges:
 # Encoder
-- source_name: "data"
+- source_name: "era5"
+  target_name: "hidden"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 12
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: "cerra"
   target_name: "hidden"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
@@ -35,13 +43,21 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
-    scale_resolutions: ${graph.nodes.hidden.node_builder.lam_resolution}
+    scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Decoder
 - source_name: "hidden"
-  target_name: "data"
+  target_name: "era5"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 4
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: "hidden"
+  target_name: "cerra"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
     num_nearest_neighbours: 3

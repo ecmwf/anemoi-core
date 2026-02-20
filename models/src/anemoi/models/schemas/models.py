@@ -67,6 +67,8 @@ class DefinedModels(str, Enum):
 class Model(BaseModel):
     target_: DefinedModels = Field(..., alias="_target_")
     "Model object defined in anemoi.models.model."
+    hidden_nodes_name: str | list[str] = Field(examples=["hidden", ["hidden1", "hidden2"]])
+    "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
     convert_: str = Field("all", alias="_convert_")
     "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
 

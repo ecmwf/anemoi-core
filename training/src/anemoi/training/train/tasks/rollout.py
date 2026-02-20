@@ -39,7 +39,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -52,8 +52,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : dict[str, HeteroData]
-            Graph objects keyed by dataset name
+        graph_data : HeteroData
+            Graph object representing the graph data
         statistics : dict
             Statistics of the training data
         data_indices : dict[str, IndexCollection]

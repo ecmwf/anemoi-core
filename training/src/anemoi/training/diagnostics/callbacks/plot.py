@@ -472,8 +472,9 @@ class LongRolloutPlots(BasePlotCallback):
             for name in self.parameters
         }
         if self.latlons is None:
-            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
+            for dataset_name in self.dataset_names:
+                self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+                self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         assert batch.shape[1] >= self.max_rollout + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
@@ -724,15 +725,9 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         super().__init__(config, dataset_names=dataset_names, every_n_epochs=every_n_epochs)
         self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
 
-    def get_node_trainable_tensors(
-        self,
-        node_attributes: NamedNodesAttributes,
-        dataset_name: str,
-    ) -> dict[str, torch.Tensor]:
+    def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
         return {
-            name: tt.trainable
-            for name, tt in node_attributes[dataset_name].trainable_tensors.items()
-            if tt.trainable is not None
+            name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None
         }
 
     @staticmethod
@@ -773,8 +768,8 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         trainable_modules = {}
 
         provider_specs = (
-            ("encoder_graph_provider", (model._graph_name_data, model._graph_name_hidden)),
-            ("decoder_graph_provider", (model._graph_name_hidden, model._graph_name_data)),
+            ("encoder_graph_provider", (dataset_name, model._graph_name_hidden)),
+            ("decoder_graph_provider", (model._graph_name_hidden, dataset_name)),
             ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
         )
         for provider_name, edge_key in provider_specs:
@@ -794,10 +789,12 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
+        node_trainable_tensors = self.get_node_trainable_tensors(model.node_attributes)
+
         for dataset_name in dataset_names:
-            if len(node_trainable_tensors := self.get_node_trainable_tensors(model.node_attributes, dataset_name)):
+            if dataset_name in node_trainable_tensors and node_trainable_tensors[dataset_name] is not None:
                 fig = plot_graph_node_features(
-                    model.node_attributes[dataset_name],
+                    model.node_attributes,
                     node_trainable_tensors,
                     datashader=self.datashader_plotting,
                 )
@@ -820,7 +817,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
                 )
             elif len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
                 fig = plot_graph_edge_features(
-                    model.node_attributes[dataset_name],
+                    model.node_attributes,
                     edge_trainable_modules,
                     q_extreme_limit=self.q_extreme_limit,
                 )
@@ -1124,9 +1121,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][
-                pl_module.model.model._graph_name_data
-            ].x.detach()
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
