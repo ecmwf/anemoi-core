@@ -69,8 +69,8 @@ optional-dependencies.migrations = [
   "rich",
 ]
 
-optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8" ]
-
+optional-dependencies.spectral = [ "torch-dct>=0.1.6" ]
+optional-dependencies.tests = [ "anemoi-models[spectral]", "hypothesis>=6.11", "pytest>=8" ]
 urls.Documentation = "https://anemoi-models.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-models/"
 urls.Issues = "https://github.com/ecmwf/anemoi-models/issues"

@@ -533,7 +533,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         is_sharded = grid_shard_slice is not None
 
-        sharding_supported = (self.loss_supports_sharding or validation_mode) and (
+        sharding_supported = (self.loss_supports_sharding) and (  # loss calculated in training and validation mode
             self.metrics_support_sharding or not validation_mode
         )
 
