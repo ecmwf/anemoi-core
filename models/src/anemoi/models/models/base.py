@@ -229,7 +229,7 @@ class BaseGraphModel(nn.Module):
         x: Tensor,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: dict[str, list] | None = None,
         **kwargs,
     ) -> Tensor:
         """Forward pass of the model.
