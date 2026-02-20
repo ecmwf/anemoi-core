@@ -184,8 +184,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = {}
-        for dataset_name, shard_shapes in grid_shard_shapes.items():
-            in_out_sharded[dataset_name] = shard_shapes is not None
+        for dataset_name, _ in x.items():
+            if grid_shard_shapes is None:
+                in_out_sharded[dataset_name] = False
+            else:
+                in_out_sharded[dataset_name] = grid_shard_shapes[dataset_name] is not None
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         fcstep = min(1, fcstep)
