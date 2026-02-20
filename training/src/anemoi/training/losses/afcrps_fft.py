@@ -57,6 +57,7 @@ class AFCRPSFFTLoss(AlmostFairKernelCRPS):
         self.transform = torch.fft.fft2
         self.mask = self.lowpass_mask_2d(xdim, ydim)
         self.no_autocast = no_autocast
+        self.loss_supports_sharding = False
 
     @staticmethod
     def lowpass_mask_2d(nx, ny):

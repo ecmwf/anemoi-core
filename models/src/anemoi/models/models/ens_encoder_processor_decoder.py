@@ -79,7 +79,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_skip = None
         
         # TODO: Figure out what to do here, we want to use the forcings and skip these via x_data_latent, but not necasarily
-        # pass these through the encoder. 
+        # pass these through the encoder.
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
@@ -183,8 +183,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         batch_size = batch_sizes[0]
         ensemble_size = ensemble_sizes[0]
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
-        in_out_sharded = grid_shard_shapes is not None
-        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
+        in_out_sharded = {}
+        for dataset_name in dataset_names():
+            if grid_shard_shapes is None:
+                in_out_sharded[dataset_name] = False
+            else:
+                in_out_sharded[dataset_name] = grid_shard_shapes[dataset_name] is not None
+            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder
@@ -225,7 +230,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                     edge_attr=encoder_edge_attr,
                     edge_index=encoder_edge_index,
                     model_comm_group=model_comm_group,
-                    x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                    x_src_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
                     x_dst_is_sharded=False,  # x_latent does not come sharded
                     keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                     edge_shard_shapes=enc_edge_shard_shapes,
@@ -250,7 +255,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             shard_shapes_ref=shard_shapes_hidden,
             model_comm_group=model_comm_group,
         )
-
         processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
             batch_size=batch_ens_size,
             model_comm_group=model_comm_group,
@@ -296,8 +300,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                     edge_index=decoder_edge_index,
                     model_comm_group=model_comm_group,
                     x_src_is_sharded=True,  # x_latent always comes sharded
-                    x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                    keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+                    x_dst_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
+                    keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
                     edge_shard_shapes=dec_edge_shard_shapes,
                 )
 
