@@ -184,7 +184,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ensemble_size = ensemble_sizes[0]
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = {}
-        for dataset_name in dataset_names():
+        for dataset_name in dataset_names:
             if grid_shard_shapes is None:
                 in_out_sharded[dataset_name] = False
             else:
