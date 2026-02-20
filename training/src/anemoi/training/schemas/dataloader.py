@@ -11,7 +11,6 @@
 import datetime
 from pathlib import Path
 from typing import Any
-from typing import Literal
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
@@ -112,28 +111,6 @@ class LoaderSet(BaseModel):
     "Value for test dataset"
 
 
-class FullGridIndicesSchema(BaseModel):
-    target_: Literal["anemoi.training.data.grid_indices.FullGrid"] = Field(
-        "anemoi.training.data.grid_indices.FullGrid",
-        alias="_target_",
-    )
-    "Grid indices for full grid class implementation from anemoi.training.data.grid_indices."
-    nodes_name: str = Field(examples=["data"])
-    "Name of the grid nodes."
-
-
-class MaskedGridIndicesSchema(BaseModel):
-    target_: Literal["anemoi.training.data.grid_indices.MaskedGrid"] = Field(
-        "anemoi.training.data.grid_indices.MaskedGrid",
-        alias="_target_",
-    )
-    "Grid indices for masked grid class implementation from anemoi.training.data.grid_indices."
-    nodes_name: str = Field(examples=["data"])
-    "Name of the grid nodes."
-    node_attribute_name: str = Field(examples=["indices_connected_nodes"])
-    "Name of the nodes graph attribute used for masking."
-
-
 class DataLoaderSchema(PydanticBaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
@@ -159,5 +136,3 @@ class DataLoaderSchema(PydanticBaseModel):
     # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
-    grid_indices: DatasetDict[FullGridIndicesSchema | MaskedGridIndicesSchema]
-    "Grid indices schema."

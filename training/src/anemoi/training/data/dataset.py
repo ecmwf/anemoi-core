@@ -10,6 +10,7 @@
 import datetime
 import logging
 from abc import abstractmethod
+from functools import cached_property
 
 import numpy as np
 import torch
@@ -97,6 +98,11 @@ class BaseAnemoiReader:
         return self.data.dates
 
     @property
+    def grid_size(self) -> int:
+        """Return dataset grid size."""
+        return sum(self.data.grids)
+
+    @property
     def statistics(self) -> dict:
         """Return dataset statistics."""
         return self.data.statistics
@@ -151,6 +157,21 @@ class BaseAnemoiReader:
         """Return dataset resolution."""
         return self.data.resolution
 
+    @cached_property
+    def cutout_mask(self) -> np.ndarray:
+        """Return cutout mask."""
+        cutout_mask = np.zeros(self.grid_size, dtype=bool)
+        if len(self.data.grids) <= 1:
+            err_msg = "Dataset `cutout_mask` property requires a cutout grid but does not have one."
+            raise ValueError(err_msg)
+        cutout_mask[: self.data.grids[0]] = True
+        return cutout_mask
+
+    @cached_property
+    def boundary_mask(self) -> np.ndarray:
+        """Return boundary mask, defined as the complement of the cutout mask."""
+        return ~self.cutout_mask
+
     @property
     @abstractmethod
     def has_trajectories(self) -> bool:
@@ -159,7 +180,7 @@ class BaseAnemoiReader:
     def get_sample(
         self,
         time_indices: slice | int | list[int],
-        grid_shard_indices: np.ndarray | None = None,
+        grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
         if isinstance(grid_shard_indices, slice):
