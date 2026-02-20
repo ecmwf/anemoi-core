@@ -205,9 +205,9 @@ class CheckpointContext:
     def __repr__(self) -> str:
         """String representation of context."""
         parts = []
-        if self.checkpoint_path:
+        if self.checkpoint_path is not None:
             parts.append(f"path={self.checkpoint_path.name}")
-        if self.model:
+        if self.model is not None:
             parts.append(f"model={type(self.model).__name__}")
         if self.metadata:
             parts.append(f"metadata_keys={list(self.metadata.keys())}")
@@ -241,14 +241,14 @@ class CheckpointContext:
 
     def _check_model_optimizer_consistency(self, logger: logging.Logger) -> None:
         """Check consistency between model and optimizer/scheduler."""
-        if self.optimizer and not self.model:
+        if self.optimizer is not None and self.model is None:
             logger.warning(
                 "Optimizer provided without a model. "
                 "This may cause issues in loading stages that expect both. "
                 "Consider providing the model or removing the optimizer.",
             )
 
-        if self.scheduler and not self.optimizer:
+        if self.scheduler is not None and self.optimizer is None:
             logger.warning(
                 "Learning rate scheduler provided without an optimizer. "
                 "Schedulers typically require an optimizer to be meaningful. "
@@ -273,7 +273,7 @@ class CheckpointContext:
 
     def _check_missing_essentials(self, logger: logging.Logger) -> None:
         """Warn about potentially missing essential fields."""
-        if not self.model and not self.pl_module:
+        if self.model is None and self.pl_module is None:
             logger.info(
                 "No model or Lightning module provided in context. "
                 "Most checkpoint operations require at least a model. "

@@ -172,16 +172,6 @@ def minimal_checkpoint(sample_state_dict: dict) -> dict:
 
 
 @pytest.fixture
-def corrupted_checkpoint_data() -> dict:
-    """Create intentionally corrupted checkpoint data for error testing."""
-    return {
-        "state_dict": {"layer.weight": "not_a_tensor"},  # String instead of tensor
-        "optimizer_state_dict": None,  # None instead of dict
-        "epoch": "ten",  # String instead of int
-    }
-
-
-@pytest.fixture
 def temp_checkpoint_dir(tmp_path: Path) -> Path:
     """Create a temporary directory for checkpoint files."""
     checkpoint_dir = tmp_path / "checkpoints"
@@ -271,19 +261,6 @@ def _cleanup_temp_files(tmp_path: Path) -> None:
     """Automatically cleanup temporary files after each test."""
     # Cleanup happens automatically with tmp_path, but we can add custom cleanup here if needed
     _ = tmp_path  # Use the parameter to prevent unused argument warnings
-
-
-# Parameterized fixtures for testing multiple formats
-@pytest.fixture(params=["lightning", "pytorch", "state_dict"])
-def checkpoint_format(request: pytest.FixtureRequest) -> str:
-    """Parametrize tests across different checkpoint formats."""
-    return request.param
-
-
-@pytest.fixture(params=["cpu", "meta"])
-def map_location(request: pytest.FixtureRequest) -> str:
-    """Parametrize tests across different map locations."""
-    return request.param
 
 
 # Custom markers for test categorization

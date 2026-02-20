@@ -158,8 +158,8 @@ class ComponentCatalog:
 
             # Scan all classes in the module
             for name, obj in inspect.getmembers(module, inspect.isclass):
-                # Skip if it's not defined in this module
-                if obj.__module__ != module_name:
+                # Skip if it's not defined in this module (or its submodules)
+                if not obj.__module__.startswith(module_name):
                     continue
 
                 # Check if this class has the expected base class in its hierarchy
@@ -285,7 +285,7 @@ class ComponentCatalog:
     def _get_loaders(cls) -> dict[str, str]:
         """Get the registry of loaders, discovering if needed."""
         if cls._loaders is None:
-            cls._loaders = cls._discover_components("anemoi.training.checkpoint.loaders", "LoadingStrategy")
+            cls._loaders = cls._discover_components("anemoi.training.checkpoint.loading", "LoadingStrategy")
             cls._warn_about_discovery_issues("loaders", cls._loaders)
         return cls._loaders
 
