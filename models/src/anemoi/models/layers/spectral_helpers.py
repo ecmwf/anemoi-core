@@ -30,13 +30,12 @@ def legpoly(
     mmax: int,
     lmax: int,
     x: np.ndarray,
-    norm: str = "ortho",
     inverse: bool = False,
-    csphase: bool = True,
 ) -> np.ndarray:
     r"""Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
-    The resulting tensor has shape (mmax, lmax, len(x)). The Condon-Shortley Phase (-1)^m
-    can be turned off optionally.
+    The resulting tensor has shape (mmax, lmax, len(x)).
+
+    Note: this is derived from the version in torch-harmonics.
 
     Method of computation follows
     [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3:
@@ -50,7 +49,7 @@ def legpoly(
     nmax = max(mmax, lmax)
     vdm = np.zeros((nmax, nmax, len(x)), dtype=np.float64)
 
-    norm_factor = 1.0 if norm == "ortho" else np.sqrt(4 * np.pi)
+    norm_factor = np.sqrt(4 * np.pi)
     norm_factor = 1.0 / norm_factor if inverse else norm_factor
     vdm[0, 0, :] = norm_factor / np.sqrt(4 * np.pi)
 
@@ -67,43 +66,9 @@ def legpoly(
                 - np.sqrt((n + m - 1) / (n - m) * (2 * n + 1) / (2 * n - 3) * (n - m - 1) / (n + m)) * vdm[m, n - 2, :]
             )
 
-    if norm == "schmidt":
-        for num in range(0, nmax):
-            if inverse:
-                vdm[:, num, :] = vdm[:, num, :] * np.sqrt(2 * num + 1)
-            else:
-                vdm[:, num, :] = vdm[:, num, :] / np.sqrt(2 * num + 1)
-
     vdm = vdm[:mmax, :lmax]
 
-    if csphase:
-        for m in range(1, mmax, 2):
-            vdm[m] *= -1
-
     return vdm
-
-
-def precompute_legpoly(
-    mmax: int,
-    lmax: int,
-    t: np.ndarray,
-    norm: str = "ortho",
-    inverse: bool = False,
-    csphase: bool = True,
-) -> np.ndarray:
-    r"""Computes the values of (-1)^m c^l_m P^l_m(\cos \theta) at the positions specified by t (theta).
-    The resulting tensor has shape (mmax, lmax, len(x)). The Condon-Shortley Phase (-1)^m
-    can be turned off optionally.
-
-    Method of computation follows
-    [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3:
-    Geochemistry, Geophysics, Geosystems.
-    [2] Rapp, R.H.; A Fortran Program for the Computation of Gravimetric Quantities from High Degree Spherical Harmonic
-    Expansions, Ohio State University Columbus; report; 1982; https://apps.dtic.mil/sti/citations/ADA123406.
-    [3] Schrama, E.; Orbit integration based upon interpolated gravitational gradients.
-    """
-
-    return legpoly(mmax, lmax, np.cos(t), norm=norm, inverse=inverse, csphase=csphase)
 
 
 class SphericalHarmonicTransform(Module):
@@ -132,7 +97,7 @@ class SphericalHarmonicTransform(Module):
         theta = np.flip(np.arccos(theta))
 
         # Precompute associated Legendre polynomials
-        pct = precompute_legpoly(self.mmax, self.lmax, theta, norm="ectrans", csphase=False)
+        pct = legpoly(self.mmax, self.lmax, np.cos(theta))
         pct = torch.from_numpy(pct)
 
         # Premultiple associated Legendre polynomials by quadrature weights
@@ -233,7 +198,7 @@ class InverseSphericalHarmonicTransform(Module):
         theta = np.flip(np.arccos(theta))
 
         # Precompute associated Legendre polynomials
-        pct = precompute_legpoly(self.mmax, self.lmax, theta, inverse=True, norm="ectrans", csphase=False)
+        pct = legpoly(self.mmax, self.lmax, np.cos(theta), inverse=True)
         pct = torch.from_numpy(pct)
 
         self.register_buffer("pct", pct, persistent=False)
