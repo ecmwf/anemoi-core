@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.index_space import IndexSpace
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -394,6 +395,40 @@ class BaseGraphModule(pl.LightningModule, ABC):
             },
         )
 
+    def get_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        start: int | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Get full targets for a time slice.
+
+        Parameters
+        ----------
+        batch : dict[str, torch.Tensor]
+            Input batch keyed by dataset.
+        start : int | None, optional
+            Time index where targets start. Defaults to ``self.n_step_input``.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Full target tensor view for each dataset.
+        """
+        if start is None:
+            start = self.n_step_input
+
+        target_full: dict[str, torch.Tensor] = {}
+        for dataset_name, dataset_batch in batch.items():
+            msg = (
+                f"Batch length not sufficient for requested target slice for {dataset_name}! "
+                f"{dataset_batch.shape[1]} !>= {start + self.n_step_output}"
+            )
+            assert dataset_batch.shape[1] >= start + self.n_step_output, msg
+            target_full[dataset_name] = dataset_batch.narrow(1, start, self.n_step_output)
+
+        return target_full
+
     def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
 
@@ -428,6 +463,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 del state_dict[key]
 
         model_state_dict = self.model.state_dict()
+        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
         for key, value in model_state_dict.items():
             full_key = f"model.{key}"
             if full_key.startswith(processor_prefixes):
@@ -554,6 +590,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -581,6 +619,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y,
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
         )
 
     def _compute_metrics(
@@ -589,6 +629,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -607,7 +649,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Computed metrics
         """
-        return self.calculate_val_metrics(y_pred, y, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name)
+        return self.calculate_val_metrics(
+            y_pred,
+            y,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
+        )
 
     def compute_dataset_loss_metrics(
         self,
@@ -872,6 +921,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         step: int | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -902,22 +953,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
-            if not isinstance(metric, BaseLoss):
-                # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(
-                    y_pred_postprocessed,
-                    y_postprocessed,
-                    grid_shard_slice=grid_shard_slice,
-                    model_comm_group=self.model_comm_group,
-                    model_comm_group_size=self.model_comm_group_size,
-                    grid_dim=self.grid_dim,
-                    grid_shard_shapes=self.grid_shard_shapes,
-                )
-                continue
+            assert isinstance(
+                metric,
+                BaseLoss,
+            ), f"Validation metric {metric_name!r} must inherit BaseLoss, got {type(metric)}"
 
             for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
-                if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
+                if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
                         " in the post processed space."
@@ -930,6 +973,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     scaler_indices=(..., indices),
                     grid_shard_slice=grid_shard_slice,
                     group=self.model_comm_group,
+                    pred_layout=pred_layout,
+                    target_layout=target_layout,
                     model_comm_group_size=self.model_comm_group_size,
                     grid_dim=self.grid_dim,
                     grid_shard_shapes=self.grid_shard_shapes,

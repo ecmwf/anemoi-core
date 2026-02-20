@@ -8,8 +8,12 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
+from anemoi.training.losses.index_space import IndexSpace
+from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
+from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionTendForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
@@ -117,8 +121,20 @@ class DummyDiffusionModel(DummyModel):
         return y_noised + 0.1 * pred
 
 
-def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
-    cfg = DictConfig({"forcing": [], "diagnostic": [], "target": []})
+def _make_minimal_index_collection(
+    name_to_index: dict[str, int],
+    *,
+    forcing: list[str] | None = None,
+    diagnostic: list[str] | None = None,
+    target: list[str] | None = None,
+) -> IndexCollection:
+    cfg = DictConfig(
+        {
+            "forcing": forcing or [],
+            "diagnostic": diagnostic or [],
+            "target": target or [],
+        },
+    )
     return IndexCollection(cfg, name_to_index)
 
 
@@ -160,6 +176,286 @@ _CFG_FORECASTER = DictConfig(
 )
 
 
+def test_graphinterpolator_preserves_time_dim_in_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test: interpolator loss targets must keep singleton time dim."""
+    forecaster = GraphInterpolator.__new__(GraphInterpolator)
+    pl.LightningModule.__init__(forecaster)
+
+    name_to_index = {"A": 0, "B": 1}
+    data_indices = _make_minimal_index_collection(name_to_index)
+    forecaster.data_indices = {"data": data_indices}
+    forecaster.dataset_names = ["data"]
+    forecaster.boundary_times = [0, 2]
+    forecaster.interp_times = [1]
+    forecaster.imap = {0: 0, 1: 1, 2: 2}
+    forecaster.n_step_output = 1
+    forecaster.rollout = 1
+    forecaster.num_tfi = {"data": 0}
+    forecaster.use_time_fraction = {"data": False}
+    forecaster.target_forcing_indices = {"data": []}
+
+    def _forward_stub(
+        self: GraphInterpolator,
+        x_bound: dict[str, torch.Tensor],
+        target_forcing: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        del self, target_forcing
+        x = x_bound["data"]
+        b, _, e, g, _ = x.shape
+        return {"data": torch.randn((b, 1, e, g, len(name_to_index)), dtype=x.dtype, device=x.device)}
+
+    def _compute_loss_metrics_stub(
+        self: GraphInterpolator,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        del self, kwargs
+        assert y["data"].ndim == 5
+        assert y["data"].shape[1] == 1
+        assert y_pred["data"].shape == y["data"].shape
+        return torch.tensor(0.0), {}, y_pred
+
+    monkeypatch.setattr(GraphInterpolator, "forward", _forward_stub, raising=True)
+    monkeypatch.setattr(GraphInterpolator, "compute_loss_metrics", _compute_loss_metrics_stub, raising=True)
+
+    b, e, g, v = 3, 1, 4, len(name_to_index)  # b>1 to guard against silent broadcast bugs
+    batch = {"data": torch.randn((b, 3, e, g, v), dtype=torch.float32)}
+
+    loss, metrics, y_preds = forecaster._step(batch=batch, validation_mode=False)
+    assert isinstance(loss, torch.Tensor)
+    assert metrics == {}
+    assert len(y_preds) == 1
+    assert y_preds[0]["data"].shape == (b, 1, e, g, v)
+
+
+def test_graphmultioutinterpolator_uses_data_full_target_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Multi-out interpolator should label targets as DATA_FULL."""
+    forecaster = GraphMultiOutInterpolator.__new__(GraphMultiOutInterpolator)
+    pl.LightningModule.__init__(forecaster)
+
+    data_indices = _make_minimal_index_collection({"prog_0": 0, "forcing_0": 1, "prog_1": 2}, forcing=["forcing_0"])
+    forecaster.data_indices = {"data": data_indices}
+    forecaster.dataset_names = ["data"]
+    forecaster.boundary_times = [0]
+    forecaster.interp_times = [1, 2]
+    forecaster.imap = {0: 0, 1: 1, 2: 2}
+    forecaster.n_step_output = len(forecaster.interp_times)
+    forecaster.n_step_input = 1
+    forecaster.rollout = 1
+
+    def _forward_stub(
+        self: GraphMultiOutInterpolator,
+        x_bound: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        del self
+        x = x_bound["data"]
+        if x.ndim == 5:
+            b, _, e, g, _ = x.shape
+        else:
+            b, e, g, _ = x.shape
+        return {"data": torch.randn((b, 2, e, g, 2), dtype=x.dtype, device=x.device)}
+
+    def _compute_loss_metrics_stub(
+        self: GraphMultiOutInterpolator,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        del self, y_pred
+        assert kwargs["pred_layout"] == IndexSpace.MODEL_OUTPUT
+        assert kwargs["target_layout"] == IndexSpace.DATA_FULL
+        assert y["data"].shape[-1] == len(data_indices.name_to_index)
+        return torch.tensor(0.0), {}, y
+
+    monkeypatch.setattr(GraphMultiOutInterpolator, "forward", _forward_stub, raising=True)
+    monkeypatch.setattr(GraphMultiOutInterpolator, "compute_loss_metrics", _compute_loss_metrics_stub, raising=True)
+
+    b, e, g, v = 2, 1, 4, len(data_indices.name_to_index)
+    batch = {"data": torch.randn((b, 3, e, g, v), dtype=torch.float32)}
+
+    loss, metrics, y_preds = forecaster._step(batch=batch, validation_mode=False)
+    assert isinstance(loss, torch.Tensor)
+    assert metrics == {}
+    assert isinstance(y_preds, list)
+    assert len(y_preds) == 1
+    assert y_preds[0]["data"].shape == (b, 2, e, g, 2)
+
+
+def test_calculate_val_metrics_rejects_variable_scaled_filtered_metric() -> None:
+    """Validation metrics must reject variable-dimension scaling even through wrappers."""
+    module = GraphInterpolator.__new__(GraphInterpolator)
+    pl.LightningModule.__init__(module)
+
+    name_to_index = {"A": 0, "B": 1}
+    data_indices = _make_minimal_index_collection(name_to_index)
+
+    metric = get_loss_function(
+        DictConfig({"_target_": "anemoi.training.losses.MSELoss", "scalers": ["grid_uniform", "double_weight"]}),
+        scalers={
+            "grid_uniform": (3, torch.ones(4)),
+            "double_weight": (4, torch.ones(len(data_indices.model.output.full)) * 2.0),
+        },
+        data_indices=data_indices,
+    )
+
+    class _Model:
+        def __init__(self) -> None:
+            def _identity_post_processor(x: torch.Tensor, **_kwargs: Any) -> torch.Tensor:
+                return x
+
+            self.post_processors = {"data": _identity_post_processor}
+
+    module.model = _Model()
+    module.metrics = {"data": {"mse": metric}}
+    module.val_metric_ranges = {"data": {"all": [0, 1]}}
+    module.model_comm_group = None
+    module.model_comm_group_size = 1
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": None}
+
+    y_pred = torch.randn(2, 1, 1, 4, 2)
+    y = torch.randn(2, 1, 1, 4, 2)
+    with pytest.raises(ValueError, match="Validation metrics cannot be scaled over the variable dimension"):
+        module.calculate_val_metrics(
+            y_pred=y_pred,
+            y=y,
+            dataset_name="data",
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
+
+
+def test_calculate_val_metrics_rejects_non_baseloss_metric() -> None:
+    """Validation metrics must be BaseLoss instances to ensure consistent filtering/remapping."""
+    module = GraphInterpolator.__new__(GraphInterpolator)
+    pl.LightningModule.__init__(module)
+
+    class _Model:
+        def __init__(self) -> None:
+            def _identity_post_processor(x: torch.Tensor, **_kwargs: Any) -> torch.Tensor:
+                return x
+
+            self.post_processors = {"data": _identity_post_processor}
+
+    module.model = _Model()
+    module.metrics = {"data": {"custom": lambda *_args, **_kwargs: torch.tensor(0.0)}}
+    module.val_metric_ranges = {"data": {"all": [0, 1]}}
+    module.model_comm_group = None
+    module.model_comm_group_size = 1
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": None}
+
+    y_pred = torch.randn(2, 1, 1, 4, 2)
+    y = torch.randn(2, 1, 1, 4, 2)
+    with pytest.raises(AssertionError, match="must inherit BaseLoss"):
+        module.calculate_val_metrics(
+            y_pred=y_pred,
+            y=y,
+            dataset_name="data",
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
+
+
+def test_update_scalers_applies_to_filtered_loss_wrapper() -> None:
+    """Updating scalers must work for LossVariableMapper-backed losses."""
+    module = GraphInterpolator.__new__(GraphInterpolator)
+    pl.LightningModule.__init__(module)
+
+    data_indices = _make_minimal_index_collection({"A": 0, "B": 1})
+    loss = get_loss_function(
+        DictConfig({"_target_": "anemoi.training.losses.MSELoss", "scalers": ["dynamic"]}),
+        scalers={"dynamic": (4, torch.ones(2))},
+        data_indices=data_indices,
+    )
+
+    class _Updater:
+        def update_scaling_values(self, callback: AvailableCallbacks, **kwargs: Any) -> tuple[tuple[int], torch.Tensor]:
+            del callback, kwargs
+            return (4,), torch.tensor([3.0, 5.0])
+
+    module.model = object()
+    module._update_scaler_for_dataset(
+        name="dynamic",
+        scaler_builder=_Updater(),
+        callback=AvailableCallbacks.ON_BATCH_START,
+        loss_obj=loss,
+        metrics_dict={},
+        dataset_name="data",
+    )
+
+    updated = loss.loss.scaler.tensors["dynamic"][1]
+    torch.testing.assert_close(updated, torch.tensor([3.0, 5.0]))
+
+
+def test_graphensforecaster_compute_dataset_loss_metrics_forwards_layout_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GraphEnsForecaster must forward pred/target layout metadata to loss and metrics."""
+    forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
+    pl.LightningModule.__init__(forecaster)
+
+    forecaster.ens_comm_subgroup_size = 1
+    forecaster.ens_comm_subgroup = None
+    forecaster.grid_shard_slice = {"data": None}
+    forecaster.grid_dim = -2
+    forecaster.grid_shard_shapes = {"data": None}
+
+    # Avoid distributed collective in this unit test.
+    monkeypatch.setattr(
+        "anemoi.training.train.tasks.ensforecaster.gather_tensor",
+        lambda input_, *_args, **_kwargs: input_,
+        raising=True,
+    )
+
+    captured: dict[str, dict[str, Any]] = {}
+
+    def _compute_loss_stub(
+        self: GraphEnsForecaster,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        del self, y_pred, y
+        captured["loss_kwargs"] = kwargs
+        return torch.tensor(0.0)
+
+    def _compute_metrics_stub(
+        self: GraphEnsForecaster,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        **kwargs: Any,
+    ) -> dict[str, torch.Tensor]:
+        del self, y_pred, y
+        captured["metric_kwargs"] = kwargs
+        return {"dummy": torch.tensor(1.0)}
+
+    monkeypatch.setattr(GraphEnsForecaster, "_compute_loss", _compute_loss_stub, raising=True)
+    monkeypatch.setattr(GraphEnsForecaster, "_compute_metrics", _compute_metrics_stub, raising=True)
+
+    y_pred = torch.randn(2, 1, 2, 4, 3)
+    y = torch.randn(2, 1, 4, 3)
+    loss, metrics, y_pred_ens = forecaster.compute_dataset_loss_metrics(
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        step=3,
+        validation_mode=True,
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_FULL,
+    )
+
+    assert isinstance(loss, torch.Tensor)
+    assert isinstance(metrics["dummy"], torch.Tensor)
+    assert y_pred_ens.shape == y_pred.shape
+    assert captured["loss_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["loss_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
+    assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
+    assert captured["metric_kwargs"]["step"] == 3
+
+
 def _set_base_task_attrs(
     obj: BaseGraphModule,
     *,
@@ -181,6 +477,49 @@ def _set_base_task_attrs(
     obj.grid_shard_slice = {"data": None}
 
 
+def test_base_get_target_returns_time_slice_view() -> None:
+    data_indices = _data_indices_single()
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER, n_step_input=1, n_step_output=2)
+
+    b, t, e, g, v = 1, 4, 1, 1, len(_NAME_TO_INDEX)
+    batch = {"data": torch.arange(b * t * e * g * v, dtype=torch.float32).reshape(b, t, e, g, v)}
+
+    target = forecaster.get_target(batch, start=1)
+    assert target["data"].shape == (b, 2, e, g, v)
+
+    before = target["data"][0, 0, 0, 0, 0].item()
+    batch["data"][0, 1, 0, 0, 0] = before + 123.0
+    assert target["data"][0, 0, 0, 0, 0].item() == before + 123.0
+
+
+def test_base_get_target_rejects_short_batch() -> None:
+    data_indices = _data_indices_single()
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER, n_step_input=1, n_step_output=2)
+
+    b, t, e, g, v = 1, 2, 1, 1, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn((b, t, e, g, v), dtype=torch.float32)}
+
+    with pytest.raises(AssertionError, match="Batch length not sufficient for requested target slice"):
+        forecaster.get_target(batch, start=1)
+
+
+def test_graphensforecaster_make_targets_requires_singleton_ensemble_dim() -> None:
+    data_indices = _data_indices_single()
+    forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER, n_step_input=1, n_step_output=1)
+
+    b, t, e, g, v = 2, 2, 2, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn((b, t, e, g, v), dtype=torch.float32)}
+
+    with pytest.raises(AssertionError, match="Expected singleton ensemble dimension"):
+        forecaster._make_targets(batch, start=1)
+
+
 def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forecaster output_times, get_init_step, and _step return shape (one instantiation)."""
     data_indices = _data_indices_single()
@@ -198,11 +537,18 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
 
-    assert forecaster.output_times == 1
-    for i in range(1, _CFG_FORECASTER.training.rollout.max + 1):
-        forecaster.rollout = i
-        assert forecaster.get_init_step(i) == 0
-        assert forecaster.output_times == i
+    def _compute_loss_metrics_stub(
+        self: GraphEnsForecaster,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        step: int | None = None,
+        validation_mode: bool = False,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        del y, step, validation_mode, kwargs
+        assert isinstance(self, GraphEnsForecaster)
+        pred = next(iter(y_pred.values()))
+        return torch.zeros(1, device=pred.device, dtype=pred.dtype), {}, y_pred
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
@@ -274,6 +620,523 @@ def test_graphdiffusionforecaster() -> None:
     y_pred = y_preds[0]["data"]
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, 1, e, g, v)
+
+
+def test_graphdiffusionforecaster_uses_reduced_model_target_and_full_loss_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyDiffusion:
+        def __init__(self, model: DummyDiffusionModel) -> None:
+            self.model = model
+
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyDiffusion(
+        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    )
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    captured: dict[str, Any] = {}
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured["pred_vars"] = y_pred["data"].shape[-1]
+        captured["target_vars"] = y["data"].shape[-1]
+        captured["pred_layout"] = kwargs["pred_layout"]
+        captured["target_layout"] = kwargs["target_layout"]
+        pred = y_pred["data"]
+        return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t_in = _CFG_DIFFUSION.training.multistep_input
+    t_out = _CFG_DIFFUSION.training.multistep_output
+    batch = torch.randn((b, t_in + t_out, e, g, v), dtype=torch.float32)
+    loss, _, _ = forecaster._step(batch={"data": batch}, validation_mode=False)
+
+    assert isinstance(loss, torch.Tensor)
+    assert captured["pred_vars"] == len(data_indices["data"].model.output.full)
+    assert captured["target_vars"] == len(data_indices["data"].name_to_index)
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_FULL
+
+
+def test_graphdiffusionforecaster_target_helpers_reduce_data_output_to_model_output() -> None:
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t_in = _CFG_DIFFUSION.training.multistep_input
+    t_out = _CFG_DIFFUSION.training.multistep_output
+    batch = {"data": torch.randn((b, t_in + t_out, e, g, v), dtype=torch.float32)}
+
+    y_model, y_full = forecaster._get_diffusion_targets(batch)
+    y_data_output = forecaster.get_data_output_target(y_full)
+    y_model_from_data_output = forecaster.reduce_data_output_target_to_model_output(y_data_output)
+
+    assert y_model["data"].shape[-1] == len(data_indices["data"].model.output.full)
+    assert y_data_output["data"].shape[-1] == len(data_indices["data"].data.output.full)
+    torch.testing.assert_close(y_model["data"], y_model_from_data_output["data"])
+
+
+def test_graphdiffusionforecaster_target_reduction_fast_paths() -> None:
+    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    pl.LightningModule.__init__(forecaster)
+
+    # Identity mapping: model.output == data.output -> return same tensor object.
+    data_indices_identity = {"data": _make_minimal_index_collection({"A": 0, "B": 1})}
+    _set_base_task_attrs(forecaster, data_indices=data_indices_identity, config=_CFG_DIFFUSION)
+    y_identity = {"data": torch.randn((2, 1, 1, 4, 2), dtype=torch.float32)}
+    y_model_identity = forecaster.reduce_data_output_target_to_model_output(y_identity)
+    assert y_model_identity["data"] is y_identity["data"]
+
+    # Contiguous subset mapping: should use view (narrow) and share storage.
+    data_indices_contiguous = {
+        "data": _make_minimal_index_collection(
+            {"obs_A": 0, "obs_B": 1, "A": 2, "B": 3},
+            target=["obs_A", "obs_B"],
+        ),
+    }
+    _set_base_task_attrs(forecaster, data_indices=data_indices_contiguous, config=_CFG_DIFFUSION)
+    y_contiguous = {"data": torch.randn((2, 1, 1, 4, 4), dtype=torch.float32)}
+    y_model_contiguous = forecaster.reduce_data_output_target_to_model_output(y_contiguous)
+    expected_contiguous = y_contiguous["data"].narrow(-1, 2, 2)
+    torch.testing.assert_close(y_model_contiguous["data"], expected_contiguous)
+    assert y_model_contiguous["data"].untyped_storage().data_ptr() == y_contiguous["data"].untyped_storage().data_ptr()
+
+    # Non-contiguous mapping: fallback to index_select.
+    data_indices_non_contiguous = {
+        "data": _make_minimal_index_collection(
+            {"A": 0, "obs_A": 1, "B": 2},
+            target=["obs_A"],
+        ),
+    }
+    _set_base_task_attrs(forecaster, data_indices=data_indices_non_contiguous, config=_CFG_DIFFUSION)
+    y_non_contiguous = {"data": torch.randn((2, 1, 1, 4, 3), dtype=torch.float32)}
+    y_model_non_contiguous = forecaster.reduce_data_output_target_to_model_output(y_non_contiguous)
+    expected_non_contiguous = y_non_contiguous["data"].index_select(
+        -1,
+        torch.tensor([0, 2], dtype=torch.long),
+    )
+    torch.testing.assert_close(y_model_non_contiguous["data"], expected_non_contiguous)
+    assert (
+        y_model_non_contiguous["data"].untyped_storage().data_ptr()
+        != y_non_contiguous["data"].untyped_storage().data_ptr()
+    )
+
+
+def test_graphdiffusiontendforecaster_uses_reduced_model_target_and_data_output_loss_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTendencyDiffusionInner:
+        sigma_max = 4.0
+        sigma_min = 1.0
+        sigma_data = 0.5
+
+        def apply_reference_state_truncation(
+            self,
+            x: dict[str, torch.Tensor],
+            _grid_shard_shapes: dict[str, Any],
+            _model_comm_group: Any,
+        ) -> dict[str, torch.Tensor]:
+            out = {}
+            for dataset_name, x_tensor in x.items():
+                b, _t, e, g, _v = x_tensor.shape
+                out[dataset_name] = torch.zeros((b, 1, e, g, 2), dtype=x_tensor.dtype, device=x_tensor.device)
+            return out
+
+        def fwd_with_preconditioning(
+            self,
+            x: dict[str, torch.Tensor],
+            y_noised: dict[str, torch.Tensor],
+            sigma: dict[str, torch.Tensor],
+            **_kwargs: Any,
+        ) -> dict[str, torch.Tensor]:
+            del x, sigma
+            out = {}
+            for dataset_name, y_tensor in y_noised.items():
+                # Regression guard: tendency model input must be reduced to model.output vars.
+                assert y_tensor.shape[-1] == 2
+                out[dataset_name] = y_tensor
+            return out
+
+    class DummyTendencyDiffusion:
+        def __init__(self) -> None:
+            self.model = DummyTendencyDiffusionInner()
+            self.pre_processors_tendencies = {"data": [object()]}
+
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionTendForecaster.__new__(GraphDiffusionTendForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyTendencyDiffusion()
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    captured: dict[str, Any] = {}
+
+    def _compute_tendency_target_stub(
+        y: dict[str, torch.Tensor],
+        _x_ref: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        captured["tendency_target_input_vars"] = y["data"].shape[-1]
+        # Keep data-output width (includes target-only variable) before reduction.
+        return y
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured["pred_vars"] = y_pred["data"].shape[-1]
+        captured["target_vars"] = y["data"].shape[-1]
+        captured["pred_layout"] = kwargs["pred_layout"]
+        captured["target_layout"] = kwargs["target_layout"]
+        pred = y_pred["data"]
+        return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "_compute_tendency_target", _compute_tendency_target_stub)
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t_in = _CFG_DIFFUSION.training.multistep_input
+    t_out = _CFG_DIFFUSION.training.multistep_output
+    batch = {"data": torch.randn((b, t_in + t_out, e, g, v), dtype=torch.float32)}
+    loss, _, _ = forecaster._step(batch=batch, validation_mode=False)
+
+    assert isinstance(loss, torch.Tensor)
+    assert captured["tendency_target_input_vars"] == len(data_indices["data"].data.output.full)
+    assert captured["pred_vars"] == len(data_indices["data"].model.output.full)
+    assert captured["target_vars"] == len(data_indices["data"].data.output.full)
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_OUTPUT
+
+
+def test_graphdiffusiontendforecaster_step_validation_mode_reconstructs_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTendencyDiffusionInner:
+        sigma_max = 4.0
+        sigma_min = 1.0
+        sigma_data = 0.5
+
+        def apply_reference_state_truncation(
+            self,
+            x: dict[str, torch.Tensor],
+            _grid_shard_shapes: dict[str, Any],
+            _model_comm_group: Any,
+        ) -> dict[str, torch.Tensor]:
+            return {dataset_name: x_tensor[:, -1:, :, :, :2].clone() for dataset_name, x_tensor in x.items()}
+
+        def compute_tendency(
+            self,
+            x_t1: dict[str, torch.Tensor],
+            x_t0: dict[str, torch.Tensor],
+            _pre_processors_state: dict[str, Any],
+            _pre_processors_tendencies: dict[str, Any],
+            **_kwargs: Any,
+        ) -> dict[str, torch.Tensor]:
+            out = {}
+            for dataset_name, x_t1_dataset in x_t1.items():
+                tendency = x_t1_dataset.clone()
+                tendency[..., :2] = x_t1_dataset[..., :2] - x_t0[dataset_name]
+                out[dataset_name] = tendency
+            return out
+
+        def fwd_with_preconditioning(
+            self,
+            x: dict[str, torch.Tensor],
+            y_noised: dict[str, torch.Tensor],
+            sigma: dict[str, torch.Tensor],
+            **_kwargs: Any,
+        ) -> dict[str, torch.Tensor]:
+            del x, sigma
+            return {dataset_name: torch.zeros_like(y_dataset[..., :2]) for dataset_name, y_dataset in y_noised.items()}
+
+        def add_tendency_to_state(
+            self,
+            state_inp: dict[str, torch.Tensor],
+            tendency: dict[str, torch.Tensor],
+            _post_processors_state: dict[str, Any],
+            _post_processors_tendencies: dict[str, Any],
+            **_kwargs: Any,
+        ) -> dict[str, torch.Tensor]:
+            return {
+                dataset_name: state_inp[dataset_name] + tendency_dataset
+                for dataset_name, tendency_dataset in tendency.items()
+            }
+
+        def _apply_imputer_inverse(
+            self,
+            post_processors: dict[str, Any],
+            dataset_name: str,
+            x: torch.Tensor,
+        ) -> torch.Tensor:
+            del post_processors, dataset_name
+            return x + 1.0
+
+    class DummyTendencyDiffusion:
+        def __init__(self) -> None:
+            self.model = DummyTendencyDiffusionInner()
+            self.pre_processors_tendencies = {"data": [object()]}
+            self.pre_processors = {"data": object()}
+            self.post_processors = {"data": object()}
+
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionTendForecaster.__new__(GraphDiffusionTendForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyTendencyDiffusion()
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+    forecaster._tendency_pre_processors = {"data": [object()]}
+    forecaster._tendency_post_processors = {"data": [object()]}
+
+    captured: dict[str, Any] = {}
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        captured["pred_vars"] = y_pred["data"].shape[-1]
+        captured["target_vars"] = y["data"].shape[-1]
+        captured["pred_layout"] = kwargs["pred_layout"]
+        captured["target_layout"] = kwargs["target_layout"]
+        captured["state_pred_vars"] = kwargs["y_pred_state"]["data"].shape[-1]
+        captured["state_target_vars"] = kwargs["y_state"]["data"].shape[-1]
+        return torch.zeros(1), {"dummy": torch.tensor(1.0)}, kwargs["y_pred_state"]
+
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t_in = _CFG_DIFFUSION.training.multistep_input
+    t_out = _CFG_DIFFUSION.training.multistep_output
+    batch = {"data": torch.randn((b, t_in + t_out, e, g, v), dtype=torch.float32)}
+
+    loss, metrics, y_preds = forecaster._step(batch=batch, validation_mode=True)
+
+    assert isinstance(loss, torch.Tensor)
+    assert isinstance(metrics["dummy"], torch.Tensor)
+    assert captured["pred_vars"] == len(data_indices["data"].model.output.full)
+    assert captured["target_vars"] == len(data_indices["data"].data.output.full)
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_OUTPUT
+    assert captured["state_pred_vars"] == len(data_indices["data"].model.output.full)
+    assert captured["state_target_vars"] == len(data_indices["data"].name_to_index)
+    assert isinstance(y_preds, list)
+    assert len(y_preds) == 1
+    assert y_preds[0]["data"].shape[-1] == len(data_indices["data"].model.output.full)
+
+
+def test_graphdiffusiontendforecaster_step_does_not_mutate_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTendencyDiffusionInner:
+        sigma_max = 4.0
+        sigma_min = 1.0
+        sigma_data = 0.5
+
+        def apply_reference_state_truncation(
+            self,
+            x: dict[str, torch.Tensor],
+            _grid_shard_shapes: dict[str, Any],
+            _model_comm_group: Any,
+        ) -> dict[str, torch.Tensor]:
+            out = {}
+            for dataset_name, x_tensor in x.items():
+                b, _t, e, g, _v = x_tensor.shape
+                out[dataset_name] = torch.zeros((b, 1, e, g, 2), dtype=x_tensor.dtype, device=x_tensor.device)
+            return out
+
+        def fwd_with_preconditioning(
+            self,
+            x: dict[str, torch.Tensor],
+            y_noised: dict[str, torch.Tensor],
+            sigma: dict[str, torch.Tensor],
+            **_kwargs: Any,
+        ) -> dict[str, torch.Tensor]:
+            del x, sigma
+            return dict(y_noised)
+
+    class DummyTendencyDiffusion:
+        def __init__(self) -> None:
+            self.model = DummyTendencyDiffusionInner()
+            self.pre_processors_tendencies = {"data": [object()]}
+
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionTendForecaster.__new__(GraphDiffusionTendForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyTendencyDiffusion()
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    def _compute_tendency_target_stub(
+        y: dict[str, torch.Tensor],
+        _x_ref: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        return y
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        _y: dict[str, torch.Tensor],
+        **_kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        pred = y_pred["data"]
+        return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "_compute_tendency_target", _compute_tendency_target_stub)
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+
+    b, e, g, v = 2, 1, 4, len(name_to_index)
+    t_in = _CFG_DIFFUSION.training.multistep_input
+    t_out = _CFG_DIFFUSION.training.multistep_output
+    batch = {"data": torch.randn((b, t_in + t_out, e, g, v), dtype=torch.float32)}
+    batch_before = {"data": batch["data"].clone()}
+
+    forecaster._step(batch=batch, validation_mode=False)
+
+    torch.testing.assert_close(batch["data"], batch_before["data"])
+
+
+def test_graphdiffusiontendforecaster_validation_metrics_use_data_full_state_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = GraphDiffusionTendForecaster.__new__(GraphDiffusionTendForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+
+    captured: dict[str, Any] = {}
+
+    class DummyInner:
+        def _apply_imputer_inverse(
+            self,
+            post_processors: dict[str, Any],
+            dataset_name: str,
+            x: torch.Tensor,
+        ) -> torch.Tensor:
+            del post_processors
+            captured["inverse_dataset_name"] = dataset_name
+            return x + 7.0
+
+    class DummyOuter:
+        def __init__(self) -> None:
+            self.model = DummyInner()
+            self.post_processors = {"data": object()}
+
+    forecaster.model = DummyOuter()
+
+    def _prepare_tensors_for_loss_stub(
+        self: GraphDiffusionTendForecaster,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        validation_mode: bool = False,
+        dataset_name: str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, slice]:
+        del self
+        captured.setdefault("prepare_calls", []).append((validation_mode, dataset_name))
+        return y_pred, y, slice(0, 1)
+
+    def _compute_loss_stub(
+        self: GraphDiffusionTendForecaster,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        del self, y_pred, y
+        captured["loss_kwargs"] = kwargs
+        return torch.tensor(0.0)
+
+    def _compute_metrics_stub(
+        self: GraphDiffusionTendForecaster,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        **kwargs: Any,
+    ) -> dict[str, torch.Tensor]:
+        del self, y_pred
+        captured["metric_target"] = y
+        captured["metric_kwargs"] = kwargs
+        return {"dummy": torch.tensor(1.0)}
+
+    monkeypatch.setattr(
+        GraphDiffusionTendForecaster,
+        "_prepare_tensors_for_loss",
+        _prepare_tensors_for_loss_stub,
+        raising=True,
+    )
+    monkeypatch.setattr(GraphDiffusionTendForecaster, "_compute_loss", _compute_loss_stub, raising=True)
+    monkeypatch.setattr(GraphDiffusionTendForecaster, "_compute_metrics", _compute_metrics_stub, raising=True)
+
+    y_pred = torch.randn((2, 1, 1, 4, 2), dtype=torch.float32)
+    y = torch.randn((2, 1, 1, 4, 3), dtype=torch.float32)
+    y_pred_state = {"data": torch.randn((2, 1, 1, 4, 2), dtype=torch.float32)}
+    y_state = {"data": torch.randn((2, 1, 1, 4, 3), dtype=torch.float32)}
+    weights = {"data": torch.ones((2, 1, 1, 1, 1), dtype=torch.float32)}
+
+    loss, metrics, y_pred_state_full = forecaster.compute_dataset_loss_metrics(
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        validation_mode=True,
+        y_pred_state=y_pred_state,
+        y_state=y_state,
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_OUTPUT,
+        weights=weights,
+    )
+
+    assert isinstance(loss, torch.Tensor)
+    assert isinstance(metrics["dummy"], torch.Tensor)
+    assert captured["inverse_dataset_name"] == "data"
+    assert captured["loss_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["loss_kwargs"]["target_layout"] == IndexSpace.DATA_OUTPUT
+    assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
+    torch.testing.assert_close(captured["metric_target"], y_state["data"] + 7.0)
+    torch.testing.assert_close(y_pred_state_full, y_pred_state["data"])
 
 
 def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.MonkeyPatch) -> None:

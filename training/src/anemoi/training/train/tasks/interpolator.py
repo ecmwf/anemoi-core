@@ -20,6 +20,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -106,10 +107,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
                 self.data_indices[dataset_name].data.input.full,
             ]  # (bs, time, ens, latlon, nvar)
 
-            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)][
-                ...,
-                self.data_indices[dataset_name].data.output.full,
-            ]
+            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)]
 
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
@@ -120,6 +118,8 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             y_pred,
             y,
             validation_mode=validation_mode,
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
             use_reentrant=False,
         )
 

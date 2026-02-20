@@ -879,9 +879,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         Parameters
         ----------
         x_t1 : torch.Tensor
-            The state at time t1 with full input variables.
+            The state at time t1.
         x_t0 : torch.Tensor
-            The state at time t0 with prognostic input variables.
+            The state at time t0.
         pre_processors_state : callable
             Function to pre-process the state variables.
         pre_processors_tendencies : callable

@@ -16,6 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 from anemoi.training.utils.enums import TensorDim
 
@@ -133,6 +134,9 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         dataset_name: str,
         step: int | None = None,
         validation_mode: bool = False,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
+        **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
@@ -148,6 +152,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             grid_dim=self.grid_dim,
             grid_shard_shape=self.grid_shard_shapes,
             dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
         )
 
         # Compute metrics if in validation mode
@@ -159,9 +165,39 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 step=step,
                 dataset_name=dataset_name,
                 grid_shard_slice=self.grid_shard_slice[dataset_name],
+                pred_layout=pred_layout,
+                target_layout=target_layout,
             )
 
         return loss, metrics_next, y_pred_ens
+
+    def _make_targets(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        start: int,
+    ) -> dict[str, torch.Tensor]:
+        """Build loss targets for ensemble rollout.
+
+        Ground-truth targets are provided with a singleton ensemble axis and
+        are reduced to `(batch, time, grid, vars)` for loss computation.
+        """
+        y_full = self.get_target(
+            batch,
+            start=start,
+        )
+
+        y: dict[str, torch.Tensor] = {}
+        for dataset_name, target in y_full.items():
+            msg = (
+                "Expected singleton ensemble dimension in target for "
+                f"{dataset_name}, got shape {tuple(target.shape)}."
+            )
+            assert target.ndim == 5 and target.shape[2] == 1, msg
+            y[dataset_name] = target[:, :, 0, :, :]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+
+        return y
 
     def _rollout_step(
         self,
@@ -232,13 +268,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         for rollout_step in range(rollout_steps):
             # prediction at rollout step rollout_step, shape = (bs, n_step_output, ens_size, latlon, nvar)
             y_pred = self(x, fcstep=rollout_step)
-            y = {}
-            for dataset_name, dataset_batch in batch.items():
-                start = self.n_step_input + rollout_step * self.n_step_output
-                y_time = dataset_batch.narrow(1, start, self.n_step_output)[:, :, 0, :, :]
-                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-                y[dataset_name] = y_time.index_select(-1, var_idx)
-                LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+            start = self.n_step_input + rollout_step * self.n_step_output
+            y = self._make_targets(batch, start=start)
 
             loss, metrics_next, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,
@@ -246,6 +277,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 y,
                 step=rollout_step,
                 validation_mode=validation_mode,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 

@@ -106,6 +106,26 @@ class InputNormalizer(BasePreprocessor):
         self.register_buffer("_input_idx", data_indices.data.input.full, persistent=True)
         self.register_buffer("_output_idx", self.data_indices.data.output.full, persistent=True)
 
+        # We need some special handling when target variables are defined.
+        model_output_names = list(self.data_indices.model.output.name_to_index.keys())
+        data_output_names = list(self.data_indices.data.output.name_to_index.keys())
+
+        # Create a boolean mask with same length as _output_idx
+        model_mask = torch.zeros(len(self._output_idx), dtype=torch.bool)
+
+        for i, var_name in enumerate(data_output_names):
+            if var_name in model_output_names:
+                # Get the index value for this variable in data.output
+                index_in_data_output = self.data_indices.data.output.name_to_index[var_name]
+                # Find which position in _output_idx has this index value
+                position_in_output_idx = (self._output_idx == index_in_data_output).nonzero(as_tuple=True)[0].item()
+                # Mark this position as True (keep it for model output)
+                model_mask[position_in_output_idx] = True
+
+        _model_output_idx = self._output_idx[model_mask]
+
+        self.register_buffer("_model_output_idx", _model_output_idx, persistent=True)
+
     def _validate_normalization_inputs(self, name_to_index_training_input: dict, minimum, maximum, mean, stdev):
         assert len(self.methods) == sum(len(v) for v in self.method_config.values()), (
             f"Error parsing methods in InputNormalizer methods ({len(self.methods)}) "
@@ -201,6 +221,8 @@ class InputNormalizer(BasePreprocessor):
             x.subtract_(self._norm_add[data_index]).div_(self._norm_mul[data_index])
         elif x.shape[-1] == len(self._output_idx):
             x.subtract_(self._norm_add[self._output_idx]).div_(self._norm_mul[self._output_idx])
+        elif x.shape[-1] == len(self._model_output_idx):
+            x.subtract_(self._norm_add[self._model_output_idx]).div_(self._norm_mul[self._model_output_idx])
         else:
             x.subtract_(self._norm_add).div_(self._norm_mul)
         return x

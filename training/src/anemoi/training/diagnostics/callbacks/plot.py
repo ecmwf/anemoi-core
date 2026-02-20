@@ -16,6 +16,7 @@ import time
 import traceback
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from pathlib import Path
@@ -44,6 +45,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
 
@@ -873,6 +875,17 @@ class PlotLoss(BasePerBatchPlotCallback):
         if self.parameter_groups is None:
             self.parameter_groups = {}
 
+    @classmethod
+    def _iter_scalers(cls, loss_obj: BaseLoss) -> Iterator[object]:
+        if hasattr(loss_obj, "scaler"):
+            yield loss_obj.scaler
+        if hasattr(loss_obj, "losses"):
+            for sub_loss in loss_obj.losses:
+                yield from cls._iter_scalers(sub_loss)
+        inner_loss = getattr(loss_obj, "loss", None)
+        if isinstance(inner_loss, BaseLoss):
+            yield from cls._iter_scalers(inner_loss)
+
     def sort_and_color_by_parameter_group(
         self,
         parameter_names: list[str],
@@ -1016,10 +1029,19 @@ class PlotLoss(BasePerBatchPlotCallback):
             for rollout_step in range(output_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 start = pl_module.n_step_input + rollout_step * pl_module.n_step_output
-                y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
-                var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
-                y_true = y_time.index_select(-1, var_idx)
-                loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
+                y_true = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
+                loss = reduce_to_last_dim(
+                    self.loss[dataset_name](
+                        y_hat,
+                        y_true,
+                        squash=False,
+                        pred_layout=IndexSpace.MODEL_OUTPUT,
+                        target_layout=IndexSpace.DATA_FULL,
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy(),
+                )
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
                     parameter_names,
@@ -1050,13 +1072,20 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
             for dataset in self.loss:
-                if (
-                    hasattr(self.loss[dataset].scaler, "nan_mask_weights")
-                    and self.loss[dataset].scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-                ):
-                    self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(
-                        self.loss[dataset].scaler.nan_mask_weights,
-                        dataset,
+                seen_scalers: set[int] = set()
+                for scaler in self._iter_scalers(self.loss[dataset]):
+                    scaler_id = id(scaler)
+                    if scaler_id in seen_scalers:
+                        continue
+                    seen_scalers.add(scaler_id)
+
+                    nan_mask_weights = getattr(scaler, "nan_mask_weights", None)
+                    if nan_mask_weights is None or nan_mask_weights.shape[pl_module.grid_dim] == 1:
+                        continue
+                    scaler.nan_mask_weights = pl_module.allgather_batch(
+                        nan_mask_weights,
+                        pl_module.grid_indices[dataset],
+                        pl_module.grid_dim,
                     )
 
             super().on_validation_batch_end(

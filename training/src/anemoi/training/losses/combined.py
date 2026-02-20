@@ -18,6 +18,7 @@ from omegaconf import DictConfig
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.utils.enums import TensorDim
 
 
 class CombinedLoss(BaseLoss):
@@ -119,13 +120,28 @@ class CombinedLoss(BaseLoss):
         if loss_weights is None:
             loss_weights = (1.0,) * len(losses)
 
+        data_indices = kwargs.pop("data_indices", None)
+        scalers = kwargs.pop("scalers", {})
+
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
         for i, loss in enumerate(losses):
             if isinstance(loss, DictConfig | dict):
-                self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
-                self.losses.append(get_loss_function(loss, scalers={}, **dict(kwargs)))
+                loss_config = dict(loss)
+                scaler_spec = loss_config.pop("scalers", ["*"])
+                self._loss_scaler_specification[i] = scaler_spec
+                # Only propagate scaler declarations when explicitly provided.
+                if scalers:
+                    loss_config["scalers"] = scaler_spec
+                self.losses.append(
+                    get_loss_function(
+                        DictConfig(loss_config),
+                        scalers=scalers,
+                        data_indices=data_indices,
+                        **dict(kwargs),
+                    ),
+                )
             elif isinstance(loss, type):
                 self._loss_scaler_specification[i] = ["*"]
                 self.losses.append(loss(**kwargs))
@@ -173,10 +189,13 @@ class CombinedLoss(BaseLoss):
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
         for i, spec in self._loss_scaler_specification.items():
             if "*" in spec or name in spec:
-                self.losses[i].scaler.add_scaler(dimension, scaler, name=name)
+                self.losses[i].add_scaler(dimension=dimension, scaler=scaler, name=name)
 
     @functools.wraps(ScaleTensor.update_scaler, assigned=("__doc__", "__annotations__"))
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         for i, spec in self._loss_scaler_specification.items():
             if "*" in spec or name in spec:
-                self.losses[i].scaler.update_scaler(name, scaler=scaler, override=override)
+                self.losses[i].update_scaler(name=name, scaler=scaler, override=override)
+
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        return any(loss.has_scaler_for_dim(dim=dim) for loss in self.losses)

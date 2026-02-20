@@ -309,6 +309,22 @@ def test_training_cycle_mlflow_dry_run(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_imerg_target(
+    imerg_target_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = imerg_target_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_imerg_target(
+    imerg_target_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = imerg_target_config
+    BaseSchema(**cfg)
+
+
 def test_training_cycle_multidatasets_diffusion(
     multidatasets_diffusion_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
