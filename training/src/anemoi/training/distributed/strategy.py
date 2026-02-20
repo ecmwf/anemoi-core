@@ -9,12 +9,22 @@
 
 
 import logging
+from abc import abstractmethod
 
 import numpy as np
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.strategies.ddp import DDPStrategy
 
+from anemoi.training.distributed.groups import build_ensemble_layout
+from anemoi.training.distributed.groups import build_model_layout
+from anemoi.training.distributed.groups import build_reader_layout
+from anemoi.training.distributed.groups import create_ensemble_process_groups
+from anemoi.training.distributed.groups import create_model_process_groups
+from anemoi.training.distributed.groups import create_reader_process_groups
+from anemoi.training.distributed.groups import get_my_ensemble_comm_group
+from anemoi.training.distributed.groups import get_my_model_comm_group
+from anemoi.training.distributed.groups import get_my_reader_group
 from anemoi.training.utils.seeding import get_base_seed
 
 LOGGER = logging.getLogger(__name__)
@@ -73,54 +83,11 @@ def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
     )
 
 
-def get_my_model_comm_group(num_gpus_per_model: int, global_rank: int, world_size: int) -> tuple[int, int, int]:
-    """Determine tasks that work together and from a model group.
-
-    Parameters
-    ----------
-    num_gpus_per_model : int
-        Number of GPUs per model to shard over.
-
-    Returns
-    -------
-    tuple[int, int, int]
-        Model_comm_group id, Model_comm_group rank, Number of model_comm_groups
-    """
-    model_comm_group_id = global_rank // num_gpus_per_model
-    model_comm_group_rank = global_rank % num_gpus_per_model
-    model_comm_num_groups = world_size // num_gpus_per_model
-
-    return model_comm_group_id, model_comm_group_rank, model_comm_num_groups
-
-
-def get_my_reader_group(model_comm_group_rank: int, read_group_size: int, global_rank: int) -> tuple[int, int, int]:
-    """Determine tasks that work together and from a reader group.
-
-    Parameters
-    ----------
-    model_comm_group_rank : int
-        Rank within the model communication group.
-    read_group_size : int
-        Number of dataloader readers per model group.
-
-    Returns
-    -------
-    tuple[int, int, int]
-        Reader_group id, Reader_group rank, Reader_group root (global rank)
-    """
-    reader_group_id = model_comm_group_rank // read_group_size
-    reader_group_rank = model_comm_group_rank % read_group_size
-    reader_group_size = read_group_size
-    reader_group_root = (global_rank // read_group_size) * read_group_size
-
-    return reader_group_id, reader_group_rank, reader_group_size, reader_group_root
-
-
-class DDPGroupStrategy(DDPStrategy):
-    """Distributed Data Parallel strategy with group communication."""
+class BaseDDPStrategy(DDPStrategy):
+    """Base DDP strategy with common functionality for group communication strategies."""
 
     def __init__(self, num_gpus_per_model: int, read_group_size: int, **kwargs: dict) -> None:
-        """Initialize the distributed strategy.
+        """Initialise the distributed strategy.
 
         Parameters
         ----------
@@ -130,12 +97,22 @@ class DDPGroupStrategy(DDPStrategy):
             Number of GPUs per reader group.
         **kwargs : dict
             Additional keyword arguments.
-
         """
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.shard_shapes: dict | None = None
+
+    @abstractmethod
+    def _setup_communication_groups(self) -> int:
+        """Set up communication groups for distributed training.
+
+        Returns
+        -------
+        int
+            The model communication group ID for this rank.
+        """
+        raise NotImplementedError
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
@@ -143,90 +120,13 @@ class DDPGroupStrategy(DDPStrategy):
         super().setup(trainer)
 
         self.shard_shapes = self._setup_shard_shapes(trainer)
+        self.shard_shapes = self._setup_shard_shapes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
         """Configure DDP with custom gradient hooks."""
         self.register_parameter_hooks()
         super().configure_ddp()
-
-    def _setup_communication_groups(self) -> int:
-        """Set up model and reader communication groups.
-
-        Returns
-        -------
-        int
-            The model communication group ID for this rank.
-        """
-        # determine the model groups that work together:
-        assert self.world_size % self.model_comm_group_size == 0, (
-            f"Total number of GPUs ({self.world_size}) must be divisible by the number of GPUs "
-            f"per model ({self.model_comm_group_size})."
-        )
-
-        model_comm_group_ranks = np.split(
-            np.arange(self.world_size, dtype=int),
-            int(self.world_size / self.model_comm_group_size),
-        )
-        model_comm_groups = [
-            torch.distributed.new_group(x) for x in model_comm_group_ranks
-        ]  # every rank has to create all of these
-
-        model_comm_group_id, model_comm_group_rank, model_comm_num_groups = get_my_model_comm_group(
-            self.model_comm_group_size,
-            self.global_rank,
-            self.world_size,
-        )
-        model_comm_group = model_comm_groups[model_comm_group_id]
-        self.model.set_model_comm_group(
-            model_comm_group,
-            model_comm_group_id,
-            model_comm_group_rank,
-            model_comm_num_groups,
-            self.model_comm_group_size,
-        )
-
-        # set up reader groups by further splitting model_comm_group_ranks with read_group_size:
-        assert self.model_comm_group_size % self.read_group_size == 0, (
-            f"Number of GPUs per model ({self.model_comm_group_size}) must be divisible by read_group_size "
-            f"({self.read_group_size})."
-        )
-
-        reader_group_ranks = np.array(
-            [
-                np.split(group_ranks, int(self.model_comm_group_size / self.read_group_size))
-                for group_ranks in model_comm_group_ranks
-            ],
-        )  # Shape: (num_model_comm_groups, model_comm_grp_size/read_group_size, read_group_size)
-        reader_groups = [[torch.distributed.new_group(x) for x in group_ranks] for group_ranks in reader_group_ranks]
-        reader_group_id, reader_group_rank, reader_group_size, reader_group_root = get_my_reader_group(
-            model_comm_group_rank,
-            self.read_group_size,
-            self.global_rank,
-        )
-        # get all reader groups of the current model group
-        model_reader_groups = reader_groups[model_comm_group_id]
-        self.model.set_reader_groups(
-            model_reader_groups,
-            reader_group_id,
-            reader_group_rank,
-            reader_group_size,
-        )
-
-        LOGGER.debug(
-            "Rank %d model_comm_group_id: %d model_comm_group: %s model_comm_group_rank: %d "
-            "reader_group_id: %d reader_group: %s reader_group_rank: %d reader_group_root (global): %d",
-            self.global_rank,
-            model_comm_group_id,
-            str(model_comm_group_ranks[model_comm_group_id]),
-            model_comm_group_rank,
-            reader_group_id,
-            reader_group_ranks[model_comm_group_id, reader_group_id],
-            reader_group_rank,
-            reader_group_root,
-        )
-
-        return model_comm_group_id
 
     def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
         """Set up shard shapes for the dataloader.
@@ -244,6 +144,68 @@ class DDPGroupStrategy(DDPStrategy):
         shard_shapes = trainer.model.module.shard_shapes
         assert shard_shapes is not None, "Shard shapes should be set after setup"
         return shard_shapes
+
+    def register_parameter_hooks(self) -> None:
+        """Register parameter hooks for gradient reduction."""
+        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
+
+
+class DDPGroupStrategy(BaseDDPStrategy):
+    """Distributed Data Parallel strategy with group communication."""
+
+    def _setup_communication_groups(self) -> int:
+        """Set up model and reader communication groups.
+
+        Returns
+        -------
+        int
+            The model communication group ID for this rank.
+        """
+        model_layout = build_model_layout(
+            world_size=self.world_size,
+            global_rank=self.global_rank,
+            model_comm_group_size=self.model_comm_group_size,
+        )
+        reader_layout = build_reader_layout(
+            model_comm_group_ranks=model_layout.model_comm_group_ranks,
+            model_comm_group_size=self.model_comm_group_size,
+            read_group_size=self.read_group_size,
+            model_comm_group_rank=model_layout.model_comm_group_rank,
+            global_rank=self.global_rank,
+        )
+        model_comm_groups = create_model_process_groups(model_layout.model_comm_group_ranks)
+        reader_groups = create_reader_process_groups(reader_layout.reader_group_ranks)
+        model_comm_group = model_comm_groups[model_layout.model_comm_group_id]
+        model_reader_groups = reader_groups[model_layout.model_comm_group_id]
+
+        self.model.set_model_comm_group(
+            model_comm_group,
+            model_layout.model_comm_group_id,
+            model_layout.model_comm_group_rank,
+            model_layout.model_comm_num_groups,
+            self.model_comm_group_size,
+        )
+        self.model.set_reader_groups(
+            model_reader_groups,
+            reader_layout.reader_group_id,
+            reader_layout.reader_group_rank,
+            reader_layout.reader_group_size,
+        )
+
+        LOGGER.debug(
+            "Rank %d model_comm_group_id: %d model_comm_group: %s model_comm_group_rank: %d "
+            "reader_group_id: %d reader_group: %s reader_group_rank: %d reader_group_root (global): %d",
+            self.global_rank,
+            model_layout.model_comm_group_id,
+            str(model_layout.model_comm_group_ranks[model_layout.model_comm_group_id]),
+            model_layout.model_comm_group_rank,
+            reader_layout.reader_group_id,
+            reader_layout.reader_group_ranks[model_layout.model_comm_group_id, reader_layout.reader_group_id],
+            reader_layout.reader_group_rank,
+            reader_layout.reader_group_root,
+        )
+
+        return model_layout.model_comm_group_id
 
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
@@ -281,16 +243,13 @@ class DDPGroupStrategy(DDPStrategy):
             reader_group_rank,
             self.read_group_size,
             self.shard_shapes,
+            self.shard_shapes,
         )
 
         return dataloader
 
-    def register_parameter_hooks(self) -> None:
-        """Register parameter hooks for gradient reduction."""
-        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
 
-
-class DDPEnsGroupStrategy(DDPStrategy):
+class DDPEnsGroupStrategy(BaseDDPStrategy):
     """Distributed Data Parallel strategy with group communication for ensembles."""
 
     def __init__(self, num_gpus_per_model: int, num_gpus_per_ensemble: int, read_group_size: int, **kwargs) -> None:
@@ -306,24 +265,9 @@ class DDPEnsGroupStrategy(DDPStrategy):
             Additional keyword arguments.
 
         """
-        super().__init__(**kwargs)
-        self.model_comm_group_size = num_gpus_per_model
-        self.read_group_size = read_group_size
+        super().__init__(num_gpus_per_model=num_gpus_per_model, read_group_size=read_group_size, **kwargs)
         self.ens_comm_group_size = num_gpus_per_ensemble
         self.shard_shapes: dict | None = None
-
-    def setup(self, trainer: pl.Trainer) -> None:
-        model_comm_group_id = self._setup_communication_groups()
-
-        super().setup(trainer)
-
-        self.shard_shapes = self._setup_shard_shapes(trainer)
-        seed_rnd(model_comm_group_id, self.global_rank)
-
-    def configure_ddp(self) -> None:
-        """Configure DDP with custom gradient hooks."""
-        self.register_parameter_hooks()
-        super().configure_ddp()
 
     def _setup_communication_groups(self) -> int:
         """Set up model, reader, and ensemble communication groups.
@@ -333,59 +277,35 @@ class DDPEnsGroupStrategy(DDPStrategy):
         int
             The model communication group ID for this rank.
         """
-        # determine the model groups that work together:
-        assert self.world_size % self.model_comm_group_size == 0, (
-            f"Total number of GPUs ({self.world_size}) must be divisible by the number of GPUs "
-            f"per model ({self.model_comm_group_size})."
+        model_layout = build_model_layout(
+            world_size=self.world_size,
+            global_rank=self.global_rank,
+            model_comm_group_size=self.model_comm_group_size,
         )
+        reader_layout = build_reader_layout(
+            model_comm_group_ranks=model_layout.model_comm_group_ranks,
+            model_comm_group_size=self.model_comm_group_size,
+            read_group_size=self.read_group_size,
+            model_comm_group_rank=model_layout.model_comm_group_rank,
+            global_rank=self.global_rank,
+        )
+        model_comm_groups = create_model_process_groups(model_layout.model_comm_group_ranks)
+        reader_groups = create_reader_process_groups(reader_layout.reader_group_ranks)
+        model_comm_group = model_comm_groups[model_layout.model_comm_group_id]
+        model_reader_groups = reader_groups[model_layout.model_comm_group_id]
 
-        model_comm_group_ranks = np.split(
-            np.arange(self.world_size, dtype=int),
-            int(self.world_size / self.model_comm_group_size),
-        )
-        model_comm_groups = [
-            torch.distributed.new_group(x) for x in model_comm_group_ranks
-        ]  # every rank has to create all of these
-
-        model_comm_group_id, model_comm_group_rank, model_comm_num_groups = get_my_model_comm_group(
-            self.model_comm_group_size,
-            self.global_rank,
-            self.world_size,
-        )
-        model_comm_group = model_comm_groups[model_comm_group_id]
         self.model.set_model_comm_group(
             model_comm_group,
-            model_comm_group_id,
-            model_comm_group_rank,
-            model_comm_num_groups,
+            model_layout.model_comm_group_id,
+            model_layout.model_comm_group_rank,
+            model_layout.model_comm_num_groups,
             self.model_comm_group_size,
         )
-
-        # set up reader groups by further splitting model_comm_group_ranks with read_group_size:
-        assert self.model_comm_group_size % self.read_group_size == 0, (
-            f"Number of GPUs per model ({self.model_comm_group_size}) must be divisible by read_group_size "
-            f"({self.read_group_size})."
-        )
-
-        reader_group_ranks = np.array(
-            [
-                np.split(group_ranks, int(self.model_comm_group_size / self.read_group_size))
-                for group_ranks in model_comm_group_ranks
-            ],
-        )  # Shape: (num_model_comm_groups, model_comm_grp_size/read_group_size, read_group_size)
-        reader_groups = [[torch.distributed.new_group(x) for x in group_ranks] for group_ranks in reader_group_ranks]
-        reader_group_id, reader_group_rank, reader_group_size, reader_group_root = get_my_reader_group(
-            model_comm_group_rank,
-            self.read_group_size,
-            self.global_rank,
-        )
-        # get all reader groups of the current model group
-        model_reader_groups = reader_groups[model_comm_group_id]
         self.model.set_reader_groups(
             model_reader_groups,
-            reader_group_id,
-            reader_group_rank,
-            reader_group_size,
+            reader_layout.reader_group_id,
+            reader_layout.reader_group_rank,
+            reader_layout.reader_group_size,
         )
 
         LOGGER.info(
@@ -395,69 +315,40 @@ class DDPEnsGroupStrategy(DDPStrategy):
             "reader_group_root (global): %d "
             "model_reader_groups: %s reader_groups: %s",
             self.global_rank,
-            model_comm_group_id,
-            str(model_comm_group_ranks[model_comm_group_id]),
-            model_comm_group_rank,
+            model_layout.model_comm_group_id,
+            str(model_layout.model_comm_group_ranks[model_layout.model_comm_group_id]),
+            model_layout.model_comm_group_rank,
             model_comm_group.size(),
-            reader_group_id,
-            reader_group_ranks[model_comm_group_id, reader_group_id],
-            reader_group_rank,
-            reader_group_root,
+            reader_layout.reader_group_id,
+            reader_layout.reader_group_ranks[model_layout.model_comm_group_id, reader_layout.reader_group_id],
+            reader_layout.reader_group_rank,
+            reader_layout.reader_group_root,
             model_reader_groups,
             reader_groups,
         )
 
-        # determine the ensemble groups that work together:
-        assert self.world_size % self.ens_comm_group_size == 0, (
-            f"Total number of GPUs ({self.world_size}) must be divisible by the number of GPUs "
-            f"per ensemble ({self.ens_comm_group_size})."
+        ensemble_layout = build_ensemble_layout(
+            world_size=self.world_size,
+            global_rank=self.global_rank,
+            ens_comm_group_size=self.ens_comm_group_size,
+            model_comm_group_size=self.model_comm_group_size,
+            model_comm_group_rank=model_layout.model_comm_group_rank,
         )
-        assert self.ens_comm_group_size % self.model_comm_group_size == 0, (
-            f"Number of GPUs per ensemble ({self.ens_comm_group_size}) must be divisible by the number of GPUs "
-            f"per model ({self.model_comm_group_size})."
-        )
+        ensemble_groups = create_ensemble_process_groups(ensemble_layout)
 
-        ens_comm_group_ranks = np.split(
-            np.arange(self.world_size, dtype=int),
-            int(self.world_size / self.ens_comm_group_size),
-        )
-        ens_comm_groups = [torch.distributed.new_group(x) for x in ens_comm_group_ranks]
-
-        ens_comm_group_id, ens_comm_group_rank, ens_comm_num_groups = get_my_model_comm_group(
-            self.ens_comm_group_size,
-            self.global_rank,
-            self.world_size,
-        )
-
-        ens_comm_group = ens_comm_groups[ens_comm_group_id]
         self.model.set_ens_comm_group(
-            ens_comm_group,
-            ens_comm_group_id,
-            ens_comm_group_rank,
-            ens_comm_num_groups,
+            ensemble_groups.ens_comm_group,
+            ensemble_layout.ens_comm_group_id,
+            ensemble_layout.ens_comm_group_rank,
+            ensemble_layout.ens_comm_num_groups,
             self.ens_comm_group_size,
         )
-
-        # ens_comm_subgroup: subgroup of same model_comm_group ranks inside the ensemble group
-        spacing = self.model_comm_group_size
-        ens_comm_subgroup_ranks = [
-            ens_comm_group[offset::spacing] for ens_comm_group in ens_comm_group_ranks for offset in range(spacing)
-        ]
-
-        ens_comm_subgroups = [torch.distributed.new_group(x) for x in ens_comm_subgroup_ranks]
-
-        ens_comm_subgroup_size = self.ens_comm_group_size // self.model_comm_group_size
-        ens_comm_subgroup_id = ens_comm_group_id * self.model_comm_group_size + model_comm_group_rank
-        ens_comm_subgroup_rank = ens_comm_group_rank // self.model_comm_group_size
-        ens_comm_num_subgroups = self.world_size // ens_comm_subgroup_size
-
-        ens_comm_subgroup = ens_comm_subgroups[ens_comm_subgroup_id]
         self.model.set_ens_comm_subgroup(
-            ens_comm_subgroup,
-            ens_comm_subgroup_id,
-            ens_comm_subgroup_rank,
-            ens_comm_num_subgroups,
-            ens_comm_subgroup_size,
+            ensemble_groups.ens_comm_subgroup,
+            ensemble_layout.ens_comm_subgroup_id,
+            ensemble_layout.ens_comm_subgroup_rank,
+            ensemble_layout.ens_comm_num_subgroups,
+            ensemble_layout.ens_comm_subgroup_size,
         )
 
         LOGGER.info(
@@ -465,35 +356,18 @@ class DDPEnsGroupStrategy(DDPStrategy):
             "ens_comm_group_size: %d ens_comm_group.size(): %d ens_comm_subgroup_id: %d "
             "ens_comm_subgroup: %s ens_comm_subgroup_rank: %d ens_comm_subgroup.size(): %d ",
             self.global_rank,
-            ens_comm_group_id,
-            str(ens_comm_group_ranks[ens_comm_group_id]),
-            ens_comm_group_rank,
+            ensemble_layout.ens_comm_group_id,
+            str(ensemble_layout.ens_comm_group_ranks[ensemble_layout.ens_comm_group_id]),
+            ensemble_layout.ens_comm_group_rank,
             self.ens_comm_group_size,
-            ens_comm_group.size(),
-            ens_comm_subgroup_id,
-            str(ens_comm_subgroup_ranks[ens_comm_subgroup_id]),
-            ens_comm_subgroup_rank,
-            ens_comm_subgroup_size,
+            ensemble_groups.ens_comm_group.size(),
+            ensemble_layout.ens_comm_subgroup_id,
+            str(ensemble_layout.ens_comm_subgroup_ranks[ensemble_layout.ens_comm_subgroup_id]),
+            ensemble_layout.ens_comm_subgroup_rank,
+            ensemble_layout.ens_comm_subgroup_size,
         )
 
-        return model_comm_group_id
-
-    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
-        """Set up shard shapes for the dataloader.
-
-        Parameters
-        ----------
-        trainer : pl.Trainer
-            The PyTorch Lightning trainer.
-
-        Returns
-        -------
-        dict
-            A dictionary containing the shard shapes for each dataset.
-        """
-        shard_shapes = trainer.model.module.shard_shapes
-        assert shard_shapes is not None, "Shard shapes should be set after setup"
-        return shard_shapes
+        return model_layout.model_comm_group_id
 
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
@@ -522,7 +396,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             self.read_group_size,
             self.global_rank,
         )
-        ens_comm_group_id, ens_comm_group_rank, ens_comm_num_groups = get_my_model_comm_group(
+        ens_comm_group_id, ens_comm_group_rank, ens_comm_num_groups = get_my_ensemble_comm_group(
             self.ens_comm_group_size,
             self.global_rank,
             self.world_size,
@@ -536,6 +410,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             reader_group_rank,
             self.read_group_size,
             self.shard_shapes,
+            self.shard_shapes,
         )
 
         dataloader.dataset.set_ens_comm_group_info(
@@ -545,7 +420,3 @@ class DDPEnsGroupStrategy(DDPStrategy):
         )
 
         return dataloader
-
-    def register_parameter_hooks(self) -> None:
-        """Register parameter hooks for gradient reduction."""
-        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
