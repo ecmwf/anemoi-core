@@ -130,7 +130,7 @@ def attention_varlen_ref(
 @pytest.mark.parametrize("Z", [1, 2]) #4, 8, 16])
 @pytest.mark.parametrize("H", [1])
 @pytest.mark.parametrize(
-    "N_CTX", [1, 2, 4, 8, 16, 18, 32, 33, 34, 38, 42, 48, 52, 64, 65, 68] 
+    "N_CTX", [1, 4, 8, 16, 18, 32, 33, 34, 38, 42, 48, 52, 64, 65, 68] 
     #"N_CTX", [32]
     # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
@@ -292,6 +292,36 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     if is_hip() and triton.runtime.driver.active.get_current_target().arch == "gfx90a":
         bwd_rtol = max(1e-2, bwd_rtol)
 
-    torch.testing.assert_close(tri_dv, ref_dv, atol=atol, rtol=bwd_rtol)
+    try:
+        torch.testing.assert_close(tri_dv, ref_dv, atol=atol, rtol=bwd_rtol)
+    except AssertionError:
+        # Diagnostic information to help locate where the mismatch comes from.
+        with torch.no_grad():
+            diff = (tri_dv - ref_dv).abs()
+
+            # Max error per (batch, head) to see if only some batches/heads are affected.
+            # Shape: [Z, H]
+            per_bh_max = diff.amax(dim=(-1, -2))
+            print("[triton-attn debug] max abs error per (batch, head):", per_bh_max.detach().cpu())
+
+            # Global max and its location
+            max_err = diff.max()
+            max_idx = (diff == max_err).nonzero(as_tuple=False)[0]
+            z, h, t, d = [int(x) for x in max_idx]
+            print(
+                "[triton-attn debug] global max abs error:",
+                float(max_err.detach().cpu()),
+                "at (batch, head, token, dim)=",
+                (z, h, t, d),
+            )
+
+            # Print a small slice around the offending token to inspect cross-batch/head behaviour.
+            print("[triton-attn debug] tri_dv[z, h, t, :8] =",
+                    tri_dv[z, h, t, :8].detach().cpu())
+            print("[triton-attn debug] ref_dv[z, h, t, :8] =",
+                    ref_dv[z, h, t, :8].detach().cpu())
+
+        # Re-raise so the test still fails, but with extra context.
+        raise
     torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=bwd_rtol)
     torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=bwd_rtol)

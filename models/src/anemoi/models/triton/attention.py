@@ -434,15 +434,14 @@ def _attn_fwd(
     #ctx_rounded = N_CTX
     #if N_CTX % BLOCK_FIXED != 0:
     #    ctx_rounded = (N_CTX // BLOCK_FIXED + 1) * BLOCK_FIXED
-    m_ptrs = M + off_hz * N_CTX + offs_fixed 
-    #m_ptrs = M + off_hz * n_ctx_rounded + offs_fixed 
+    m_ptrs = M + off_hz * n_ctx_rounded + offs_fixed  # Use n_ctx_rounded since M is allocated with that dimension
     tl.store(m_ptrs, m_i, mask=offs_fixed < N_CTX) # TODO(cathal) might be overwiriting block boundarys in m where offs_fixed goes beyond ctx and into the next
     #acc = tl.where(offs_fixed[:, None] < N_CTX, acc, 0.0)  # mask out-of-bounds output values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
     desc_o.store([fixed_offset, 0], acc.to(dtype))
 
 
 @triton.jit
-def _attn_bwd_preprocess(Out, DO, Delta, N_CTX, PRE_BLOCK: tl.constexpr, HEAD_DIM: tl.constexpr):  #  #  #  #
+def _attn_bwd_preprocess(Out, DO, Delta, N_CTX, n_ctx_rounded: tl.constexpr, PRE_BLOCK: tl.constexpr, HEAD_DIM: tl.constexpr):  #  #  #  #
     """Calculates a per-token scalar Delta needed for backwards softmax computation.
 
     Pre-computing and storing it here prevents repeated recomputation during inner backward computation.
@@ -450,12 +449,12 @@ def _attn_bwd_preprocess(Out, DO, Delta, N_CTX, PRE_BLOCK: tl.constexpr, HEAD_DI
     off_m = tl.program_id(0) * PRE_BLOCK + tl.arange(0, PRE_BLOCK)
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
-    # load
-    o = tl.load(Out + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=off_m[:, None] < N_CTX, other=0.0).to(tl.float32)
-    do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=off_m[:, None] < N_CTX, other=0.0).to(tl.float32)
+    # load - use n_ctx_rounded for stride since tensors are padded
+    o = tl.load(Out + off_hz * HEAD_DIM * n_ctx_rounded + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=off_m[:, None] < N_CTX, other=0.0).to(tl.float32)
+    do = tl.load(DO + off_hz * HEAD_DIM * n_ctx_rounded + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=off_m[:, None] < N_CTX, other=0.0).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
-    # write-back
-    tl.store(Delta + off_hz * N_CTX + off_m, delta, mask=off_m < N_CTX)
+    # write-back - use n_ctx_rounded since Delta has that dimension
+    tl.store(Delta + off_hz * n_ctx_rounded + off_m, delta, mask=off_m < N_CTX)
 
 
 @triton.autotune(
@@ -504,7 +503,7 @@ def _attn_bwd_dkdv(
 
     # Index into head and batch
     off_hz = tl.program_id(2)
-    off_chz = (off_hz * N_CTX).to(tl.int64)
+    off_chz = (off_hz * n_ctx_rounded).to(tl.int64)  # Use n_ctx_rounded since M/L/D are allocated with that dimension
     off_z = off_hz // H
     off_h = off_hz % H
     iter_offset = off_z * (n_ctx_rounded * H) + off_h * n_ctx_rounded
@@ -630,7 +629,7 @@ def _attn_bwd_dkdv(
 
         # Load m before computing qk to reduce pipeline stall.
         
-        m = tl.load(M + offs_iter, mask=mask_iter < N_CTX, other=0.0)  # mask out-of-bounds m values, since they will not contribute to output when N_CTX is not divisible by BLOCK_FIXED
+        m = tl.load(M + mask_iter, mask=mask_iter < N_CTX, other=0.0)  # Use mask_iter (curr_iter + offs_iter) not just offs_iter
         qkT = tl.dot(k, qT)
         #qkT = tl.where((mask_iter[:, None] < N_CTX), qkT, MINUS_INF)
         qkT = tl.where((mask_iter[None, :] < N_CTX), qkT, MINUS_INF) # more similar to how masking is doen in fwd pass
@@ -654,7 +653,7 @@ def _attn_bwd_dkdv(
         ppT = pT.to(dtype)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
-        Di = tl.load(D + offs_iter, mask=mask_iter < N_CTX, other=0.0)  # mask out-of-bounds D values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
+        Di = tl.load(D + mask_iter, mask=mask_iter < N_CTX, other=0.0)  # Use mask_iter (curr_iter + offs_iter) not just offs_iter
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
@@ -718,7 +717,8 @@ def _attn_bwd_dq(
 
     # Index into head and batch
     off_hz = tl.program_id(2)
-    off_chz = (off_hz * N_CTX).to(tl.int64)
+    off_chz = (off_hz * n_ctx_rounded).to(tl.int64)  # Use n_ctx_rounded since M/D are allocated with that dimension
+    #off_chz = (off_hz * N_CTX).to(tl.int64)  # Use n_ctx_rounded since M/D are allocated with that dimension
     off_z = off_hz // H
     off_h = off_hz % H
     iter_offset = off_z * (n_ctx_rounded * H) + off_h * n_ctx_rounded
@@ -776,7 +776,7 @@ def _attn_bwd_dq(
     q = tl.where(offs_fixed[:, None] < N_CTX, q, 0.0)  # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
     do = tl.where(offs_fixed[:, None] < N_CTX, do, 0.0)  # mask out-of-bounds do values to 0, so they dont contribute
 
-    m = tl.load(M + offs_fixed)
+    m = tl.load(M + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)  # Add masking to prevent garbage values
     m = m[:, None]
 
     # D (= delta) is pre-divided by ds_scale.
@@ -1008,18 +1008,19 @@ class TritonAttention(torch.autograd.Function):
         dv = torch.empty_like(v).contiguous()
         BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
 
-        L = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
         k = k * (ctx.sm_scale * RCP_LN2) # TODO move to kernel
         PRE_BLOCK = 16
-        pre_grid = (triton.cdiv(N_CTX, PRE_BLOCK), BATCH * N_HEAD)
         delta = torch.empty_like(M)
 
         # Pad tensors to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_ITER
         # This ensures tensor descriptors don't read past the end of the flattened array
         n_ctx = q.shape[2]
         n_ctx_rounded = math.ceil(n_ctx / 16) * 16 #TODO(cathal) use block size from autotuning results instead of hardcoding 16 here
+        #pre_grid = (triton.cdiv(N_CTX, PRE_BLOCK), BATCH * N_HEAD)
+        pre_grid = (triton.cdiv(n_ctx_rounded, PRE_BLOCK), BATCH * N_HEAD)
+        L = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
         
         # Pad q, k, v if necessary
         #TODO(cathal) need a better way to do this
@@ -1029,6 +1030,7 @@ class TritonAttention(torch.autograd.Function):
             k = torch.nn.functional.pad(k, (0, 0, 0, pad_size), value=0.0)
             v = torch.nn.functional.pad(v, (0, 0, 0, pad_size), value=0.0)
             o = torch.nn.functional.pad(o, (0, 0, 0, pad_size), value=0.0)
+            do = torch.nn.functional.pad(do, (0, 0, 0, pad_size), value=0.0)
 
             dq = torch.nn.functional.pad(dq, (0, 0, 0, pad_size), value=0.0)
             dk = torch.nn.functional.pad(dk, (0, 0, 0, pad_size), value=0.0)
@@ -1038,17 +1040,17 @@ class TritonAttention(torch.autograd.Function):
         desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, True)
 
         # precompute 'delta' value needed for softmax computation
-        _attn_bwd_preprocess[pre_grid](o, do, delta, N_CTX, PRE_BLOCK=PRE_BLOCK, HEAD_DIM=HEAD_DIM)
+        _attn_bwd_preprocess[pre_grid](o, do, delta, N_CTX, n_ctx_rounded=n_ctx_rounded, PRE_BLOCK=PRE_BLOCK, HEAD_DIM=HEAD_DIM)
 
         # defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU
         # (SMs are essentially processors on a GPU, with typically 1024 threads per SM)
         # There is at least one kernel per BATCH * NUM_HEAD.
         # Depending on BLOCK_FIXED, the context dimension can be further split across kernels
         def grid_dkdv(META):
-            return (triton.cdiv(N_CTX, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
+            return (triton.cdiv(n_ctx_rounded, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
 
         def grid_dq(META):
-            return (triton.cdiv(N_CTX, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
+            return (triton.cdiv(n_ctx_rounded, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
 
         # Compute dK and dV
         _attn_bwd_dkdv[grid_dkdv](
