@@ -396,32 +396,39 @@ dataloader:
   training:
     datasets:
       data:
-        dataset:
-          join:
-          - ${system.input.dataset}
-          - ${system.input.forcing_dataset}
+        dataset_config:
+          dataset:
+            join:
+            - ${system.input.dataset}
+            - ${system.input.forcing_dataset}
+          frequency: ${data.frequency}
+          drop: []
         start: "2022-01-01T00:00:00"
         end: "2022-01-04T00:00:00"
-        frequency: ${data.frequency}
-        drop: []
   validation:
     datasets:
       data:
-        dataset:
-          join:
-          - ${system.input.dataset}
-          - ${system.input.forcing_dataset}
+        dataset_config:
+          dataset:
+            join:
+            - ${system.input.dataset}
+            - ${system.input.forcing_dataset}
+          frequency: ${data.frequency}
+          drop: []
         start: "2022-01-04T06:00:00"
         end: "2022-01-06T06:00:00"
-        frequency: ${data.frequency}
-        drop: []
   test:
     datasets:
       data:
-        dataset: {}
+        dataset_config:
+          dataset:
+            join:
+            - ${system.input.dataset}
+            - ${system.input.forcing_dataset}
+          frequency: ${data.frequency}
+          drop: []
         start: 2022
         end: null
-        frequency: ${data.frequency}
   num_workers:
     training: 2
     validation: 2
