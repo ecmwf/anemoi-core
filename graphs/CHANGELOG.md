@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.5...graphs-0.9.0) (2026-02-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848))
+
+### Code Refactoring
+
+* **training:** Remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848)) ([dcd69ac](https://github.com/ecmwf/anemoi-core/commit/dcd69ac415894131876c2f19af643896f1605fe6))
+
 ## [0.8.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.4...graphs-0.8.5) (2026-02-09)
 
 

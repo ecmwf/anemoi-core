@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.10.0](https://github.com/ecmwf/anemoi-core/compare/training-0.9.1...training-0.10.0) (2026-02-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* Rewrite dataset Schema to fix issue 911 ([#916](https://github.com/ecmwf/anemoi-core/issues/916))
+* **training:** remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848))
+
+### Features
+
+* Checkpoint pipeline infrastructure (Phase 1) ([#501](https://github.com/ecmwf/anemoi-core/issues/501)) ([2e20ec6](https://github.com/ecmwf/anemoi-core/commit/2e20ec67cbf41ddbe192ba72ccdca02689816c00))
+* Remove single out time interpolator ([#915](https://github.com/ecmwf/anemoi-core/issues/915)) ([80713fb](https://github.com/ecmwf/anemoi-core/commit/80713fb6d04b76ecfd44c6e5e450a546ac2a0d1c))
+* Rewrite dataset Schema to fix issue 911 ([#916](https://github.com/ecmwf/anemoi-core/issues/916)) ([b198783](https://github.com/ecmwf/anemoi-core/commit/b198783325bb0a8458be6525cc00e1319de48f4b))
+* **training:** Deprecate tensorboard and Harmonise loggers interface ([#850](https://github.com/ecmwf/anemoi-core/issues/850)) ([3da01b7](https://github.com/ecmwf/anemoi-core/commit/3da01b78c9a21f7b402eb7e0ebb4caa9f3b23f29))
+
+
+### Bug Fixes
+
+* Convert sanity rnd tensor ([#920](https://github.com/ecmwf/anemoi-core/issues/920)) ([f6f85e1](https://github.com/ecmwf/anemoi-core/commit/f6f85e1ab32a4781f3ed3d0236ffddc99a5d44a5))
+* Forbid extras in nativedatasetschema ([#901](https://github.com/ecmwf/anemoi-core/issues/901)) ([dead80d](https://github.com/ecmwf/anemoi-core/commit/dead80d92075f2cda08287c131c3e06d1100a5db))
+* Integrate select variables in dataloader ([#900](https://github.com/ecmwf/anemoi-core/issues/900)) ([d34e80c](https://github.com/ecmwf/anemoi-core/commit/d34e80cacd2a82ca9d718b2914fe6e8cb306498a))
+* **mlflow:** Fix KeyError in error message for missing environment variables ([#894](https://github.com/ecmwf/anemoi-core/issues/894)) ([77ca1ae](https://github.com/ecmwf/anemoi-core/commit/77ca1ae5f5eb34c0790ec4ac24aee8814ee45cd7))
+* Optimiser schema was ignoring kwargs ([#885](https://github.com/ecmwf/anemoi-core/issues/885)) ([1f1a030](https://github.com/ecmwf/anemoi-core/commit/1f1a030421bebd2daf31c7cf285138b4baea340d))
+* Single interpolator ([#881](https://github.com/ecmwf/anemoi-core/issues/881)) ([4378de0](https://github.com/ecmwf/anemoi-core/commit/4378de0afd03010ef8b012b973d186961f67bbf0))
+* **training:** Plot callbacks multi out and noopt graph provider ([#872](https://github.com/ecmwf/anemoi-core/issues/872)) ([872618f](https://github.com/ecmwf/anemoi-core/commit/872618fc6d2cc5060bd142fa634a7095b0645761))
+* **training:** Scaler index handling improvement, doc string clean-up ([#879](https://github.com/ecmwf/anemoi-core/issues/879)) ([7ffa124](https://github.com/ecmwf/anemoi-core/commit/7ffa12496e64ce46544d085dec58f47f4d6e234e))
+
+
+### Code Refactoring
+
+* **training:** Remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848)) ([dcd69ac](https://github.com/ecmwf/anemoi-core/commit/dcd69ac415894131876c2f19af643896f1605fe6))
+
 ## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/training-0.9.0...training-0.9.1) (2026-02-09)
 
 

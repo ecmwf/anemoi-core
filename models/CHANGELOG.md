@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.12.2](https://github.com/ecmwf/anemoi-core/compare/models-0.12.1...models-0.12.2) (2026-02-20)
+
+
+### Features
+
+* Remove single out time interpolator ([#915](https://github.com/ecmwf/anemoi-core/issues/915)) ([80713fb](https://github.com/ecmwf/anemoi-core/commit/80713fb6d04b76ecfd44c6e5e450a546ac2a0d1c))
+
+
+### Bug Fixes
+
+* **models:** Fix migration script, remove unused arg ([#893](https://github.com/ecmwf/anemoi-core/issues/893)) ([531546e](https://github.com/ecmwf/anemoi-core/commit/531546e8a28b6560f6f1398878407ff35e74af53))
+* **training:** Raise triton tolerence ([#870](https://github.com/ecmwf/anemoi-core/issues/870)) ([81e913b](https://github.com/ecmwf/anemoi-core/commit/81e913be973e9f84d787f1cbce6809898b848dbd))
+
 ## [0.12.1](https://github.com/ecmwf/anemoi-core/compare/models-0.12.0...models-0.12.1) (2026-02-09)
 
 
