@@ -15,7 +15,6 @@ noise_injector:
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
   noise_matrix: null
-  transpose_noise_matrix: false
   row_normalize_noise_matrix: false
   autocast: false
   layer_kernels:
@@ -47,6 +46,7 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: True # Transformer and GraphTransformer only
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
   layer_kernels:
@@ -77,6 +77,7 @@ encoder:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
@@ -93,6 +94,7 @@ decoder:
   initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"

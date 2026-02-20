@@ -50,6 +50,9 @@ class TruncatedConnectionSchema(BaseModel):
     autocast: bool = Field(
         False, description="Whether to enable mixed precision autocasting during projection operations."
     )
+    row_normalize: bool = Field(
+        False, description="Whether to normalize projection matrix weights per row (target node) so each row sums to 1."
+    )
 
     @model_validator(mode="after")
     def check_instantiation_method(self) -> Any:
@@ -85,6 +88,8 @@ class TruncatedConnectionSchema(BaseModel):
                 raise ValueError(
                     "When using graph-based projection, do not specify truncation_up_file_path or truncation_down_file_path."
                 )
+
+        return self
 
 
 ResidualConnectionSchema = Annotated[

@@ -27,6 +27,5 @@ def migrate(ckpt: CkptType) -> CkptType:
 
 
 def rollback(ckpt: CkptType) -> CkptType:
-    """Rollbacks the migration"""
-    del ckpt["foo"]
+    """Don't fail if rollback exists for backward compatibility"""
     return ckpt

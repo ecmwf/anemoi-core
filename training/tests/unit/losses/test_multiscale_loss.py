@@ -10,22 +10,23 @@
 import pytest
 import torch
 from pytest_mock import MockerFixture
+from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
-from anemoi.training.losses.multiscale import SparseProjector
 
 
 @pytest.fixture
 def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs."""
-    tensor_shape = [1, 2, 4, 1]  # (bs, time, grid, vars)
+    tensor_shape = [1, 1, 2, 4, 2]  # (batch, output_steps, ens, latlon, vars)
 
     pred = torch.zeros(tensor_shape)
-    pred[0, :, 0, 0] = torch.tensor([1.0, 1.0])
-    target = torch.zeros(tensor_shape[1:])
+    pred[0, 0, :, 0] = torch.tensor([1.0, 0.0])
+    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
 
     # With only one "grid point" differing by 1 in all
     # variables, the loss should be 1.0
@@ -59,17 +60,22 @@ def test_multi_scale(
     mocker: MockerFixture,
 ) -> None:
     """Test multiscale loss with different per-scale losses and weights."""
-    smoothing_matrix = SparseProjector(
-        torch.tensor([[0, 0, 1, 1, 2, 2, 3, 3], [0, 1, 1, 2, 2, 3, 3, 0]]),
-        torch.ones(8) / 2,
-        src_size=4,
-        dst_size=4,
+    graph = HeteroData()
+    graph["src"].num_nodes = 4
+    graph["dst"].num_nodes = 4
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 0, 1, 1, 2, 2, 3, 3], [0, 1, 1, 2, 2, 3, 3, 0]])
+    graph[("src", "to", "dst")].edge_weight = torch.ones(8) / 2
+
+    smoothing_provider = ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="edge_weight",
         row_normalize=False,
-        transpose=False,
     )
+
     mocker.patch(
         "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
-        return_value=[None, smoothing_matrix],
+        return_value=[None, smoothing_provider],
     )
 
     multiscale_loss = MultiscaleLossWrapper(
@@ -84,18 +90,20 @@ def test_multi_scale(
 
     assert isinstance(loss, torch.Tensor)
     assert loss.shape == (2,), "Loss should have shape (num_scales,) when squash=True"
-
     loss = multiscale_loss(pred, target, squash=False)
 
     assert isinstance(loss, torch.Tensor)
+    # better to have a nvar > 1 because otherwise pred.shape[-1] == 1 and loss.shape == (2) which makes the test fail
     assert loss.shape == (2, pred.shape[-1]), "Loss should have shape (num_scales, num_variables) when squash=False"
 
 
 def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
     """Test equivalence when only one scale is used."""
-    tensor_shape = [1, 2, 4, 5]
-    pred = torch.randn(tensor_shape)
-    target = torch.randn(tensor_shape[1:])
+    tensor_shape = [1, 1, 2, 4, 1]  # (batch, output_steps, ens, latlon, vars)
+
+    pred = torch.zeros(tensor_shape)
+    pred[0, 0, :, 0] = torch.tensor([1.0])
+    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
 
     per_scale_loss = AlmostFairKernelCRPS()
     multiscale_loss = MultiscaleLossWrapper(

@@ -29,25 +29,25 @@ LOGGER = logging.getLogger(__name__)
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_architecture_configs(
-    architecture_config: tuple[DictConfig, str, str],
+def test_training_cycle_global(
+    global_config: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url, _ = architecture_config
+    cfg, url, _ = global_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str, str]) -> None:
-    cfg, _, _ = architecture_config
+def test_config_validation_global_config(global_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = global_config
     BaseSchema(**cfg)
 
 
-def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, str, str]) -> None:
+def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:
     from anemoi.training.diagnostics.logger import get_mlflow_logger
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
-    config, _, _ = base_global_config
+    config = gnn_config_mlflow
     if config.config_validation:
         OmegaConf.resolve(config)
         config = BaseSchema(**config)
@@ -56,10 +56,27 @@ def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, 
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
 
-    logger = get_mlflow_logger(config)
+    from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
-    if config.diagnostics.log.mlflow.enabled:
-        assert Path(config.diagnostics.log.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
+    config = convert_to_omegaconf(config)
+
+    # Minimal inputs required by get_mlflow_logger
+    run_id = None
+    fork_run_id = None
+    paths = config.system.output
+    logger_config = config.diagnostics.log
+
+    logger_cfg = getattr(logger_config, "mlflow", None)
+    if getattr(logger_cfg, "enabled", False):
+        LOGGER.info("%s logger enabled", "MLFLOW")
+
+        logger = get_mlflow_logger(
+            run_id=run_id,
+            fork_run_id=fork_run_id,
+            paths=paths,
+            logger_config=logger_config,
+        )
+        assert Path(logger_config.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
         assert isinstance(logger, AnemoiMLflowLogger)
 
 
@@ -91,6 +108,23 @@ def test_training_cycle_stretched(
 
 def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = stretched_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multidatasets(
+    multidatasets_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multidatasets_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = multidatasets_config
     BaseSchema(**cfg)
 
 
@@ -152,6 +186,23 @@ def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, l
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_autoencoder(
+    autoencoder_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = autoencoder_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = autoencoder_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = gnn_config
     get_test_archive(url)
@@ -181,10 +232,10 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
 
 @skip_if_offline
 def test_loading_checkpoint(
-    architecture_config_with_checkpoint: tuple[DictConfig, str],
+    global_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: callable,
 ) -> None:
-    cfg, url = architecture_config_with_checkpoint
+    cfg, url = global_config_with_checkpoint
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.model
@@ -193,10 +244,10 @@ def test_loading_checkpoint(
 @skip_if_offline
 @pytest.mark.slow
 def test_restart_from_existing_checkpoint(
-    architecture_config_with_checkpoint: tuple[DictConfig, str],
+    global_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = architecture_config_with_checkpoint
+    cfg, url = global_config_with_checkpoint
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
@@ -230,3 +281,39 @@ def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_
 def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
     cfg, _ = diffusion_config
     BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.mlflow
+def test_training_cycle_mlflow_dry_run(
+    mlflow_dry_run_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    from anemoi.training.commands.mlflow import prepare_mlflow_run_id
+
+    cfg, url = mlflow_dry_run_config
+
+    # Generate a dry run ID and set it in the config
+    run_id, _ = prepare_mlflow_run_id(
+        config=cfg,
+    )
+    cfg["training"]["run_id"] = run_id
+
+    # Get training data
+    get_test_archive(url)
+
+    # Run training
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multidatasets_diffusion(
+    multidatasets_diffusion_config: tuple[DictConfig, list[str]],
+    get_test_archive: callable,
+) -> None:
+    cfg, urls = multidatasets_diffusion_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
