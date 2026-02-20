@@ -26,12 +26,7 @@ dataloader:
       - dataset: ${system.input.forcing_dataset}
     adjust: all
     min_distance_km: 0
-  grid_indices:
-    datasets:
-      data:
-        _target_: anemoi.training.data.grid_indices.MaskedGrid
-        nodes_name: data
-        node_attribute_name: indices_connected_nodes
+    max_distance_km: 300
 model:
   output_mask:
     _target_: anemoi.training.utils.masks.Boolean1DMask

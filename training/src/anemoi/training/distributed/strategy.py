@@ -135,12 +135,14 @@ class DDPGroupStrategy(DDPStrategy):
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
+        self.shard_shapes: dict | None = None
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
 
         super().setup(trainer)
 
+        self.shard_shapes = self._setup_shard_shapes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
@@ -226,6 +228,23 @@ class DDPGroupStrategy(DDPStrategy):
 
         return model_comm_group_id
 
+    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
+        """Set up shard shapes for the dataloader.
+
+        Parameters
+        ----------
+        trainer : pl.Trainer
+            The PyTorch Lightning trainer.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the shard shapes for each dataset.
+        """
+        shard_shapes = trainer.model.module.shard_shapes
+        assert shard_shapes is not None, "Shard shapes should be set after setup"
+        return shard_shapes
+
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
 
@@ -261,6 +280,7 @@ class DDPGroupStrategy(DDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
+            self.shard_shapes,
         )
 
         return dataloader
@@ -290,12 +310,14 @@ class DDPEnsGroupStrategy(DDPStrategy):
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.ens_comm_group_size = num_gpus_per_ensemble
+        self.shard_shapes: dict | None = None
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
 
         super().setup(trainer)
 
+        self.shard_shapes = self._setup_shard_shapes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
@@ -456,6 +478,23 @@ class DDPEnsGroupStrategy(DDPStrategy):
 
         return model_comm_group_id
 
+    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
+        """Set up shard shapes for the dataloader.
+
+        Parameters
+        ----------
+        trainer : pl.Trainer
+            The PyTorch Lightning trainer.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the shard shapes for each dataset.
+        """
+        shard_shapes = trainer.model.module.shard_shapes
+        assert shard_shapes is not None, "Shard shapes should be set after setup"
+        return shard_shapes
+
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
 
@@ -496,6 +535,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
+            self.shard_shapes,
         )
 
         dataloader.dataset.set_ens_comm_group_info(
