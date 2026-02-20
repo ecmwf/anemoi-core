@@ -292,6 +292,6 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     if is_hip() and triton.runtime.driver.active.get_current_target().arch == "gfx90a":
         bwd_rtol = max(1e-2, bwd_rtol)
 
-    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=bwd_rtol)
-    torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=bwd_rtol)
     torch.testing.assert_close(tri_dv, ref_dv, atol=atol, rtol=bwd_rtol)
+    torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=bwd_rtol)
+    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=bwd_rtol)

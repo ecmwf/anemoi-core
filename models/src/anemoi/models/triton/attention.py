@@ -134,16 +134,16 @@ def _attn_fwd_inner(
     iter_offset = iter_offset + lo
     # loop over k, v and update accumulator
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
-        curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
+        #curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
         mask_iter = curr_iter + offs_iter
         
         # -- compute qk ----
         #k = desc_k.load([iter_offset, 0]).T
-        k = desc_k.load([iter_offset, 0])#.T
+        k = desc_k.load([iter_offset, 0]).T
         # transpose access to mask_iter bc k is transposed
         #k = tl.where(mask_iter[None, :] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
-        k = tl.where(mask_iter[:, None] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
-        qk = tl.dot(q, tl.trans(k)) * qk_scale
+        k = tl.where(mask_iter[None, :] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
+        qk = tl.dot(q, k) * qk_scale
         
         # Apply out-of-bounds masking first
         qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
@@ -455,7 +455,7 @@ def _attn_bwd_preprocess(Out, DO, Delta, N_CTX, PRE_BLOCK: tl.constexpr, HEAD_DI
     do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=off_m[:, None] < N_CTX, other=0.0).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
-    tl.store(Delta + off_hz * N_CTX + off_m, delta)
+    tl.store(Delta + off_hz * N_CTX + off_m, delta, mask=off_m < N_CTX)
 
 
 @triton.autotune(
@@ -489,6 +489,7 @@ def _attn_bwd_dkdv(
     WINDOW: tl.constexpr,
     WARP_SPECIALIZE: tl.constexpr,
     dtype: tl.constexpr,
+    n_ctx_rounded: tl.constexpr,
 ):
     """Computes dK and dV with respect to dO.
 
@@ -506,11 +507,11 @@ def _attn_bwd_dkdv(
     off_chz = (off_hz * N_CTX).to(tl.int64)
     off_z = off_hz // H
     off_h = off_hz % H
-    iter_offset = off_z * (N_CTX * H) + off_h * N_CTX
+    iter_offset = off_z * (n_ctx_rounded * H) + off_h * n_ctx_rounded
     fixed_offset = iter_offset + start_fixed
 
     # number of elements in all non-head-dim dimensions
-    y_dim: tl.constexpr = Z * H * N_CTX
+    y_dim: tl.constexpr = Z * H * n_ctx_rounded
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
         shape=[y_dim, HEAD_DIM],
@@ -567,9 +568,10 @@ def _attn_bwd_dkdv(
     # load K and V: they stay in SRAM throughout the inner loop.
     k = desc_k.load([fixed_offset, 0])
     v = desc_v.load([fixed_offset, 0])
+    k = tl.where(offs_fixed[:, None] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
+    v = tl.where(offs_fixed[:, None] < N_CTX, v, 0.0)  # mask out-of-bounds v values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
 
     # Create offset pointers for tensors
-    offs_iter = start_iter + tl.arange(0, BLOCK_ITER)
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
 
     tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
@@ -618,7 +620,7 @@ def _attn_bwd_dkdv(
     # skip up to 'lo'
     iter_offset += lo
 
-    offs_iter = iter_offset + tl.arange(0, BLOCK_ITER)
+    offs_iter =  tl.arange(0, BLOCK_ITER)
     
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
 
@@ -630,7 +632,8 @@ def _attn_bwd_dkdv(
         
         m = tl.load(M + offs_iter, mask=mask_iter < N_CTX, other=0.0)  # mask out-of-bounds m values, since they will not contribute to output when N_CTX is not divisible by BLOCK_FIXED
         qkT = tl.dot(k, qT)
-        qkT = tl.where((mask_iter[:, None] < N_CTX), qkT, MINUS_INF)
+        #qkT = tl.where((mask_iter[:, None] < N_CTX), qkT, MINUS_INF)
+        qkT = tl.where((mask_iter[None, :] < N_CTX), qkT, MINUS_INF) # more similar to how masking is doen in fwd pass
         # Apply masking.
         if CAUSAL:
             mask = offs_iter[None, :] >= offs_fixed[:, None]
@@ -646,12 +649,12 @@ def _attn_bwd_dkdv(
         pT = tl.math.exp2(qkT - m[None, :])
         
         do = desc_do.load([iter_offset, 0])
+        do = tl.where(mask_iter[:, None] < N_CTX, do, 0.0)  # mask out-of-bounds do values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
         # Compute dV.
         ppT = pT.to(dtype)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_iter, mask=mask_iter < N_CTX, other=0.0)  # mask out-of-bounds D values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
-        Di = tl.where(mask_iter < N_CTX, Di, 0.0)  # mask out-of-bounds D values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
@@ -697,6 +700,7 @@ def _attn_bwd_dq(
     WINDOW: tl.constexpr,
     WARP_SPECIALIZE: tl.constexpr,
     dtype: tl.constexpr,
+    n_ctx_rounded: tl.constexpr,
 ):
     """Computes dQ with respect to dO.
 
@@ -717,11 +721,11 @@ def _attn_bwd_dq(
     off_chz = (off_hz * N_CTX).to(tl.int64)
     off_z = off_hz // H
     off_h = off_hz % H
-    iter_offset = off_z * (N_CTX * H) + off_h * N_CTX
+    iter_offset = off_z * (n_ctx_rounded * H) + off_h * n_ctx_rounded
     fixed_offset = iter_offset + start_fixed
 
     # How many elements in the first 3 dimensaions
-    y_dim = Z * H * N_CTX
+    y_dim = Z * H * n_ctx_rounded
     # Build tensor descriptors if they havent already been built in _system_specific_settings()
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
@@ -769,12 +773,14 @@ def _attn_bwd_dq(
     q = desc_q.load([fixed_offset, 0])
     dq = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
     do = desc_do.load([fixed_offset, 0])
+    q = tl.where(offs_fixed[:, None] < N_CTX, q, 0.0)  # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
+    do = tl.where(offs_fixed[:, None] < N_CTX, do, 0.0)  # mask out-of-bounds do values to 0, so they dont contribute
 
     m = tl.load(M + offs_fixed)
     m = m[:, None]
 
     # D (= delta) is pre-divided by ds_scale.
-    Di = tl.load(D + offs_fixed)
+    Di = tl.load(D + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)  # mask out-of-bounds D values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
     tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
     curr_iter = start_iter
     
@@ -816,7 +822,7 @@ def _attn_bwd_dq(
 
     # skip up to 'lo'
     iter_offset += lo
-    offs_iter = iter_offset + tl.arange(0, BLOCK_ITER)
+    offs_iter = tl.arange(0, BLOCK_ITER)
 
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
         curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
@@ -1024,6 +1030,10 @@ class TritonAttention(torch.autograd.Function):
             v = torch.nn.functional.pad(v, (0, 0, 0, pad_size), value=0.0)
             o = torch.nn.functional.pad(o, (0, 0, 0, pad_size), value=0.0)
 
+            dq = torch.nn.functional.pad(dq, (0, 0, 0, pad_size), value=0.0)
+            dk = torch.nn.functional.pad(dk, (0, 0, 0, pad_size), value=0.0)
+            dv = torch.nn.functional.pad(dv, (0, 0, 0, pad_size), value=0.0)
+
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
         desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, True)
 
@@ -1059,6 +1069,7 @@ class TritonAttention(torch.autograd.Function):
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,  #
             dtype=torch_dtype_to_triton(q.dtype),
+            n_ctx_rounded=n_ctx_rounded,
             **extra_kern_args,
         )
 
@@ -1078,7 +1089,14 @@ class TritonAttention(torch.autograd.Function):
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,  #
             dtype=torch_dtype_to_triton(q.dtype),
+            n_ctx_rounded=n_ctx_rounded,
             **extra_kern_args,
         )
+
+        # Remove padding from tensors
+        if n_ctx_rounded != n_ctx:
+            dq = dq[:, :, :n_ctx, :]
+            dk = dk[:, :, :n_ctx, :]
+            dv = dv[:, :, :n_ctx, :]
 
         return dq, dk, dv, None, None, None, None
