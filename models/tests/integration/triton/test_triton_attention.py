@@ -32,9 +32,6 @@ try:
 except BaseException:
     HAS_FLASH = False
 
-HAS_FLASH = True
-
-
 def attention_varlen_ref(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -125,14 +122,15 @@ def attention_varlen_ref(
 
 @pytest.mark.gpu
 @pytest.mark.slow
-@pytest.mark.parametrize("Z", [1, 2])  # 4, 8, 16])
-@pytest.mark.parametrize("H", [1])
+@pytest.mark.parametrize("Z", [4])
+@pytest.mark.parametrize("H", [9])
 @pytest.mark.parametrize(
     "N_CTX",
-    [1, 4, 8, 16, 18, 32, 33, 34, 38, 42, 48, 52, 64, 65, 68],
+    [97, 128, 200, 384, 768, 1024, 1025, 2048],
     # "N_CTX", [32]
     # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
+#@pytest.mark.parametrize("HEAD_DIM", [32, 40, 59, 64, 80, 96, 111, 128, 160, 192, 224, 256])
 @pytest.mark.parametrize("HEAD_DIM", [64])
 @pytest.mark.parametrize("causal", [False])  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
 @pytest.mark.parametrize(
@@ -141,7 +139,7 @@ def attention_varlen_ref(
     # [0]
 )  # test larger (o96) config if FLASH_ATTN is available to compute reference
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
-@pytest.mark.parametrize("dtype", [torch.float16])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     """Compares Triton flash attention against a naive torch implementation, and optionally flash attention
 

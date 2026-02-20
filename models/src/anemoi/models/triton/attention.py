@@ -624,7 +624,7 @@ def _attn_bwd_dkdv(
         qkT = tl.where((mask_iter[None, :] < N_CTX), qkT, MINUS_INF)  # more similar to how masking is doen in fwd pass
         # Apply masking.
         if CAUSAL:
-            mask = mask_iter[None, :] <= offs_fixed[:, None]
+            mask = mask_iter[None, :] >= offs_fixed[:, None]
             qkT = tl.where(mask, qkT, MINUS_INF)
 
         if WINDOW > 0:
