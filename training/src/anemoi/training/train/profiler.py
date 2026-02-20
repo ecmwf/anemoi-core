@@ -19,11 +19,11 @@ from pathlib import Path
 import hydra
 import pandas as pd
 import pytorch_lightning as pl
+import torch
 from omegaconf import DictConfig
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
 
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.profilers import BenchmarkProfiler
 from anemoi.training.diagnostics.profilers import ProfilerProgressBar
 from anemoi.training.train.train import AnemoiTrainer
@@ -155,9 +155,10 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def model_summary(self) -> str:
+        example_input_array = self.get_example_input_array()
         if self.config.diagnostics.benchmark_profiler.model_summary.enabled:
             model = self.model
-            return self.profiler.get_model_summary(model=model, example_input_array=self.example_input_array)
+            return self.profiler.get_model_summary(model=model, example_input_array=example_input_array)
         return None
 
     @rank_zero_only
@@ -285,17 +286,14 @@ class AnemoiProfiler(AnemoiTrainer):
                 callbacks.append(MemorySnapshotRecorder(self.config))
         return callbacks
 
-    @cached_property
-    def datamodule(self) -> AnemoiDatasetsDataModule:
-        datamodule = super().datamodule
-        # to generate a model summary with shapes we need a sample input array
-        batch = next(iter(datamodule.train_dataloader()))
+    def get_example_input_array(self) -> dict[str, torch.Tensor]:
+        batch = next(iter(self.datamodule.train_dataloader()))
         if type(batch) in [list, tuple]:
             batch = batch[0]
 
-        self.example_input_array = {}
+        example_input_array = {}
         for dataset_name in batch:
-            self.example_input_array[dataset_name] = batch[dataset_name][
+            example_input_array[dataset_name] = batch[dataset_name][
                 :,
                 0 : self.config.training.multistep_input,
                 ...,
@@ -303,14 +301,14 @@ class AnemoiProfiler(AnemoiTrainer):
             ]
             # If the input batch is sharded, replicate it to its full size
             if self.config.dataloader.read_group_size > 1:
-                self.example_input_array[dataset_name] = self.example_input_array[dataset_name].repeat(
+                example_input_array[dataset_name] = example_input_array[dataset_name].repeat(
                     1,
                     1,
                     1,
                     self.config.dataloader.read_group_size,
                     1,
                 )
-        return datamodule
+        return example_input_array
 
     @cached_property
     def profiler(self) -> BenchmarkProfiler:
