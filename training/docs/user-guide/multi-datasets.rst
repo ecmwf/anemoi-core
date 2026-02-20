@@ -75,6 +75,56 @@ now becomes:
 
 Each dataset is identified by a unique name, and all configuration that applies specifically to that dataset is defined within its block.
 
+
+*********************************************
+ Dataloader Dataset Reader Configuration
+*********************************************
+
+The dataloader dataset reader structure has been updated to use a dedicated
+``dataset_config`` key. This is a breaking change intended to remove ambiguous
+nesting and make the mapping to ``open_dataset`` explicit.
+
+The required structure is:
+
+.. code:: yaml
+
+    dataloader:
+        training:
+            datasets:
+                era5:
+                    dataset_config:
+                        dataset: ${system.input.dataset}
+                        frequency: ${data.frequency}
+                        drop: []
+                        select: []
+                        statistics: /path/to/statistics.zarr
+                    start: 1985
+                    end: 2020
+                    trajectory: null
+
+where ``dataset_config`` is passed to ``open_dataset`` as a dictionary, i.e.:
+
+.. code:: python
+
+    open_dataset({"dataset": ..., "frequency": ..., "drop": ..., "select": ..., "statistics": ...})
+
+
+Previous format (no longer supported in validated configurations):
+
+.. code:: yaml
+
+    dataloader:
+        training:
+            datasets:
+                era5:
+                    dataset:
+                        name: ${system.input.dataset}
+                        frequency: ${data.frequency}
+                        drop: []
+                    start: 1985
+                    end: 2020
+                    trajectory: null
+
 ***************************************
  Dataset Name Conventions in Templates
 ***************************************
@@ -185,6 +235,6 @@ Since they have different variables, each dataset has its own lists of forcing a
 
 #. All configuration snippets throughout the documentation have been updated to reflect the new structure.
 
-#. To ease the transition, the previous configuration layout is still supported for a limited period, but only when configuration validation is disabled.
+#. For dataloader dataset readers, use ``dataset_config`` (outer key) and ``dataset`` (inner key). The old ``dataset``/``name`` shape is deprecated and should be migrated.
 
 #. We strongly recommend updating configurations to the new datasets-based layout, as this is the forward-compatible and fully supported format.

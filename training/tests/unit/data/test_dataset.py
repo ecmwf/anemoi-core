@@ -12,21 +12,25 @@ import datetime
 import numpy as np
 import pytest
 import torch
+from pydantic import ValidationError
 
 from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.training.data.dataset import create_dataset
+from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
 
 
+@pytest.fixture
+def dataset_path(extract_dataset_path: tuple[str, str], get_test_archive: GetTestArchive) -> str:
+    """Fixture to provide dataset path."""
+    path, url_archive = extract_dataset_path
+    get_test_archive(url_archive)
+    return path
+
+
 class TestNativeGridDataset:
     """Test NativeGridDataset instantiation and properties."""
-
-    @pytest.fixture
-    def dataset_path(self, extract_dataset_path: tuple[str, str], get_test_archive: GetTestArchive) -> str:
-        """Fixture to provide dataset path."""
-        path, url_archive = extract_dataset_path
-        get_test_archive(url_archive)
-        return path
 
     @skip_if_offline
     @pytest.mark.parametrize("start", [None, 2017])
@@ -55,7 +59,13 @@ class TestNativeGridDataset:
         frequency: str,
         drop: list[str],
     ) -> None:
-        dataset = NativeGridDataset(dataset=dataset_path, frequency=frequency, drop=drop)
+        dataset_cfg = {"dataset": dataset_path}
+        if frequency is not None:
+            dataset_cfg["frequency"] = frequency
+        if drop is not None:
+            dataset_cfg["drop"] = drop
+
+        dataset = NativeGridDataset(dataset=dataset_cfg)
 
         assert dataset.data is not None
         assert not dataset.has_trajectories
@@ -92,7 +102,7 @@ class TestNativeGridDataset:
             pytest.skip("Dataset needs at least 2 variables for drop test")
 
         drop_vars = [original_vars[0]]
-        dataset = NativeGridDataset(dataset=dataset_path, drop=drop_vars)
+        dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": drop_vars})
 
         assert dataset.data is not None
         assert drop_vars[0] not in dataset.variables
@@ -138,3 +148,291 @@ class TestNativeGridDataset:
         assert sample.ndim == 4
         assert sample.shape[0] == 3  # 3 time steps
         assert sample.shape[2] == 4  # 4 selected gridpoints
+
+
+@skip_if_offline
+def test_native_grid_dataset_accepts_dataset_dictionary(dataset_path: str) -> None:
+    original = NativeGridDataset(dataset=dataset_path)
+    if not original.variables:
+        pytest.skip("Dataset has no variables to test drop.")
+
+    drop_var = original.variables[0]
+    dataset_cfg = {
+        "dataset": dataset_path,
+        "frequency": "6h",
+        "drop": [drop_var],
+    }
+    dataset = NativeGridDataset(dataset=dataset_cfg, start=None, end=None)
+
+    assert dataset.data is not None
+    assert dataset.dates is not None
+    assert dataset.variables is not None
+    assert drop_var not in dataset.variables
+
+
+@skip_if_offline
+def test_create_dataset_accepts_nested_dataset_dictionary(dataset_path: str) -> None:
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": dataset_path,
+            "frequency": "6h",
+            "drop": [],
+        },
+        "start": None,
+        "end": None,
+        "trajectory": None,
+    }
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert dataset.data is not None
+    assert not dataset.has_trajectories
+
+
+@skip_if_offline
+def test_create_dataset_does_not_clip_when_start_end_are_none(dataset_path: str) -> None:
+    original = NativeGridDataset(dataset=dataset_path)
+
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": dataset_path,
+            "frequency": "6h",
+            "drop": [],
+        },
+        "start": None,
+        "end": None,
+        "trajectory": None,
+    }
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert dataset.dates[0] == original.dates[0]
+    assert dataset.dates[-1] == original.dates[-1]
+
+
+@skip_if_offline
+def test_native_grid_dataset_select_and_drop_filters_variables(dataset_path: str) -> None:
+    base = NativeGridDataset(dataset=dataset_path)
+    variables = set(base.variables)
+
+    required_for_test = {"2t", "msl", "10u"}
+    if not required_for_test.issubset(variables):
+        pytest.skip("Fixture dataset does not contain expected variables for select/drop test.")
+
+    selected = ["2t", "msl", "10u"]
+    selected_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "select": selected})
+    assert set(selected_dataset.variables) == set(selected)
+
+    dropped = ["2t", "msl"]
+    dropped_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": dropped})
+    assert "2t" not in dropped_dataset.variables
+    assert "msl" not in dropped_dataset.variables
+    assert "10u" in dropped_dataset.variables
+
+
+@skip_if_offline
+def test_native_grid_dataset_select_and_drop_atmospheric_variables(dataset_path: str) -> None:
+    base = NativeGridDataset(dataset=dataset_path)
+    variables = set(base.variables)
+
+    required_for_test = {"z_500", "t_100", "u_700"}
+    if not required_for_test.issubset(variables):
+        pytest.skip("Fixture dataset does not contain expected atmospheric variables for select/drop test.")
+
+    selected = ["z_500", "t_100", "u_700"]
+    selected_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "select": selected})
+    assert set(selected_dataset.variables) == set(selected)
+
+    dropped = ["z_500", "t_100"]
+    dropped_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": dropped})
+    assert "z_500" not in dropped_dataset.variables
+    assert "t_100" not in dropped_dataset.variables
+    assert "u_700" in dropped_dataset.variables
+
+
+@skip_if_offline
+def test_create_dataset_supports_join_pattern(dataset_path: str) -> None:
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": {
+                "join": [
+                    dataset_path,
+                    dataset_path,
+                ],
+            },
+            "frequency": "6h",
+            "drop": [],
+        },
+        "start": None,
+        "end": None,
+        "trajectory": None,
+    }
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert dataset.data is not None
+    assert not dataset.has_trajectories
+    assert len(dataset.dates) > 0
+
+
+@skip_if_offline
+def test_create_dataset_join_with_inner_windows_and_outer_clipping(dataset_path: str) -> None:
+    outer_start = "2017-01-03T00:00:00"
+    outer_end = "2017-01-08T18:00:00"
+
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": {
+                "join": [
+                    {
+                        "dataset": dataset_path,
+                        "start": "2017-01-01T06:00:00",
+                        "end": "2017-01-10T18:00:00",
+                    },
+                    {
+                        "dataset": dataset_path,
+                        "start": "2017-01-01T06:00:00",
+                        "end": "2017-01-10T18:00:00",
+                    },
+                ],
+            },
+            "frequency": "6h",
+            "drop": [],
+        },
+        "start": outer_start,
+        "end": outer_end,
+        "trajectory": None,
+    }
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert dataset.data is not None
+    assert len(dataset.dates) > 0
+    assert dataset.dates[0] >= np.datetime64(outer_start)
+    assert dataset.dates[-1] <= np.datetime64(outer_end)
+
+
+@skip_if_offline
+def test_create_dataset_concat_with_inner_windows_and_outer_clipping(dataset_path: str) -> None:
+    outer_start = "2017-01-03T00:00:00"
+    outer_end = "2017-01-08T18:00:00"
+
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": {
+                "concat": [
+                    {
+                        "dataset": dataset_path,
+                        "start": "2017-01-01T06:00:00",
+                        "end": "2017-01-05T18:00:00",
+                    },
+                    {
+                        "dataset": dataset_path,
+                        "start": "2017-01-06T00:00:00",
+                        "end": "2017-01-10T18:00:00",
+                    },
+                ],
+            },
+            "frequency": "6h",
+            "drop": [],
+        },
+        "start": outer_start,
+        "end": outer_end,
+        "trajectory": None,
+    }
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert dataset.data is not None
+    assert len(dataset.dates) > 0
+    assert dataset.dates[0] >= np.datetime64(outer_start)
+    assert dataset.dates[-1] <= np.datetime64(outer_end)
+
+
+def test_create_dataset_rejects_start_end_inside_dataset_config() -> None:
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6",
+            "start": 1985,
+            "end": 2020,
+        },
+        "start": None,
+        "end": None,
+        "trajectory": None,
+    }
+
+    with pytest.raises(ValueError, match="dataset_config cannot contain"):
+        create_dataset(dataset_reader_cfg)
+
+
+@skip_if_offline
+def test_native_grid_dataset_raises_for_invalid_open_dataset_key(dataset_path: str) -> None:
+    dataset_cfg = {
+        "dataset": dataset_path,
+        "invalid_key": "not-supported",
+    }
+
+    with pytest.raises(NotImplementedError, match=r"invalid_key|Unsupported arguments"):
+        NativeGridDataset(dataset=dataset_cfg, start=1985, end=2020)
+
+
+def test_native_dataset_schema_validates_new_dataset_dictionary() -> None:
+    # case with Pydantic is on (model_validation=True)
+    cfg = NativeDatasetSchema(
+        dataset_config={
+            "dataset": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6",
+            "frequency": "6h",
+            "drop": ["q"],
+            "select": ["t2m", "msl"],
+            "statistics": "custom-statistics.zarr",
+        },
+        start=1985,
+        end=2020,
+    )
+
+    assert cfg.dataset_config is not None
+    assert cfg.start == 1985
+    assert cfg.end == 2020
+
+
+def test_native_dataset_schema_validates_cutout_dataset_config() -> None:
+    cfg = NativeDatasetSchema(
+        dataset_config={
+            "dataset": {
+                "cutout": [
+                    {
+                        "dataset": "mock-dataset-a.zarr",
+                    },
+                    {
+                        "dataset": "mock-dataset-b.zarr",
+                    },
+                ],
+                "adjust": "all",
+            },
+            "statistics": "mock-statistics.zarr",
+            "frequency": "6h",
+            "drop": [],
+        },
+        start=1985,
+        end=2020,
+    )
+
+    assert cfg.dataset_config is not None
+    assert cfg.start == 1985
+    assert cfg.end == 2020
+
+
+def test_native_dataset_schema_raises_on_invalid_dataset_dictionary() -> None:
+    with pytest.raises(ValidationError):
+        NativeDatasetSchema(dataset_config={"frequency": "6h"}, start=1985, end=2020)
+
+
+def test_native_dataset_schema_without_validation_accepts_invalid_payload() -> None:
+    # case with Pydantic is off (model_validation=False)
+    cfg = NativeDatasetSchema.model_construct(
+        dataset_config={"invalid_key": "not-supported"},
+        start=1985,
+        end=2020,
+    )
+
+    assert cfg.dataset_config == {"invalid_key": "not-supported"}
