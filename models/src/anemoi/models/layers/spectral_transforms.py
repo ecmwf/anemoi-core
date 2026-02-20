@@ -79,7 +79,7 @@ class FFT2D(SpectralTransform):
             self.filter = self.lowpass_filter(x_dim, y_dim)
 
     @staticmethod
-    def lowpass_filter(x_dim, y_dim):
+    def lowpass_filter(x_dim: torch.Tensor, y_dim: torch.Tensor)->torch.Tensor:
         fx = torch.fft.fftfreq(x_dim)
         fy = torch.fft.fftfreq(y_dim)
 
