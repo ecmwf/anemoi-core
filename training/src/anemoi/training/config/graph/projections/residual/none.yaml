@@ -1,0 +1,6 @@
+---
+data_nodes: ${graph.data}
+truncation_nodes: null
+down_edges_name: null
+up_edges_name: null
+edge_weight_attribute: null

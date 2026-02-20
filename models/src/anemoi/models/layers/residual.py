@@ -102,6 +102,10 @@ class TruncatedConnection(BaseResidualConnection):
         File path (.npz) to load the up-projection matrix from.
     truncation_down_file_path : str, optional
         File path (.npz) to load the down-projection matrix from.
+    truncation_up_edges_name : tuple[str, str, str], optional
+        Edge type identifier (src, relation, dst) for the up-projection matrix.
+    truncation_down_edges_name : tuple[str, str, str], optional
+        Edge type identifier (src, relation, dst) for the down-projection matrix.
     row_normalize : bool, optional
         Whether to normalize weights per row (target node) so each row sums to 1
 
@@ -144,6 +148,8 @@ class TruncatedConnection(BaseResidualConnection):
         src_node_weight_attribute: Optional[str] = None,
         truncation_up_file_path: Optional[str] = None,
         truncation_down_file_path: Optional[str] = None,
+        truncation_up_edges_name: Optional[tuple[str, str, str]] = None,
+        truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
         autocast: bool = False,
         row_normalize: bool = False,
     ) -> None:
@@ -154,6 +160,8 @@ class TruncatedConnection(BaseResidualConnection):
             truncation_nodes,
             truncation_up_file_path,
             truncation_down_file_path,
+            truncation_up_edges_name,
+            truncation_down_edges_name,
             edge_weight_attribute,
         )
 
@@ -184,23 +192,36 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_nodes,
         truncation_up_file_path,
         truncation_down_file_path,
+        truncation_up_edges_name,
+        truncation_down_edges_name,
         edge_weight_attribute,
     ):
-        are_files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
-        if not are_files_specified:
+        files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
+        edge_names_specified = truncation_up_edges_name is not None or truncation_down_edges_name is not None
+        if not files_specified:
             assert graph is not None, "graph must be provided if file paths are not specified."
-            assert data_nodes is not None, "data nodes name must be provided if file paths are not specified."
-            assert (
-                truncation_nodes is not None
-            ), "truncation nodes name must be provided if file paths are not specified."
-            up_edges = (truncation_nodes, "to", data_nodes)
-            down_edges = (data_nodes, "to", truncation_nodes)
+            if edge_names_specified:
+                assert (
+                    truncation_up_edges_name is not None and truncation_down_edges_name is not None
+                ), "Both truncation_up_edges_name and truncation_down_edges_name must be provided."
+                up_edges = tuple(truncation_up_edges_name)
+                down_edges = tuple(truncation_down_edges_name)
+            else:
+                assert data_nodes is not None, "data nodes name must be provided if file paths are not specified."
+                assert (
+                    truncation_nodes is not None
+                ), "truncation nodes name must be provided if file paths are not specified."
+                up_edges = (truncation_nodes, "to", data_nodes)
+                down_edges = (data_nodes, "to", truncation_nodes)
             assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."
             assert down_edges in graph.edge_types, f"Graph must contain edges {down_edges} for down-projection."
         else:
             assert (
                 data_nodes is None or truncation_nodes is None or edge_weight_attribute is None
             ), "If file paths are specified, node and attribute names should not be provided."
+            assert (
+                truncation_up_edges_name is None and truncation_down_edges_name is None
+            ), "If file paths are specified, edge names should not be provided."
             up_edges = down_edges = None  # Not used when loading from files
         return up_edges, down_edges
 

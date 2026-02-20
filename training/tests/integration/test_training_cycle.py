@@ -169,6 +169,62 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_ensemble_graph_multiscale(
+    ensemble_graph_multiscale_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = ensemble_graph_multiscale_config
+    assert cfg.training.multistep_output == 2
+    assert cfg.training.multistep_input == 3
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    graph_data = trainer.graph_data["data"]
+
+    for node_name in ["smooth_1x", "smooth_2x", "smooth_4x", "smooth_8x"]:
+        assert node_name in graph_data.node_types
+        assert (node_name, "to", node_name) in graph_data.edge_types
+
+    trainer.train()
+
+
+def test_config_validation_ensemble_graph_multiscale(
+    ensemble_graph_multiscale_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = ensemble_graph_multiscale_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_ensemble_truncated_connection(
+    ensemble_truncated_connection_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = ensemble_truncated_connection_config
+    assert cfg.training.multistep_output == 2
+    assert cfg.training.multistep_input == 3
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    graph_data = trainer.graph_data["data"]
+
+    assert "truncation" in graph_data.node_types
+    assert ("data", "to", "truncation") in graph_data.edge_types
+    assert ("truncation", "to", "data") in graph_data.edge_types
+
+    trainer.train()
+
+
+def test_config_validation_ensemble_truncated_connection(
+    ensemble_truncated_connection_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = ensemble_truncated_connection_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_hierarchical(
     hierarchical_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,

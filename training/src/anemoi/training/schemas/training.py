@@ -290,15 +290,29 @@ class MultiScaleLossSchema(BaseModel):
     per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
     weights: list[float]
     keep_batch_sharded: bool
-    loss_matrices_path: str
-    loss_matrices: list[str | None]
+    loss_matrices_path: str | None = None
+    loss_matrices: list[str | None] | None = None
+    loss_matrices_graph: list[dict[str, Any] | None] | None = None
 
     @field_validator("weights")
     @classmethod
     def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
-        if "loss_matrices" in info.data:
+        if "loss_matrices_graph" in info.data and info.data.get("loss_matrices_graph") is not None:
+            assert len(v) == len(
+                info.data["loss_matrices_graph"],
+            ), "weights must have same length as loss_matrices_graph"
+        elif "loss_matrices" in info.data and info.data.get("loss_matrices") is not None:
             assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
         return v
+
+    @model_validator(mode="after")
+    def validate_matrix_source(self) -> Self:
+        file_based = self.loss_matrices is not None
+        graph_based = self.loss_matrices_graph is not None
+        if file_based and graph_based:
+            msg = "Specify either loss_matrices or loss_matrices_graph, not both."
+            raise ValueError(msg)
+        return self
 
 
 class HuberLossSchema(BaseLossSchema):

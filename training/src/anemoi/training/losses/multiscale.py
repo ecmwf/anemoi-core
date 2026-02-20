@@ -14,6 +14,7 @@ from pathlib import Path
 import einops
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
@@ -36,6 +37,8 @@ class MultiscaleLossWrapper(BaseLoss):
         keep_batch_sharded: bool,
         loss_matrices_path: Path | str | None = None,
         loss_matrices: list[Path | str] | None = None,
+        loss_matrices_graph: list[dict | None] | None = None,
+        graph_data: HeteroData | None = None,
         autocast: bool = False,
     ) -> None:
         """Wrapper for multi-scale loss computation.
@@ -52,12 +55,21 @@ class MultiscaleLossWrapper(BaseLoss):
             Path to the directory containing smoothing matrices
         loss_matrices : list[Path | str] | None
             Filenames of the smoothing matrices (must preserve grid size)
+        loss_matrices_graph : list[dict | None] | None
+            Graph-based smoothing matrix definitions (edges + weights)
+        graph_data : HeteroData | None
+            Graph data used to build graph-based smoothing matrices
         autocast : bool
             Whether to use automatic mixed precision for the projections
         """
         super().__init__()
 
-        self.smoothing_matrices = self._load_smoothing_matrices(loss_matrices_path, loss_matrices)
+        self.smoothing_matrices = self._load_smoothing_matrices(
+            loss_matrices_path,
+            loss_matrices,
+            loss_matrices_graph,
+            graph_data,
+        )
         self.num_scales = len(self.smoothing_matrices)
         assert (
             len(weights) == self.num_scales
@@ -86,32 +98,79 @@ class MultiscaleLossWrapper(BaseLoss):
 
     def _load_smoothing_matrices(
         self,
-        loss_matrices_path: Path | str,
+        loss_matrices_path: Path | str | None,
         loss_matrices: list[Path | str] | None,
+        loss_matrices_graph: list[dict | None] | None,
+        graph_data: HeteroData | None,
     ) -> list[ProjectionGraphProvider | None]:
         """Load smoothing matrices for multi-scale loss computation.
 
         These matrices apply spatial smoothing while preserving grid size.
         """
-        smoothing_matrices = []
+        assert not (
+            loss_matrices and loss_matrices_graph
+        ), "Specify either loss_matrices or loss_matrices_graph, not both."
+
+        if loss_matrices_graph is not None:
+            return self._load_graph_smoothing_matrices(loss_matrices_graph, graph_data)
 
         # Handle None, empty list, or falsy values - default to single scale with no smoothing
+        return self._load_file_smoothing_matrices(loss_matrices_path, loss_matrices)
+
+    def _load_graph_smoothing_matrices(
+        self,
+        loss_matrices_graph: list[dict | None],
+        graph_data: HeteroData | None,
+    ) -> list[ProjectionGraphProvider | None]:
+        assert graph_data is not None, "graph_data must be provided when using loss_matrices_graph."
+
+        smoothing_matrices: list[ProjectionGraphProvider | None] = []
+        for entry in loss_matrices_graph:
+            if entry is None or entry is False or entry == "None":
+                smoothing_matrices.append(None)
+                LOGGER.info("Loss smoothing (graph): %s", None)
+                continue
+
+            edges_name = entry.get("edges_name")
+            assert edges_name is not None, "Each loss_matrices_graph entry must include 'edges_name'."
+            edges_name = tuple(edges_name)
+
+            provider = ProjectionGraphProvider(
+                graph=graph_data,
+                edges_name=edges_name,
+                edge_weight_attribute=entry.get("edge_weight_attribute"),
+                src_node_weight_attribute=entry.get("src_node_weight_attribute"),
+                row_normalize=entry.get("row_normalize", False),
+            )
+            smoothing_matrices.append(provider)
+            LOGGER.info("Loss smoothing (graph): %s", provider.get_edges().shape)
+
+        return smoothing_matrices
+
+    def _load_file_smoothing_matrices(
+        self,
+        loss_matrices_path: Path | str | None,
+        loss_matrices: list[Path | str] | None,
+    ) -> list[ProjectionGraphProvider | None]:
         if not loss_matrices:
             LOGGER.info("No smoothing files specified, using single scale without smoothing")
             return [None]
 
+        smoothing_matrices: list[ProjectionGraphProvider | None] = []
         for filename in loss_matrices:
             # Skip None, False, or the string "None"
             if filename is None or filename is False or filename == "None":
                 smoothing_matrices.append(None)
                 LOGGER.info("Loss smoothing: %s", None)
-            else:
-                provider = ProjectionGraphProvider(
-                    file_path=Path(loss_matrices_path, filename),
-                    row_normalize=False,
-                )
-                smoothing_matrices.append(provider)
-                LOGGER.info("Loss smoothing: %s", provider.get_edges().shape)
+                continue
+
+            file_path = Path(filename) if loss_matrices_path is None else Path(loss_matrices_path, filename)
+            provider = ProjectionGraphProvider(
+                file_path=file_path,
+                row_normalize=False,
+            )
+            smoothing_matrices.append(provider)
+            LOGGER.info("Loss smoothing: %s", provider.get_edges().shape)
 
         return smoothing_matrices
 

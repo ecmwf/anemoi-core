@@ -262,10 +262,23 @@ class NoiseConditioningSchema(BaseModel):
     "Settings related to custom kernels for encoder processor and decoder blocks"
     noise_matrix: Optional[str] = Field(default=None)
     "Path to the noise projection matrix file (.npz). If None, no projection is applied."
+    noise_edges_name: Optional[tuple[str, str, str]] = Field(default=None)
+    "Edge type identifier (src, relation, dst) for graph-based noise projection."
+    edge_weight_attribute: Optional[str] = Field(default=None)
+    "Optional edge attribute name for graph-based noise projection weights."
     row_normalize_noise_matrix: bool = Field(default=False)
     "Whether to row-normalize the noise projection matrix weights."
     autocast: bool = Field(default=False)
     "Whether to use autocast for the noise projection matrix operations."
+
+    @model_validator(mode="after")
+    def validate_noise_projection(self) -> "NoiseConditioningSchema":
+        file_based = self.noise_matrix is not None
+        graph_based = self.noise_edges_name is not None
+        if file_based and graph_based:
+            msg = "Specify either noise_matrix or noise_edges_name, not both."
+            raise ValueError(msg)
+        return self
 
 
 class NoiseInjectorSchema(BaseModel):

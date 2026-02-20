@@ -1,6 +1,10 @@
 # Stretched grid graph config intended to be used with a cutout dataset.
 # The stretched mesh resolution used here is intended for o96 global resolution with 10km
 # limited area resolution.
+defaults:
+  - projections: none
+  - _self_
+
 overwrite: True
 
 data: "data"
@@ -10,7 +14,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"  # Always overridden from dataloader config
+      dataset: null  # Always overridden from dataloader config
     attributes: ${graph.attributes.nodes}
   hidden:
     node_builder:

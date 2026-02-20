@@ -28,7 +28,7 @@ class AnemoiDatasetNodeSchema(BaseModel):
         ..., alias="_target_"
     )
     "Nodes from Anemoi dataset class implementation from anemoi.graphs.nodes."
-    dataset: str | list | dict  # TODO(Helen): Discuss schema with Baudouin
+    dataset: str | list | dict | None  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
 
 
@@ -70,6 +70,13 @@ class ReducedGaussianGridNodeSchema(BaseModel):
     "Nodes from NPZ grids class implementation from anemoi.graphs.nodes."
     grid: Literal["o16", "o32", "o48", "o96", "o160", "o256", "o320", "n320", "o1280"]
     "Reduced gaussian grid."
+
+
+class ReferenceNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.ReferenceNodes"] = Field(..., alias="_target_")
+    "Nodes copied from an existing node set in the graph."
+    reference_node_name: str
+    "Name of nodes to copy coordinates from."
 
 
 class ICONMeshNodeSchema(BaseModel):
@@ -152,6 +159,7 @@ NodeBuilderSchemas = Annotated[
     | ICONMeshNodeSchema
     | LimitedAreaNPZFileNodesSchema
     | ReducedGaussianGridNodeSchema
+    | ReferenceNodeSchema
     | IcosahedralandHealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema
     | StretchedIcosahdralNodeSchema,

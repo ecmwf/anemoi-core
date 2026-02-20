@@ -1,0 +1,5 @@
+---
+defaults:
+  - multiscale: none
+  - residual: none
+  - _self_
