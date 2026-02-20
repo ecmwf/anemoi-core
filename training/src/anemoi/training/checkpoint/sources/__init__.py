@@ -10,7 +10,9 @@
 """Checkpoint source implementations for the acquisition layer."""
 
 from .base import CheckpointSource
+from .local import LocalSource
 
 __all__ = [
     "CheckpointSource",
+    "LocalSource",
 ]
