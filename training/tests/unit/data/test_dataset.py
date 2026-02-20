@@ -395,6 +395,33 @@ def test_native_dataset_schema_validates_new_dataset_dictionary() -> None:
     assert cfg.end == 2020
 
 
+def test_native_dataset_schema_validates_cutout_dataset_config() -> None:
+    cfg = NativeDatasetSchema(
+        dataset_config={
+            "dataset": {
+                "cutout": [
+                    {
+                        "dataset": "mock-dataset-a.zarr",
+                    },
+                    {
+                        "dataset": "mock-dataset-b.zarr",
+                    },
+                ],
+                "adjust": "all",
+            },
+            "statistics": "mock-statistics.zarr",
+            "frequency": "6h",
+            "drop": [],
+        },
+        start=1985,
+        end=2020,
+    )
+
+    assert cfg.dataset_config is not None
+    assert cfg.start == 1985
+    assert cfg.end == 2020
+
+
 def test_native_dataset_schema_raises_on_invalid_dataset_dictionary() -> None:
     with pytest.raises(ValidationError):
         NativeDatasetSchema(dataset_config={"frequency": "6h"}, start=1985, end=2020)
