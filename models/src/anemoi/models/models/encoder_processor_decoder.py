@@ -221,7 +221,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         ensemble_size = self._get_consistent_dim(x, 2)
 
         in_out_sharded = {}
-        for dataset_name, _ in x.items():
+        for dataset_name in dataset_names:
             if grid_shard_shapes is None:
                 in_out_sharded[dataset_name] = False
             else:
