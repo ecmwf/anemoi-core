@@ -635,11 +635,11 @@ def _attn_bwd_dkdv(
         qkT = tl.where((mask_iter[None, :] < N_CTX), qkT, MINUS_INF) # more similar to how masking is doen in fwd pass
         # Apply masking.
         if CAUSAL:
-            mask = offs_iter[None, :] >= offs_fixed[:, None]
+            mask = mask_iter[None, :] <= offs_fixed[:, None]
             qkT = tl.where(mask, qkT, MINUS_INF)
 
         if WINDOW > 0:
-            iter_pos = offs_iter[None, :]
+            iter_pos = mask_iter[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
             mask = (kv_lower_bound <= iter_pos) & (kv_upper_bound >= iter_pos)
             qkT = tl.where(mask, qkT, MINUS_INF)
@@ -836,13 +836,13 @@ def _attn_bwd_dq(
         qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)  # mask out-of-bounds qk values, since they will not contribute to output when N_CTX is not divisible by BLOCK_FIXED
         # Apply masking based on the position of the current K and V blocks.
         if CAUSAL:
-            iter_pos = offs_iter[None, :]
+            iter_pos = mask_iter[None, :]
             fixed_pos = offs_fixed[:, None]
             mask = fixed_pos >= iter_pos
             qk = tl.where(mask, qk, MINUS_INF)
 
         if WINDOW > 0:
-            iter_pos = offs_iter[None, :]
+            iter_pos = mask_iter[None, :]
             mask = (iter_pos <= q_upper_bound) & (iter_pos >= q_lower_bound)
             qk = tl.where(mask, qk, MINUS_INF)
 
