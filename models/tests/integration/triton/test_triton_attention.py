@@ -63,8 +63,6 @@ def attention_varlen_ref(
     device = q.device
     dtype = q.dtype
     batch_size = len(cu_seqlens_q) - 1
-    num_heads = q.shape[1]
-    head_dim = q.shape[2]
 
     # Collect outputs for each sequence
     outputs = []
@@ -162,7 +160,6 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 
     if window and causal:
         pytest.skip("Causal and sliding window together not supported")
-    torch.manual_seed(42)
     try:
         DEVICE = triton.runtime.driver.active.get_active_torch_device()
     except RuntimeError:
