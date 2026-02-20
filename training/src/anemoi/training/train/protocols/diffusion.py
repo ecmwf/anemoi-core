@@ -38,6 +38,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
+        task,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
@@ -48,6 +49,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -57,10 +59,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
         )
 
         self.rho = config.model.model.diffusion.rho
-
-    @property
-    def output_times(self) -> int:
-        return 1  # Diffusion doesn't have rollout
 
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
@@ -187,7 +185,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         return sigma, weight
 
 
-class GraphDiffusionForecaster(BaseDiffusionForecaster):
+class DiffusionProtocol(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion."""
 
     def _step(
@@ -212,8 +210,10 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -241,13 +241,14 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         return loss, metrics, [y_pred]
 
 
-class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
+class DiffusionTendProtocol(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
 
     def __init__(
         self,
         *,
         config: BaseSchema,
+        task,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
@@ -257,6 +258,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     ) -> None:
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -473,8 +475,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         """
         # batch is already normalized in BaseGraphModule._normalize_batch
         # x: data.input.full (normalized), y: data.output.full (normalized)
-        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:

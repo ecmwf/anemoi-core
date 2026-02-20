@@ -35,6 +35,8 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        n_step_input: int,
+        n_step_output: int,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -48,24 +50,17 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             Graph definition
         """
         model_config = DotDict(model_config)
-        self.input_times = model_config.training.explicit_times.input
-        self.output_times = model_config.training.explicit_times.target
 
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
+            n_step_input=n_step_input,
+            n_step_output=n_step_output,
         )
 
         self.latent_skip = model_config.model.latent_skip
-
-    # Overwrite base class
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        return (
-            len(self.input_times) * self.num_input_channels[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-        )
 
     def _assemble_input(
         self,
@@ -255,18 +250,18 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
 
     def fill_metadata(self, md_dict):
         for dataset in self.input_dim.keys():
-            input_rel_date_indices = self.input_times
-            output_rel_date_indices = self.output_times
+            # input_rel_date_indices = self.input_times
+            # output_rel_date_indices = self.output_times
 
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": len(input_rel_date_indices),
+                #    "input_timesteps": len(input_rel_date_indices),
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
 
             md_dict["metadata_inference"][dataset]["shapes"] = shapes
-            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
-            md_dict["metadata_inference"][dataset]["timesteps"][
-                "output_relative_date_indices"
-            ] = output_rel_date_indices
+            # md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
+            # md_dict["metadata_inference"][dataset]["timesteps"][
+            #    "output_relative_date_indices"
+            # ] = output_rel_date_indices

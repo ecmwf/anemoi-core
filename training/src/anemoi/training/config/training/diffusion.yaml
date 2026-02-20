@@ -52,7 +52,7 @@ optimizer:
   eps: 1e-7
 
 # select model
-model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
+model_task: anemoi.training.train.protocols.DiffusionProtocol
 
 # select strategy
 strategy:

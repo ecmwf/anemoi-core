@@ -25,6 +25,16 @@ from anemoi.utils.dates import frequency_to_seconds
 LOGGER = logging.getLogger(__name__)
 
 
+def latlon_to_3d(lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
+    """Convert lat/lon (in degrees) to 3D coordinates on unit sphere."""
+    lat_rad = np.radians(lats)
+    lon_rad = np.radians(lons)
+    x = np.cos(lat_rad) * np.cos(lon_rad)
+    y = np.cos(lat_rad) * np.sin(lon_rad)
+    z = np.sin(lat_rad)
+    return np.vstack((x, y, z)).T
+
+
 class BaseAnemoiReader:
     """Anemoi data reader for native grid datasets."""
 
@@ -168,6 +178,58 @@ class BaseAnemoiReader:
         tree.add(f"Resolution: {self.resolution}")
         tree.add(f"Num variables: {len(self.name_to_index)}")
         return tree
+
+
+class MaskedGridDataset(BaseAnemoiReader):
+    """Masked grid dataset."""
+
+    def __init__(
+        self,
+        dataset: str | dict,
+        start: datetime.datetime | int | None = None,
+        end: datetime.datetime | int | None = None,
+        frequency: str | None = None,
+        drop: list[str] | None = None,
+        mask_lam_radius_km: int | None = None,
+    ):
+        assert (
+            "cutout" in dataset
+        ), "MaskedGridDataset requires a limited area in the dataset configuration (e.g., 'cutout' keyword)."
+        super().__init__(dataset, start=start, end=end, frequency=frequency, drop=drop)
+        self.mask_radius = mask_lam_radius_km / 6371.0
+
+    @property
+    def cutout_mask(self) -> np.ndarray:
+        """Return cutout mask."""
+        cutout_mask = np.zeros(self.grid_size, dtype=bool)
+        cutout_mask[: self.data.grids[0]] = True
+        return cutout_mask
+
+    @cached_property
+    def grid_indices(self) -> np.ndarray:
+        """Return grid indices inside the mask."""
+        from scipy.spatial import cKDTree
+
+        coords = latlon_to_3d(self.data.latitudes, self.data.longitudes)
+
+        # Check which points are within the radius of any LAM point
+        tree = cKDTree(coords[self.cutout_mask])
+        dists, _ = tree.query(coords[self.data.grids[0] :], k=1, distance_upper_bound=self.mask_radius)
+
+        grid_mask = np.concatenate([self.cutout_mask, np.isfinite(dists)])
+        return np.where(grid_mask)[0].astype(np.int64)
+
+    def supporting_arrays(self) -> dict:
+        return super().supporting_arrays | {"grid_indices": self.grid_indices}
+
+    def get_sample(
+        self,
+        time_indices: slice | int | list[int],
+        grid_shard_indices: np.ndarray | None = None,
+    ) -> torch.Tensor:
+        """Get a sample from the dataset."""
+        masked_grid_shard_indices = self.grid_indices[grid_shard_indices]
+        return super().get_sample(time_indices, masked_grid_shard_indices)
 
 
 class NativeGridDataset(BaseAnemoiReader):

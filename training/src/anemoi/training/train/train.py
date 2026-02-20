@@ -105,9 +105,14 @@ class AnemoiTrainer(ABC):
         self._log_information()
 
     @cached_property
+    def task(self) -> "BaseTask":
+        """Task instance."""
+        return instantiate(self.config.task)
+
+    @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(self.config)
+        datamodule = AnemoiDatasetsDataModule(self.config, self.task)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -212,6 +217,7 @@ class AnemoiTrainer(ABC):
 
         kwargs = {
             "config": self.config,
+            "task": self.task,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
@@ -338,6 +344,7 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "seed": self.initial_seed,
             "run_id": self.run_id,
+            "task": None,  # will be populated in Task
             "dataset": None,  # will be populated in DataModule
             "data_indices": None,  # will be populated in DataModule
             "provenance_training": gather_provenance_info(),
@@ -346,6 +353,7 @@ class AnemoiTrainer(ABC):
             "uuid": None,  # will be populated in checkpoint callback
         }
         self.datamodule.fill_metadata(md_dict)
+        self.task.fill_metadata(md_dict)
         return map_config_to_primitives(md_dict)
 
     @cached_property
@@ -575,7 +583,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path="../config", config_name="interpolator_multiout")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 
