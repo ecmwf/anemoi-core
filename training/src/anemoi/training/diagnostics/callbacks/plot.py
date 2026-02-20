@@ -33,7 +33,6 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.models import AnemoiModelEncProcDecInterpolator
 from anemoi.training.diagnostics.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
@@ -94,18 +93,6 @@ class BasePlotCallback(Callback, ABC):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
-
-    def _get_init_step(self, rollout_step: int, mode: tuple) -> int:
-        """Return index of initial step for plotting."""
-        return rollout_step if mode == "time_interp" else 0
-
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
-        """Return times outputted by the model."""
-        if isinstance(pl_module.model.model, AnemoiModelEncProcDecInterpolator):
-            output_times = (len(config.training.explicit_times.target), "time_interp")
-        else:
-            output_times = (getattr(pl_module, "rollout", 0), "forecast")
-        return output_times
 
     @rank_zero_only
     def _output_figure(
@@ -280,27 +267,19 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 
             # gather tensors if necessary
             batch = {
-                dataset_name: pl_module.allgather_batch(
-                    dataset_tensor,
-                    pl_module.grid_indices[dataset_name],
-                    pl_module.grid_dim,
-                )
+                dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
                 for dataset_name, dataset_tensor in batch.items()
             }
-            # output: [loss, [pred_dict1, pred_dict2, ...]], gather predictions for plotting
+            # output: (loss, [pred_dict1, pred_dict2, ...]); all tasks return a list of per-step dicts.
             preds = output[1]
-            if isinstance(preds, dict):
-                preds = [preds]
+            if not isinstance(preds, list):
 
+                raise TypeError(preds)
             output = [
                 output[0],
                 [
                     {
-                        dataset_name: pl_module.allgather_batch(
-                            dataset_pred,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
-                        )
+                        dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
                         for dataset_name, dataset_pred in pred.items()
                     }
                     for pred in preds
@@ -315,12 +294,9 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                     if hasattr(post_processor, "nan_locations"):
                         post_processor.nan_locations = pl_module.allgather_batch(
                             post_processor.nan_locations,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
+                            dataset_name,
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
-
-            output_times = self._get_output_times(self.config, pl_module)
 
             self.plot(
                 trainer,
@@ -330,7 +306,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                output_times=output_times,
+                output_times=pl_module.output_times,
                 **kwargs,
             )
 
@@ -366,14 +342,12 @@ class BasePerEpochPlotCallback(BasePlotCallback):
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
 
-            output_times = self._get_output_times(self.config, pl_module)
-
             self.plot(
                 trainer,
                 pl_module,
                 self.dataset_names,
                 epoch=trainer.current_epoch,
-                output_times=output_times,
+                output_times=pl_module.output_times,
                 **kwargs,
             )
 
@@ -761,6 +735,28 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             if tt.trainable is not None
         }
 
+    @staticmethod
+    def _resolve_edge_provider(provider: Any, dataset_name: str) -> Any:
+        if provider is None:
+            return None
+        if isinstance(provider, (dict, torch.nn.ModuleDict)):
+            if dataset_name in provider:
+                return provider[dataset_name]
+            return None
+        return provider
+
+    @staticmethod
+    def _has_trainable_edge_params(provider: Any) -> bool:
+        if provider is None:
+            return False
+        trainable_module = getattr(provider, "trainable", None)
+        if trainable_module is None:
+            return False
+        # Graph providers has TrainableTensor -> .trainable;
+        # parameter is nested as .trainable.trainable.
+        trainable_parameter = getattr(trainable_module, "trainable", None)
+        return trainable_parameter is not None
+
     def get_edge_trainable_modules(
         self,
         model: torch.nn.Module,
@@ -776,37 +772,15 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         # but only for the modules (encoder/processor/decoder).
         trainable_modules = {}
 
-        # Check encoder
-        if (
-            hasattr(model, "encoder_graph_provider")
-            and dataset_name in model.encoder_graph_provider
-            and hasattr(model.encoder_graph_provider[dataset_name], "trainable")
-            and model.encoder_graph_provider[dataset_name].trainable is not None
-            and model.encoder_graph_provider[dataset_name].trainable.trainable is not None
-        ):
-            trainable_modules[(model._graph_name_data, model._graph_name_hidden)] = model.encoder_graph_provider[
-                dataset_name
-            ]
-
-        # Check decoder
-        if (
-            hasattr(model, "decoder_graph_provider")
-            and dataset_name in model.decoder_graph_provider
-            and hasattr(model.decoder_graph_provider[dataset_name], "trainable")
-            and model.decoder_graph_provider[dataset_name].trainable is not None
-            and model.decoder_graph_provider[dataset_name].trainable.trainable is not None
-        ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_data)] = model.decoder_graph_provider[
-                dataset_name
-            ]
-
-        # Check processor
-        if (
-            hasattr(model, "processor_graph_provider")
-            and model.processor_graph_provider.trainable is not None
-            and model.processor_graph_provider.trainable.trainable is not None
-        ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = model.processor_graph_provider
+        provider_specs = (
+            ("encoder_graph_provider", (model._graph_name_data, model._graph_name_hidden)),
+            ("decoder_graph_provider", (model._graph_name_hidden, model._graph_name_data)),
+            ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
+        )
+        for provider_name, edge_key in provider_specs:
+            provider = self._resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
+            if self._has_trainable_edge_params(provider):
+                trainable_modules[edge_key] = provider
 
         return trainable_modules
 
@@ -1007,7 +981,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
+        output_times: int,
     ) -> None:
         logger = trainer.logger
         _ = batch_idx
@@ -1018,8 +992,8 @@ class PlotLoss(BasePerBatchPlotCallback):
         for dataset_name in dataset_names:
 
             data_indices = pl_module.data_indices[dataset_name]
-            parameter_names = list(data_indices.model.output.name_to_index.keys())
-            parameter_positions = list(data_indices.model.output.name_to_index.values())
+            parameter_names = list[str](data_indices.model.output.name_to_index.keys())
+            parameter_positions = list[int](data_indices.model.output.name_to_index.values())
             # reorder parameter_names by position
             parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
             metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
@@ -1036,10 +1010,10 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            if output_times[1] != "forecast":
-                output_times = [1]
+            if pl_module.task_type != "forecaster":
+                output_times = 1
 
-            for rollout_step in range(output_times[0]):
+            for rollout_step in range(output_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 start = pl_module.n_step_input + rollout_step * pl_module.n_step_output
                 y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
@@ -1082,8 +1056,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 ):
                     self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(
                         self.loss[dataset].scaler.nan_mask_weights,
-                        pl_module.grid_indices[dataset],
-                        pl_module.grid_dim,
+                        dataset,
                     )
 
             super().on_validation_batch_end(
@@ -1121,9 +1094,32 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
-        output_times: tuple,
+        output_times: int,
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
+        Parameters
+        ----------
+        pl_module : pl.LightningModule
+            The LightningModule instance
+        dataset_name : str
+            The name of the dataset to process
+        outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
+            The outputs from the model. The second element must be a list of dicts
+            (one per outer step). Tasks with a single step (e.g. diffusion, multi-out
+            interpolator) must return [y_pred] so that ``for x in outputs[1]``
+            iterates over steps; if they return the dict directly, iteration would
+            be over dataset names and indexing would fail.
+        batch : dict[str, torch.Tensor]
+            The batch of data
+        output_times : int
+            Number of outer steps for plotting (rollout steps for forecaster, interp times for interpolator).
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            The data and output tensors for plotting
+        """
         if self.latlons is None:
             self.latlons = {}
 
@@ -1133,9 +1129,16 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             ].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
+        # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
+        assert isinstance(
+            outputs[1],
+            list,
+        ), "outputs[1] must be a list of per-step dicts."
+
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = output_times[0]
-        if output_times[1] == "forecast":
+        # total_targets: forecaster has n_step_output per rollout step; interpolator has 1 per step
+        total_targets = output_times
+        if pl_module.task_type == "forecaster":
             total_targets *= pl_module.n_step_output
 
         input_tensor = (
@@ -1157,7 +1160,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        if output_times[1] == "time_interp" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
+
+        if pl_module.task_type == "time-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
             # Multi-out interpolator: rollouts are packed in the time dimension.
             output_tensor = output_tensor.squeeze(0)
         output_tensor = (
@@ -1240,7 +1244,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
+        output_times: int,
     ) -> None:
         logger = trainer.logger
 
@@ -1271,10 +1275,10 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            if output_times[1] == "forecast":
+            if pl_module.task_type == "forecaster" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
                 max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     for out_step in range(max_out_steps):
                         truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_predicted_multilevel_flat_sample(
@@ -1306,9 +1310,9 @@ class PlotSample(BasePlotAdditionalMetrics):
                             ),
                         )
             else:
-                for rollout_step in range(output_times[0]):
+                for rollout_step in range(output_times):
                     interp_step = rollout_step + 1
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                    init_step = pl_module.get_init_step(rollout_step)
                     fig = plot_predicted_multilevel_flat_sample(
                         plot_parameters_dict,
                         self.per_sample,
@@ -1381,7 +1385,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
+        output_times: int,
     ) -> None:
         logger = trainer.logger
 
@@ -1414,10 +1418,10 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if output_times[1] == "forecast":
+            if pl_module.task_type == "forecaster":
                 max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     for out_step in range(max_out_steps):
                         truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_power_spectrum(
@@ -1445,8 +1449,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                             ),
                         )
             else:
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     interp_step = rollout_step + 1
                     fig = plot_power_spectrum(
                         plot_parameters_dict_spectrum,
@@ -1524,7 +1528,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
+        output_times: int,
     ) -> None:
         logger = trainer.logger
 
@@ -1556,10 +1560,10 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if output_times[1] == "forecast":
+            if pl_module.task_type == "forecaster":
                 max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     for out_step in range(max_out_steps):
                         truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                         fig = plot_histogram(
@@ -1587,8 +1591,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                             ),
                         )
             else:
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
+                for rollout_step in range(output_times):
+                    init_step = pl_module.get_init_step(rollout_step)
                     interp_step = rollout_step + 1
                     fig = plot_histogram(
                         plot_parameters_dict_histogram,
