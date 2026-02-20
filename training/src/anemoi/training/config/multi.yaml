@@ -34,6 +34,3 @@ diagnostics:
     mlflow:
       enabled: False
       tracking_uri: None
-    wandb:
-      enabled: False
-      entity: example

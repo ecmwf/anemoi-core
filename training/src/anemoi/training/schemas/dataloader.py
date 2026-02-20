@@ -55,7 +55,7 @@ class Frequency(RootModel):
         return int(self.as_timedelta.total_seconds())
 
 
-class NativeDatasetSchema(PydanticBaseModel):
+class NativeDatasetSchema(BaseModel):
     """Dataset configuration schema."""
 
     dataset: str | dict | Path | list[dict] | None = None
@@ -68,6 +68,8 @@ class NativeDatasetSchema(PydanticBaseModel):
     "Temporal resolution, frequency must be >= to dataset frequency."
     drop: list | None = Field(default=None)
     "List of variables to drop from dataset"
+    select: list | None = Field(default=None)
+    "List of variables to select from dataset, if not provided all variables are selected."
 
 
 class TrajectorySchema(PydanticBaseModel):

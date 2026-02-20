@@ -35,11 +35,15 @@ class BaseAnemoiReader:
         end: datetime.datetime | int | None = None,
         frequency: str | None = None,
         drop: list[str] | None = None,
+        select: list[str] | None = None,
     ):
         """Initialise Anemoi data reader."""
         ds_kwargs = {}
         if drop is not None:
             ds_kwargs["drop"] = drop
+
+        if select is not None:
+            ds_kwargs["select"] = select
 
         if frequency is not None:
             ds_kwargs["frequency"] = frequency

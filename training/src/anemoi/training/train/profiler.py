@@ -21,7 +21,6 @@ import pandas as pd
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
-from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
 
@@ -124,28 +123,15 @@ class AnemoiProfiler(AnemoiTrainer):
         else:
             return None
 
-    def _get_logger(self) -> dict[str, Logger]:
-        if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):
-            logger_info = {"logger_name": "wandb", "logger": self.wandb_logger}
-        elif self.config.diagnostics.log.tensorboard.enabled:
-            logger_info = {"logger_name": "tensorboard", "logger": self.tensorboard_logger}
-        elif self.config.diagnostics.log.mlflow.enabled:
-            logger_info = {"logger_name": "mlflow", "logger": self.mlflow_logger}
-        else:
-            LOGGER.warning("No logger enabled for system profiler")
-            logger_info = None
-        return logger_info
-
     @cached_property
     @rank_zero_only
     def system_profile(self) -> None:
         """System Profiler Report."""
         if self.config.diagnostics.benchmark_profiler.system.enabled:
-            logger_info = self._get_logger()
-            if logger_info:
+            if self.logger:
                 return self.profiler.get_system_profiler_df(
-                    logger_name=logger_info["logger_name"],
-                    logger=logger_info["logger"],
+                    logger_name=self.logger.logger_name,
+                    logger=self.logger,
                 )
             LOGGER.warning("System Profiler Report is not available")
             return None
@@ -177,10 +163,10 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @rank_zero_only
     def export_to_logger(self) -> None:
-        if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):
+        if self.logger and self.logger.logger_name == "wandb" and (not self.config.diagnostics.log.wandb.offline):
             self.to_wandb()
 
-        elif self.config.diagnostics.log.mlflow.enabled:
+        elif self.logger and self.logger.logger_name == "mlflow":
             self.to_mlflow()
 
     def report(self) -> str:
@@ -286,7 +272,7 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        self.config.diagnostics.progress_bar.target_ = (
+        self.config.diagnostics.progress_bar["_target_"] = (
             ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
         )
         callbacks = super().callbacks
