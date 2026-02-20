@@ -43,6 +43,12 @@ def _normalize_dataset_config(dataset_config: str | dict | DictConfig) -> str | 
         msg = "dataset_config.dataset cannot be None."
         raise ValueError(msg)
 
+    invalid_inner_keys = {"start", "end"} & set(dataset_config)
+    if invalid_inner_keys:
+        invalid = ", ".join(sorted(invalid_inner_keys))
+        msg = f"dataset_config cannot contain [{invalid}]. Use outer keys 'start' and 'end' instead."
+        raise ValueError(msg)
+
     # Keep only explicitly set options to avoid passing None-valued kwargs
     # (e.g. select=None), which can trigger downstream subset selection issues.
     return {key: value for key, value in dataset_config.items() if value is not None}
