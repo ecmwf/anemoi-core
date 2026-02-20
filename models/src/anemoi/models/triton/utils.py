@@ -16,6 +16,28 @@ from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr
 
 
+def is_triton_available():
+    """Checks if triton is available.
+
+    Triton is supported if the triton library is installed and if Anemoi is running on GPU.
+    """
+    try:
+        import triton  # noqa: F401
+    except ImportError:
+        triton_available = False
+    else:
+        triton_available = True
+
+    gpus_present = torch.cuda.is_available()
+
+    return triton_available and gpus_present
+
+
+if is_triton_available():
+    import triton
+    import triton.language as tl
+
+
 def edge_index_to_csc(edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = None, reverse: bool = True):
     """Convert edge indices to CSC format, optionally also building reverse (CSR-like) metadata.
 
@@ -51,18 +73,34 @@ def edge_index_to_csc(edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = No
     return (row, colptr), perm
 
 
-def is_triton_available():
-    """Checks if triton is available.
-
-    Triton is supported if the triton library is installed and if Anemoi is running on GPU.
-    """
-    try:
-        import triton  # noqa: F401
-    except ImportError:
-        triton_available = False
+def torch_dtype_to_triton(dtype):
+    # Import inside the function for safety
+    # If triton is not installed this import will fail
+    if dtype == torch.float16:
+        return tl.float16
+    elif dtype == torch.bfloat16:
+        return tl.bfloat16
+    elif dtype == torch.float32:
+        return tl.float32
     else:
-        triton_available = True
+        raise ValueError(f"Unsupported dtype: {dtype}")
 
-    gpus_present = torch.cuda.is_available()
 
-    return triton_available and gpus_present
+def is_hip():
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "hip"
+
+
+def is_cuda():
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "cuda"
+
+
+def supports_host_descriptor():
+    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
+
+
+def is_blackwell():
+    return is_cuda() and torch.cuda.get_device_capability()[0] == 10
+
+
+def is_hopper():
+    return is_cuda() and torch.cuda.get_device_capability()[0] == 9

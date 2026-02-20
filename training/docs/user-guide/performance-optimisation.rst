@@ -304,6 +304,15 @@ for further speedups.
 
 Flash attention is not the default as it must be compiled from source.
 
+The Transformer processor also supports a Triton backend. This is as fast
+as flash-attention 2. It is supported on Nvidia and AMD GPUs. It is
+enabled by default. It can be selected in the config like so:
+
+.. code::
+
+   model.processor.attention_implementation: 'triton'
+
+
 For the GraphTransformer processor, the 'triton' backend is the fastest.
 To use the 'triton' backend set the following config option:
 

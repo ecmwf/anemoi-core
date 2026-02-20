@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from typing import Any
 from typing import Optional
 
@@ -28,6 +29,9 @@ from anemoi.models.distributed.transformer import shard_sequence
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+# Change attention implementation during inference runtime
+ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
 
 
 class MultiHeadSelfAttention(nn.Module):
@@ -107,6 +111,7 @@ class MultiHeadSelfAttention(nn.Module):
         ), f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
 
         self.attention_implementation = attention_implementation
+
         self.use_alibi_slopes = use_alibi_slopes
 
         self.num_heads = num_heads
@@ -142,8 +147,22 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
+            "triton": TritonAttentionWrapper,
         }
-        assert self.attention_implementation in attn_funcs, f"{self.attention_implementation} not supported. \
+
+        # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
+        if ATTENTION_BACKEND:
+            if ATTENTION_BACKEND == self.attention_implementation:
+                # Attention backend has already been updated, return early
+                return
+            LOGGER.info(
+                "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
+                self.attention_implementation,
+                ATTENTION_BACKEND,
+            )
+            self.attention_implementation = ATTENTION_BACKEND
+
+        assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
 
         # initalise the attn func here
@@ -213,6 +232,10 @@ class MultiHeadSelfAttention(nn.Module):
         query = self.lin_q(x)
         key = self.lin_k(x)
         value = self.lin_v(x)
+
+        # Check at runtime if the Attention backend env var has been set, and update attention backend accordingly
+        if ATTENTION_BACKEND:
+            self.set_attention_function()
 
         return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
 
@@ -403,6 +426,65 @@ class FlashAttentionWrapper(nn.Module):
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
+
+
+class TritonAttentionWrapper(nn.Module):
+    """Wrapper for Anemoi Triton attention. An implementation of the flash attention algorithm, intended to be a portable alternative when flash attention is not available"""
+
+    def __init__(self, _compile=True):
+        super().__init__()
+
+        # Helper function to check if triton is available
+        # Prevents strange errors from importing triton functions on unsupported systems
+        from anemoi.models.triton.utils import is_triton_available
+
+        if not is_triton_available():
+            raise ImportError(
+                "Triton is not supported on your system. Either it is not installed or no GPUs are available"
+            )
+
+        from anemoi.models.triton.attention import TritonAttention
+
+        self.attention = TritonAttention
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: int = None,
+        dropout_p: float = 0.0,
+        softcap=None,
+        alibi_slopes: torch.Tensor = None,
+    ):
+
+        self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
+
+        softmax_scale = 1 / math.sqrt(query.size(-1))
+
+        out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)
+
+        return out
+
+    def _not_implemented(self, causal: bool, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
+        msg = ""
+        if dropout_p != 0.0:
+            msg += "dropout_p, "
+        if softcap is not None and softcap != 0.0:
+            msg += "softcap, "
+        if alibi_slopes is not None:
+            msg += "alibi slobes, "
+        if causal:
+            msg += "causal, "
+        if len(msg) > 0:
+            msg = (
+                "The following features you requested are not yet implemented in the Triton-Attention backend: "
+                + msg
+                + "\nPlease use a different attention backend, or create a ticket on the anemoi-core repository"
+            )
+            raise NotImplementedError(msg)
 
 
 class MultiHeadCrossAttention(MultiHeadSelfAttention):
