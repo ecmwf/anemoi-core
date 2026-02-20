@@ -259,7 +259,6 @@ def _generate_configs(try_warp_spec=True):
 
     if "PYTEST_VERSION" in os.environ:
         # Use a single config in testing for reproducibility
-        # Use BLOCK_FIXED=16 to avoid issues with small N_CTX in tests
         configs = [ 
             triton.Config(
                 dict(BLOCK_FIXED=32, BLOCK_ITER=16, WARP_SPECIALIZE=False),
@@ -269,45 +268,6 @@ def _generate_configs(try_warp_spec=True):
             )
         ]
     return configs
-
-
-def _prune_invalid_configs_fwd(configs, named_args, **kwargs):
-    N_CTX = kwargs["N_CTX"]
-    HEAD_DIM = kwargs["HEAD_DIM"]
-
-    # Filter out configs where BLOCK_FIXED > N_CTX
-    # And configs where BLOCK_* does not divide evenly into N_CTX
-    valid_configs=[conf for conf in configs if (conf.kwargs.get("BLOCK_FIXED", 0) <= N_CTX)]
-        
-    if len(valid_configs) == 0:
-        raise ValueError(f"Autotuning found no valid runtime configurations for your setup (mode=fwd, {N_CTX=}, {HEAD_DIM=}). Please use an alternate attention backend or open a ticket on the anemoi-core repository describing your use case.")
-
-    return valid_configs
-
-
-def _prune_invalid_configs_bwd(configs, named_args, **kwargs):
-    N_CTX = kwargs["N_CTX"]
-    HEAD_DIM = kwargs["HEAD_DIM"]
-    
-    valid_configs = [
-        conf
-        for conf in configs
-        if (
-            # Filter out configs where BLOCK_* > N_CTX
-            conf.kwargs.get("BLOCK_FIXED", 0) <= N_CTX
-            and conf.kwargs.get("BLOCK_ITER", 0) <= N_CTX
-            # BLOCK_FIXED must divide evenly into BLOCK_ITER (static assert in _bwd_dvdk and _bwd_dq)
-            and conf.kwargs.get("BLOCK_FIXED", 0) % conf.kwargs.get("BLOCK_ITER", 0) == 0
-            # and configs where the block size does not divide evenly into the context
-            and N_CTX % conf.kwargs.get("BLOCK_FIXED", 0) == 0 and N_CTX % conf.kwargs.get("BLOCK_ITER", 0) == 0
-        )
-    ]
-    
-    if len(valid_configs) == 0:
-        raise ValueError(f"Autotuning found no valid configurations for your setup (mode=bwd, {N_CTX=}, {HEAD_DIM=}). Please use an alternate attention backend or open a ticket on the anemoi-core repository describing your use case.")
-
-    return valid_configs
-
 
 @triton.jit
 def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
@@ -320,8 +280,7 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 @triton.autotune(
     configs=_generate_configs(),
     key=["N_CTX", "HEAD_DIM"],
-    prune_configs_by={"early_config_prune": _prune_invalid_configs_fwd},
-    cache_results=True,
+    cache_results=False,
 )
 @triton.jit
 def _attn_fwd(
@@ -343,7 +302,6 @@ def _attn_fwd(
     dtype: tl.constexpr,
     n_ctx_rounded: tl.constexpr,
 ):
-    tl.static_assert(BLOCK_ITER <= HEAD_DIM)
                      
     start_fixed = tl.program_id(0)
     off_hz = tl.program_id(1)
@@ -462,8 +420,7 @@ def _attn_bwd_preprocess(Out, DO, Delta, N_CTX, n_ctx_rounded: tl.constexpr, PRE
     # For an o96 2048c configuration, got a 3x speedup from autotuning
     configs=_generate_configs(try_warp_spec=False),
     key=["N_CTX", "HEAD_DIM"],
-    prune_configs_by={"early_config_prune": _prune_invalid_configs_bwd},
-    cache_results=True,
+    cache_results=False,
 )
 @triton.jit
 def _attn_bwd_dkdv(
@@ -573,7 +530,6 @@ def _attn_bwd_dkdv(
     # Create offset pointers for tensors
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
 
-    tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
     curr_iter = start_iter
     
     #TODO(cathal) change based on dtype
@@ -676,8 +632,7 @@ def _attn_bwd_dkdv(
     # For an o96 2048c configuration, got a 3x speedup from autotuning
     configs=_generate_configs(try_warp_spec=False),
     key=["N_CTX", "HEAD_DIM"],
-    prune_configs_by={"early_config_prune": _prune_invalid_configs_bwd},
-    cache_results=True,
+    cache_results=False,
 )
 @triton.jit
 def _attn_bwd_dq(
@@ -781,7 +736,6 @@ def _attn_bwd_dq(
 
     # D (= delta) is pre-divided by ds_scale.
     Di = tl.load(D + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)  # mask out-of-bounds D values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
-    tl.static_assert(BLOCK_FIXED % BLOCK_ITER == 0)
     curr_iter = start_iter
     
     #TODO(cathal) change based on dtype
