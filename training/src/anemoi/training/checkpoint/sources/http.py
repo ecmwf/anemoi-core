@@ -23,6 +23,7 @@ Example
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import pickle
 import tempfile
@@ -62,6 +63,10 @@ class HTTPSource(CheckpointSource):
         Maximum download retry attempts (default: 3)
     timeout : int
         Per-attempt timeout in seconds (default: 300)
+    expected_checksum : str or None
+        Expected SHA-256 checksum of the downloaded file. If provided,
+        the download is verified before loading. If None, a warning is
+        logged that integrity was not verified.
 
     Examples
     --------
@@ -74,10 +79,29 @@ class HTTPSource(CheckpointSource):
     >>> result = await source.process(context)
     """
 
-    def __init__(self, url: str, max_retries: int = 3, timeout: int = 300) -> None:
+    def __init__(
+        self,
+        url: str,
+        max_retries: int = 3,
+        timeout: int = 300,
+        expected_checksum: str | None = None,
+    ) -> None:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+            msg = f"HTTPSource requires an HTTP or HTTPS URL, got scheme '{parsed.scheme}' in: {url}"
+            raise CheckpointConfigError(msg)
+        if not parsed.netloc:
+            from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+            msg = f"HTTPSource URL has no host: {url}"
+            raise CheckpointConfigError(msg)
+
         self.url = url
         self.max_retries = max_retries
         self.timeout = timeout
+        self.expected_checksum = expected_checksum
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from an HTTP/HTTPS URL.
@@ -105,6 +129,7 @@ class HTTPSource(CheckpointSource):
             If the downloaded file cannot be loaded by PyTorch
         """
         from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+        from anemoi.training.checkpoint.utils import calculate_checksum
         from anemoi.training.checkpoint.utils import download_with_retry
 
         LOGGER.info("Downloading checkpoint from %s", self.url)
@@ -121,13 +146,31 @@ class HTTPSource(CheckpointSource):
                 timeout=self.timeout,
             )
 
+            # Checksum verification
+            if self.expected_checksum is not None:
+                actual = calculate_checksum(tmp_path)
+                if actual != self.expected_checksum:
+                    from anemoi.training.checkpoint.exceptions import CheckpointValidationError
+
+                    msg = (
+                        f"Checksum mismatch for checkpoint downloaded from {self.url}. "
+                        f"Expected {self.expected_checksum}, got {actual}."
+                    )
+                    raise CheckpointValidationError(msg)
+                LOGGER.info("Checksum verified for %s", self.url)
+            else:
+                LOGGER.warning(
+                    "No checksum provided for HTTP checkpoint download from %s. Integrity not verified.",
+                    self.url,
+                )
+
             try:
-                raw_data = torch.load(tmp_path, weights_only=False, map_location="cpu")
+                # SECURITY: weights_only=False is required for Anemoi checkpoints that
+                # contain non-tensor metadata (hyper_parameters, callbacks, etc.).
+                raw_data = await asyncio.to_thread(torch.load, tmp_path, weights_only=False, map_location="cpu")
             except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
                 raise CheckpointLoadError(tmp_path, e) from e
 
-            # Point context path at the downloaded file for format detection
-            context.checkpoint_path = tmp_path
             self._load_and_populate(context, raw_data)
 
         finally:

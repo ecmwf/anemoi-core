@@ -22,6 +22,7 @@ Example
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import pickle
 from pathlib import Path
@@ -79,10 +80,15 @@ class LocalSource(CheckpointSource):
         CheckpointLoadError
             If the file cannot be loaded by PyTorch
         """
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
         from anemoi.training.checkpoint.exceptions import CheckpointLoadError
         from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 
-        path = Path(context.checkpoint_path)
+        if context.checkpoint_path is None:
+            msg = "LocalSource requires checkpoint_path to be set on context"
+            raise CheckpointConfigError(msg)
+
+        path = Path(context.checkpoint_path).expanduser().resolve()
 
         if not path.exists():
             raise CheckpointNotFoundError(path)
@@ -90,7 +96,7 @@ class LocalSource(CheckpointSource):
         LOGGER.info("Loading checkpoint from local path: %s", path)
 
         try:
-            raw_data = torch.load(path, weights_only=False, map_location="cpu")
+            raw_data = await asyncio.to_thread(torch.load, path, weights_only=False, map_location="cpu")
         except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
             raise CheckpointLoadError(path, e) from e
 

@@ -17,8 +17,9 @@ Example
 -------
 >>> class LocalSource(CheckpointSource):
 ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
-...         raw_data = torch.load(context.checkpoint_path, map_location="cpu")
-...         return self._load_and_populate(context, raw_data)
+...         raw_data = torch.load(context.checkpoint_path, weights_only=False, map_location="cpu")
+...         self._load_and_populate(context, raw_data)
+...         return context
 """
 
 from __future__ import annotations
@@ -101,42 +102,28 @@ class CheckpointSource(PipelineStage):
         self,
         context: CheckpointContext,
         raw_data: dict[str, Any],
-    ) -> CheckpointContext:
-        """Populate context with loaded checkpoint data and detected format.
+    ) -> None:
+        """Populate context **in-place** with loaded checkpoint data and detected format.
 
         This convenience method standardises how checkpoint sources
         attach raw data to the context. It detects the checkpoint format
-        from the file path (if available) and sets both
-        ``checkpoint_data`` and ``checkpoint_format`` on the context.
+        from the loaded data and sets both ``checkpoint_data`` and
+        ``checkpoint_format`` on the context. The context is mutated in
+        place; nothing is returned.
 
         Parameters
         ----------
         context : CheckpointContext
-            Current pipeline context with optional ``checkpoint_path``
+            Current pipeline context (mutated in place)
         raw_data : dict
             Raw loaded checkpoint data dictionary
-
-        Returns
-        -------
-        CheckpointContext
-            Context with ``checkpoint_data`` and ``checkpoint_format``
-            populated
         """
         context.checkpoint_data = raw_data
 
-        if context.checkpoint_path is not None:
-            from anemoi.training.checkpoint.formats import detect_checkpoint_format
+        from anemoi.training.checkpoint.formats import detect_format_from_data
 
-            context.checkpoint_format = detect_checkpoint_format(context.checkpoint_path)
-            LOGGER.debug(
-                "Detected checkpoint format '%s' for %s",
-                context.checkpoint_format,
-                context.checkpoint_path,
-            )
-        else:
-            LOGGER.debug(
-                "No checkpoint path available for format detection; "
-                "format will need to be set by a downstream stage or explicitly.",
-            )
-
-        return context
+        context.checkpoint_format = detect_format_from_data(raw_data)
+        LOGGER.debug(
+            "Detected checkpoint format '%s' from data keys",
+            context.checkpoint_format,
+        )
