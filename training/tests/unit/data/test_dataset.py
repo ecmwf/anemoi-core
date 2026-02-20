@@ -250,6 +250,105 @@ def test_native_grid_dataset_select_and_drop_atmospheric_variables(dataset_path:
     assert "u_700" in dropped_dataset.variables
 
 
+@skip_if_offline
+def test_create_dataset_supports_join_pattern(dataset_path: str) -> None:
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": {
+                "join": [
+                    dataset_path,
+                    dataset_path,
+                ],
+            },
+            "frequency": "6h",
+            "drop": [],
+        },
+        "start": None,
+        "end": None,
+        "trajectory": None,
+    }
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert dataset.data is not None
+    assert not dataset.has_trajectories
+    assert len(dataset.dates) > 0
+
+
+@skip_if_offline
+def test_create_dataset_join_with_inner_windows_and_outer_clipping(dataset_path: str) -> None:
+    outer_start = "2017-01-03T00:00:00"
+    outer_end = "2017-01-08T18:00:00"
+
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": {
+                "join": [
+                    {
+                        "dataset": dataset_path,
+                        "start": "2017-01-01T06:00:00",
+                        "end": "2017-01-10T18:00:00",
+                    },
+                    {
+                        "dataset": dataset_path,
+                        "start": "2017-01-01T06:00:00",
+                        "end": "2017-01-10T18:00:00",
+                    },
+                ],
+            },
+            "frequency": "6h",
+            "drop": [],
+        },
+        "start": outer_start,
+        "end": outer_end,
+        "trajectory": None,
+    }
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert dataset.data is not None
+    assert len(dataset.dates) > 0
+    assert dataset.dates[0] >= np.datetime64(outer_start)
+    assert dataset.dates[-1] <= np.datetime64(outer_end)
+
+
+@skip_if_offline
+def test_create_dataset_concat_with_inner_windows_and_outer_clipping(dataset_path: str) -> None:
+    outer_start = "2017-01-03T00:00:00"
+    outer_end = "2017-01-08T18:00:00"
+
+    dataset_reader_cfg = {
+        "dataset_config": {
+            "dataset": {
+                "concat": [
+                    {
+                        "dataset": dataset_path,
+                        "start": "2017-01-01T06:00:00",
+                        "end": "2017-01-05T18:00:00",
+                    },
+                    {
+                        "dataset": dataset_path,
+                        "start": "2017-01-06T00:00:00",
+                        "end": "2017-01-10T18:00:00",
+                    },
+                ],
+            },
+            "frequency": "6h",
+            "drop": [],
+        },
+        "start": outer_start,
+        "end": outer_end,
+        "trajectory": None,
+    }
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert dataset.data is not None
+    assert len(dataset.dates) > 0
+    assert dataset.dates[0] >= np.datetime64(outer_start)
+    assert dataset.dates[-1] <= np.datetime64(outer_end)
+
+
 def test_create_dataset_rejects_start_end_inside_dataset_config() -> None:
     dataset_reader_cfg = {
         "dataset_config": {
