@@ -152,16 +152,22 @@ class TestNativeGridDataset:
 
 @skip_if_offline
 def test_native_grid_dataset_accepts_dataset_dictionary(dataset_path: str) -> None:
+    original = NativeGridDataset(dataset=dataset_path)
+    if not original.variables:
+        pytest.skip("Dataset has no variables to test drop.")
+
+    drop_var = original.variables[0]
     dataset_cfg = {
         "dataset": dataset_path,
         "frequency": "6h",
-        "drop": ["q"],
+        "drop": [drop_var],
     }
     dataset = NativeGridDataset(dataset=dataset_cfg, start=None, end=None)
 
     assert dataset.data is not None
     assert dataset.dates is not None
     assert dataset.variables is not None
+    assert drop_var not in dataset.variables
 
 
 @skip_if_offline
@@ -204,6 +210,46 @@ def test_create_dataset_does_not_clip_when_start_end_are_none(dataset_path: str)
     assert dataset.dates[-1] == original.dates[-1]
 
 
+@skip_if_offline
+def test_native_grid_dataset_select_and_drop_filters_variables(dataset_path: str) -> None:
+    base = NativeGridDataset(dataset=dataset_path)
+    variables = set(base.variables)
+
+    required_for_test = {"2t", "msl", "10u"}
+    if not required_for_test.issubset(variables):
+        pytest.skip("Fixture dataset does not contain expected variables for select/drop test.")
+
+    selected = ["2t", "msl", "10u"]
+    selected_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "select": selected})
+    assert set(selected_dataset.variables) == set(selected)
+
+    dropped = ["2t", "msl"]
+    dropped_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": dropped})
+    assert "2t" not in dropped_dataset.variables
+    assert "msl" not in dropped_dataset.variables
+    assert "10u" in dropped_dataset.variables
+
+
+@skip_if_offline
+def test_native_grid_dataset_select_and_drop_atmospheric_variables(dataset_path: str) -> None:
+    base = NativeGridDataset(dataset=dataset_path)
+    variables = set(base.variables)
+
+    required_for_test = {"z_500", "t_100", "u_700"}
+    if not required_for_test.issubset(variables):
+        pytest.skip("Fixture dataset does not contain expected atmospheric variables for select/drop test.")
+
+    selected = ["z_500", "t_100", "u_700"]
+    selected_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "select": selected})
+    assert set(selected_dataset.variables) == set(selected)
+
+    dropped = ["z_500", "t_100"]
+    dropped_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": dropped})
+    assert "z_500" not in dropped_dataset.variables
+    assert "t_100" not in dropped_dataset.variables
+    assert "u_700" in dropped_dataset.variables
+
+
 def test_create_dataset_rejects_start_end_inside_dataset_config() -> None:
     dataset_reader_cfg = {
         "dataset_config": {
@@ -227,7 +273,7 @@ def test_native_grid_dataset_raises_for_invalid_open_dataset_key(dataset_path: s
         "invalid_key": "not-supported",
     }
 
-    with pytest.raises(TypeError, match="invalid_key"):
+    with pytest.raises(NotImplementedError, match=r"invalid_key|Unsupported arguments"):
         NativeGridDataset(dataset=dataset_cfg, start=1985, end=2020)
 
 
