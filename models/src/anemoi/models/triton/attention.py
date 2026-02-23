@@ -143,7 +143,7 @@ def _attn_fwd_inner(
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
         # curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
         mask_iter = curr_iter + offs_iter
-        tail_iter_block = (curr_iter + BLOCK_ITER > N_CTX)
+        tail_iter_block = curr_iter + BLOCK_ITER > N_CTX
 
         # -- compute qk ----
         # k = desc_k.load([iter_offset, 0]).T
@@ -414,11 +414,9 @@ def _attn_fwd(
     acc = acc / l_i[:, None]
     m_ptrs = M + off_hz * n_ctx_rounded + offs_fixed  # Use n_ctx_rounded since M is allocated with that dimension
     if UNEVEN_CTX and tail_case:
-        tl.store(
-            m_ptrs, m_i, mask=offs_fixed < N_CTX
-        ) 
+        tl.store(m_ptrs, m_i, mask=offs_fixed < N_CTX)
     else:
-        tl.store(m_ptrs, m_i)  
+        tl.store(m_ptrs, m_i)
     # desc_o.store([fixed_offset, 0], acc.to(dtype))
     if UNEVEN_CTX and tail_case:
         # need to write a smaller block size when using uneven ctx to avoid writing into the next SMs region
@@ -628,7 +626,7 @@ def _attn_bwd_dkdv(
 
         mask_iter = curr_iter + offs_iter
         qT = desc_q.load([iter_offset, 0]).T
-        tail_iter_block = (curr_iter + BLOCK_ITER > N_CTX)
+        tail_iter_block = curr_iter + BLOCK_ITER > N_CTX
         if UNEVEN_CTX and tail_iter_block:
             # mask out-of-bounds q values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
             qT = tl.where(mask_iter[None, :] < N_CTX, qT, 0.0)
@@ -664,7 +662,7 @@ def _attn_bwd_dkdv(
         ppT = pT.to(dtype)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
-        if UNEVEN_CTX and  tail_iter_block:
+        if UNEVEN_CTX and tail_iter_block:
             Di = tl.load(D + mask_iter, mask=mask_iter < N_CTX, other=0.0)
         else:
             Di = tl.load(D + mask_iter)
@@ -811,7 +809,7 @@ def _attn_bwd_dq(
     if UNEVEN_CTX and tail_fixed_block:
         m = tl.load(M + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)  # Add masking to prevent loading garbage values
         Di = tl.load(D + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)
-    else: 
+    else:
         m = tl.load(M + offs_fixed)
         Di = tl.load(D + offs_fixed)
     m = m[:, None]
