@@ -9,7 +9,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.dataset}
+      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"  # Always overridden from dataloader config
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
@@ -54,11 +54,7 @@ edges:
     target_mask_attr_name: cutout_mask
   attributes: ${graph.attributes.edges}
 
-post_processors:
-  - _target_: anemoi.graphs.processors.RemoveUnconnectedNodes
-    nodes_name: data
-    ignore: cutout_mask # optional
-    save_mask_indices_to_attr: indices_connected_nodes # optional
+post_processors: []
 
 attributes:
   nodes:

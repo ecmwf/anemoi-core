@@ -100,6 +100,44 @@ def sort_edges_1hop_sharding(
     return edge_attr, edge_index, [], []
 
 
+def shard_edges_1hop(
+    edge_attr: Tensor,
+    edge_index: Adj,
+    src_size: int,
+    dst_size: int,
+    model_comm_group: Optional[ProcessGroup],
+) -> tuple[Tensor, Adj, tuple[list[torch.Size], list[torch.Size]]]:
+    """Sort and shard edges for 1-hop sharding.
+
+    Parameters
+    ----------
+    edge_attr : Tensor
+        Edge attributes
+    edge_index : Adj
+        Edge index
+    src_size : int
+        Number of source nodes
+    dst_size : int
+        Number of destination nodes
+    model_comm_group : ProcessGroup, optional
+        Model communication group
+
+    Returns
+    -------
+    tuple[Tensor, Adj, tuple[list[torch.Size], list[torch.Size]]]
+        Sharded edge_attr, sharded edge_index, and tuple of (shapes_edge_attr, shapes_edge_idx)
+    """
+    from anemoi.models.distributed.graph import shard_tensor
+
+    num_nodes = (src_size, dst_size)
+    edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
+        num_nodes, edge_attr, edge_index, model_comm_group
+    )
+    edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
+    edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+    return edge_attr, edge_index, (shapes_edge_attr, shapes_edge_idx)
+
+
 def sort_edges_1hop_chunks(
     num_nodes: Union[int, tuple[int, int]],
     edge_attr: Tensor,

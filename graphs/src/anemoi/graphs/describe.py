@@ -83,6 +83,8 @@ class GraphDescriptor:
             - Number of edges.
             - Number of isolated source nodes.
             - Number of isolated target nodes.
+            - Min edges per target node.
+            - Max edges per target node.
             - Total dimension of the attributes.
             - List of attribute names.
         """
@@ -91,6 +93,13 @@ class GraphDescriptor:
             attributes = edges.edge_attrs()
             attributes.remove("edge_index")
 
+            # Compute edge counts per target node
+            target_edge_counts = torch.bincount(edges.edge_index[1], minlength=self.graph[dst_name].num_nodes)
+            # Only consider nodes that have at least one edge
+            connected_target_counts = target_edge_counts[target_edge_counts > 0]
+            min_edges_per_target = connected_target_counts.min().item() if len(connected_target_counts) > 0 else 0
+            max_edges_per_target = connected_target_counts.max().item() if len(connected_target_counts) > 0 else 0
+
             edge_summary.append(
                 [
                     src_name,
@@ -98,6 +107,8 @@ class GraphDescriptor:
                     edges.num_edges,
                     self.graph[src_name].num_nodes - len(torch.unique(edges.edge_index[0])),
                     self.graph[dst_name].num_nodes - len(torch.unique(edges.edge_index[1])),
+                    min_edges_per_target,
+                    max_edges_per_target,
                     sum(edges[attr].shape[1] for attr in attributes),
                     ", ".join([f"{attr}({edges[attr].shape[1]}D)" for attr in attributes]),
                 ]
@@ -190,10 +201,12 @@ class GraphDescriptor:
                     "Num. edges",
                     "Isolated Source",
                     "Isolated Target",
+                    "Min edges/target",
+                    "Max edges/target",
                     "Attribute dim",
                     "Attributes",
                 ],
-                align=["<", "<", ">", ">", ">", ">", ">"],
+                align=["<", "<", ">", ">", ">", ">", ">", ">", ">"],
                 margin=3,
             )
         )

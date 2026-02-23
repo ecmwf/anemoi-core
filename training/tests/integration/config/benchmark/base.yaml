@@ -1,12 +1,12 @@
 # base config which defines settings shared across all benchmarks
 
-hardware:
-  accelerator: cuda
-  num_gpus_per_node: 2
-  num_nodes: 1
-  paths:
-    data:  /home/mlx/ai-ml/datasets/
-    graph: ./ #store locally so graph will be reused by non-zero processes
+system:
+  hardware:
+    accelerator: cuda
+    num_gpus_per_node: 2
+    num_nodes: 1
+
+
 
 dataloader:
   num_workers:
@@ -52,6 +52,7 @@ diagnostics:
       enabled: false #some error about metric key in extract_gpu_metrics being invalid
   log:
     mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: true
       offline: True
       tracking_uri: ""

@@ -128,6 +128,7 @@ _dev/
 _api/
 ./outputs
 *tmp_data/
+*/uv.lock
 
 # Project specific
 ?
@@ -141,3 +142,8 @@ _version.py
 *.to_upload
 tempCodeRunnerFile.python
 Untitled-*.py
+trace.txt
+?/
+*.prof
+prof/
+*.gz

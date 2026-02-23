@@ -123,8 +123,8 @@ class TestTransformerProcessorBlock:
 
         x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
         output = block.forward(x, shapes, batch_size)
-        assert isinstance(output, torch.Tensor)
-        assert output.shape == (batch_size, num_channels)
+        assert isinstance(output[0], torch.Tensor)
+        assert output[0].shape == (batch_size, num_channels)
 
 
 class TestGraphConvProcessorBlock:

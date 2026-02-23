@@ -1,6 +1,6 @@
 ## How to Contribute
 
-Please see the [read the docs](https://anemoi.readthedocs.io/en/latest/dev/contributing.html).
+Please see the [read the docs](https://anemoi.readthedocs.io/en/latest/contributing/contributing.html).
 
 
 ## Contributors
@@ -10,4 +10,4 @@ Thank you to all the wonderful people who have contributed to Anemoi. Contributi
 
 ## Contributing Organisations
 
-Significant contributions have been made by the following organisations: [DWD](https://www.dwd.de/), [FMI](https://www.ilmatieteenlaitos.fi/), [KNMI](https://www.knmi.nl), [MET Norway](https://www.met.no/), [MeteoSwiss](https://www.meteoswiss.admin.ch/), [RMI](https://www.meteo.be/) & [ECMWF](https://www.ecmwf.int/)
+Significant contributions have been made by the following organisations: [DMI](https://www.dmi.dk/), [DWD](https://www.dwd.de/), [FMI](https://www.ilmatieteenlaitos.fi/), [KNMI](https://www.knmi.nl), [MET Norway](https://www.met.no/), [MeteoSwiss](https://www.meteoswiss.admin.ch/), [RMI](https://www.meteo.be/), [Met Office](https://www.metoffice.gov.uk/), [Météo-France](https://meteofrance.com/) & [ECMWF](https://www.ecmwf.int/)

@@ -46,7 +46,7 @@ def test_benchmark_training_cycle(
     AnemoiProfiler(cfg).profile()
 
     # determine store from benchmark config
-    config_path = Path("~/.config/anemoi-benchmark.yaml").expanduser()
+    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
     user, hostname, path = parse_benchmark_config(config_path)
     store: str = f"ssh://{user}@{hostname}:{path}"
 

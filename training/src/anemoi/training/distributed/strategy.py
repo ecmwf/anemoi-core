@@ -13,10 +13,7 @@ import logging
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from lightning_fabric.utilities.optimizer import _optimizers_to_device
-from pytorch_lightning.overrides.distributed import _sync_module_states
 from pytorch_lightning.strategies.ddp import DDPStrategy
-from pytorch_lightning.trainer.states import TrainerFn
 
 from anemoi.training.utils.seeding import get_base_seed
 
@@ -61,7 +58,7 @@ def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
     initial_seed = base_seed * (model_comm_group_id + 1)
     rnd_seed = pl.seed_everything(initial_seed)  # note: workers are seeded independently in dataloader
     np_rng = np.random.default_rng(rnd_seed)
-    sanity_rnd = (torch.rand(1), np_rng.random())
+    sanity_rnd = (torch.rand(1)[0], np_rng.random())
     LOGGER.debug(
         (
             "Strategy: Rank %d, model comm group id %d, base seed %d, seeded with %d, "
@@ -138,13 +135,30 @@ class DDPGroupStrategy(DDPStrategy):
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
+        self.shard_shapes: dict | None = None
 
     def setup(self, trainer: pl.Trainer) -> None:
-        assert self.accelerator is not None, "Accelerator is not initialized for distributed strategy"
-        self.accelerator.setup(trainer)
+        model_comm_group_id = self._setup_communication_groups()
 
+        super().setup(trainer)
+
+        self.shard_shapes = self._setup_shard_shapes(trainer)
+        seed_rnd(model_comm_group_id, self.global_rank)
+
+    def configure_ddp(self) -> None:
+        """Configure DDP with custom gradient hooks."""
+        self.register_parameter_hooks()
+        super().configure_ddp()
+
+    def _setup_communication_groups(self) -> int:
+        """Set up model and reader communication groups.
+
+        Returns
+        -------
+        int
+            The model communication group ID for this rank.
+        """
         # determine the model groups that work together:
-
         assert self.world_size % self.model_comm_group_size == 0, (
             f"Total number of GPUs ({self.world_size}) must be divisible by the number of GPUs "
             f"per model ({self.model_comm_group_size})."
@@ -173,7 +187,6 @@ class DDPGroupStrategy(DDPStrategy):
         )
 
         # set up reader groups by further splitting model_comm_group_ranks with read_group_size:
-
         assert self.model_comm_group_size % self.read_group_size == 0, (
             f"Number of GPUs per model ({self.model_comm_group_size}) must be divisible by read_group_size "
             f"({self.read_group_size})."
@@ -213,40 +226,24 @@ class DDPGroupStrategy(DDPStrategy):
             reader_group_root,
         )
 
-        # register hooks for correct gradient reduction
-        self.register_parameter_hooks()
+        return model_comm_group_id
 
-        # move the model to the correct device
-        self.model_to_device()
+    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
+        """Set up shard shapes for the dataloader.
 
-        # skip wrapping the model if we are not fitting as no gradients need to be exchanged
-        trainer_fn = trainer.state.fn
+        Parameters
+        ----------
+        trainer : pl.Trainer
+            The PyTorch Lightning trainer.
 
-        if trainer_fn == TrainerFn.FITTING and self._layer_sync:
-            assert self.model is not None, "Model is not initialized for distributed strategy"
-            self.model = self._layer_sync.apply(self.model)
-
-        self.setup_precision_plugin()
-
-        if trainer_fn == TrainerFn.FITTING:
-            # do not wrap with DDP if not fitting as there's no gradients to reduce
-            self.configure_ddp()
-
-            # set up optimizers after the wrapped module has been moved to the device
-            self.setup_optimizers(trainer)
-            _optimizers_to_device(self.optimizers, self.root_device)
-
-            import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
-
-            if isinstance(self._ddp_comm_state, post_localSGD.PostLocalSGDState):
-                self._enable_model_averaging()
-        else:
-            # we need to manually synchronize the module's states since we aren't using the DDP wrapper
-            assert self.model is not None, "Model is not initialized for distributed strategy"
-            _sync_module_states(self.model)
-
-        # seed ranks
-        seed_rnd(model_comm_group_id, self.global_rank)
+        Returns
+        -------
+        dict
+            A dictionary containing the shard shapes for each dataset.
+        """
+        shard_shapes = trainer.model.module.shard_shapes
+        assert shard_shapes is not None, "Shard shapes should be set after setup"
+        return shard_shapes
 
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
@@ -283,6 +280,7 @@ class DDPGroupStrategy(DDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
+            self.shard_shapes,
         )
 
         return dataloader
@@ -312,13 +310,30 @@ class DDPEnsGroupStrategy(DDPStrategy):
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.ens_comm_group_size = num_gpus_per_ensemble
+        self.shard_shapes: dict | None = None
 
     def setup(self, trainer: pl.Trainer) -> None:
-        assert self.accelerator is not None, "Accelerator is not initialized for distributed strategy"
-        self.accelerator.setup(trainer)
+        model_comm_group_id = self._setup_communication_groups()
 
+        super().setup(trainer)
+
+        self.shard_shapes = self._setup_shard_shapes(trainer)
+        seed_rnd(model_comm_group_id, self.global_rank)
+
+    def configure_ddp(self) -> None:
+        """Configure DDP with custom gradient hooks."""
+        self.register_parameter_hooks()
+        super().configure_ddp()
+
+    def _setup_communication_groups(self) -> int:
+        """Set up model, reader, and ensemble communication groups.
+
+        Returns
+        -------
+        int
+            The model communication group ID for this rank.
+        """
         # determine the model groups that work together:
-
         assert self.world_size % self.model_comm_group_size == 0, (
             f"Total number of GPUs ({self.world_size}) must be divisible by the number of GPUs "
             f"per model ({self.model_comm_group_size})."
@@ -347,7 +362,6 @@ class DDPEnsGroupStrategy(DDPStrategy):
         )
 
         # set up reader groups by further splitting model_comm_group_ranks with read_group_size:
-
         assert self.model_comm_group_size % self.read_group_size == 0, (
             f"Number of GPUs per model ({self.model_comm_group_size}) must be divisible by read_group_size "
             f"({self.read_group_size})."
@@ -462,40 +476,24 @@ class DDPEnsGroupStrategy(DDPStrategy):
             ens_comm_subgroup_size,
         )
 
-        # register hooks for correct gradient reduction
-        self.register_parameter_hooks()
+        return model_comm_group_id
 
-        # move the model to the correct device
-        self.model_to_device()
+    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
+        """Set up shard shapes for the dataloader.
 
-        # skip wrapping the model if we are not fitting as no gradients need to be exchanged
-        trainer_fn = trainer.state.fn
+        Parameters
+        ----------
+        trainer : pl.Trainer
+            The PyTorch Lightning trainer.
 
-        if trainer_fn == TrainerFn.FITTING and self._layer_sync:
-            assert self.model is not None, "Model is not initialized for distributed strategy"
-            self.model = self._layer_sync.apply(self.model)
-
-        self.setup_precision_plugin()
-
-        if trainer_fn == TrainerFn.FITTING:
-            # do not wrap with DDP if not fitting as there's no gradients to reduce
-            self.configure_ddp()
-
-            # set up optimizers after the wrapped module has been moved to the device
-            self.setup_optimizers(trainer)
-            _optimizers_to_device(self.optimizers, self.root_device)
-
-            import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
-
-            if isinstance(self._ddp_comm_state, post_localSGD.PostLocalSGDState):
-                self._enable_model_averaging()
-        else:
-            # we need to manually synchronize the module's states since we aren't using the DDP wrapper
-            assert self.model is not None, "Model is not initialized for distributed strategy"
-            _sync_module_states(self.model)
-
-        # seed ranks
-        seed_rnd(model_comm_group_id, self.global_rank)
+        Returns
+        -------
+        dict
+            A dictionary containing the shard shapes for each dataset.
+        """
+        shard_shapes = trainer.model.module.shard_shapes
+        assert shard_shapes is not None, "Shard shapes should be set after setup"
+        return shard_shapes
 
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
@@ -535,11 +533,15 @@ class DDPEnsGroupStrategy(DDPStrategy):
             model_comm_group_id,
             model_comm_group_rank,
             model_comm_num_groups,
+            reader_group_rank,
+            self.read_group_size,
+            self.shard_shapes,
+        )
+
+        dataloader.dataset.set_ens_comm_group_info(
             ens_comm_group_id,
             ens_comm_group_rank,
             ens_comm_num_groups,
-            reader_group_rank,
-            self.read_group_size,
         )
 
         return dataloader

@@ -1,11 +1,24 @@
 # anemoi-graphs
 
-[![Documentation Status](https://readthedocs.org/projects/anemoi-graphs/badge/?version=latest)](https://anemoi-graphs.readthedocs.io/en/latest/?badge=latest)
+<p align="center">
+  <a href="https://github.com/ecmwf/codex/raw/refs/heads/main/Project Maturity">
+    <img src="https://github.com/ecmwf/codex/raw/refs/heads/main/Project Maturity/incubating_badge.svg" alt="Maturity Level">
+  </a>
+  <a href="https://opensource.org/licenses/apache-2-0">
+    <img src="https://img.shields.io/badge/Licence-Apache 2.0-blue.svg" alt="Licence">
+  </a>
+  <!-- Individual package releases -->
+  <a href="https://github.com/ecmwf/anemoi-graphs/releases">
+    <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-graphs?color=orange&label=Graphs%20Release" alt="Anemoi Graphs Release">
+  </a>
+  <!-- documentation badges -->
+  <a href="https://anemoi-graphs.readthedocs.io/en/latest/">
+    <img src="https://img.shields.io/readthedocs/anemoi-graphs/latest?label=Docs%20(Graphs)&color=green" alt="Anemoi Graphs Docs">
+  </a>
+</p>
 
-**DISCLAIMER**
-This project is **BETA** and will be **Experimental** for the foreseeable future.
-Interfaces and functionality are likely to change, and the project itself may be scrapped.
-**DO NOT** use this software in any project/software that is operational.
+> \[!IMPORTANT\]
+> This software is **Incubating** and subject to ECMWF's guidelines on [Software Maturity](https://github.com/ecmwf/codex/raw/refs/heads/main/Project%20Maturity).
 
 A package to build graphs for data-driven forecasts.
 
