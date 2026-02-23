@@ -401,7 +401,11 @@ _CFG_INTERP_STEP = DictConfig({"training": {"explicit_times": {"input": [0, 3], 
 _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}})
 
 
-@pytest.mark.parametrize("task_class", [GraphMultiOutInterpolator], ids=["multi_out"])
+@pytest.mark.parametrize(
+    "task_class",
+    [GraphMultiOutInterpolator],
+    ids=["multi_out"],
+)
 def test_interpolator_output_times_and_get_init_step(
     task_class: type[GraphMultiOutInterpolator],
 ) -> None:
