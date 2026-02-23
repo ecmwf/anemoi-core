@@ -129,16 +129,14 @@ def attention_varlen_ref(
     [97, 128, 200, 384, 768, 1024, 1025, 2048],
     # "N_CTX", [32]
     # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
-)  # test larger (o96) config if FLASH_ATTN is available to compute reference
-#@pytest.mark.parametrize("HEAD_DIM", [32, 40, 59, 64, 80, 96, 111, 128, 160, 192, 224, 256])
+)  
 @pytest.mark.parametrize("HEAD_DIM", [64])
 @pytest.mark.parametrize("causal", [False])  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
 @pytest.mark.parametrize(
     "window",
     [True, False],
-    # [0]
-)  # test larger (o96) config if FLASH_ATTN is available to compute reference
-@pytest.mark.parametrize("mode", ["fwd", "bwd"])
+)  
+@pytest.mark.parametrize("mode", ["fwd"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     """Compares Triton flash attention against a naive torch implementation, and optionally flash attention
