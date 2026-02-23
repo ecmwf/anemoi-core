@@ -236,7 +236,14 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             use_reentrant=False,
         )
 
-        y_preds = [x_in_interp_to_hres + y_pred, y_pred]
+        # Denormalize tensors
+        x_in_interp_to_hres = self.model.pre_processors(
+            x_in_interp_to_hres, dataset="input_lres"
+        )
+        y_pred = self.model.post_processors(y_pred, dataset="output")
+
+        # Add predicted residuals to the state
+        y_preds = [x_in_interp_to_hres[..., self.x_in_matching_channel_indices] + y_pred, y_pred]
 
         return loss, metrics_next, y_preds
 
