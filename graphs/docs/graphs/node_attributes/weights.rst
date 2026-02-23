@@ -75,11 +75,11 @@ area equally among all nodes in the band.
 .. literalinclude:: ../yaml/attributes_isolatitude_area_weights.yaml
    :language: yaml
 
-It is also possible to load custom weightings from a variable in an 
+It is also possible to load custom weightings from a variable in an
 Anemoi dataset:
 
 .. literalinclude:: ../yaml/attributes_custom_area_weights.yaml
    :language: yaml
 
-Note that the ``AnemoiDatasetVariableWeights`` class can only be applied 
+Note that the ``AnemoiDatasetVariableWeights`` class can only be applied
 to nodes generated using ``AnemoiDatasetNodes``.
