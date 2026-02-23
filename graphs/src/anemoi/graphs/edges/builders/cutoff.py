@@ -19,8 +19,6 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 from torch_geometric.nn import radius
 
-from icecream import ic
-
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import get_grid_reference_distance
@@ -70,24 +68,17 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         target_mask_attr_name: str | None = None,
         max_num_neighbours: int = 64,
     ) -> None:
-        super().__init__(
-            source_name, target_name, source_mask_attr_name, target_mask_attr_name
-        )
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float."
-        assert isinstance(
-            max_num_neighbours, int
-        ), "Number of nearest neighbours must be an integer."
+        assert isinstance(max_num_neighbours, int), "Number of nearest neighbours must be an integer."
         assert cutoff_factor > 0, "Cutoff factor must be positive."
         assert max_num_neighbours > 0, "Number of nearest neighbours must be positive."
         self.cutoff_factor = cutoff_factor
-        ic(self.cutoff_factor)
+        print("cutoff factor", self.cutoff_factor)
         self.max_num_neighbours = max_num_neighbours
-        ic(self.max_num_neighbours)
 
     @staticmethod
-    def get_reference_distance(
-        nodes: NodeStorage, mask_attr_name: torch.Tensor | None = None
-    ) -> float:
+    def get_reference_distance(nodes: NodeStorage, mask_attr_name: torch.Tensor | None = None) -> float:
         """Compute the reference distance.
 
         Parameters
@@ -108,8 +99,6 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             _grid_reference_distance = get_grid_reference_distance(nodes.x, mask)
         else:
             _grid_reference_distance = nodes["_grid_reference_distance"]
-
-        ic(_grid_reference_distance)
 
         return _grid_reference_distance
 
@@ -133,19 +122,14 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             graph[self.target_name], mask_attr_name=self.target_mask_attr_name
         )
 
-        ic(reference_dist * self.cutoff_factor)
-
         return reference_dist * self.cutoff_factor
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
         """Prepare node information and get source and target nodes."""
         self.radius = self.get_cutoff_radius(graph)
-        ic(self.radius)
         return super().prepare_node_data(graph)
 
-    def _compute_edge_index_pyg(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor
-    ) -> torch.Tensor:
+    def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         edge_index = radius(
             source_coords,
             target_coords,
@@ -173,9 +157,9 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         mask = np.ones(adjmat.nnz, dtype=bool)
         node_idx = np.where(nodes_to_drop > 0)[0]
         for node_id in node_idx:
-            indices_of_largest_dist = np.argpartition(
-                adjmat.data[adjmat.row == node_id], -nodes_to_drop[node_id]
-            )[-nodes_to_drop[node_id] :]
+            indices_of_largest_dist = np.argpartition(adjmat.data[adjmat.row == node_id], -nodes_to_drop[node_id])[
+                -nodes_to_drop[node_id] :
+            ]
             mask[np.where(adjmat.row == node_id)[0][indices_of_largest_dist]] = False
 
         # Define the new sparse matrix
@@ -184,9 +168,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             shape=adjmat.shape,
         )
 
-    def _compute_adj_matrix_sklearn(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor
-    ) -> torch.Tensor:
+    def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.radius_neighbors_graph(
@@ -196,9 +178,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         adj_matrix = self._crop_to_max_num_neighbours(adj_matrix)
         return adj_matrix
 
-    def compute_edge_index(
-        self, source_nodes: NodeStorage, target_nodes: NodeStorage
-    ) -> torch.Tensor:
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Get the adjacency matrix for the cut-off method.
 
         Parameters
@@ -219,9 +199,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             self.source_name,
             self.target_name,
         )
-        return super().compute_edge_index(
-            source_nodes=source_nodes, target_nodes=target_nodes
-        )
+        return super().compute_edge_index(source_nodes=source_nodes, target_nodes=target_nodes)
 
 
 class ReversedCutOffEdges(CutOffEdges):
@@ -257,9 +235,7 @@ class ReversedCutOffEdges(CutOffEdges):
     def get_cartesian_node_coordinates(
         self, source_nodes: NodeStorage, target_nodes: NodeStorage
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        source_coords, target_coords = super().get_cartesian_node_coordinates(
-            source_nodes, target_nodes
-        )
+        source_coords, target_coords = super().get_cartesian_node_coordinates(source_nodes, target_nodes)
         return target_coords, source_coords
 
     def get_cutoff_radius(self, graph: HeteroData):
@@ -283,9 +259,7 @@ class ReversedCutOffEdges(CutOffEdges):
         )
         return reference_dist * self.cutoff_factor
 
-    def undo_masking_adj_matrix(
-        self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage
-    ):
+    def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
         adj_matrix = adj_matrix.T
         return super().undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
 

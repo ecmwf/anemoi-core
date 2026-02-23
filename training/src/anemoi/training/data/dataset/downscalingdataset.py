@@ -16,7 +16,6 @@ import numpy as np
 import torch
 import time
 from einops import rearrange
-from icecream import ic
 from torch.utils.data import IterableDataset, get_worker_info
 
 # from torch_geometric.nn import radius
@@ -118,7 +117,5 @@ class DownscalingDataset(NativeGridDataset):
                 "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
             )
             y = torch.from_numpy(y)
-
-            # ic("data load time", time_end - time_start)
 
             yield x_in_lres, x_in_hres, y

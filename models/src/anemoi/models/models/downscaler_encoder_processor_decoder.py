@@ -36,8 +36,6 @@ from anemoi.models.models.diffusion_encoder_processor_decoder import (
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
 
-from icecream import ic
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -358,7 +356,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         lres_grid_shard_shapes = None
         if model_comm_group is not None:
             lres_shard_shapes = get_shard_shapes(x_in, -2, model_comm_group)
-            x = shard_tensor(x, -2, lres_shard_shapes, model_comm_group)
+            x_in = shard_tensor(x_in, -2, lres_shard_shapes, model_comm_group)
             lres_grid_shard_shapes = [shape[-2] for shape in lres_shard_shapes]
         hres_grid_shard_shapes = None
         if model_comm_group is not None:
@@ -584,8 +582,9 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         # torch.manual_seed(seed)
         # if torch.cuda.is_available():
         #    torch.cuda.manual_seed_all(seed)
+        print("sample, sigmas", sigmas)
         y_init = torch.randn(shape, device=x_in_interp_to_hres.device) * sigmas[0]  # , dtype=sigmas.dtype)
-
+        print("sample, y val", y_init.mean(dim=-1).std())
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
 
@@ -603,7 +602,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
 
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
-
+        print("sample y_init", y_init.mean(dim=-1).std())
         return sampler_instance.sample(
             x_in_interp_to_hres,
             x_in_hres,

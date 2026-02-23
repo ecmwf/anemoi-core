@@ -252,7 +252,7 @@ class EDMHeunSampler(DiffusionSampler):
         batch_size, ensemble_size = x_in_interp.shape[0], x_in_interp.shape[2]
         num_steps = len(sigmas) - 1
 
-        # ic("Before step", y[..., 64].mean())
+        # print("Before step", y[..., 64].mean())
 
         # Heun sampling loop
         for i in range(num_steps):
@@ -275,9 +275,7 @@ class EDMHeunSampler(DiffusionSampler):
                 x_in_interp,
                 x_in_hres,
                 y.to(dtype=x_in_interp.dtype),
-                sigma_effective.view(1, 1, 1, 1)
-                .expand(batch_size, ensemble_size, 1, 1)
-                .to(x_in_interp.dtype),
+                sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(x_in_interp.dtype),
                 model_comm_group,
                 grid_shard_shapes,
             ).to(dtype)
@@ -292,9 +290,7 @@ class EDMHeunSampler(DiffusionSampler):
                     x_in_interp,
                     x_in_hres,
                     y_next.to(dtype=x_in_interp.dtype),
-                    sigma_next.view(1, 1, 1, 1)
-                    .expand(batch_size, ensemble_size, 1, 1)
-                    .to(dtype=x_in_interp.dtype),
+                    sigma_next.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype=x_in_interp.dtype),
                     model_comm_group,
                     grid_shard_shapes,
                 ).to(dtype)
@@ -337,12 +333,8 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = sigma.view(1, 1, 1, 1).expand(
-                batch_size, ensemble_size, 1, 1
-            )
-            denoised = denoising_fn(
-                x, y, sigma_expanded, model_comm_group, grid_shard_shapes
-            )
+            sigma_expanded = sigma.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1)
+            denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
 
             if sigma_next == 0:
                 y = denoised
