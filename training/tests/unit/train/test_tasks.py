@@ -12,12 +12,10 @@ from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAd
 from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
-from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.forecaster import GraphForecaster
-from anemoi.training.train.tasks.interpolator import GraphInterpolator
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -403,14 +401,9 @@ _CFG_INTERP_STEP = DictConfig({"training": {"explicit_times": {"input": [0, 3], 
 _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}})
 
 
-@pytest.mark.parametrize(
-    ("task_class", "adapter_class"),
-    [(GraphInterpolator, InterpolatorPlotAdapter), (GraphMultiOutInterpolator, InterpolatorMultiOutPlotAdapter)],
-    ids=["single_out", "multi_out"],
-)
+@pytest.mark.parametrize("task_class", [GraphMultiOutInterpolator], ids=["multi_out"])
 def test_interpolator_output_times_and_get_init_step(
-    task_class: type[GraphInterpolator] | type[GraphMultiOutInterpolator],
-    adapter_class: type[InterpolatorPlotAdapter] | type[InterpolatorMultiOutPlotAdapter],
+    task_class: type[GraphMultiOutInterpolator],
 ) -> None:
     """Both interpolator task types: output_times == len(target), get_init_step(i) == i."""
     interpolator = task_class.__new__(task_class)
@@ -419,7 +412,7 @@ def test_interpolator_output_times_and_get_init_step(
     interpolator.n_step_output = len(_CFG_INTERP_TWO_TARGETS.training.explicit_times.target)
     interpolator.interp_times = _CFG_INTERP_TWO_TARGETS.training.explicit_times.target
     interpolator.model = None  # unused for this test
-    interpolator._plot_adapter = adapter_class(interpolator)
+    interpolator._plot_adapter = InterpolatorMultiOutPlotAdapter(interpolator)
 
     assert interpolator.plot_adapter.output_times == 2
     for i in range(interpolator.plot_adapter.output_times):
@@ -496,49 +489,6 @@ def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> 
     loss, _, y_preds = ae._step(batch, validation_mode=False)
 
     _assert_step_return_format(loss, y_preds, expected_len=1)
-
-
-def test_graphinterpolator_step_returns_list_of_dicts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GraphInterpolator (single-out) _step returns (loss, metrics, list of dicts) per interp step."""
-
-    def dummy_forward(x_bound: dict, target_forcing: dict | None = None) -> dict:
-        del target_forcing
-        b = next(iter(x_bound.values())).shape[0]
-        e = next(iter(x_bound.values())).shape[2]
-        g = next(iter(x_bound.values())).shape[3]
-        v = next(iter(x_bound.values())).shape[4]
-        return {"data": torch.randn(b, 1, e, g, v, dtype=torch.float32)}
-
-    data_indices = _data_indices_single()
-    task = GraphInterpolator.__new__(GraphInterpolator)
-    pl.LightningModule.__init__(task)
-    _set_base_task_attrs(task, data_indices=data_indices, config=_CFG_INTERP_STEP)
-    task.interp_times = _CFG_INTERP_STEP.training.explicit_times.target
-    task.boundary_times = _CFG_INTERP_STEP.training.explicit_times.input
-    sorted_indices = sorted(set(task.boundary_times + task.interp_times))
-    task.imap = {idx: i for i, idx in enumerate(sorted_indices)}
-    task.num_tfi = {"data": 0}
-    task.use_time_fraction = {"data": False}
-    task.target_forcing_indices = {"data": []}
-    task.model = type(
-        "M",
-        (),
-        {"__call__": lambda _self, x_bound, target_forcing=None, **_kwargs: dummy_forward(x_bound, target_forcing)},
-    )()
-    task.loss = {"data": DummyLoss()}
-
-    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
-    monkeypatch.setattr(
-        task,
-        "compute_loss_metrics",
-        lambda *args, **_kwargs: (torch.tensor(0.0), {}, args[0] if args else None),
-    )
-
-    b, t, e, g, v = 2, 4, 1, 4, 2
-    batch = {"data": torch.randn(b, t, e, g, v, dtype=torch.float32)}
-    loss, _, y_preds = task._step(batch, validation_mode=False)
-
-    _assert_step_return_format(loss, y_preds, expected_len=len(task.interp_times))
 
 
 def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
