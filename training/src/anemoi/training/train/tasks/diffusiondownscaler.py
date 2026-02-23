@@ -68,10 +68,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
         self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
-        self.x_in_matching_channel_indices = self._match_tensor_channels(
-            data_indices["in_lres"].name_to_index,
-            data_indices["out_hres"].name_to_index,
-        )
         reader_group_size = self.config.dataloader.read_group_size
 
         fields_direct_prediction = getattr(config.data, "direct_prediction", None)
@@ -231,7 +227,8 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         # Compute residuals: high-res target minus upsampled low-res input
         # Select only the matching channels from upsampled lres
-        resid = y - x_in_lres_upsampled[..., self.x_in_matching_channel_indices.to(x_in_lres_upsampled.device)]
+        channel_indices = self.model.model.x_in_matching_channel_indices.to(x_in_lres_upsampled.device)
+        resid = y - x_in_lres_upsampled[..., channel_indices]
 
         x_in_lres_upsampled = self.model.pre_processors["in_lres"](x_in_lres_upsampled)
         x_in_hres = self.model.pre_processors["in_hres"](x_in_hres)
@@ -287,7 +284,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         # Full prediction = baseline + residual
         y_pred_full = (
-            x_in_lres_upsampled_denorm[..., self.x_in_matching_channel_indices.to(x_in_lres_upsampled_denorm.device)]
+            x_in_lres_upsampled_denorm[
+                ..., self.model.model.x_in_matching_channel_indices.to(x_in_lres_upsampled_denorm.device)
+            ]
             + y_pred_denorm
         )
 
@@ -422,35 +421,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                 )
 
         return metrics
-
-    def _match_tensor_channels(self, input_name_to_index, output_name_to_index):
-        """Reorder and select channels from input tensor to match output tensor structure.
-
-        Parameters
-        ----------
-        input_name_to_index : dict
-            Mapping from variable names to indices in input tensor
-        output_name_to_index : dict
-            Mapping from variable names to indices in output tensor
-
-        Returns
-        -------
-        torch.Tensor
-            Tensor of indices for channel selection
-        """
-        common_channels = set(input_name_to_index.keys()) & set(output_name_to_index.keys())
-
-        # for each output channel, look for corresponding input channel
-        channel_mapping = []
-        for channel_name in output_name_to_index.keys():
-            if channel_name in common_channels:
-                input_pos = input_name_to_index[channel_name]
-                channel_mapping.append(input_pos)
-
-        # Convert to tensor for indexing
-        channel_indices = torch.tensor(channel_mapping)
-
-        return channel_indices
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.

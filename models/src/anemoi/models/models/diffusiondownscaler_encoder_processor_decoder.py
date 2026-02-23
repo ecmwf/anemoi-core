@@ -64,6 +64,62 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             graph_data=graph_data,
         )
 
+        self.register_buffer(
+            "x_in_matching_channel_indices",
+            self._build_matching_channel_indices(),
+            persistent=True,
+        )
+
+    def _build_matching_channel_indices(self) -> torch.Tensor:
+        """Build indices to reorder in_lres channels to out_hres output order."""
+        input_name_to_index = self.data_indices["in_lres"].name_to_index
+        output_name_to_index = self.data_indices["out_hres"].name_to_index
+        channel_indices = self._match_tensor_channels(input_name_to_index, output_name_to_index)
+        if channel_indices.numel() != len(output_name_to_index):
+            missing = [name for name in output_name_to_index.keys() if name not in input_name_to_index]
+            raise ValueError(
+                "Could not fully map in_lres channels to out_hres channels for residual reconstruction. "
+                f"Missing channels in in_lres: {missing}"
+            )
+        return channel_indices
+
+    def _match_tensor_channels(
+        self,
+        input_name_to_index: dict[str, int],
+        output_name_to_index: dict[str, int],
+    ) -> torch.Tensor:
+        """Reorder and select channels from input tensor to match output tensor structure."""
+        common_channels = set(input_name_to_index.keys()) & set(output_name_to_index.keys())
+        channel_mapping = []
+        for channel_name in output_name_to_index.keys():
+            if channel_name in common_channels:
+                channel_mapping.append(input_name_to_index[channel_name])
+        return torch.tensor(channel_mapping, dtype=torch.long)
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        """Backwards-compatible loading for checkpoints created before this buffer existed."""
+        key = f"{prefix}x_in_matching_channel_indices"
+        if key not in state_dict:
+            state_dict[key] = self.x_in_matching_channel_indices
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components with optional dataset filtering for encoder/decoder."""
         from anemoi.models.layers.graph_provider import create_graph_provider
@@ -943,10 +999,12 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
         state_outp = post_processors_state["out_hres"](residuals, in_place=False)
 
-        state_outp += post_processors_state["in_lres"](
+        x_in_lres_denorm = post_processors_state["in_lres"](
             state_inp,
             in_place=False,
         )
+        channel_indices = self.x_in_matching_channel_indices.to(x_in_lres_denorm.device)
+        state_outp += x_in_lres_denorm[..., channel_indices]
         return state_outp
 
     def _after_sampling(
