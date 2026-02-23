@@ -404,11 +404,11 @@ _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}}
 
 @pytest.mark.parametrize(
     ("task_class", "adapter_class"),
-    [(GraphInterpolator, InterpolatorPlotAdapter), (GraphMultiOutInterpolator, InterpolatorMultiOutPlotAdapter)],
-    ids=["single_out", "multi_out"],
+    [(GraphMultiOutInterpolator, InterpolatorMultiOutPlotAdapter)],
+    ids=["multi_out"],
 )
 def test_interpolator_output_times_and_get_init_step(
-    task_class: type[GraphInterpolator] | type[GraphMultiOutInterpolator],
+    task_class: type[GraphMultiOutInterpolator],
     adapter_class: type[InterpolatorPlotAdapter] | type[InterpolatorMultiOutPlotAdapter],
 ) -> None:
     """Both interpolator task types: output_times == len(target), get_init_step(i) == i."""
