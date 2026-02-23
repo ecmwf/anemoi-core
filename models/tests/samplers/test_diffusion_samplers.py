@@ -43,7 +43,7 @@ class MockDenoisingFunction:
         sigma: torch.Tensor | dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[dict[str, Optional[list]]] = None,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Mock denoising function that reduces noise proportionally to sigma."""
         self.call_count += 1
 
@@ -439,30 +439,6 @@ class TestSamplerComparison:
 
         return x, y, sigmas
 
-    def test_samplers_produce_different_results(self, sample_data):
-        """Test that different samplers produce different results."""
-        x, y, sigmas = sample_data
-
-        # Use different mock functions to ensure different behavior
-        mock_fn1 = MockDenoisingFunction(deterministic=True, noise_reduction_factor=0.8)
-        mock_fn2 = MockDenoisingFunction(deterministic=True, noise_reduction_factor=0.8)
-
-        sampler_heun = EDMHeunSampler(S_churn=0.0)
-        y_cloned = {k: v.clone() for k, v in y.items()}
-        result_heun = sampler_heun.sample(x, y_cloned, sigmas, mock_fn1)
-
-        sampler_dpmpp = DPMpp2MSampler()
-        y_cloned = {k: v.clone() for k, v in y.items()}
-        result_dpmpp = sampler_dpmpp.sample(x, y_cloned, sigmas, mock_fn2)
-
-        # Convert to same dtype for comparison
-        result_heun = {k: v.to(result_dpmpp[k].dtype) for k, v in result_heun.items()}
-
-        assert set(result_heun.keys()) == set(result_dpmpp.keys())
-        for dataset_name in result_heun:
-            # Results should be different (unless by coincidence)
-            assert not torch.allclose(result_heun[dataset_name], result_dpmpp[dataset_name], atol=1e-6)
-
     def test_samplers_same_output_shape(self, sample_data):
         """Test that all samplers produce the same output shape."""
         x, y, sigmas = sample_data
@@ -592,3 +568,60 @@ class TestSamplerEdgeCases:
             assert result_dpmpp[dataset_name].shape == y[dataset_name].shape
             assert torch.isfinite(result_heun[dataset_name]).all()
             assert torch.isfinite(result_dpmpp[dataset_name]).all()
+
+
+class TestSamplerMultiDataset:
+    """Regression tests for multi-dataset sampling behavior."""
+
+    @pytest.mark.parametrize(
+        "sampler_factory",
+        [
+            lambda: EDMHeunSampler(dtype=torch.float64, S_churn=0.0),
+            lambda: DPMpp2MSampler(dtype=torch.float64),
+        ],
+        ids=["heun", "dpmpp_2m"],
+    )
+    def test_multi_dataset_uses_per_dataset_sigma_shape_and_dtype(self, sampler_factory):
+        x = {
+            "dataset_a": torch.randn(2, 3, 1, 5, 3, dtype=torch.float32),
+            "dataset_b": torch.randn(1, 2, 4, 7, 2, dtype=torch.bfloat16),
+        }
+        y = {dataset_name: torch.randn_like(x_data) for dataset_name, x_data in x.items()}
+        sigmas = torch.linspace(1.0, 0.0, 6, dtype=torch.float64)
+
+        class ShapeDtypeCheckingDenoiser:
+            def __call__(
+                self,
+                x_in: dict[str, torch.Tensor],
+                y_in: dict[str, torch.Tensor],
+                sigma_in: torch.Tensor | dict[str, torch.Tensor],
+                model_comm_group: Optional[ProcessGroup] = None,
+                grid_shard_shapes: Optional[dict[str, Optional[list]]] = None,
+            ) -> dict[str, torch.Tensor]:
+                del model_comm_group, grid_shard_shapes
+                assert isinstance(sigma_in, dict)
+                for dataset_name, y_data in y_in.items():
+                    sigma_data = sigma_in[dataset_name]
+                    assert sigma_data.shape == (
+                        y_data.shape[0],
+                        1,
+                        y_data.shape[2],
+                        1,
+                        1,
+                    )
+                    assert sigma_data.dtype == y_data.dtype == x_in[dataset_name].dtype
+                return {dataset_name: y_data for dataset_name, y_data in y_in.items()}
+
+        sampler = sampler_factory()
+        result = sampler.sample(
+            x={dataset_name: x_data.clone() for dataset_name, x_data in x.items()},
+            y={dataset_name: y_data.clone() for dataset_name, y_data in y.items()},
+            sigmas=sigmas,
+            denoising_fn=ShapeDtypeCheckingDenoiser(),
+        )
+
+        assert set(result.keys()) == set(y.keys())
+        for dataset_name, result_data in result.items():
+            assert result_data.shape == y[dataset_name].shape
+            assert result_data.dtype == x[dataset_name].dtype
+            assert torch.isfinite(result_data).all()

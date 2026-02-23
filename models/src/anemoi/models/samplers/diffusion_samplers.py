@@ -28,6 +28,14 @@ DenoisingFunction = Callable[
 ]
 
 
+def _expand_sigma(sigma: torch.Tensor, y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Broadcast scalar sigma to per-dataset model-conditioning shape."""
+    return {
+        dataset_name: sigma.view(1, 1, 1, 1, 1).expand(y_data.shape[0], 1, y_data.shape[2], 1, 1).to(y_data.dtype)
+        for dataset_name, y_data in y.items()
+    }
+
+
 class NoiseScheduler(ABC):
     """Base class for noise schedulers."""
 
@@ -65,7 +73,14 @@ class NoiseScheduler(ABC):
 class KarrasScheduler(NoiseScheduler):
     """Karras et al. EDM schedule."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, rho: float = 7.0, **kwargs):
+    def __init__(
+        self,
+        sigma_max: float,
+        sigma_min: float,
+        num_steps: int,
+        rho: float = 7.0,
+        **kwargs,
+    ):
         super().__init__(sigma_max, sigma_min, num_steps)
         self.rho = rho
 
@@ -98,7 +113,13 @@ class LinearScheduler(NoiseScheduler):
         dtype_compute: torch.dtype = torch.float64,
         **kwargs,
     ) -> torch.Tensor:
-        sigmas = torch.linspace(self.sigma_max, self.sigma_min, self.num_steps, device=device, dtype=dtype_compute)
+        sigmas = torch.linspace(
+            self.sigma_max,
+            self.sigma_min,
+            self.num_steps,
+            device=device,
+            dtype=dtype_compute,
+        )
 
         return sigmas
 
@@ -106,7 +127,14 @@ class LinearScheduler(NoiseScheduler):
 class CosineScheduler(NoiseScheduler):
     """Cosine schedule."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, s: float = 0.008, **kwargs):
+    def __init__(
+        self,
+        sigma_max: float,
+        sigma_min: float,
+        num_steps: int,
+        s: float = 0.008,
+        **kwargs,
+    ):
         super().__init__(sigma_max, sigma_min, num_steps)
         self.s = s  # small offset to prevent singularity
 
@@ -226,8 +254,11 @@ class EDMHeunSampler(DiffusionSampler):
         S_noise = kwargs.get("S_noise", self.S_noise)
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
+        sigmas = sigmas.to(dtype)
 
         num_steps = len(sigmas) - 1
+        # Persistent dtype-precision solver state; all Heun update arithmetic uses this buffer.
+        y_solver = {dataset_name: y_data.to(dtype) for dataset_name, y_data in y.items()}
 
         # Heun sampling loop
         for i in range(num_steps):
@@ -236,56 +267,75 @@ class EDMHeunSampler(DiffusionSampler):
 
             apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
             if apply_churn:
-                gamma = min(S_churn / num_steps, torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1)
+                gamma = min(
+                    S_churn / num_steps,
+                    torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1,
+                )
                 sigma_effective = sigma_i + gamma * sigma_i
 
-                for dataset_name in y:
-                    epsilon = torch.randn_like(y[dataset_name]) * S_noise
-                    y[dataset_name] = y[dataset_name] + torch.sqrt(sigma_effective**2 - sigma_i**2) * epsilon
+                for dataset_name in y_solver:
+                    epsilon = torch.randn_like(y_solver[dataset_name]) * S_noise
+                    y_solver[dataset_name] = (
+                        y_solver[dataset_name] + torch.sqrt(sigma_effective**2 - sigma_i**2) * epsilon
+                    )
             else:
                 sigma_effective = sigma_i
 
-            for dataset_name in y:
-                y[dataset_name] = y[dataset_name].to(x[dataset_name].dtype)
+            # Cast for model evaluation: run denoiser in model/input dtype.
+            y_model = {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
 
-            sigma_effective_expanded = {
-                dataset_name: sigma_effective.view(1, 1, 1, 1, 1)
-                .expand(y_data.shape[0], 1, y_data.shape[2], 1, 1)
-                .to(y_data.dtype)
-                for dataset_name, y_data in y.items()
-            }
+            sigma_effective_expanded = _expand_sigma(sigma_effective, y_model)
 
-            D1 = denoising_fn(x, y, sigma_effective_expanded, model_comm_group, grid_shard_shapes)
+            D1 = denoising_fn(
+                x,
+                y_model,
+                sigma_effective_expanded,
+                model_comm_group,
+                grid_shard_shapes,
+            )
+            D1_solver = {dataset_name: den.to(dtype) for dataset_name, den in D1.items()}
 
-            for dataset_name in D1:
-                D1[dataset_name] = D1[dataset_name].to(dtype)
-
-            d, y_next = {}, {}
-            for dataset_name in y:
-                d[dataset_name] = (y[dataset_name] - D1[dataset_name]) / (sigma_effective + eps_prec)
-                y_next[dataset_name] = y[dataset_name] + (sigma_next - sigma_effective) * d[dataset_name]
-                y_next[dataset_name] = y_next[dataset_name].to(x[dataset_name].dtype)
+            # Predictor state in solver precision; for Heun corrector evaluation.
+            update_direction, y_next_solver = {}, {}
+            for dataset_name in y_solver:
+                update_direction[dataset_name] = (y_solver[dataset_name] - D1_solver[dataset_name]) / (
+                    sigma_effective + eps_prec
+                )
+                y_next_solver[dataset_name] = (
+                    y_solver[dataset_name] + (sigma_next - sigma_effective) * update_direction[dataset_name]
+                )
 
             if sigma_next > eps_prec:
-                sigma_next_expanded = {
-                    dataset_name: sigma_next.view(1, 1, 1, 1, 1)
-                    .expand(y_next_data.shape[0], 1, y_next_data.shape[2], 1, 1)
-                    .to(y_next_data.dtype)
-                    for dataset_name, y_next_data in y_next.items()
+                y_next_model = {
+                    # Second denoiser call also runs in model/input dtype (Heun corrector stage).
+                    dataset_name: y_next_data.to(x[dataset_name].dtype)
+                    for dataset_name, y_next_data in y_next_solver.items()
                 }
+                sigma_next_expanded = _expand_sigma(sigma_next, y_next_model)
 
-                D2 = denoising_fn(x, y_next, sigma_next_expanded, model_comm_group, grid_shard_shapes)
+                D2 = denoising_fn(
+                    x,
+                    y_next_model,
+                    sigma_next_expanded,
+                    model_comm_group,
+                    grid_shard_shapes,
+                )
+                D2_solver = {dataset_name: den.to(dtype) for dataset_name, den in D2.items()}
 
-                for dataset_name in D2:
-                    D2[dataset_name] = D2[dataset_name].to(dtype)
-
-                for dataset_name in y:
-                    d_prime = (y_next[dataset_name] - D2[dataset_name]) / (sigma_next + eps_prec)
-                    y[dataset_name] = y[dataset_name] + (sigma_next - sigma_effective) * (d[dataset_name] + d_prime) / 2
+                for dataset_name in y_solver:
+                    corrected_update_direction = (y_next_solver[dataset_name] - D2_solver[dataset_name]) / (
+                        sigma_next + eps_prec
+                    )
+                    y_solver[dataset_name] = (
+                        y_solver[dataset_name]
+                        + (sigma_next - sigma_effective)
+                        * (update_direction[dataset_name] + corrected_update_direction)
+                        / 2
+                    )
             else:
-                y = y_next
+                y_solver = y_next_solver
 
-        return y
+        return {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
 
 
 class DPMpp2MSampler(DiffusionSampler):
@@ -307,7 +357,7 @@ class DPMpp2MSampler(DiffusionSampler):
     ) -> dict[str, torch.Tensor]:
         dtype = kwargs.get("dtype", self.dtype)
 
-        # DPM++ sampler converts to x.dtype
+        # Keep model evaluations in model dtype, but run solver updates in sampler dtype.
         for dataset_name in y:
             y[dataset_name] = y[dataset_name].to(x[dataset_name].dtype)
         sigmas = sigmas.to(dtype)
@@ -322,42 +372,38 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = {
-                dataset_name: sigma.view(1, 1, 1, 1, 1)
-                .expand(y_data.shape[0], 1, y_data.shape[2], 1, 1)
-                .to(y_data.dtype)
-                for dataset_name, y_data in y.items()
-            }
+            sigma_expanded = _expand_sigma(sigma, y)
             denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
+            denoised_solver = {dataset_name: den.to(dtype) for dataset_name, den in denoised.items()}
 
             if sigma_next == 0:
-                y = denoised
+                y = {dataset_name: den.to(x[dataset_name].dtype) for dataset_name, den in denoised_solver.items()}
                 break
 
+            y_solver = {dataset_name: y_data.to(dtype) for dataset_name, y_data in y.items()}
             t = -torch.log(sigma + 1e-10)
             t_next = -torch.log(sigma_next + 1e-10) if sigma_next > 0 else float("inf")
             h = t_next - t
 
             if old_denoised is None:
-                x0 = denoised
                 for dataset_name in y:
-                    y[dataset_name] = (sigma_next / sigma) * y[dataset_name] - (torch.exp(-h) - 1) * x0[dataset_name]
+                    y_solver[dataset_name] = (sigma_next / sigma) * y_solver[dataset_name] - (
+                        torch.exp(-h) - 1
+                    ) * denoised_solver[dataset_name]
             else:
                 # Second order multistep
                 h_last = -torch.log(sigmas[i - 1] + 1e-10) - t if i > 0 else h
                 r = h_last / h
 
-                x0 = denoised
-                x0_last = old_denoised
-
                 coeff1 = 1 + 1 / (2 * r)
                 coeff2 = -1 / (2 * r)
 
                 for dataset_name in y:
-                    D = coeff1 * x0[dataset_name] + coeff2 * x0_last[dataset_name]
-                    y[dataset_name] = (sigma_next / sigma) * y[dataset_name] - (torch.exp(-h) - 1) * D
+                    D = coeff1 * denoised_solver[dataset_name] + coeff2 * old_denoised[dataset_name]
+                    y_solver[dataset_name] = (sigma_next / sigma) * y_solver[dataset_name] - (torch.exp(-h) - 1) * D
 
-            old_denoised = denoised
+            old_denoised = denoised_solver
+            y = {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
 
         return y
 
