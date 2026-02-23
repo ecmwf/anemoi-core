@@ -218,10 +218,11 @@ class MultiDataset(IterableDataset):
             )
             if valid_date_indices_ref is None:
                 valid_date_indices_ref = valid_date_indices
-            assert np.array_equal(
-                valid_date_indices_ref,
-                valid_date_indices,
-            ), "Datasets have different valid_date_indices, cannot synchronize samples"
+            #assert np.array_equal(
+            #    valid_date_indices_ref,
+            #    valid_date_indices,
+            #), "Datasets have different valid_date_indices, cannot synchronize samples"
+            valid_date_indices_ref = np.intersect1d(valid_date_indices, valid_date_indices_ref)
         return valid_date_indices_ref
 
     def set_comm_group_info(

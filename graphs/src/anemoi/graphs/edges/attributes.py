@@ -20,7 +20,7 @@ from torch_geometric.typing import PairTensor
 from torch_geometric.typing import Size
 from torch_geometric.utils import scatter
 
-from anemoi.graphs.edges.directional import compute_directions
+from anemoi.graphs.edges.directional_legacy import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_distributed_device
