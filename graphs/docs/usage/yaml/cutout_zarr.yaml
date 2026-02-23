@@ -9,6 +9,7 @@ nodes:
           - dataset: /path/to/global-dataset.zarr
         adjust: all
         min_distance_km: 10
+        max_distance_km: null
     attributes: ...
   hidden: ...
 

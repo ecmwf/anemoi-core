@@ -193,21 +193,6 @@ and the batch size. ``num_workers`` relates to model parallelisation.
       validation: null
       test: 20
 
-The grid points being modelled are also defined. In many cases this will
-be the full grid. For limited area modelling, you may want to define a
-set of target indices which mask/remove some grid points, leaving only
-the area being modelled.
-
-.. code:: yaml
-
-   # set a custom mask for grid points.
-   # Useful for LAM (dropping unconnected nodes from forcing dataset)
-   grid_indices:
-      datasets:
-         your_dataset_name:
-            _target_: anemoi.training.data.grid_indices.FullGrid
-            nodes_name: ${graph.data}
-
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we
 separate our data into: training data, used to train the model;
@@ -222,7 +207,9 @@ time of each section of the data.
 This can be given as a full date, or just the year, or year and month,
 in these cases the first of the month/first of the year is used.
 
-We also define the dataset used and the frequency. These can be set
+We also define the dataset reader options under ``dataset_config``.
+This includes the dataset source (``dataset``) and optional keys such as
+``frequency``, ``drop``, ``select`` and ``statistics``. These can be set
 separately for the different training/validation/test parts of the
 dataset `your_dataset_name`, for example, if test data is stored in a
 different file.

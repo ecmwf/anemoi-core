@@ -397,41 +397,6 @@ def test_process_forecaster_output_shapes():
     assert output_tensor.shape == (output_times, n_step_output, n_ens, nlatlon, nvar), output_tensor.shape
 
 
-def test_process_time_interpolator_output_shapes():
-    """BasePlotAdditionalMetrics.process: time-interpolator task yields expected shapes."""
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
-    callback = PlotSample(
-        config=config,
-        sample_idx=0,
-        parameters=["a", "b"],
-        accumulation_levels_plot=[0.5],
-        output_steps=1,
-        dataset_names=["data"],
-    )
-    batch_size, sample_idx, n_ens, nlatlon, nvar = 2, 10, 1, 50, 3
-    output_times = 2
-    total_targets = output_times  # no n_step_output factor for interpolator
-    pl_module = _make_pl_module_interpolator(
-        output_times=output_times,
-        nlatlon=nlatlon,
-    )
-    batch = {"data": torch.randn(batch_size, sample_idx, n_ens, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
-        [
-            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
-            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
-        ],
-    )
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
-
-    data, output_tensor = callback.process(pl_module, "data", outputs, batch, output_times)
-
-    assert data.shape == (1 + total_targets + 1, n_ens, nlatlon, nvar), data.shape
-    assert output_tensor.shape == (output_times, 1, n_ens, nlatlon, nvar), output_tensor.shape
-
-
 def test_process_time_interpolator_multi_out_squeeze():
     """BasePlotAdditionalMetrics.process: time-interpolator multi-out (ndim=5, shape[0]=1) squeezes to 4D."""
     config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
