@@ -398,8 +398,7 @@ def test_logfft2dist_loss() -> None:
     assert hasattr(loss.transform, "y_dim")
 
     # pred/target are (batch, steps, grid, vars)
-    # TODO (Ophelia): edit this when multi ouptuts get merged
-    right = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    right = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
 
     # squash=False -> per-variable loss
     loss_value = loss(*right, squash=False)
@@ -420,7 +419,6 @@ def test_logfft2dist_loss() -> None:
 def test_fcl_loss() -> None:
     import einops
 
-    # TODO (Ophelia): edit this when multi ouptuts get merged
     """Test that FourierCorrelationLoss can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
