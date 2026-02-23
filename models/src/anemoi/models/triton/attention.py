@@ -98,6 +98,7 @@ def _attn_fwd_inner(
 
         # round down to lowest multiple of BLOCK_ITER
         lo = (lo // BLOCK_ITER) * BLOCK_ITER
+        lo = tl.multiple_of(lo, BLOCK_ITER)
     elif WINDOW > 0:
         # Attends within the following range (Assuming W=1)
         # X X - - -
@@ -132,6 +133,7 @@ def _attn_fwd_inner(
         # X X X X X
 
         lo, hi = 0, N_CTX
+        lo = tl.multiple_of(lo, BLOCK_ITER)
 
     # TODO(cathal) change based on dtype
     MINUS_INF: tl.constexpr = -1.0e8
@@ -151,6 +153,7 @@ def _attn_fwd_inner(
             k = tl.where(
                 mask_iter[None, :] < N_CTX, k, 0.0
             )  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
+
         qk = tl.dot(q, k) * qk_scale
 
         if UNEVEN_CTX:
@@ -263,8 +266,8 @@ def _generate_configs(try_warp_spec=True):
         )
         for BM in [16, 32, 64, 128]
         for BN in [16, 32, 64, 128]
-        for s in NUM_STAGES_OPTIONS
-        for w in [4, 8]
+        for s in [1] #NUM_STAGES_OPTIONS
+        for w in [4] #[4, 8]
         for WS in ([True, False] if try_warp_spec else [False])
     ]
 
@@ -283,6 +286,12 @@ def _generate_configs(try_warp_spec=True):
 
 @triton.jit
 def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
+    # TODO(cathal) possible bug here, debug by forcing this code path
+    #   The above exception was the direct cause of the following exception:
+
+    #   triton.compiler.errors.CompilationError: at 5:15:
+    #       return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
+    #       Shape element 0 must have type `constexpr[int]`, got `constexpr[<class 'triton.language.core.tensor'>]
     if isinstance(desc_or_ptr, tl.tensor_descriptor):
         return desc_or_ptr
     else:
@@ -321,13 +330,15 @@ def _attn_fwd(
     off_z = off_hz // H
     off_h = off_hz % H
 
-    # number of elements in all non-head-dim dimensions (use rounded value for actual tensor layout)
-    y_dim = Z * H * n_ctx_rounded
+    # number of elements in all non-head-dim dimensions (use actual N_CTX for q,k,v,o layout)
+    y_dim_padded = Z * H * n_ctx_rounded
+    y_dim = Z * H * N_CTX
 
     # If tensor_descriptors weren't created on host (in system_specific_settings())
     # Then they are created here
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
+        #shape=[y_dim_padded, HEAD_DIM],
         shape=[y_dim, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_FIXED, HEAD_DIM],
@@ -349,16 +360,18 @@ def _attn_fwd(
         output_block_size = N_CTX - start_fixed * BLOCK_FIXED
     desc_o = _maybe_make_tensor_descriptor(
         desc_o,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_padded, HEAD_DIM],
+        #shape=[y_dim, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[output_block_size, HEAD_DIM],
     )
 
     # Offsets into the start of the tensor which this kernel will iterate over
-    # Use n_ctx_rounded for calculating offsets since tensor is padded
-    iter_offset = off_z * (n_ctx_rounded * H) + off_h * n_ctx_rounded
+    iter_offset = off_z * H * N_CTX + off_h * N_CTX
     # Offsets into the region of the tensor which this kernel will keep in memory
-    fixed_offset = iter_offset + start_fixed * BLOCK_FIXED  # (used for Tensor Descriptors)
+    padded_fixed_offset =  off_z * H * n_ctx_rounded + off_h * n_ctx_rounded + start_fixed * BLOCK_FIXED  # (used for Tensor Descriptors)
+    fixed_offset =  iter_offset + start_fixed * BLOCK_FIXED  # (used for Tensor Descriptors)
+
     # initialize offset pointers
     offs_fixed = start_fixed * BLOCK_FIXED + tl.arange(0, BLOCK_FIXED)  # (used for normal tensors)
     offs_iter = tl.arange(0, BLOCK_ITER)
@@ -373,6 +386,7 @@ def _attn_fwd(
     qk_scale = sm_scale
     qk_scale *= 1.44269504  # 1/log(2) #hack to make calculating exponent faster, by merging 1/ln(2) now the cheaper exp2() fn can be called later instead of exp()
     # load q: it will stay in SRAM throughout
+    #q = desc_q.load([padded_fixed_offset, 0])
     q = desc_q.load([fixed_offset, 0])
     if UNEVEN_CTX:
         # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
@@ -406,7 +420,8 @@ def _attn_fwd(
     tl.store(
         m_ptrs, m_i, mask=offs_fixed < N_CTX
     )  # TODO(cathal) might be overwiriting block boundarys in m where offs_fixed goes beyond ctx and into the next
-    desc_o.store([fixed_offset, 0], acc.to(dtype))
+    #desc_o.store([fixed_offset, 0], acc.to(dtype))
+    desc_o.store([padded_fixed_offset, 0], acc.to(dtype))
 
 
 @triton.jit
@@ -420,14 +435,14 @@ def _attn_bwd_preprocess(
     off_m = tl.program_id(0) * PRE_BLOCK + tl.arange(0, PRE_BLOCK)
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
-    # load - use n_ctx_rounded for stride since tensors are padded
+    # load - use N_CTX for stride since tensors are not padded
     o = tl.load(
-        Out + off_hz * HEAD_DIM * n_ctx_rounded + off_m[:, None] * HEAD_DIM + off_n[None, :],
+        Out + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
         mask=off_m[:, None] < N_CTX,
         other=0.0,
     ).to(tl.float32)
     do = tl.load(
-        DO + off_hz * HEAD_DIM * n_ctx_rounded + off_m[:, None] * HEAD_DIM + off_n[None, :],
+        DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
         mask=off_m[:, None] < N_CTX,
         other=0.0,
     ).to(tl.float32)
@@ -485,11 +500,11 @@ def _attn_bwd_dkdv(
     off_chz = (off_hz * n_ctx_rounded).to(tl.int64)  # Use n_ctx_rounded since M/L/D are allocated with that dimension
     off_z = off_hz // H
     off_h = off_hz % H
-    iter_offset = off_z * (n_ctx_rounded * H) + off_h * n_ctx_rounded
+    iter_offset = off_z * H * N_CTX + off_h * N_CTX 
     fixed_offset = iter_offset + start_fixed
 
-    # number of elements in all non-head-dim dimensions
-    y_dim: tl.constexpr = Z * H * n_ctx_rounded
+    # number of elements in all non-head-dim dimensions (use actual N_CTX for q,k,v,do layout)
+    y_dim: tl.constexpr = Z * H * N_CTX
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
         shape=[y_dim, HEAD_DIM],
@@ -699,14 +714,13 @@ def _attn_bwd_dq(
 
     # Index into head and batch
     off_hz = tl.program_id(2)
-    off_chz = (off_hz * n_ctx_rounded).to(tl.int64)  # Use n_ctx_rounded since M/D are allocated with that dimension
-    # off_chz = (off_hz * N_CTX).to(tl.int64)  # Use n_ctx_rounded since M/D are allocated with that dimension
+    off_chz = off_hz * n_ctx_rounded
     off_z = off_hz // H
     off_h = off_hz % H
-    iter_offset = off_z * (n_ctx_rounded * H) + off_h * n_ctx_rounded
+    iter_offset = off_z * (N_CTX * H) + off_h * N_CTX  # Use N_CTX since q,k,v,do are not padded
     fixed_offset = iter_offset + start_fixed
 
-    # How many elements in the first 3 dimensaions
+    # How many elements in the first 3 dimensions (use actual N_CTX for q,k,v,do layout)
     y_dim = Z * H * n_ctx_rounded
     # Build tensor descriptors if they havent already been built in _system_specific_settings()
     desc_q = _maybe_make_tensor_descriptor(
@@ -876,16 +890,15 @@ def _system_specific_settings(q, k, v, o, warp_specialize):
 
     # If host descriptor isnt supported, the descriptors will be created on device at the start of the kernels
     if supports_host_descriptor():
-        y_dim = q.shape[0] * q.shape[1] * q.shape[2]
 
         dummy_block = [
             1,
             1,
         ]  # After autotuning, block_shape will be overwritten with the optimal block size in host_descriptor_pre_hook()
-        desc_q = TensorDescriptor(q, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
-        desc_v = TensorDescriptor(v, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
-        desc_k = TensorDescriptor(k, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
-        desc_o = TensorDescriptor(o, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
+        desc_q = TensorDescriptor(q, shape=[q.shape[0] * q.shape[1] * q.shape[2], HEAD_DIM_Q], strides=[HEAD_DIM_Q, 1], block_shape=dummy_block)
+        desc_v = TensorDescriptor(v, shape=[v.shape[0] * v.shape[1] * v.shape[2], HEAD_DIM_V], strides=[HEAD_DIM_V, 1], block_shape=dummy_block)
+        desc_k = TensorDescriptor(k, shape=[k.shape[0] * k.shape[1] * k.shape[2], HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
+        desc_o = TensorDescriptor(o, shape=[o.shape[0] * o.shape[1] * o.shape[2], HEAD_DIM_Q], strides=[HEAD_DIM_Q, 1], block_shape=dummy_block)
     else:
         desc_q = q
         desc_v = v
@@ -929,20 +942,14 @@ class TritonAttention(torch.autograd.Function):
         # Currently it works so long as block size is lte 128.
         # TODO(cathal) ensure grid is based on real ctx not rounded ctx, to avoid launching extra blocks which do no work when ctx is not divisible by block size
 
-        # Pad q, k, v if necessary
-        # TODO(cathal) need a better way to do this
-
-        # commenting out the padding  (here and below) gives a speedup from 1.78 and 2.9ms to 1.5 and 2.4ms (compared to flash attn 1.23ms and 2.01ms)
+        # Only pad M (not q, k, v, o) to avoid runtime cost
+        # M needs padding since it's indexed with n_ctx_rounded for batch alignment
         uneven_ctx = n_ctx_rounded != n_ctx
         if uneven_ctx:
             pad_size = n_ctx_rounded - n_ctx
-            q = torch.nn.functional.pad(q, (0, 0, 0, pad_size), value=0.0)
-            k = torch.nn.functional.pad(k, (0, 0, 0, pad_size), value=0.0)
-            v = torch.nn.functional.pad(v, (0, 0, 0, pad_size), value=0.0)
-            o = torch.nn.functional.pad(o, (0, 0, 0, pad_size), value=0.0)
-            M = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
-        else:
-            M = torch.empty((q.shape[0], q.shape[1], n_ctx), device=q.device, dtype=torch.float32)
+            #q = torch.nn.functional.pad(q, (0, 0, 0, pad_size))
+            o = torch.nn.functional.pad(o, (0, 0, 0, pad_size))
+        M = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
 
@@ -982,10 +989,8 @@ class TritonAttention(torch.autograd.Function):
 
         # Remove padding from tensors
         if uneven_ctx:
+            #q = q[:, :, :n_ctx, :]
             o = o[:, :, :n_ctx, :]
-            q = q[:, :, :n_ctx, :]
-            k = k[:, :, :n_ctx, :]
-            v = v[:, :, :n_ctx, :]
 
         ctx.save_for_backward(q, k, v, o, M)
 
@@ -1016,25 +1021,13 @@ class TritonAttention(torch.autograd.Function):
         MAX_BLOCK_SIZE = 128
         n_ctx_rounded = (
             math.ceil(n_ctx / MAX_BLOCK_SIZE) * MAX_BLOCK_SIZE
-        )  # TODO(cathal) use block size from autotuning results instead of hardcoding 64 here
+        )  
         uneven_ctx = n_ctx_rounded != n_ctx
-        # pre_grid = (triton.cdiv(N_CTX, PRE_BLOCK), BATCH * N_HEAD)
+        #if uneven_ctx:
+        #    pad_size = n_ctx_rounded - n_ctx
+        #    q = torch.nn.functional.pad(q, (0, 0, 0, pad_size))
 
         pre_grid = (triton.cdiv(n_ctx_rounded, PRE_BLOCK), BATCH * N_HEAD)
-
-        # Pad q, k, v if necessary
-        # TODO(cathal) need a better way to do this
-        if uneven_ctx:
-            pad_size = n_ctx_rounded - n_ctx
-            q = torch.nn.functional.pad(q, (0, 0, 0, pad_size), value=0.0)
-            k = torch.nn.functional.pad(k, (0, 0, 0, pad_size), value=0.0)
-            v = torch.nn.functional.pad(v, (0, 0, 0, pad_size), value=0.0)
-            o = torch.nn.functional.pad(o, (0, 0, 0, pad_size), value=0.0)
-            do = torch.nn.functional.pad(do, (0, 0, 0, pad_size), value=0.0)
-
-            dq = torch.nn.functional.pad(dq, (0, 0, 0, pad_size), value=0.0)
-            dk = torch.nn.functional.pad(dk, (0, 0, 0, pad_size), value=0.0)
-            dv = torch.nn.functional.pad(dv, (0, 0, 0, pad_size), value=0.0)
         L = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
@@ -1099,11 +1092,5 @@ class TritonAttention(torch.autograd.Function):
             UNEVEN_CTX=uneven_ctx,
             **extra_kern_args,
         )
-
-        # Remove padding from tensors
-        if uneven_ctx:
-            dq = dq[:, :, :n_ctx, :]
-            dk = dk[:, :, :n_ctx, :]
-            dv = dv[:, :, :n_ctx, :]
 
         return dq, dk, dv, None, None, None, None
