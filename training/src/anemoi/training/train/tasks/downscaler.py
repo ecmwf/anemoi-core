@@ -237,7 +237,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         )
 
         # Denormalize tensors
-        x_in_interp_to_hres = self.model.pre_processors(
+        x_in_interp_to_hres = self.model.post_processors(
             x_in_interp_to_hres, dataset="input_lres"
         )
         y_pred = self.model.post_processors(y_pred, dataset="output")
