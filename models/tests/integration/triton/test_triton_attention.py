@@ -123,11 +123,11 @@ def attention_varlen_ref(
 
 @pytest.mark.gpu
 @pytest.mark.slow
-@pytest.mark.parametrize("Z", [1])
-@pytest.mark.parametrize("H", [1,2])
+@pytest.mark.parametrize("Z", [4])
+@pytest.mark.parametrize("H", [9])
 @pytest.mark.parametrize(
     "N_CTX",
-    [48, 97, 128],
+    [97, 128, 200, 257, 384, 512, 768, 1025, 2048],
     # "N_CTX", [32]
     # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
 )
@@ -137,8 +137,8 @@ def attention_varlen_ref(
     "window",
     [True, False],
 )
-@pytest.mark.parametrize("mode", ["fwd" ])
-@pytest.mark.parametrize("dtype", [torch.float16])
+@pytest.mark.parametrize("mode", ["fwd"])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     """Compares Triton flash attention against a naive torch implementation, and optionally flash attention
 
@@ -266,13 +266,13 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
                 # Print a small slice around the offending token to inspect cross-batch/head behaviour.
                 print("[triton-attn debug] tri_out[z, h, t, :8] =", tri_out[z, h, t, :8].detach().cpu())
                 print("[triton-attn debug] ref_out[z, h, t, :8] =", ref_out[z, h, t, :8].detach().cpu())
-                
+
                 # Additional debug: check error pattern across tokens
                 per_token_max = diff[z, h, :, :].amax(dim=-1)
                 print(f"[triton-attn debug] max error per token in batch {z} head {h}:")
                 print(f"  First 10 tokens: {per_token_max[:10].detach().cpu()}")
                 print(f"  Last 10 tokens: {per_token_max[-10:].detach().cpu()}")
-                
+
                 # Check if error is concentrated at boundaries
                 boundary_errors = (per_token_max > atol).sum()
                 print(f"[triton-attn debug] {boundary_errors}/{len(per_token_max)} tokens exceed tolerance")
