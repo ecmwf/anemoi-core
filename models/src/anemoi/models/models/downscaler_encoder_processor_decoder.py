@@ -44,6 +44,82 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
     """Downscaling Model."""
 
+    def __init__(
+        self,
+        *,
+        model_config: DotDict,
+        data_indices: dict,
+        statistics: dict,
+        graph_data: HeteroData,
+        truncation_data: dict,
+    ) -> None:
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+            truncation_data=truncation_data,
+        )
+        self.register_buffer(
+            "x_in_matching_channel_indices",
+            self._build_matching_channel_indices(),
+            persistent=True,
+        )
+
+    def _build_matching_channel_indices(self) -> torch.Tensor:
+        """Build indices to reorder input_lres channels to output channel order."""
+        input_name_to_index = self.data_indices.data.input[0].name_to_index
+        output_name_to_index = {
+            k: v
+            for k, v in self.data_indices.data.output.name_to_index.items()
+            if v in self.data_indices.data.output.full
+        }
+        channel_indices = self._match_tensor_channels(input_name_to_index, output_name_to_index)
+        if channel_indices.numel() != len(output_name_to_index):
+            missing = [name for name in output_name_to_index.keys() if name not in input_name_to_index]
+            raise ValueError(
+                "Could not fully map input_lres channels to output channels for residual reconstruction. "
+                f"Missing channels in input_lres: {missing}"
+            )
+        return channel_indices
+
+    def _match_tensor_channels(
+        self,
+        input_name_to_index: dict[str, int],
+        output_name_to_index: dict[str, int],
+    ) -> torch.Tensor:
+        """Reorder/select input channels to match output tensor structure."""
+        common_channels = set(input_name_to_index.keys()) & set(output_name_to_index.keys())
+        channel_mapping = []
+        for channel_name in output_name_to_index.keys():
+            if channel_name in common_channels:
+                channel_mapping.append(input_name_to_index[channel_name])
+        return torch.tensor(channel_mapping, dtype=torch.long)
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        """Backwards-compatible loading for checkpoints created before this buffer existed."""
+        key = f"{prefix}x_in_matching_channel_indices"
+        if key not in state_dict:
+            state_dict[key] = self.x_in_matching_channel_indices
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+
     def compute_residuals_advanced(
         self,
         y: torch.Tensor,
@@ -664,11 +740,13 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         """
         state_outp = post_processors_state(residuals, dataset="output", in_place=False)
 
-        state_outp += post_processors_state(
+        state_inp_denorm = post_processors_state(
             state_inp,
             dataset="input_lres",
             in_place=False,
         )
+        channel_indices = self.x_in_matching_channel_indices.to(state_inp_denorm.device)
+        state_outp += state_inp_denorm[..., channel_indices]
         return state_outp
 
     def correction_bug_to_delete(self, out, y_pred_residuals, post_processors_state):

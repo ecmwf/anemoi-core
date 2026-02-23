@@ -70,14 +70,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.training_approach = getattr(
             config.training, "training_approach", "probabilistic_low_noise"
         )
-        self.x_in_matching_channel_indices = match_tensor_channels(
-            self.data_indices.data.input[0].name_to_index,
-            {
-                k: v
-                for k, v in self.data_indices.data.output.name_to_index.items()
-                if v in self.data_indices.data.output.full
-            },
-        )
         reader_group_size = self.config.dataloader.read_group_size
         self.lres_grid_indices = instantiate(
             self.config.model_dump(by_alias=True).dataloader.lres_grid_indices,
@@ -177,12 +169,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
 
-        self.x_in_matching_channel_indices = self.x_in_matching_channel_indices.to(
-            x_in_interp_to_hres.device
-        )
+        channel_indices = self.model.model.x_in_matching_channel_indices.to(x_in_interp_to_hres.device)
         residuals_target = self.model.model.compute_residuals(
             y,
-            x_in_interp_to_hres[..., self.x_in_matching_channel_indices],
+            x_in_interp_to_hres[..., channel_indices],
         )
 
         # Y = Y[:, :, :, ..., self.data_indices.data.output.full] #(see if necessary)
@@ -243,7 +233,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         y_pred = self.model.post_processors(y_pred, dataset="output")
 
         # Add predicted residuals to the state
-        y_preds = [x_in_interp_to_hres[..., self.x_in_matching_channel_indices] + y_pred, y_pred]
+        y_preds = [x_in_interp_to_hres[..., channel_indices] + y_pred, y_pred]
 
         return loss, metrics_next, y_preds
 
@@ -503,24 +493,3 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             }
         )
         """
-
-
-def match_tensor_channels(input_name_to_index, output_name_to_index):
-    """
-    Reorders and selects channels from input tensor to match output tensor structure.
-    x_in: Input tensor of shape [batch, n_grid_points, channels]
-    """
-
-    common_channels = set(input_name_to_index.keys()) & set(output_name_to_index.keys())
-
-    # for each output channel, look for corresponding input channel
-    channel_mapping = []
-    for channel_name in output_name_to_index.keys():
-        if channel_name in common_channels:
-            input_pos = input_name_to_index[channel_name]
-            channel_mapping.append(input_pos)
-
-    # Convert to tensor for indexing
-    channel_indices = torch.tensor(channel_mapping)
-
-    return channel_indices
