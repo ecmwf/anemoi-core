@@ -472,6 +472,9 @@ def _attn_bwd_dkdv(
     desc_do,
     desc_dk,
     desc_dv,
+    # need to pass raw pointers for dk and  v when using uneven ctx, to handle the dynamic block sizes and masked loads required for uneven ctx
+    dk_ptr,
+    dv_ptr,
     M,
     L,
     D,
@@ -669,9 +672,21 @@ def _attn_bwd_dkdv(
     # Store computed dK and dV
     # when N_CTX is not divisible by BLOCK_FIXED, we may have computed values for out-of-bounds positions,
     # In this case, we set the block size of desc_d[vk] to be smaller in the tail case, such that the store only writes the in-bounds values.
-    desc_dv.store([fixed_offset, 0], dv.to(dtype))
-    dk *= sm_scale
-    desc_dk.store([fixed_offset, 0], dk.to(dtype))
+
+    if UNEVEN_CTX and (start_fixed + 1) * BLOCK_FIXED > N_CTX:
+        # need to write a smaller block size when using uneven ctx to avoid writing into the next SMs region
+        # to do this, access dk and dv as regular pointers with 2D indexing
+        out_ptrs = off_hz * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + (tl.arange(0, HEAD_DIM))[None, :]
+        dv_ptrs = dv_ptr + out_ptrs
+        dk_ptrs = dk_ptr + out_ptrs
+
+        tl.store(dv_ptrs, dv.to(dtype), mask=offs_fixed[:, None] < N_CTX)
+        dk *= sm_scale
+        tl.store(dk_ptrs, dk.to(dtype), mask=offs_fixed[:, None] < N_CTX)
+    else:
+        desc_dv.store([fixed_offset, 0], dv.to(dtype))
+        dk *= sm_scale
+        desc_dk.store([fixed_offset, 0], dk.to(dtype))
 
 
 @triton.autotune(
@@ -688,6 +703,7 @@ def _attn_bwd_dq(
     desc_v,
     desc_do,
     desc_dq,
+    dq_ptr,
     M,
     D,
     # shared by Q/K/V/DO.
@@ -871,10 +887,14 @@ def _attn_bwd_dq(
     # Write back dQ.
     dq *= LN2
     # to avoid writing out of bounds when N_CTX is not divisible by BLOCK_FIXED, the block size of desc_dq is set to be smaller in the last block, so we only write the in-bounds values
-    desc_dq.store([fixed_offset, 0], dq.to(dtype))
+    if UNEVEN_CTX and (start_fixed + 1) * BLOCK_FIXED > N_CTX:
+        dq_ptrs = dq_ptr + off_hz * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + tl.arange(0, HEAD_DIM)[None, :]
+        tl.store(dq_ptrs, dq.to(dtype), mask=offs_fixed[:, None] < N_CTX)
+    else:
+        desc_dq.store([fixed_offset, 0], dq.to(dtype))
 
 
-def _system_specific_settings(q, k, v, o, warp_specialize, uneven_ctx):
+def _system_specific_settings(q, k, v, o, warp_specialize):
     """Provides addtional performance settings for specific systems.
 
     These performance settings come from the Triton fused attention example.
@@ -920,10 +940,6 @@ def _system_specific_settings(q, k, v, o, warp_specialize, uneven_ctx):
             block_shape=dummy_block,
         )
 
-        # need to change the block shape when using uneven ctx so we dont wriute into another SMs region
-        # if uneven_ctx:
-        #    desc_o = o
-        # else:
         desc_o = TensorDescriptor(
             o,
             shape=[o.shape[0] * o.shape[1] * o.shape[2], HEAD_DIM_Q],
@@ -978,7 +994,7 @@ class TritonAttention(torch.autograd.Function):
         uneven_ctx = n_ctx_rounded != n_ctx
         M = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
-        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True, uneven_ctx)
+        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
 
         # defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU
         # (SMs are essentially processors on a GPU, with typically 1024 threads per SM)
@@ -1050,13 +1066,11 @@ class TritonAttention(torch.autograd.Function):
         n_ctx_rounded = math.ceil(n_ctx / MAX_BLOCK_SIZE) * MAX_BLOCK_SIZE
         uneven_ctx = n_ctx_rounded != n_ctx
 
-        pre_grid = (triton.cdiv(n_ctx_rounded, PRE_BLOCK), BATCH * N_HEAD)
+        pre_grid = (triton.cdiv(n_ctx, PRE_BLOCK), BATCH * N_HEAD)
         L = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
-        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True, uneven_ctx)
-        desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(
-            dq, dk, dv, do, True, uneven_ctx
-        )
+        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
+        desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, True)
 
         # precompute 'delta' value needed for softmax computation
         _attn_bwd_preprocess[pre_grid](
@@ -1068,10 +1082,10 @@ class TritonAttention(torch.autograd.Function):
         # There is at least one kernel per BATCH * NUM_HEAD.
         # Depending on BLOCK_FIXED, the context dimension can be further split across kernels
         def grid_dkdv(META):
-            return (triton.cdiv(n_ctx_rounded, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
+            return (triton.cdiv(n_ctx, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
 
         def grid_dq(META):
-            return (triton.cdiv(n_ctx_rounded, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
+            return (triton.cdiv(n_ctx, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
 
         # Compute dK and dV
         _attn_bwd_dkdv[grid_dkdv](
@@ -1081,6 +1095,9 @@ class TritonAttention(torch.autograd.Function):
             desc_do,
             desc_dk,
             desc_dv,
+            # need to pass raw pointer in uneven ctx case
+            dk,
+            dv,
             M,
             L,
             delta,  #
@@ -1104,6 +1121,8 @@ class TritonAttention(torch.autograd.Function):
             desc_v,
             desc_do,
             desc_dq,
+            # need to pass raw pointer in uneven ctx case
+            dq,
             M,
             delta,  #
             Z=BATCH,

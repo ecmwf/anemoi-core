@@ -128,8 +128,6 @@ def attention_varlen_ref(
 @pytest.mark.parametrize(
     "N_CTX",
     [97, 128, 200, 257, 384, 512, 768, 1025, 2048],
-    # "N_CTX", [32]
-    # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
 )
 @pytest.mark.parametrize("HEAD_DIM", [64])
 @pytest.mark.parametrize("causal", [False])  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
@@ -137,7 +135,7 @@ def attention_varlen_ref(
     "window",
     [True, False],
 )
-@pytest.mark.parametrize("mode", ["fwd"])
+@pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     """Compares Triton flash attention against a naive torch implementation, and optionally flash attention
@@ -296,6 +294,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     if is_hip() and triton.runtime.driver.active.get_current_target().arch == "gfx90a":
         bwd_rtol = max(1e-2, bwd_rtol)
 
+    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=bwd_rtol)
     try:
         torch.testing.assert_close(tri_dv, ref_dv, atol=atol, rtol=bwd_rtol)
     except AssertionError:
@@ -326,4 +325,3 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         # Re-raise so the test still fails, but with extra context.
         raise
     torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=bwd_rtol)
-    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=bwd_rtol)
