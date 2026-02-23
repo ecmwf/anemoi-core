@@ -116,9 +116,74 @@ def attention_varlen_ref(
     return output
 
 
-# def test_triton_attention_deterministic():
-#    """ Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic. """
-#    raise NotImplementedError("TODO(cathal): implement this test.")
+@pytest.mark.gpu
+def test_triton_attention_deterministic():
+    """Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic."""
+    
+    if not is_triton_available():
+        pytest.skip("Triton not available")
+    
+    try:
+        DEVICE = triton.runtime.driver.active.get_active_torch_device()
+    except RuntimeError:
+        pytest.skip("No GPU detected")
+    
+    attention = TritonAttention.apply
+    
+    # Fixed test configuration: fp16, global attention (no causal, no window), fwd+bwd
+    Z, H, N_CTX, HEAD_DIM = 2, 4, 256, 64
+    dtype = torch.float16
+    causal = False
+    window_size = -1
+    
+    # Create fixed inputs (use manual_seed for reproducibility of this test)
+    torch.manual_seed(42)
+    q = torch.rand((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).requires_grad_()
+    k = torch.rand((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).requires_grad_()
+    v = torch.rand((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).requires_grad_()
+    dout = torch.randn((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE)
+    sm_scale = 1 / math.sqrt(HEAD_DIM)
+    
+    # Store first run outputs
+    first_out = None
+    first_dq = None
+    first_dk = None
+    first_dv = None
+    
+    num_runs = 50
+    for run in range(num_runs):
+        # Clone inputs to ensure fresh gradients each run
+        q_run = q.clone().detach().requires_grad_()
+        k_run = k.clone().detach().requires_grad_()
+        v_run = v.clone().detach().requires_grad_()
+        
+        # Forward pass
+        out = attention(q_run, k_run, v_run, causal, window_size, sm_scale)
+        
+        # Backward pass
+        out.backward(dout)
+        
+        if run == 0:
+            # Store first run for comparison
+            first_out = out.detach().clone()
+            first_dq = q_run.grad.detach().clone()
+            first_dk = k_run.grad.detach().clone()
+            first_dv = v_run.grad.detach().clone()
+        else:
+            # Compare with first run - outputs should be bit-exact
+            try:
+                torch.testing.assert_close(out, first_out, atol=0.0, rtol=0.0)
+                torch.testing.assert_close(q_run.grad, first_dq, atol=0.0, rtol=0.0)
+                torch.testing.assert_close(k_run.grad, first_dk, atol=0.0, rtol=0.0)
+                torch.testing.assert_close(v_run.grad, first_dv, atol=0.0, rtol=0.0)
+            except AssertionError as e:
+                raise AssertionError(
+                    f"Non-deterministic behavior detected on run {run + 1}/{num_runs}. "
+                    f"Output differs from first run. This indicates a race condition or "
+                    f"uninitialized memory access in the kernel."
+                ) from e
+    
+    print(f"[triton-attn deterministic] All {num_runs} runs produced identical results ✓")
 
 
 @pytest.mark.gpu
