@@ -7,13 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .area_weights import AnemoiDatasetVariableWeights
 from .area_weights import CosineLatWeightedAttribute
 from .area_weights import IsolatitudeAreaWeights
 from .area_weights import MaskedPlanarAreaWeights
 from .area_weights import PlanarAreaWeights
 from .area_weights import SphericalAreaWeights
 from .area_weights import UniformWeights
-from .area_weights import AnemoiDatasetVariableWeights
 from .boolean_op import BooleanAndMask
 from .boolean_op import BooleanNot
 from .boolean_op import BooleanOrMask

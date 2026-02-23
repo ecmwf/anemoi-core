@@ -19,10 +19,10 @@ from scipy.spatial import SphericalVoronoi
 from scipy.spatial import Voronoi
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.datasets.data import open_dataset
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
-from anemoi.datasets.data import open_dataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -424,9 +424,9 @@ class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
         area_km = dict(zip(unique_lats, ring_area_km / lat_counts))
         return np.array([area_km[lat] for lat in latitudes])
 
+
 class AnemoiDatasetVariableWeights(BaseNodeAttribute):
-    """
-    Load area weights from a variable in the dataset.
+    """Load area weights from a variable in the dataset.
 
     Attributes
     ----------
@@ -446,14 +446,13 @@ class AnemoiDatasetVariableWeights(BaseNodeAttribute):
     def __init__(self, variable: str, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__(norm, dtype)
         self.variable = variable
-    
+
     def _read_data(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
         """Read the weighting variable from the dataset."""
         return open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        """
-        Extract the data and convert it to a Torch tensor object.
+        """Extract the data and convert it to a Torch tensor object.
 
         Parameters
         ----------
