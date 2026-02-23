@@ -78,6 +78,31 @@ You can also change the GPU count to whatever you have available:
 This matches the interface of the underlying defaults in Anemoi
 training.
 
+***********************************
+ Dataloader Breaking Change
+***********************************
+
+Starting from the current configuration schema, dataloader dataset reader
+settings must be provided under ``dataset_config``.
+
+Use:
+
+.. code:: yaml
+
+   dataloader:
+      training:
+         datasets:
+            your_dataset_name:
+               dataset_config:
+                  dataset: ${system.input.dataset}
+                  frequency: ${data.frequency}
+                  drop: []
+               start: 1985
+               end: 2020
+
+Do not use the previous ``dataset``/``name`` nesting. Configuration
+validation now enforces the new layout.
+
 *********************************
  Multistep Input and Output
 *********************************
