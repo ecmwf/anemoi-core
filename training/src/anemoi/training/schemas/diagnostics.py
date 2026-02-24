@@ -303,7 +303,10 @@ class PlotSchema(PydanticBaseModel):
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
-    projection_kind: str = Field(default="equirectangular", examples=["equirectangular", "lambert_conformal"])
+    projection_kind: Literal["equirectangular", "lambert_conformal"] = Field(
+        default="equirectangular",
+        examples=["equirectangular", "lambert_conformal"],
+    )
     "Map projection for diagnostics plots: 'equirectangular' or 'lambert_conformal'."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
