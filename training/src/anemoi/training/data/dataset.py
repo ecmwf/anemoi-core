@@ -25,30 +25,72 @@ from anemoi.utils.dates import frequency_to_seconds
 LOGGER = logging.getLogger(__name__)
 
 
+def _as_dict(value: str | dict | DictConfig) -> str | dict:
+    """Convert DictConfig payloads to plain dicts."""
+    return dict(value) if isinstance(value, DictConfig) else value
+
+
+def _normalize_dataset_config(dataset_config: str | dict | DictConfig) -> str | dict:
+    """Normalize dataset payload to the open_dataset dictionary contract."""
+    dataset_config = _as_dict(dataset_config)
+    if not isinstance(dataset_config, dict):
+        return dataset_config
+
+    if "dataset" not in dataset_config:
+        msg = "dataset_config must contain the 'dataset' key."
+        raise ValueError(msg)
+
+    if dataset_config["dataset"] is None:
+        msg = "dataset_config.dataset cannot be None."
+        raise ValueError(msg)
+
+    invalid_inner_keys = {"start", "end"} & set(dataset_config)
+    if invalid_inner_keys:
+        invalid = ", ".join(sorted(invalid_inner_keys))
+        msg = f"dataset_config cannot contain [{invalid}]. Use outer keys 'start' and 'end' instead."
+        raise ValueError(msg)
+
+    # Keep only explicitly set options to avoid passing None-valued kwargs
+    # (e.g. select=None), which can trigger downstream subset selection issues.
+    return {key: value for key, value in dataset_config.items() if value is not None}
+
+
+def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
+    """Validate and normalize reader configuration."""
+    normalized = dict(dataset_config)
+
+    if "dataset" in normalized:
+        msg = (
+            "Invalid dataloader dataset schema: use 'dataset_config' (outer key) "
+            "and 'dataset' inside it. The legacy outer 'dataset' key is no longer supported."
+        )
+        raise ValueError(msg)
+
+    base_dataset_config = normalized.pop("dataset_config", None)
+    if base_dataset_config is None:
+        msg = "Missing required 'dataset_config' in dataset reader configuration."
+        raise ValueError(msg)
+
+    normalized["dataset_config"] = base_dataset_config
+    return normalized
+
+
 class BaseAnemoiReader:
     """Anemoi data reader for native grid datasets."""
 
     def __init__(
         self,
-        dataset: str | dict,
+        dataset: str | dict | None = None,
+        dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
-        frequency: str | None = None,
-        drop: list[str] | None = None,
-        select: list[str] | None = None,
     ):
-        """Initialise Anemoi data reader."""
-        ds_kwargs = {}
-        if drop is not None:
-            ds_kwargs["drop"] = drop
-
-        if select is not None:
-            ds_kwargs["select"] = select
-
-        if frequency is not None:
-            ds_kwargs["frequency"] = frequency
-
-        self.data = open_dataset(dataset, start=start, end=end, **ds_kwargs)
+        """Initialize Anemoi data reader."""
+        source = dataset_config if dataset_config is not None else dataset
+        if source is None:
+            msg = "Either dataset or dataset_config must be provided."
+            raise ValueError(msg)
+        self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
 
     @property
     def dates(self) -> np.ndarray:
@@ -184,22 +226,14 @@ class TrajectoryDataset(BaseAnemoiReader):
 
     def __init__(
         self,
-        dataset: str | dict,
         trajectory_start: datetime.datetime,
         trajectory_length: int,
+        dataset: str | dict | None = None,
+        dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
-        frequency: str | None = None,
-        drop: list[str] | None = None,
     ):
-        """Initialise trajectory dataset."""
-        super().__init__(
-            dataset,
-            start=start,
-            end=end,
-            frequency=frequency,
-            drop=drop,
-        )
+        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
         self.trajectory_start = trajectory_start
         self.trajectory_length = trajectory_length
 
@@ -222,9 +256,7 @@ class TrajectoryDataset(BaseAnemoiReader):
 
 def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
-    if isinstance(dataset_config, DictConfig):
-        dataset_config = dict(dataset_config)
-
+    dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
         LOGGER.info("Creating TrajectoryDataset...")
