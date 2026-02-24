@@ -51,23 +51,11 @@ class EnsemblePlotMixin:
             Processed batch and predictions
         """
         # For ensemble models, batch is a tuple - allgather the full batch first
-        batch = {
-            dataset: pl_module.allgather_batch(batch[dataset], pl_module.grid_indices[dataset], pl_module.grid_dim)
-            for dataset in batch
-        }
+        batch = {ds_name: pl_module.allgather_batch(batch[ds_name], ds_name) for ds_name in batch}
+
         # Extract ensemble predictions
         loss, y_preds = output
-        y_preds = [
-            {
-                dataset: pl_module.allgather_batch(
-                    pred[dataset],
-                    pl_module.grid_indices[dataset],
-                    pl_module.grid_dim,
-                )
-                for dataset in pred
-            }
-            for pred in y_preds
-        ]
+        y_preds = [{ds_name: pl_module.allgather_batch(pred[ds_name], ds_name) for ds_name in pred} for pred in y_preds]
 
         # Return batch (normalized data) and structured output like regular forecaster
         return batch, [loss, y_preds]
@@ -140,7 +128,7 @@ class EnsemblePlotMixin:
                 for x in outputs[1]
             ),
         )
-        if pl_module.task_type == "temporal-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
+        if pl_module.task_type == "time-interpolator" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
             output_tensor = output_tensor.squeeze(0)
         output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
@@ -179,8 +167,7 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                     if hasattr(post_processor, "nan_locations"):
                         post_processor.nan_locations = pl_module.allgather_batch(
                             post_processor.nan_locations,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
+                            dataset_name,
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
