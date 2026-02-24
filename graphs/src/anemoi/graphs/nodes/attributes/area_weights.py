@@ -408,8 +408,6 @@ class AnemoiDatasetVariableWeights(BaseNodeAttribute):
 
     Methods
     -------
-    _read_data(self, nodes)
-        Read the weighting variable from the dataset.
     get_raw_values(self, nodes)
         Extract the data and convert it to a Torch tensor object.
     """
