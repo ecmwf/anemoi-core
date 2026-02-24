@@ -44,18 +44,20 @@ limit_batches:
 training:
   datasets:
     era5:
-      dataset: ${system.input.dataset}
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+        drop: []
       start: 1985
       end: 2020
-      frequency: ${data.frequency}
-      drop: []
       trajectory: null
     cerra:
-      dataset: ${system.input.dataset_b}  # Using same dataset as duplicate for testing
+      dataset_config:
+        dataset: ${system.input.dataset_b}  # Using same dataset as duplicate for testing
+        frequency: ${data.frequency}
+        drop: []
       start: 1985
       end: 2020
-      frequency: ${data.frequency}
-      drop: []
       trajectory: null
 
 validation_rollout: 1 # number of rollouts to use for validation
@@ -64,34 +66,38 @@ validation_rollout: 1 # number of rollouts to use for validation
 validation:
   datasets:
     era5:
-      dataset: ${system.input.dataset}
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+        drop: []
       start: 2021
       end: 2021
-      frequency: ${data.frequency}
-      drop: []
       trajectory: null
     cerra:
-      dataset: ${system.input.dataset_b}
+      dataset_config:
+        dataset: ${system.input.dataset_b}
+        frequency: ${data.frequency}
+        drop: []
       start: 2021
       end: 2021
-      frequency: ${data.frequency}
-      drop: []
       trajectory: null
 
 # Multi-dataset test with same datasets, different time period
 test:
   datasets:
     era5:
-      dataset: ${system.input.dataset}
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+        drop: []
       start: 2022
       end: null
-      frequency: ${data.frequency}
-      drop: []
       trajectory: null
     cerra:
-      dataset: ${system.input.dataset_b}
+      dataset_config:
+        dataset: ${system.input.dataset_b}
+        frequency: ${data.frequency}
+        drop: []
       start: 2022
       end: null
-      frequency: ${data.frequency}
-      drop: []
       trajectory: null
