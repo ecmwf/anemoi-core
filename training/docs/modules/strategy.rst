@@ -6,8 +6,8 @@
 
 This module defines the strategy for parallelising model training
 across GPUs. It also seeds the random number generators for each rank
-to keep runs reproducible. The implementation builds on the PyTorch
-`DDP Strategy <https://pytorch.org/tutorials/intermediate/ddp_tutorial.html>`__
+to keep runs reproducible. The implementation builds on the PyTorch Lightning
+`DDP Strategy <https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.strategies.DDPStrategy.html>`__
 but layers several communication groups on top of vanilla DDP so that
 models, readers, and ensemble members can coordinate work explicitly.
 
@@ -101,7 +101,7 @@ data.
 *********************
 
 ``DDPEnsGroupStrategy`` starts from ``DDPGroupStrategy`` and adds a
-second layer of communication groups so that ensemble members can be
+second set of communication groups so that ensemble members can be
 distributed across GPUs. The strategy keeps three invariants in place:
 
 * Each model shard still runs inside a model communication group, so the
