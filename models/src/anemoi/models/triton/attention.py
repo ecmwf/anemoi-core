@@ -20,16 +20,26 @@ import math
 import os
 
 import torch
-import triton
-import triton.language as tl
-from triton.tools.tensor_descriptor import (
-    TensorDescriptor,  # TODO(cathal) doesnt seem to work for torch 2.7 and less, guard
-)
 
 from anemoi.models.triton.utils import is_blackwell
 from anemoi.models.triton.utils import is_hip
 from anemoi.models.triton.utils import supports_host_descriptor
 from anemoi.models.triton.utils import torch_dtype_to_triton
+
+TRITON_AVAILABLE = False
+try:
+    import triton
+    import triton.language as tl  # noqa: E402
+
+    TRITON_AVAILABLE = True
+except ImportError:
+    raise ValueError(
+        "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
+    )
+
+TENSOR_DESCRIPTOR_SUPPORTED = triton.__version__ >= "2.7"
+if TENSOR_DESCRIPTOR_SUPPORTED:
+    from triton.tools.tensor_descriptor import TensorDescriptor
 
 
 def set_allocator():
@@ -49,42 +59,47 @@ def set_allocator():
     triton.set_allocator(alloc_fn)
 
 
-set_allocator()
+if TRITON_AVAILABLE:
+    set_allocator()
 
 
 @triton.jit
 def _attn_fwd_inner(
-    acc,
-    l_i,
-    m_i,
-    q,  #
-    desc_k,
-    desc_v,  #
-    iter_offset,
+    acc,  # accumulator in smem for the output of this block, with shape [BLOCK_FIXED, HEAD_DIM]
+    l_i,  # smem buffer for the denominator of the softmax, with shape [BLOCK_FIXED]
+    m_i,  # smem buffer for the maxes used in the softmax, with shape [BLOCK_FIXED]
+    q,  # the block of Q loaded into shared memory, with shape [BLOCK_FIXED, HEAD_DIM]
+    desc_k,  # tensor descriptor for K
+    desc_v,  # tensor descriptor for V
+    iter_offset,  # the starting offset into K and V which this block will iterate over
     dtype: tl.constexpr,
-    start_fixed,
-    qk_scale,  #
-    BLOCK_FIXED: tl.constexpr,
-    BLOCK_ITER: tl.constexpr,  #
-    CAUSAL: tl.constexpr,
-    offs_fixed: tl.constexpr,
-    offs_iter: tl.constexpr,  #
-    N_CTX: tl.constexpr,
-    WINDOW: tl.constexpr,
-    WARP_SPECIALIZE: tl.constexpr,
+    start_fixed,  # the starting block of the context within Q and O which this kernel is responsible for, used for masking
+    qk_scale,  # scaling factor for the QK^T operation, contains the 1/log(2) factor for faster exponentant calculation
+    BLOCK_FIXED: tl.constexpr,  # The size of BLOCK_FIXED, which determines how much of Q is loaded into shared memory and how much of the output is calculated by each block, determined by autotuning
+    BLOCK_ITER: tl.constexpr,  # The size of BLOCK_ITER, which determines how much of K and V is iterated over in each block, determined by autotuning
+    CAUSAL: tl.constexpr,  # whether to apply causal masking.
+    offs_fixed: tl.constexpr,  # offset pointers for the block of Q and O which this kernel is responsible for, used for masking
+    offs_iter: tl.constexpr,  # offset pointers for the block of K and V which this kernel is responsible for, used for masking
+    N_CTX: tl.constexpr,  # the context length.
+    WINDOW: tl.constexpr,  # The sliding window size for attention. If 0, no sliding window masking is applied.
+    WARP_SPECIALIZE: tl.constexpr,  # Whether or not warp specialization should be used.
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
 ):
-    """Tiled calculation of the attention algorithm.
+    """Tiled calculation of the attention algorithm. Inner loop.
 
-    Each program has loaded a BLOCK_FIXED sized section of the context Q
+    Outside this function, each program has loaded a BLOCK_FIXED sized section of the context Q
     This is stored in shared memory throughout.
     It then loops over K and V in sizes of BLOCK_ITER until the entire
-    BLOCK_FIXED sized output is accumulated
+    BLOCK_FIXED sized output is calculated in shared memory.
+    Outside this function, output is stored back to global memory.
 
     Optionally, causal or sliding window masking can be performed.
+    Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context which doesnt fit into a full block.
 
     """
     # range of values handled by this kernel
+
+    # If masking is being used, compute the bounds of the attention for this block based on the position of the block in the context
     if CAUSAL:
         # Attends within the following range
         # X - - - -
@@ -99,6 +114,8 @@ def _attn_fwd_inner(
         # round down to lowest multiple of BLOCK_ITER
         lo = (lo // BLOCK_ITER) * BLOCK_ITER
         lo = tl.multiple_of(lo, BLOCK_ITER)
+        if not UNEVEN_CTX:
+            hi = tl.multiple_of(hi, BLOCK_ITER)
     elif WINDOW > 0:
         # Attends within the following range (Assuming W=1)
         # X X - - -
@@ -114,16 +131,12 @@ def _attn_fwd_inner(
         if lo % BLOCK_ITER != 0:
             lo = (lo // BLOCK_ITER) * BLOCK_ITER
         # round up to highest multiple if not even
-        # if hi % BLOCK_ITER != 0:
-        #    hi = (hi // BLOCK_ITER) * BLOCK_ITER + BLOCK_ITER
+        if hi % BLOCK_ITER != 0:
+            hi = (hi // BLOCK_ITER) * BLOCK_ITER + BLOCK_ITER
 
         # Apply bounds and inform compiler about multiples
         lo = tl.multiple_of(lo, BLOCK_ITER)
-        # Only assert hi is a multiple if it wasn't clamped by N_CTX
-        # if hi <= N_CTX:
-        #    hi = tl.multiple_of(hi, BLOCK_ITER)
-        # else:
-        #    hi = tl.minimum(hi, N_CTX)
+        hi = tl.multiple_of(hi, BLOCK_ITER)
     else:
         # Attends within the following range
         # X X X X X
@@ -134,51 +147,50 @@ def _attn_fwd_inner(
 
         lo, hi = 0, N_CTX
         lo = tl.multiple_of(lo, BLOCK_ITER)
+        if not UNEVEN_CTX:
+            hi = tl.multiple_of(hi, BLOCK_ITER)
 
-    # TODO(cathal) change based on dtype
-    MINUS_INF: tl.constexpr = -1.0e8
+    MINUS_INF: tl.constexpr = float(-1.0e8)
 
+    # Compute the starting offset of K and V, based on optional masking
     iter_offset = iter_offset + lo
+
     # loop over k, v and update accumulator
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
-        # curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
-        mask_iter = curr_iter + offs_iter
+        curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
         tail_iter_block = curr_iter + BLOCK_ITER > N_CTX
 
-        # -- compute qk ----
-        # k = desc_k.load([iter_offset, 0]).T
+        # -- compute qk  (load Kt, optionally mask it, load compute QKt, optionally mask it)----
         k = desc_k.load([iter_offset, 0]).T
-        # transpose access to mask_iter bc k is transposed
-        # k = tl.where(mask_iter[None, :] < N_CTX, k, 0.0)  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
         if UNEVEN_CTX and tail_iter_block:
             k = tl.where(
-                mask_iter[None, :] < N_CTX, k, 0.0
-            )  # mask out-of-bounds k values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
+                (curr_iter + offs_iter)[None, :] < N_CTX, k, 0.0
+            )  # mask out-of-bounds k values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
 
         qk = tl.dot(q, k) * qk_scale
 
         if UNEVEN_CTX and tail_iter_block:
             qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
 
-        # apply masking
+        # apply Causal or Window masking if needed.
         if WINDOW > 0:
             fixed_pos = offs_fixed[:, None]
-            iter_pos = curr_iter + offs_iter[None, :]
+            iter_pos = (curr_iter + offs_iter)[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
             mask = (iter_pos <= fixed_pos + WINDOW) & (iter_pos >= fixed_pos - WINDOW)
             qk = tl.where(mask, qk, MINUS_INF)
 
         elif CAUSAL:
             fixed_pos = offs_fixed[:, None]
-            iter_pos = curr_iter + offs_iter[None, :]
+            iter_pos = (curr_iter + offs_iter)[None, :]
             mask = fixed_pos >= iter_pos
             qk = tl.where(mask, qk, MINUS_INF)
 
-        # global attention
+        # compute max and exponent after masking (more numerically stable)
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         p = tl.math.exp2(qk - m_ij[:, None])
 
-        # -- compute correction factor
+        # -- compute correction factor --
         alpha = tl.math.exp2(m_i - m_ij)
         l_ij = tl.sum(p, 1)
         # -- update output accumulator --
@@ -187,9 +199,11 @@ def _attn_fwd_inner(
         v = desc_v.load([iter_offset, 0])
         if UNEVEN_CTX and tail_iter_block:
             v = tl.where(
-                mask_iter[:, None] < N_CTX, v, 0.0
-            )  # mask out-of-bounds v values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_ITER
+                (curr_iter + offs_iter)[:, None] < N_CTX, v, 0.0
+            )  # mask out-of-bounds v values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_ITER
         p = p.to(dtype)
+
+        # compute the final dot product and update accumulator
         acc = tl.dot(p, v, acc)
 
         # update m_i and l_i
@@ -199,13 +213,24 @@ def _attn_fwd_inner(
 
         # Move to next block
         iter_offset += BLOCK_ITER
+
     return acc, l_i, m_i
 
 
 def _host_descriptor_pre_hook(nargs):
-    """Updates the tensor descriptor to use the block size determined by autotuning"""
+    """Updates the tensor descriptor to use the block size determined by autotuning.
+
+    Tensor descriptors are alternatives to raw pointers which encode information about the shape, stride and block size of the tensors.
+    They allow the compiler to make use of hardware features like TMA (Tensor Memory Accelerator) on supported hardware (e.g. Nvidia Hoppers and Blackwells).
+
+    Tensor descriptors are initially created with a dummy block size, as the optimal block size is not known until autotuning.
+    This pre-hook updates the block size of the tensor descriptors to match the block size determined by autotuning for this kernel configuration.
+    """
+
     if not isinstance(nargs["desc_q"], TensorDescriptor):
         # If the input is not a tensor descriptor, return
+        # This can happen when the hardware does not support host descriptors, and raw pointers are passed to the kernel instead.
+        # In this case, the kernel will create tensor descriptors later from the raw pointers.
         return
 
     BLOCK_FIXED = nargs["BLOCK_FIXED"]
@@ -246,15 +271,13 @@ def _generate_configs(try_warp_spec=True):
 
     Triton will benchmark all the configs after initalising and will
     run with the best config.
-
-    backward config is more constrained. warp-spec doesnt compile in mnay cases (triton v3.4 on GH200)
-    so it is disabled by default in bwd
     """
     if is_hip():
         NUM_STAGES_OPTIONS = [1]
     else:
         NUM_STAGES_OPTIONS = [1, 2, 3, 4]
 
+    # TODO(cathal) reduce number of configurations or add heuristics to select configurations based on hardware properties, to reduce autotuning time.
     configs = [
         triton.Config(
             {"BLOCK_FIXED": BM, "BLOCK_ITER": BN, "WARP_SPECIALIZE": WS},
@@ -264,8 +287,8 @@ def _generate_configs(try_warp_spec=True):
         )
         for BM in [16, 32, 64, 128]
         for BN in [16, 32, 64, 128]
-        for s in [1]  # NUM_STAGES_OPTIONS
-        for w in [4]  # [4, 8]
+        for s in NUM_STAGES_OPTIONS
+        for w in [4, 8]
         for WS in ([True, False] if try_warp_spec else [False])
     ]
 
@@ -303,37 +326,55 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 )
 @triton.jit
 def _attn_fwd(
-    sm_scale,
-    M,
-    Z,
-    H,
+    sm_scale,  # softmax scaling factor.
+    M,  # pointer to output maxes, used for numerical stability in softmax calculation, with shape [Z*H*N_CTX]
+    Z,  # batch size
+    H,  # num heads
+    # tensor descriptors or raw pointers, depending on hardware support for host descriptors. If raw pointers are passed, they will be converted to tensor descriptors in the kernel with block sizes determined by autotuning
     desc_q,
     desc_k,
     desc_v,
     desc_o,
+    # raw pointers for output when using uneven ctx, to handle the dynamic block sizes and masked stores required for uneven ctx.
     o,
-    N_CTX: tl.constexpr,  #
-    HEAD_DIM: tl.constexpr,  #
-    WINDOW: tl.constexpr,  #
-    BLOCK_FIXED: tl.constexpr,  #
-    BLOCK_ITER: tl.constexpr,  #
-    CAUSAL: tl.constexpr,  #
-    WARP_SPECIALIZE: tl.constexpr,  #
-    dtype: tl.constexpr,
-    n_ctx_rounded: tl.constexpr,
+    N_CTX: tl.constexpr,  # context length
+    HEAD_DIM: tl.constexpr,  # head dimension
+    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied. Only values within the window around the BLOCK_FIXED section of Q loaded by the kernel will be attended to.
+    BLOCK_FIXED: tl.constexpr,  # size of the block of Q loaded into shared memory
+    BLOCK_ITER: tl.constexpr,  # size of the block of K and V iterated over
+    CAUSAL: tl.constexpr,  # whether to apply causal masking
+    WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
+    dtype: tl.constexpr,  # output dtype
+    n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for calculating offsets and strides when UNEVEN_CTX is false
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
 ):
+    """Tiled forward pass of attention.
 
-    start_fixed = tl.program_id(0)
-    off_hz = tl.program_id(1)
+    Each program loads a BLOCK_FIXED sized section of the context Q into shared memory,
+    and iterates over K and V in blocks of BLOCK_ITER (inside the kernel _attn_fwd_inner)
+    until the entire BLOCK_FIXED sized output O is accumulated.
+
+    Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context which doesnt fit into a full block.
+    """
+
+    # ***** 1) determine which section of the output this program is responsible for *****
+
+    # This kernel is executed by multiple SMs in parallel, each responsible for calculating a different section of the output O
+    # The following lines allow the kernel to determine which section of the output it is responsible for, so it can load the correct section of Q and iterate over the correct sections of K and V
+    start_fixed = tl.program_id(
+        0
+    )  # which BLOCK_FIXED sized section of the output this program is responsible, determining the subset of Q and O which is loaded and stored by this program
+    off_hz = tl.program_id(1)  # Which head and batch this program is partly responsible for.
     off_z = off_hz // H
     off_h = off_hz % H
+
+    # ****** 2) create tensor descriptors for the input and output tensors, with block sizes determined by autotuning *****
 
     # number of elements in all non-head-dim dimensions (use actual N_CTX for q,k,v,o layout)
     y_dim = Z * H * N_CTX
 
-    # If tensor_descriptors weren't created on host (in system_specific_settings())
-    # Then they are created here
+    # tensor descriptors might have already been created on host (in system_specific_settings())
+    # If host descriptors aren't supported on the hardware, then tensor descripotrs are created now
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
         shape=[y_dim, HEAD_DIM],
@@ -352,6 +393,8 @@ def _attn_fwd(
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_ITER, HEAD_DIM],
     )
+
+    # store output values, handling uneven ctx by masking out-of-bounds values and adjusting block size of output when necessary
     output_block_size = BLOCK_FIXED
     tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
     if UNEVEN_CTX and tail_case:
@@ -359,35 +402,41 @@ def _attn_fwd(
     desc_o = _maybe_make_tensor_descriptor(
         desc_o,
         shape=[y_dim, HEAD_DIM],
-        # shape=[y_dim, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[output_block_size, HEAD_DIM],
     )
 
-    # Offsets into the start of the tensor which this kernel will iterate over
-    iter_offset = off_z * H * N_CTX + off_h * N_CTX
-    # Offsets into the region of the tensor which this kernel will keep in memory
-    fixed_offset = iter_offset + start_fixed * BLOCK_FIXED  # (used for Tensor Descriptors)
+    # ****** 3) calculate offsets into the input and output tensors which this kernel is responsible for *****
 
-    # initialize offset pointers
-    offs_fixed = start_fixed * BLOCK_FIXED + tl.arange(0, BLOCK_FIXED)  # (used for normal tensors)
+    # Offsets into the start of the K and V tensors which this kernel will iterate over )
+    iter_offset = off_z * H * N_CTX + off_h * N_CTX
+    # Offsets into the middle of the Q tensor which this kernel will keep in memory, and the O tensor which it will write to.
+    fixed_offset = iter_offset + start_fixed * BLOCK_FIXED
+
+    # initialize offset pointers (used for normal tensors)
+    offs_fixed = start_fixed * BLOCK_FIXED + tl.arange(0, BLOCK_FIXED)
     offs_iter = tl.arange(0, BLOCK_ITER)
+
+    # ****** 4) allocate shared memory buffers for output and load fixed subset of Q into shared memory *****
 
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32) - float(
         "inf"
     )  # list of maximum values, will be updated after each BLOCK_ITER. used to compute online softmax
-    l_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32)  # - float("inf") #+ 1.0
-    acc = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
+    l_i = tl.zeros([BLOCK_FIXED], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)  # output accumulator
+
     # load scales
     qk_scale = sm_scale
     qk_scale *= 1.44269504  # 1/log(2) #hack to make calculating exponent faster, by merging 1/ln(2) now the cheaper exp2() fn can be called later instead of exp()
+
     # load q: it will stay in SRAM throughout
     q = desc_q.load([fixed_offset, 0])
     if UNEVEN_CTX and tail_case:
         # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
         q = tl.where(offs_fixed[:, None] < N_CTX, q, 0.0)
 
+    # ****** 5) main loop, iterating over blocks of K and V, and updating the output accumulator, m_i and l_i for each block *****
     acc, l_i, m_i = _attn_fwd_inner(
         acc,
         l_i,
@@ -413,18 +462,20 @@ def _attn_fwd(
     m_i += tl.math.log2(l_i)
     acc = acc / l_i[:, None]
     m_ptrs = M + off_hz * n_ctx_rounded + offs_fixed  # Use n_ctx_rounded since M is allocated with that dimension
+
+    # ***** 6) store output *****
+
+    # store output values, handling uneven ctx by masking out-of-bounds values and adjusting block size of output when necessary
     if UNEVEN_CTX and tail_case:
+        # mask the store to m so that we dont write out-of-bounds values when N_CTX is not divisible by BLOCK_FIXED.
         tl.store(m_ptrs, m_i, mask=offs_fixed < N_CTX)
-    else:
-        tl.store(m_ptrs, m_i)
-    # desc_o.store([fixed_offset, 0], acc.to(dtype))
-    if UNEVEN_CTX and tail_case:
         # need to write a smaller block size when using uneven ctx to avoid writing into the next SMs region
-        # to do this, access o as a regular pointer with 2D indexing
+        # o is a tensor descriptor which doesnt support different block sizes, so access o as a regular pointer with 2D indexing
         offs_d = tl.arange(0, HEAD_DIM)
         o_ptrs = o + off_hz * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + offs_d[None, :]
         tl.store(o_ptrs, acc.to(dtype), mask=offs_fixed[:, None] < N_CTX)
     else:
+        tl.store(m_ptrs, m_i)
         desc_o.store([fixed_offset, 0], acc.to(dtype))
 
 
@@ -960,6 +1011,10 @@ def _system_specific_settings(q, k, v, o, warp_specialize):
             block_shape=dummy_block,
         )
     else:
+        if not TENSOR_DESCRIPTOR_SUPPORTED:
+            raise NotImplementedError(
+                "TritonAttention requires either tensor descriptors or host descriptors, which are not supported on this system/triton version combination. Please consider updating your triton version to use TritonAttention. Alternatively, you can open a ticket on the anemoi-core repository to request support for your system."
+            )
         desc_q = q
         desc_v = v
         desc_k = k
