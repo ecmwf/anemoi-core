@@ -45,6 +45,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample_unconditional
+                                                
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.schemas.base_schema import BaseSchema
 
@@ -1132,9 +1133,12 @@ class PlotSampleUnconditionalDiffusion(BasePlotAdditionalMetrics):
         epoch: int,
     ):
         logger = trainer.logger
-
+        rank_zero_info("[DEBUG] on passe dans PlotSampleUnconditionalDiffusion")
+        print("Lightning", trainer.state.fn)
+        print("Model training flag", pl_module.training)
         # Build dictionary of indices and parameters to be plotted
         diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
+        print('JE SUIS PARAM',self.config.data.diagnostic)
         plot_parameters_dict = {
             pl_module.data_indices.model.output.name_to_index[name]: (
                 name,
@@ -1144,9 +1148,11 @@ class PlotSampleUnconditionalDiffusion(BasePlotAdditionalMetrics):
         }
 
         data, output_tensor = self.process(pl_module, outputs, batch)
+        print('DANS PLOT process',self.process,self)
 
         local_rank = pl_module.local_rank
         rollout = getattr(pl_module, "rollout", 0)
+        print('DANS PLOT rollout',rollout)
         for rollout_step in range(rollout):
             fig = plot_predicted_multilevel_flat_sample_unconditional(
                 parameters = plot_parameters_dict,

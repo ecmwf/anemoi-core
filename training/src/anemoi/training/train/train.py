@@ -153,9 +153,9 @@ class AnemoiTrainer(ABC):
                 from anemoi.graphs.utils import get_distributed_device
 
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                print('JE SUIS LA DEVICE UTILISÉE DEBUG',get_distributed_device())
+                return torch.load(graph_filename, map_location="cpu", weights_only=False)
+
                 # return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-                return torch.load(graph_filename, map_location='cpu', weights_only=False)
 
         else:
             graph_filename = None
@@ -476,7 +476,11 @@ class AnemoiTrainer(ABC):
     def train(self) -> None:
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
-
+        print('JE SUIS ACCELERATOR, DEVICES',self.accelerator,self.config.hardware.num_gpus_per_node
+              )
+        import os 
+        print ('RANK=', os.environ.get("RANK"))
+        print('WORLD SIZE', os.environ.get("WORLD_SIZE"))
         trainer = pl.Trainer(
             accelerator=self.accelerator,
             callbacks=self.callbacks,

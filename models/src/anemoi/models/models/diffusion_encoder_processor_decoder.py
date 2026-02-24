@@ -21,7 +21,7 @@ from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
-
+import numpy as np 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -739,7 +739,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
-    ):# -> torch.Tensor:
+    ) -> torch.Tensor:
         """Sample from the diffusion model.
 
         Parameters
@@ -885,6 +885,10 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
             model_comm_group,
             grid_shard_shapes=grid_shard_shapes,
         )
+
+
+
+
 
     def prepare_sample_SDEdit(
         self,

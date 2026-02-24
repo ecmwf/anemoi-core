@@ -1,0 +1,152 @@
+defaults:
+- data: zarr #to change to our own config
+- dataloader: native_grid #to change to our own config
+- diagnostics: evaluation
+- datamodule: single
+- hardware: example
+# - graph: multi_scale
+# - graph: graph_AROME.yaml
+
+- graph: existing_graph
+# - graph: multi_scale
+- model: graphtransformer_diffusionuncond
+- training: diffusion
+- _self_
+
+# set to true to switch on config validation
+config_validation: False
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    mlflow:
+      enabled: True 
+      # on_resume_create_child: False
+      offline: False
+      experiment_name: 'overfit_x=mean_4vars_100'
+      project_name: 'overfit_x=mean_4vars_100'
+      run_name: 'overfit_x=mean_4vars_100'
+      # on_resume_create_child: False
+      # experiment_name: 'nodes_8_freq_1_maxsteps_225000_high_noise_4vars_orographie_cond'
+      # project_name: 'nodes_8_freq_1_maxsteps_225000_high_noise_4vars_orographie_cond'
+      # run_name: 'nodes_8_freq_1_maxsteps_225000_high_noise_4vars_orographie_cond'
+      # experiment_name: overfit_x=0_4vars_sigma_10000_high_noise_steps_15k_multiscalegraph
+      # project_name: overfit_x=0_4vars_sigma_10000_high_noise_steps_15k_multiscalegraph
+      # run_name: overfit_x=0_4vars_sigma_10000_high_noise_steps_15k_multiscalegraph  
+      tracking_uri: 'https://mlflow.ecmwf.int'
+      authentication: True
+      terminal: False
+    wandb:AssertionError: Data indexing has invalid entries ['tp'], not in dataset.
+    wandb:
+      enabled: False
+      entity: "none"
+data:
+    frequency: 1h 
+    diagnostic: ["tp"] #variables que le modÃ¨le ne prendra pas en input mais va sortir en output : tp est la pluie, on ne la prend pas en input 
+    # Ã§a peut perturber en input les variables et tout le modne fait comme Ã§a.
+    forcing:
+      - "z"
+
+      # - "cos_latitude"
+      # - "cos_longitude"
+      # - "sin_latitude"
+      # - "sin_longitude"
+      # - "cos_julian_day"
+      # - "cos_local_time"
+      # - "sin_julian_day"
+      # - "sin_local_time"
+      # - "insolation"
+      # - "lsm"
+      # - "z"
+
+    # normalizer:
+    #   std: null
+    #   max: null
+    #   none: ${data.forcing}
+
+    normalizer:
+      default: "mean-std"
+      max: null
+      # mean-std:
+      # - z
+      # none: 
+      # - cos_latitude
+      # - cos_longitude
+      # - sin_latitude
+      # - sin_longitude
+      # - cos_julian_day
+      # - cos_local_time
+      # - sin_julian_day
+      # - sin_local_time
+      # - lsm
+
+dataloader:
+    dataset:
+        - dataset: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
+    grid_indices:
+        _target_: anemoi.training.data.grid_indices.MaskedGrid
+        nodes_name: data
+        node_attribute_name: indices_connected_nodes
+    training:
+        start: "2020-01-01"
+        end: "2020-01-03"
+        # end: "2023-01-03"
+
+        select: ['10u', '10v',  '2t', 'tp','z']
+    
+        # select: ['10u', '10v', '2d', '2t', 'msl', 'sp', 'skt', 'z', 'tp', 'q_50', 'q_100', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_700', 'q_850', 'q_925', 'q_1000', 't_50', 't_100', 't_150', 't_200', 't_250', 't_300', 't_400', 't_500', 't_700', 't_850', 't_925', 't_1000', 'u_50', 'u_100', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_500', 'u_700', 'u_850', 'u_925', 'u_1000', 'v_50', 'v_100', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_500', 'v_700', 'v_850', 'v_925', 'v_1000', 'z_50', 'z_100', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_500', 'z_700', 'z_850', 'z_925', 'z_1000', lsm, insolation, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, sin_julian_day, sin_latitude, sin_local_time, sin_longitude]
+    validation:
+        start: "2023-04-01"
+        end: "2023-04-03"
+        # end: "2024-04-02"
+
+        select: ['10u', '10v',  '2t', 'tp','z']
+
+        # select: ['10u', '10v', '2d', '2t', 'msl', 'sp', 'skt', 'z', 'tp', 'q_50', 'q_100', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_700', 'q_850', 'q_925', 'q_1000', 't_50', 't_100', 't_150', 't_200', 't_250', 't_300', 't_400', 't_500', 't_700', 't_850', 't_925', 't_1000', 'u_50', 'u_100', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_500', 'u_700', 'u_850', 'u_925', 'u_1000', 'v_50', 'v_100', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_500', 'v_700', 'v_850', 'v_925', 'v_1000', 'z_50', 'z_100', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_500', 'z_700', 'z_850', 'z_925', 'z_1000', lsm, insolation, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, sin_julian_day, sin_latitude, sin_local_time, sin_longitude]
+    test:
+        start: "2024-04-02"
+        end: "2024-04-03"
+        select: ['10u', '10v',  '2t', 'tp','z']
+
+        # select: ['10u', '10v', '2d', '2t', 'msl', 'sp', 'skt', 'z', 'tp', 'q_50', 'q_100', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_700', 'q_850', 'q_925', 'q_1000', 't_50', 't_100', 't_150', 't_200', 't_250', 't_300', 't_400', 't_500', 't_700', 't_850', 't_925', 't_1000', 'u_50', 'u_100', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_500', 'u_700', 'u_850', 'u_925', 'u_1000', 'v_50', 'v_100', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_500', 'v_700', 'v_850', 'v_925', 'v_1000', 'z_50', 'z_100', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_500', 'z_700', 'z_850', 'z_925', 'z_1000', lsm, insolation, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, sin_julian_day, sin_latitude, sin_local_time, sin_longitude]
+    batch_size:
+      training: 1
+      validation: 1
+      test: 1
+    num_workers:
+      training: 4
+      validation: 4
+model:
+  model:
+    _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDecUnconditional
+  diffusion:
+    sigma_max: 100.0
+
+hardware:
+  paths:
+    data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
+    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/overfit_x=mean_4vars_100/
+    # output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/overfit_x=0_4vars_sigma_10000_high_noise_steps_15k_multiscalegraph/
+    # output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/multi_nodes/nodes_8_freq_1_maxsteps_225000_high_noise_4vars_orographie_cond/
+    # output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/outputs_cond_z_high_noise_norm_z2/
+
+  files:
+    dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
+    # graph: /project/home/p200177/DE_371/angeliquebonamy/anemoi/graph/multiscale/graph_AROME_full.pt
+    # warm_start: null
+    graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
+    # graph: /project/home/p200177/DE_371/angeliquebonamy/anemoi/graph/graph_AROME_full.pt
+  # num_nodes: 2     warm_start: null
+
+  # accelerator: gpu
+  # devices: 1 
+  num_gpus_per_node: 4
+  num_gpus_per_model: 2
+  num_nodes: 4
+training:
+  max_steps: 15000
+  # max_epochs: 500
+  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
+  training_approach: probabilistic_high_noise
+  # run_id: 2659a6f832334a209a597689879e94fc
+#   run_id : 9c9db60ca9804bad98d54a7baa6177fb

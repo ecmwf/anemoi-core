@@ -25,7 +25,7 @@ edges:
 - source_name: data
   target_name: hidden
   edge_builders:
-    # - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    # - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges 
     #   num_nearest_neighbours: 12 # only for knn method
 
     - _target_: anemoi.graphs.edges.CutOffEdges #recommandé pour l'encodeur pour ne pas laisser des noeuds des data dans le vide
@@ -39,25 +39,12 @@ edges:
       norm: unit-std
   # Processor configuration
 
-- source_name: hidden
-  target_name: hidden
-  edge_builders:
-  - _target_: anemoi.graphs.edges.MultiScaleEdges
-    x_hops: 1
-  scale_resolutions: 9
-  attributes:
-    edge_length:
-      _target_: anemoi.graphs.edges.attributes.EdgeLength
-      norm: unit-std
-    edge_dirs:
-      _target_: anemoi.graphs.edges.attributes.EdgeDirection
-      norm: unit-std
-
 # - source_name: hidden
 #   target_name: hidden
 #   edge_builders:
-#   - _target_: anemoi.graphs.edges.CutOffEdges #essayer de mettre anemoi.graphs.edges.MultiScaleEdges avec x hop = 1 et voir scale resolution (à définir)
-#     cutoff_factor: 1 #=1 permet d'avoir tous les hidden to hidden avec une seule connexion
+#   - _target_: anemoi.graphs.edges.MultiScaleEdges
+#     x_hops: 1
+#   scale_resolutions: 9
 #   attributes:
 #     edge_length:
 #       _target_: anemoi.graphs.edges.attributes.EdgeLength
@@ -65,6 +52,20 @@ edges:
 #     edge_dirs:
 #       _target_: anemoi.graphs.edges.attributes.EdgeDirection
 #       norm: unit-std
+
+- source_name: hidden
+  target_name: hidden
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges #essayer de mettre anemoi.graphs.edges.MultiScaleEdges avec x hop = 1 et voir scale resolution (à définir)
+    cutoff_factor: 1 #=1 permet d'avoir tous les hidden to hidden avec une seule connexion
+  attributes:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+      
   # Decoder configuration
 - source_name: hidden
   target_name: data
