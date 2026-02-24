@@ -89,9 +89,55 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lres_grid_shard_slice = None
         self.hres_grid_shard_shapes = None
         self.hres_grid_shard_slice = None
+        self._set_channel_indices(data_indices)
 
-        fields_direct_prediction = getattr(config.data, "direct_prediction", None)
-        self.indices_direct_prediction = ...
+    def _set_channel_indices(self, data_indices):
+        input_name_to_index = self.data_indices.data.input[0].name_to_index
+        input_hres_name_to_index = self.data_indices.data.input[1].name_to_index
+        out_name_to_index = {
+            k: v
+            for k, v in self.data_indices.data.output.name_to_index.items()
+            if v in self.data_indices.data.output.full
+        }
+        LOGGER.info(f"input_name_to_index: {input_name_to_index}")
+        LOGGER.info(f"input_hres_name_to_index: {input_hres_name_to_index}")
+        LOGGER.info(f"out_name_to_index: {out_name_to_index}")
+        common_channels = set(input_name_to_index.keys()) & set(out_name_to_index.keys())
+        residual_fields = getattr(self.config.data, "residual_fields", [])
+        in_non_residual_fields = getattr(self.config.data, "in_non_residual_fields", [])
+        out_non_residual_fields = getattr(self.config.data, "out_non_residual_fields", [])
+        in_hres_forcings_fields = getattr(self.config.data, "forcing", [])
+        assert set(residual_fields).isdisjoint(set(in_non_residual_fields)), (
+                f"residual and non residual input variables overlap: {set(residual_fields).intersection(set(in_non_residual_fields))}. ",
+            )
+        assert set(residual_fields).isdisjoint(set(out_non_residual_fields)), (
+                f"residual and non residual output variables overlap: {set(residual_fields).intersection(set(out_non_residual_fields))}. ",
+            )
+
+        x_in_res_indices = []
+        y_res_indices = []
+        for channel_name in residual_fields:
+            if channel_name in common_channels:
+                x_in_res_indices.append(input_name_to_index[channel_name])
+                y_res_indices.append(out_name_to_index[channel_name])
+            else:
+                if channel_name not in input_name_to_index.keys():
+                    LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in in_lres dataset")
+                else:
+                    LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in out_hres dataset")
+
+        x_in_non_res_indices = [input_name_to_index[channel] for channel in in_non_residual_fields]
+        y_non_res_indices = [out_name_to_index[channel] for channel in out_non_residual_fields]
+
+        x_in_hres_forcing_indices = input_hres_name_to_index.values()
+        if len(x_in_hres_forcing_indices):
+            x_in_hres_forcing_indices = [input_hres_name_to_index[channel] for channel in in_hres_forcings_fields]
+
+        self.x_in_residual_indices = torch.tensor(x_in_res_indices)
+        self.y_residual_indices = torch.tensor(y_res_indices)
+        self.x_in_non_residual_indices = torch.tensor(x_in_non_res_indices)
+        self.y_non_residual_indices = torch.tensor(y_non_res_indices)
+        self.x_in_hres_forcing_indices = torch.tensor(x_in_hres_forcing_indices)
 
     def forward(
         self,
@@ -168,14 +214,21 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             grid_shard_shapes=self.lres_grid_shard_shapes,
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
-
-        channel_indices = self.model.model.x_in_matching_channel_indices.to(x_in_interp_to_hres.device)
-        residuals_target = self.model.model.compute_residuals(
-            y,
-            x_in_interp_to_hres[..., channel_indices],
-        )
-
+        device = x_in_interp_to_hres.device
+        # indices to device
+        y_residual_indices = self.y_residual_indices.to(device)
+        x_in_residual_indices = self.x_in_residual_indices.to(device)
+        y_non_residual_indices = self.y_non_residual_indices.to(device)
+        x_in_hres_forcing_indices = self.x_in_hres_forcing_indices.to(device)
+        
+        y_target = torch.zeros_like(y).to(device)
+        # channel_indices = self.model.model.x_in_matching_channel_indices.to(x_in_interp_to_hres.device)
+        if len(y_residual_indices): # if residual variables
+            residuals_target = y[..., y_residual_indices] -  x_in_interp_to_hres[..., x_in_residual_indices]
+            y_target[..., y_residual_indices] = residuals_target
         # Y = Y[:, :, :, ..., self.data_indices.data.output.full] #(see if necessary)
+        if len(y_non_residual_indices): # if output non residual variables
+            y_target[..., y_non_residual_indices] = y[..., y_non_residual_indices]
 
         x_in_interp_to_hres = self.model.pre_processors(
             x_in_interp_to_hres, dataset="input_lres"
@@ -185,23 +238,23 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             x_in_hres, dataset="input_hres"
         )  # , in_place=False
         # x_in_hres = x_in_hres[:, :, ..., self.data_indices.data.input[1].full]
-        residuals_target = self.model.pre_processors(residuals_target, dataset="output")
+        y_target = self.model.pre_processors(y_target, dataset="output")
 
         # Scaler update
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
-            shape=(residuals_target.shape[0],) + (1,) * (residuals_target.ndim - 2),
+            shape=(y_target.shape[0],) + (1,) * (y_target.ndim - 2),
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
             rho=self.rho,
-            device=residuals_target.device,
+            device=y_target.device,
         )
 
         # get targets and noised targets
-        residuals_target_noised = self._noise_target(residuals_target, sigma)
+        y_target_noised = self._noise_target(y_target, sigma)
 
         # prediction, fwd_with_preconditioning
         # time_for_pred = time.time()
@@ -209,7 +262,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         y_pred = self(
             x_in_interp_to_hres,
             x_in_hres,
-            residuals_target_noised,
+            y_target_noised,
             sigma,
         )  # shape is (bs, ens, latlon, nvar)
         # print("time for pred", time.time() - time_for_pred)
@@ -218,7 +271,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         loss, metrics_next = checkpoint(
             self.compute_loss_metrics,
             y_pred=y_pred[:, 0, ...],
-            y=residuals_target[:, 0, ...],  # removing time dim for loss computation,
+            y=y_target[:, 0, ...],  # removing time dim for loss computation,
             rollout_step=0,
             training_mode=training_mode,
             validation_mode=validation_mode,
@@ -231,9 +284,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             x_in_interp_to_hres, dataset="input_lres"
         )
         y_pred = self.model.post_processors(y_pred, dataset="output")
-
+        y_pred_full = y_pred
+        y_pred_full[..., y_residual_indices] += x_in_interp_to_hres[..., x_in_residual_indices]
         # Add predicted residuals to the state
-        y_preds = [x_in_interp_to_hres[..., channel_indices] + y_pred, y_pred]
+        y_preds = [y_pred_full, y_pred]
 
         return loss, metrics_next, y_preds
 

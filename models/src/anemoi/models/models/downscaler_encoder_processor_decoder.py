@@ -77,8 +77,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         channel_indices = self._match_tensor_channels(input_name_to_index, output_name_to_index)
         if channel_indices.numel() != len(output_name_to_index):
             missing = [name for name in output_name_to_index.keys() if name not in input_name_to_index]
-            raise ValueError(
-                "Could not fully map input_lres channels to output channels for residual reconstruction. "
+            LOGGER.info(
+                "Deprecated message : Could not fully map input_lres channels to output channels for residual reconstruction. "
                 f"Missing channels in input_lres: {missing}"
             )
         return channel_indices
@@ -738,6 +738,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         torch.Tensor
             the de-normalised state
         """
+        raise NotImplementedError('Rearrange variables here!')
         state_outp = post_processors_state(residuals, dataset="output", in_place=False)
 
         state_inp_denorm = post_processors_state(

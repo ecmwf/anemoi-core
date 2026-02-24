@@ -116,7 +116,6 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
     def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
-
         c_data = self._make_noise_emb(
             noise_cond,
             repeat=self.node_attributes.num_nodes[self._graph_name_data],
