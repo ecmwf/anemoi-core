@@ -120,7 +120,6 @@ class BaseDDPStrategy(DDPStrategy):
         super().setup(trainer)
 
         self.shard_shapes = self._setup_shard_shapes(trainer)
-        self.shard_shapes = self._setup_shard_shapes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
@@ -243,7 +242,6 @@ class DDPGroupStrategy(BaseDDPStrategy):
             reader_group_rank,
             self.read_group_size,
             self.shard_shapes,
-            self.shard_shapes,
         )
 
         return dataloader
@@ -267,7 +265,6 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
         """
         super().__init__(num_gpus_per_model=num_gpus_per_model, read_group_size=read_group_size, **kwargs)
         self.ens_comm_group_size = num_gpus_per_ensemble
-        self.shard_shapes: dict | None = None
 
     def _setup_communication_groups(self) -> int:
         """Set up model, reader, and ensemble communication groups.
@@ -409,7 +406,6 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
-            self.shard_shapes,
             self.shard_shapes,
         )
 
