@@ -57,8 +57,6 @@ explicit_times:
   input: [0, 6]
   target: [1, 2, 3, 4, 5]
 
-target_forcing: null
-
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
