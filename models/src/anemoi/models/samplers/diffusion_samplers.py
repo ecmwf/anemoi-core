@@ -12,7 +12,7 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Callable
 from typing import Optional
-
+import numpy as np
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -20,7 +20,7 @@ DenoisingFunction = Callable[
     [torch.Tensor, torch.Tensor, torch.Tensor, Optional[ProcessGroup], Optional[list]], torch.Tensor
 ]
 
-
+# from anemoi.training.diagnostic.plot import plot_predicted_multilevel_flat_sample_unconditional
 class NoiseScheduler(ABC):
     """Base class for noise schedulers."""
 
@@ -212,7 +212,8 @@ class EDMHeunSampler(DiffusionSampler):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
-        print("x dans edm sampler", x)
+        print("3) : dans sampler heun")
+        print("x dans edm sampler", x, "de shape ", x.shape, "mean : ", x.mean, "std : ", x.std)
         # Override instance defaults with any kwargs
         S_churn = kwargs.get("S_churn", self.S_churn)
         S_min = kwargs.get("S_min", self.S_min)
@@ -220,19 +221,19 @@ class EDMHeunSampler(DiffusionSampler):
         S_noise = kwargs.get("S_noise", self.S_noise)
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
-        print("S chrun : ", S_churn)
-        print("S_min ", S_min)
-        print("S amx ", S_max)
-        print("S noise", S_noise)
-        print("denoising function ", DenoisingFunction)
+
         batch_size, ensemble_size = x.shape[0], x.shape[2]
 
         num_steps = len(sigmas) - 1
         print("num steps :", num_steps)
         # Heun sampling loop
         for i in range(num_steps):
+            
+            y_array = y.detach().cpu().numpy()
+            print(f'step {i}')
             sigma_i = sigmas[i]
             sigma_next = sigmas[i + 1]
+            # plot_step(y,[0,1,3, 42, 53, 30],["10u", "10v", "2t", "U_850", "V_850", "T_850"], i, sigma_i)
 
             apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
             # print("apply_churn", apply_churn)
@@ -244,6 +245,8 @@ class EDMHeunSampler(DiffusionSampler):
                 y = y + torch.sqrt(sigma_effective**2 - sigma_i**2) * epsilon
             else:
                 sigma_effective = sigma_i
+                
+            print("sigma effective view", sigma_effective.view(1, 1, 1, 1).expand(y.shape[0], y.shape[1], 1, 1).to(x.dtype))
 
             D1 = denoising_fn(
                 x,
@@ -254,17 +257,9 @@ class EDMHeunSampler(DiffusionSampler):
             ).to(dtype)
                       
             d = (y - D1) / (sigma_effective + eps_prec)
-            # print("D1 : ", D1.shape, D1)
-            if i in [0, 1, 2, num_steps//2, num_steps-3, num_steps-2, num_steps-1]:
-                with torch.no_grad():
-                    y_std  = y.float().std().item()
-                    d1_std = D1.float().std().item()
-                    resid_std = (y - D1).float().std().item()
-
-                    print(f"[i={i:02d}] sigma={float(sigma_effective):.6g}  "
-              f"std(y)={y_std:.4g} std(D1)={d1_std:.4g} std(y-D1)={resid_std:.4g}") 
+            print(f"sigma next : {sigma_next} et sigma effective {sigma_effective} ")
             y_next = y + (sigma_next - sigma_effective) * d
-
+            print(" eps prec adns heun sampler ", eps_prec)
             if sigma_next > eps_prec:
                 D2 = denoising_fn(
                     x,
@@ -357,3 +352,56 @@ DIFFUSION_SAMPLERS = {
     "heun": EDMHeunSampler,
     "dpmpp_2m": DPMpp2MSampler,
 }
+
+def plot_step(y_denoise, idx_var, vars, denoising_step, sigma) -> None:
+    """Write a step of the state.
+
+    Parameters
+    ----------
+    state : State
+        The state dictionary.
+    """
+    import earthkit.data as ekd
+    import earthkit.plots as ekp
+
+    print("plotting step ...")
+    
+    latitudes = np.load("/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/latitudes.npy")
+    longitudes = np.load("/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/longitudes.npy")
+    
+    plotting_fields = []
+
+    for i in range(len(vars)):
+        idx = idx_var[i]
+        variable = vars[i]
+        plotting_fields.append(
+            ekd.ArrayField(
+                y_denoise[0,0,:,idx].detach().cpu().numpy(),
+                {
+                    "param": variable,
+                    "shortName": variable,
+                    "variable_name": variable,
+                    "latitudes": latitudes,
+                    "longitudes": longitudes,
+                },
+            )
+        )
+    fig = ekp.quickplot(
+        ekd.FieldList.from_fields(plotting_fields), mode="subplots", domain=None
+    )
+
+    title = f"sigma = {sigma: .2f}"
+
+    fig.title(title)
+    fname = f'/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/plot_step_during_inf/plot_step_model_cond/denoising_step_{denoising_step}_sigma={sigma: .2f}.png'
+    # mpl_fig = getattr(fig, "figure", None)
+    
+    # mpl_fig = getattr(fig, "figure", None)
+    # if mpl_fig is None:
+    #     mpl_fig = getattr(fig, "_fig", None)
+
+    # if mpl_fig is not None:
+    #     mpl_fig.suptitle(title, fontsize=14)
+        
+    fig.save(fname)
+    del fig

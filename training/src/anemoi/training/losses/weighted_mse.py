@@ -67,10 +67,8 @@ class WeightedMSELoss(MSELoss):
         """
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
-
         if weights is not None:
             out = out * weights
-
+        
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
         return self.reduce(out, squash, group=group if is_sharded else None)

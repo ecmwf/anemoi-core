@@ -105,8 +105,7 @@ class GraphForecaster(BaseGraphModule):
         batch: torch.Tensor,
         rollout_step: int,
     ) -> torch.Tensor:
-        x = x.roll(-1, dims=1)
-
+        print("rollout step : ", rollout_step)
         # Get prognostic variables
         x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
             ...,
