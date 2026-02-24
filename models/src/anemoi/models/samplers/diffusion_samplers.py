@@ -220,7 +220,7 @@ class EDMHeunSampler(DiffusionSampler):
         S_noise = kwargs.get("S_noise", self.S_noise)
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
-
+        print('JE PASSE PAR SAMPLER HEUN')
         batch_size, ensemble_size = x.shape[0], x.shape[2]
         num_steps = len(sigmas) - 1
         # Heun sampling loop

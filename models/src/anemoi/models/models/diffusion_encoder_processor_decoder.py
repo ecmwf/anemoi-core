@@ -19,7 +19,7 @@ from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
-
+import numpy as np 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -776,6 +776,137 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         return out
 
 
+    # def sample(
+    #     self,
+    #     x: torch.Tensor,
+    #     model_comm_group: Optional[ProcessGroup] = None,
+    #     grid_shard_shapes: Optional[list] = None,
+    #     noise_scheduler_params: Optional[dict] = None,
+    #     sampler_params: Optional[dict] = None,
+    #     **kwargs,
+    # ) -> torch.Tensor:
+    #     """Sample from the diffusion model.
+
+    #     Parameters
+    #     ----------
+    #     x : torch.Tensor
+    #         Input conditioning data with shape (batch, time, ensemble, grid, vars)
+    #     model_comm_group : Optional[ProcessGroup]
+    #         Process group for distributed training
+    #     grid_shard_shapes : Optional[list]
+    #         Grid shard shapes for distributed processing
+    #     noise_scheduler_params : Optional[dict]
+    #         Dictionary of noise scheduler parameters (schedule_type, num_steps, sigma_max, etc.) to override defaults
+    #     sampler_params : Optional[dict]
+    #         Dictionary of sampler parameters (sampler, S_churn, S_min, etc.) to override defaults
+    #     **kwargs
+    #         Additional sampler-specific arguments
+
+    #     Returns
+    #     -------
+    #     torch.Tensor
+    #         Sampled output with shape (batch, ensemble, grid, vars)
+    #     """
+    #     # Start with inference defaults
+    #     noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
+    #     # Override config with provided noise scheduler parameters
+    #     if noise_scheduler_params is not None:
+    #         noise_scheduler_config.update(noise_scheduler_params)
+
+    #     warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") #param de steps (dont sdedit) est dedans
+    #     # Remove schedule_type (used for class selection, not constructor)
+    #     actual_schedule_type = noise_scheduler_config.pop("schedule_type")
+
+    #     if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
+    #         raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
+    #     scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
+    #     scheduler = scheduler_cls(**noise_scheduler_config)
+    #     sigmas = scheduler.get_schedule(x.device, torch.float64)
+    #     # Initialize output with noise
+    #     batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
+    #     shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
+    #     y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * sigmas[0]
+
+    #     # Build diffusion sampler config dict from all inference defaults
+    #     diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
+    #     # Override config with provided sampler parameters
+    #     if sampler_params is not None:
+    #         diffusion_sampler_config.update(sampler_params)
+        
+    #     warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}") #param de sdedit est dedans.
+    #     # Remove sampler name (used for class selection, not constructor)
+    #     actual_sampler = diffusion_sampler_config.pop("sampler")
+
+    #     if actual_sampler not in diffusion_samplers.DIFFUSION_SAMPLERS:
+    #         raise ValueError(f"Unknown sampler: {actual_sampler}")
+        
+    #     sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
+    #     sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
+    #     if noise_scheduler_config['SDEdit']:
+
+    #         num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
+            
+    #         num_steps = len(sigmas) #total number of denoising steps when not using sdedit
+            
+    #         assert num_steps_sdedit <= num_steps, f"num_steps_sdedit ({num_steps_sdedit}) must be <= num_steps ({num_steps})"
+            
+    #         init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
+    #         sigmas = sigmas[num_steps - num_steps_sdedit :]
+    #         y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
+    #     x_zeros = torch.zeros_like(x,device=x.device)
+    #     print('DEBUG ON PASSE sampler dans models', sampler_instance)
+    #     return sampler_instance.sample(
+    #         x_zeros,
+    #         y_init,
+    #         sigmas,
+    #         self.fwd_with_preconditioning,
+    #         model_comm_group,
+    #         grid_shard_shapes=grid_shard_shapes,
+    #     )
+    
+    # def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
+    #     node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
+    #     if grid_shard_shapes is not None:
+    #         shard_shapes_nodes = get_or_apply_shard_shapes(
+    #             node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+    #         )
+    #         node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
+        
+    #     # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
+            
+    #     ################################### X MEAN SHARDING ###################################
+    #     x_mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean_train_vars.npy")).to(x.device).to(x.dtype)
+    #     x_mean = x_mean.unsqueeze(0).expand(-1, 2, -1, -1, -1)
+    #     indices = torch.tensor([0,1,3,7]).to(x_mean.device)
+    #     x_mean = torch.index_select(x_mean, dim=-1, index=indices)
+    #     shard_shapes = get_shard_shapes(x_mean, -2, model_comm_group=model_comm_group)
+    #     x_mean = shard_tensor(x_mean, -2, shard_shapes, model_comm_group)
+
+    #     mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean.npy")).to(x_mean.device).to(x_mean.dtype)
+    #     stdev = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/stdev.npy")).to(x_mean.device).to(x_mean.dtype)
+
+    #     mean = torch.index_select(mean,dim=0, index=indices)
+    #     stdev = torch.index_select(stdev, dim=0, index=indices)
+
+    #     x_mean = (x_mean - mean) / stdev
+
+    #     # print("on apsse toujours dans assemble input")
+    #     # ########################################################################################
+    #     # print(f"x mean shape : {x_mean.shape}")
+    #     # print(f'x shape {x.shape}')
+    #     x_data_latent = torch.cat(
+    #         (
+    #             einops.rearrange(x_mean, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+    #             einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+    #             node_attributes_data,
+    #         ),
+    #         dim=-1,  # feature dimension
+    #     )
+    #     shard_shapes_data = get_or_apply_shard_shapes(
+    #         x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+    #     )
+    #     return x_data_latent, None, shard_shapes_data
+
     def sample(
         self,
         x: torch.Tensor,
@@ -784,7 +915,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ):# -> torch.Tensor:
         """Sample from the diffusion model.
 
         Parameters
@@ -813,15 +944,28 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         if noise_scheduler_params is not None:
             noise_scheduler_config.update(noise_scheduler_params)
 
-        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") #param de steps (dont sdedit) est dedans
+        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}") 
+
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
 
         if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
             raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
+
+
+####################################### DEV #######################################
+        params_inference = kwargs["params_inference"]
+
+        num_steps = params_inference["num_steps"]
+        print("params inference ", params_inference)
+        noise_scheduler_config = params_inference
+    
+###################################################################################
+        print("noise scheduler config : ", noise_scheduler_config)
         scheduler = scheduler_cls(**noise_scheduler_config)
         sigmas = scheduler.get_schedule(x.device, torch.float64)
+
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
         shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
@@ -832,8 +976,8 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
-        
-        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}") #param de sdedit est dedans.
+    
+        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}") 
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
 
@@ -842,26 +986,68 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
-        if noise_scheduler_config['SDEdit']:
 
-            num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
-            
-            num_steps = len(sigmas) #total number of denoising steps when not using sdedit
-            
-            assert num_steps_sdedit <= num_steps, f"num_steps_sdedit ({num_steps_sdedit}) must be <= num_steps ({num_steps})"
-            
-            init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
-            sigmas = sigmas[num_steps - num_steps_sdedit :]
-            y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
-            x_zeros = torch.zeros_like(x,device=x.device)
+        sdedit_in_config = "SDEdit" in noise_scheduler_config.keys()
+        
+        print("noise_scheduler_config", noise_scheduler_config)
+        sdedit_in_config = 'SDEdit' in params_inference.keys()
+        params_inference['SDEdit']=False
+        #DEV ONLY
+        if sdedit_in_config :
+            if params_inference['SDEdit']:
+
+                num_steps_sdedit = params_inference["num_steps_sdedit"]
+                
+                num_steps = len(sigmas) #total number of denoising steps when not using sdedit
+                
+                assert num_steps_sdedit <= num_steps, f"num_steps_sdedit ({num_steps_sdedit}) must be <= num_steps ({num_steps})"
+                warnings.warn(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
+                
+                init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
+                sigmas = sigmas[num_steps - num_steps_sdedit :]
+                y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
+
+        # x = torch.zeros_like(x, device=x.device) #set condition to constant = 0 as in training
+
+        # if sdedit_in_config :
+        #     if noise_scheduler_config['SDEdit']:
+
+        #         num_steps_sdedit = noise_scheduler_config["num_steps_sdedit"]
+                
+        #         num_steps = len(sigmas) #total number of denoising steps when not using sdedit
+                
+        #         assert num_steps_sdedit <= num_steps, f"num_steps_sdedit ({num_steps_sdedit}) must be <= num_steps ({num_steps})"
+        #         warnings.warn(f"SDEdit activated with {num_steps_sdedit}/{num_steps} steps")
+                
+        #         init_sigma = sigmas[num_steps - num_steps_sdedit] #taking only the last num_steps_sdedit sigmas to sample
+        #         sigmas = sigmas[num_steps - num_steps_sdedit :]
+        #         y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
+        # x = torch.zeros_like(x, device=x.device) #set condition to constant = 0 as in training
+        print("shape de x ", x.shape)
+        # x = x[...,0]  # shape: [1, 2, 1, 332840]
+
+        # x = x.unsqueeze(-1).repeat(1, 1, 1, 1, 78) # shape: [1, 2, 1, 332840, 78]
+
+        # x = (x - torch.mean(x))/torch.std(x)
+        
+        # print('max x : ', torch.max(x))
+        # print("min x : ", torch.min(x))
+        # print("mean x : ", torch.mean(x))
+        # print("std x :", torch.std(x))
+
+        x = torch.zeros_like(x, device = x.device)
         return sampler_instance.sample(
-            x_zeros,
+            x,
             y_init,
             sigmas,
             self.fwd_with_preconditioning,
             model_comm_group,
             grid_shard_shapes=grid_shard_shapes,
         )
+
+
+
+
 
     def prepare_sample_SDEdit(
         self,

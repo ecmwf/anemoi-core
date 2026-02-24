@@ -1138,6 +1138,7 @@ class PlotSampleUnconditionalDiffusion(BasePlotAdditionalMetrics):
         print("Model training flag", pl_module.training)
         # Build dictionary of indices and parameters to be plotted
         diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
+        print('JE SUIS PARAM',self.config.data.diagnostic)
         plot_parameters_dict = {
             pl_module.data_indices.model.output.name_to_index[name]: (
                 name,
@@ -1147,9 +1148,11 @@ class PlotSampleUnconditionalDiffusion(BasePlotAdditionalMetrics):
         }
 
         data, output_tensor = self.process(pl_module, outputs, batch)
+        print('DANS PLOT process',self.process,self)
 
         local_rank = pl_module.local_rank
         rollout = getattr(pl_module, "rollout", 0)
+        print('DANS PLOT rollout',rollout)
         for rollout_step in range(rollout):
             fig = plot_predicted_multilevel_flat_sample_unconditional(
                 parameters = plot_parameters_dict,

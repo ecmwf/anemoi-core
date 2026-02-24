@@ -44,12 +44,13 @@ class InputNormalizer(BasePreprocessor):
         super().__init__(config, data_indices, statistics)
 
         name_to_index_training_input = self.data_indices.data.input.name_to_index
+        # print('JE SUIS DANS NORM',name_to_index_training_input.items())
 
         minimum = statistics["minimum"]
         maximum = statistics["maximum"]
         mean = statistics["mean"]
         stdev = statistics["stdev"]
-
+        # print('minimum:', minimum)
         # Optionally reuse statistic of one variable for another variable
         statistics_remap = {}
         for remap, source in self.remap.items():
@@ -64,10 +65,17 @@ class InputNormalizer(BasePreprocessor):
 
         _norm_add = np.zeros((minimum.size,), dtype=np.float32)
         _norm_mul = np.ones((minimum.size,), dtype=np.float32)
-
         for name, i in name_to_index_training_input.items():
-            method = self.methods.get(name, self.default)
+            # print('je suis ZZZZZZZZZZZ',name, type(name),name_to_index_training_input.items())
 
+            if i==7:
+                print('je suis ZZZZZZZZZZZ',i)
+            
+            method = self.methods.get(name, self.default)
+            if i==7:
+                print('je suis ZZZZZZZZZZZ',i,method)
+            if i==4:
+                print('je suis ZZZZZZZZZZZ',name,i,method)
             if method == "mean-std":
                 LOGGER.debug(f"Normalizing: {name} is mean-std-normalised.")
                 if stdev[i] < (mean[i] * 1e-6):
@@ -164,7 +172,6 @@ class InputNormalizer(BasePreprocessor):
             x.mul_(self._norm_mul[self._input_idx]).add_(self._norm_add[self._input_idx])
         else:
             x.mul_(self._norm_mul).add_(self._norm_add)
-
         return x
 
     def inverse_transform(

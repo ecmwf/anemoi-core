@@ -17,7 +17,7 @@ diagnostics:
     mlflow:
       enabled: True 
       offline: False
-      # on_resume_create_child: False
+      on_resume_create_child: False
       experiment_name: 'nodes_4_freq_1_maxsteps_225000_high_noise'
       project_name: 'nodes_4_freq_1_maxsteps_225000_high_noise'
       run_name: 'nodes_4_freq_1_maxsteps_225000_high_noise'
@@ -47,6 +47,20 @@ data:
       std: null
       max: null
       none: ${data.forcing}
+    # normalizer:
+    #   default: "mean-std"
+    #   max: null
+    #   none: 
+    #   - cos_latitude
+    #   - cos_longitude
+    #   - sin_latitude
+    #   - sin_longitude
+    #   - cos_julian_day
+    #   - cos_local_time
+    #   - sin_julian_day
+    #   - sin_local_time
+    #   - lsm
+
 dataloader:
     dataset:
         - dataset: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
@@ -87,6 +101,8 @@ hardware:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
     # output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/outputs_incond_x_0_high_noise_rho3_125K/
     output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/multi_nodes/nodes_4_freq_1_maxsteps_225000/probabilistic_high_noise/
+    # output:   /project/home/p200177/DE_371/angeliquebonamy/anemoi/outputs_cond_z_high_noise_norm_z2/
+
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
     graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt

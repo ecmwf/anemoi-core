@@ -193,6 +193,7 @@ class GraphForecaster(BaseGraphModule):
         batch: torch.Tensor,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        rank_zero_info('[DEBUG] dans _step de graphforecaster')
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -207,5 +208,4 @@ class GraphForecaster(BaseGraphModule):
             y_preds.append(y_preds_next)
 
         loss *= 1.0 / self.rollout
-        rank_zero_info('[DEBUG] dans _step de graphforecaster')
         return loss, metrics, y_preds
