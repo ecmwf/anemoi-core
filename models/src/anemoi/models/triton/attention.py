@@ -50,8 +50,7 @@ def set_allocator():
     This frees up threads and registers to do other computations
     TMA requires global memory allocations, so we set the alloc_fn here
     """
-    # TODO(cathal) Update to check if allocator has been set before attempting to set
-    # Currently there isn't a stable way to do this via Triton
+    # Currently there isn't a stable way to check if the allocator has not been set via Triton
 
     def alloc_fn(size: int, align: int, _):
         return torch.empty(size, dtype=torch.int8, device="cuda")
@@ -549,6 +548,9 @@ def _attn_bwd_dkdv(
 
     Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context.
     """
+    RCP_LN2: tl.constexpr = (
+        1.44269504  # 1/log(2), used to merge with sm_scale to make calculating exponent faster by using exp2() later
+    )
 
     # ***** 1) determine which section of the gradients this program is responsible for *****
 
@@ -635,6 +637,7 @@ def _attn_bwd_dkdv(
 
     # load K and V: they stay in SRAM throughout the inner loop.
     k = desc_k.load([fixed_offset, 0])
+    k *= sm_scale * RCP_LN2
     v = desc_v.load([fixed_offset, 0])
     if UNEVEN_CTX and tail_case:
         # mask out-of-bounds k and v values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED/BLOCK_ITER
@@ -691,29 +694,29 @@ def _attn_bwd_dkdv(
 
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
 
-        mask_iter = curr_iter + offs_iter
+        curr_offs = curr_iter + offs_iter
         qT = desc_q.load([iter_offset, 0]).T
         tail_iter_block = curr_iter + BLOCK_ITER > N_CTX
         if UNEVEN_CTX and tail_iter_block:
             # mask out-of-bounds q values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
-            qT = tl.where(mask_iter[None, :] < N_CTX, qT, 0.0)
+            qT = tl.where(curr_offs[None, :] < N_CTX, qT, 0.0)
 
         # Load m before computing qk to reduce pipeline stall.
         if UNEVEN_CTX and tail_iter_block:
-            m = tl.load(M + mask_iter, mask=mask_iter < N_CTX, other=0.0)
+            m = tl.load(M + curr_offs, mask=curr_offs < N_CTX, other=0.0)
         else:
-            m = tl.load(M + mask_iter)
+            m = tl.load(M + curr_offs)
         qkT = tl.dot(k, qT)
 
         # Apply masking.
         if UNEVEN_CTX and tail_iter_block:
-            qkT = tl.where((mask_iter[None, :] < N_CTX), qkT, MINUS_INF)
+            qkT = tl.where((curr_offs[None, :] < N_CTX), qkT, MINUS_INF)
         if CAUSAL:
-            mask = mask_iter[None, :] >= offs_fixed[:, None]
+            mask = curr_offs[None, :] >= offs_fixed[:, None]
             qkT = tl.where(mask, qkT, MINUS_INF)
 
         if WINDOW > 0:
-            iter_pos = mask_iter[None, :]
+            iter_pos = curr_offs[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
             mask = (kv_lower_bound <= iter_pos) & (kv_upper_bound >= iter_pos)
             qkT = tl.where(mask, qkT, MINUS_INF)
@@ -724,15 +727,15 @@ def _attn_bwd_dkdv(
         do = desc_do.load([iter_offset, 0])
         if UNEVEN_CTX and tail_iter_block:
             # mask out-of-bounds do values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
-            do = tl.where(mask_iter[:, None] < N_CTX, do, 0.0)
+            do = tl.where(curr_offs[:, None] < N_CTX, do, 0.0)
         # Compute dV.
         ppT = pT.to(dtype)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
         if UNEVEN_CTX and tail_iter_block:
-            Di = tl.load(D + mask_iter, mask=mask_iter < N_CTX, other=0.0)
+            Di = tl.load(D + curr_offs, mask=curr_offs < N_CTX, other=0.0)
         else:
-            Di = tl.load(D + mask_iter)
+            Di = tl.load(D + curr_offs)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
@@ -782,6 +785,7 @@ def _attn_bwd_dq(
     dq_ptr,  # raw pointer for dq when using uneven ctx, to handle the dynamic block sizes and masked stores required for uneven ctx
     M,  # pointer to output maxes from forward pass
     D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
+    sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
     Z: tl.constexpr,  # batch size
     H: tl.constexpr,  # num heads
@@ -806,6 +810,9 @@ def _attn_bwd_dq(
 
     # LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
     LN2: tl.constexpr = 0.6931471805599453  # = ln(2)
+    RCP_LN2: tl.constexpr = (
+        1.4426950408889634  # = 1/ln(2), used to merge with sm_scale to make calculating exponent faster by using exp2() later
+    )
 
     # ***** 1) determine which section of the gradients this program is responsible for *****
 
@@ -946,10 +953,10 @@ def _attn_bwd_dq(
 
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
         curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
-        mask_iter = curr_iter + offs_iter
         tail_iter_block = (curr_iter + BLOCK_ITER) > N_CTX
 
         kT = desc_k.load([iter_offset, 0]).T
+        kT *= sm_scale * RCP_LN2
         vT = desc_v.load([iter_offset, 0]).T
         if UNEVEN_CTX and tail_iter_block:
             # mask out-of-bounds k and q values to 0, so they dont contribute to output when N_CTX is not divisible by BLOCK_FIXED
@@ -962,13 +969,13 @@ def _attn_bwd_dq(
         if UNEVEN_CTX and tail_iter_block:
             qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
         if CAUSAL:
-            iter_pos = mask_iter[None, :]
+            iter_pos = (curr_iter + offs_iter)[None, :]
             fixed_pos = offs_fixed[:, None]
             mask = fixed_pos >= iter_pos
             qk = tl.where(mask, qk, MINUS_INF)
 
         if WINDOW > 0:
-            iter_pos = mask_iter[None, :]
+            iter_pos = (curr_iter + offs_iter)[None, :]
             mask = (iter_pos <= q_upper_bound) & (iter_pos >= q_lower_bound)
             qk = tl.where(mask, qk, MINUS_INF)
 
@@ -987,7 +994,6 @@ def _attn_bwd_dq(
 
     # ***** 6) store gradient dQ *****
 
-    # Write back dQ.
     dq *= LN2
     # to avoid writing out of bounds when N_CTX is not divisible by BLOCK_FIXED, the block size of desc_dq is set to be smaller in the last block, so we only write the in-bounds values
     if UNEVEN_CTX and tail_fixed_block:
@@ -1156,8 +1162,6 @@ class TritonAttention(torch.autograd.Function):
         dv = torch.empty_like(v).contiguous()
         BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
 
-        RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
-        k = k * (ctx.sm_scale * RCP_LN2)  # TODO move to kernel
         PRE_BLOCK = 16
         delta = torch.empty_like(M)
 
@@ -1227,6 +1231,7 @@ class TritonAttention(torch.autograd.Function):
             dq,
             M,
             delta,  #
+            ctx.sm_scale,
             Z=BATCH,
             H=N_HEAD,
             N_CTX=N_CTX,  #
