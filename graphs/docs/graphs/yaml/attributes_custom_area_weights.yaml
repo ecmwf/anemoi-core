@@ -1,0 +1,9 @@
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: /path/to/dataset.zarr
+    attributes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.AnemoiDatasetVariableWeights
+        variable: cell_area
