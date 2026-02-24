@@ -104,18 +104,21 @@ def _gather(
 
         dist.all_gather_into_tensor(output, input_, group=group)
     else:
+        max_shape = tuple(max(shape[dim] for shape in shapes) for dim in range(len(shapes[0])))
         tensor_list = [
             torch.empty(
-                shapes[rank], dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+                max_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
             )
-            for rank in range(comm_size)
+            for _ in range(comm_size)
         ]
 
+        pad_size = max_shape[1] - input_.shape[1]
+        input_ = torch.nn.functional.pad(input_, (0, pad_size), mode="constant", value=0)
         tensor_list[comm_rank] = input_
         dist.all_gather(tensor_list, input_, group=group)
 
         # Note: torch.cat already creates a contiguous tensor.
-        output = torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
+        output = torch.cat([t[tuple(slice(None, s) for s in shapes[i])] for i, t in enumerate(tensor_list)], dim=dim_)
 
     return output
 
