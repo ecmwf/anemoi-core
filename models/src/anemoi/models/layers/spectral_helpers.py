@@ -8,12 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
+
 import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import Module
-import logging
-
 
 LOGGER = logging.getLogger(__name__)
 
