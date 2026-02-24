@@ -12,6 +12,10 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import Module
+import logging
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
@@ -90,7 +94,12 @@ class SphericalHarmonicTransform(Module):
         self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
 
         # Use more efficient batched rfft for regular grids
-        self.rfft_rings = self.rfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.rfft_rings_regular
+        if len(set(self.lons_per_lat)) > 1:
+            LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
+            self.rfft_rings = self.rfft_rings_reduced
+        else:
+            LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
+            self.rfft_rings = self.rfft_rings_regular
 
         # Compute Gaussian latitudes and quadrature weights
         theta, weight = legendre_gauss_weights(nlat)
@@ -191,7 +200,12 @@ class InverseSphericalHarmonicTransform(Module):
         self.n_grid_points = sum(self.lons_per_lat)
 
         # Use more efficient batched rfft for regular grids
-        self.irfft_rings = self.irfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.irfft_rings_regular
+        if len(set(self.lons_per_lat)) > 1:
+            LOGGER.info("InverseSphericalHarmonicTransform: Using irfft_rings_reduced for reduced grid")
+            self.irfft_rings = self.irfft_rings_reduced
+        else:
+            LOGGER.info("InverseSphericalHarmonicTransform: Using irfft_rings_regular for regular grid")
+            self.irfft_rings = self.irfft_rings_regular
 
         # Compute Gaussian latitudes (don't need quadrature weights for the inverse)
         theta, _ = legendre_gauss_weights(nlat)
