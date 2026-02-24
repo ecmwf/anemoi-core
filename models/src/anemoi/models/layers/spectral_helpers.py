@@ -77,9 +77,11 @@ def legpoly(
 
 class SphericalHarmonicTransform(Module):
 
-    def __init__(self, nlat: int, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
+    def __init__(self, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
 
         super().__init__()
+
+        nlat = len(lons_per_lat)
 
         self.lmax = lmax or nlat
         self.mmax = mmax or nlat
@@ -188,9 +190,11 @@ class SphericalHarmonicTransform(Module):
 
 class InverseSphericalHarmonicTransform(Module):
 
-    def __init__(self, nlat: int, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
+    def __init__(self, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
 
         super().__init__()
+
+        nlat = len(lons_per_lat)
 
         self.lmax = lmax or nlat
         self.mmax = mmax or nlat
