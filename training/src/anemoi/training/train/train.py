@@ -107,7 +107,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(self.config, self.graph_data)
+        datamodule = AnemoiDatasetsDataModule(self.config)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -188,7 +188,19 @@ class AnemoiTrainer(ABC):
         dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
         for dataset_name, dataset_config in dataset_configs.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
+            dataset_reader_config = dataset_config.dataset_config
+            if isinstance(dataset_reader_config, (DictConfig, dict)):
+                if "dataset" not in dataset_reader_config:
+                    msg = f"Dataset '{dataset_name}' is missing 'dataset' key."
+                    raise ValueError(msg)
+                dataset_source = dataset_reader_config["dataset"]
+            else:
+                dataset_source = dataset_reader_config
+
+            if dataset_source is None:
+                msg = f"Dataset source is None for dataset '{dataset_name}'. Check dataloader.dataset_config.dataset."
+                raise ValueError(msg)
+            graphs[dataset_name] = self._create_graph_for_dataset(dataset_source, dataset_name)
         return graphs
 
     @cached_property
