@@ -244,7 +244,7 @@ def lam_config_with_graph(
     cfg.graph = existing_graph_config
 
     dataset_name = "data"  # default dataset name
-    url_graph = "anemoi-integration-tests/training/graphs/lam-graph.pt"
+    url_graph = "anemoi-integration-tests/training/graphs/lam-graph-2026-02-19.pt"
     tmp_path_graph = Path(get_test_data(url_graph))
     dataset_graph_filename = tmp_path_graph.name.replace(".pt", f"_{dataset_name}.pt")
     tmp_path_graph.rename(tmp_path_graph.parent / dataset_graph_filename)

@@ -54,11 +54,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
 
-        
         if self.has_processor:
             # Processor hidden -> hidden (shared across all datasets)
             first_dataset_name = next(iter(self._graph_data.keys()))
-            processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
+            processor_graph = self._graph_data[first_dataset_name][
+                (self._graph_name_hidden, "to", self._graph_name_hidden)
+            ]
             processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
 
             # Processor hidden -> hidden
