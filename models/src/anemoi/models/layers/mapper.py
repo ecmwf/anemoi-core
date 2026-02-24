@@ -249,34 +249,43 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         # gather/scatter if x_src is sharded, always reduce gradients in bwds
         x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
-        if edge_shard_shapes is not None:
-            # Edges are 1-hop sorted and sharded by graph provider
-            shapes_edge_attr = edge_shard_shapes[0]
-            shapes_edge_idx = edge_shard_shapes[1]
-        else:
-            # Edges not pre-sharded, do 1-hop sorting and sharding here
-            src_size = sum(shape[0] for shape in shapes_src)
-            dst_size = sum(shape[0] for shape in shapes_dst)
-            edge_attr, edge_index, (shapes_edge_attr, shapes_edge_idx) = shard_edges_1hop(
-                edge_attr, edge_index, src_size, dst_size, model_comm_group
-            )
+        # Ensure nodes_src always exists (used for cond mapping below)
+        nodes_src: Optional[Tensor] = None
 
-        # Relabel destination indices from global to local
-        if model_comm_group is not None and model_comm_group.size() > 1:
-            rank = model_comm_group.rank()
-            dst_offset = sum(shapes_dst[i][0] for i in range(rank))
-            edge_index = edge_index.clone()  # no in-place modification of pre-sharded tensor
-            edge_index[1] -= dst_offset
+        if edge_index is not None:
+            if edge_shard_shapes is not None:
+                # Edges are 1-hop sorted and sharded by graph provider
+                shapes_edge_attr = edge_shard_shapes[0]
+                shapes_edge_idx = edge_shard_shapes[1]
+            else:
+                # Edges not pre-sharded, do 1-hop sorting and sharding here
+                src_size = sum(shape[0] for shape in shapes_src)
+                dst_size = sum(shape[0] for shape in shapes_dst)
+                edge_attr, edge_index, (shapes_edge_attr, shapes_edge_idx) = shard_edges_1hop(
+                    edge_attr, edge_index, src_size, dst_size, model_comm_group
+                )
 
-        # at this point, x_src is synced i.e. full, x_dst is sharded, edges are sharded (incoming edges to x_dst)
-        size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
-        x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
+            # Relabel destination indices from global to local
+            if model_comm_group is not None and model_comm_group.size() > 1:
+                rank = model_comm_group.rank()
+                dst_offset = sum(shapes_dst[i][0] for i in range(rank))
+                edge_index = edge_index.clone()  # no in-place modification of pre-sharded tensor
+                edge_index[1] -= dst_offset
+
+            # x_src is synced/full, x_dst is sharded, edges are sharded (incoming to x_dst)
+            size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
+            x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
 
         if cond is not None:  # sync cond_src to match x_src:
             cond_src, cond_dst = cond
             shapes_cond_src = change_channels_in_shape(shapes_src, cond_src.shape[-1])
             cond_src_full = sync_tensor(cond_src, 0, shapes_cond_src, model_comm_group, gather_in_fwd=True)
-            cond = (cond_src_full[nodes_src], cond_dst)
+
+            # If edges exist we may have dropped/reindexed src nodes; otherwise keep full cond_src.
+            if nodes_src is not None:
+                cond = (cond_src_full[nodes_src], cond_dst)
+            else:
+                cond = (cond_src_full, cond_dst)
 
         if not x_dst_is_sharded:
             x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
@@ -357,6 +366,39 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
+        # Special-case: graphs with no edges (e.g. NoOpGraph / dataset without decoder graph).
+        # Still apply sharding + embeddings consistently, but skip message passing.
+        if edge_index is None:
+            x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
+                x=x,
+                shard_shapes=shard_shapes,
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=x_src_is_sharded,
+                x_dst_is_sharded=x_dst_is_sharded,
+            )
+
+            x_dst_out = x_dst  # no message passing without edges
+
+            x_dst_out = self.post_process(
+                x_dst=x_dst_out,
+                shapes_dst=shapes_dst,
+                model_comm_group=model_comm_group,
+                keep_x_dst_sharded=keep_x_dst_sharded,
+            )
+
+            # Forward mapper post_process is identity: gather here if requested.
+            if (not keep_x_dst_sharded) and (model_comm_group is not None) and (model_comm_group.size() > 1):
+                global_n_dst = sum(s[0] for s in shapes_dst)
+                if x_dst_out.shape[0] != global_n_dst:
+                    x_dst_out = gather_tensor(
+                        x_dst_out,
+                        0,
+                        change_channels_in_shape(shapes_dst, x_dst_out.shape[-1]),
+                        model_comm_group,
+                    )
+
+            return x_dst_out
+
         x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst, cond = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,

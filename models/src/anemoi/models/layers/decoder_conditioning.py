@@ -29,8 +29,7 @@ class CondConfig:
     enabled: bool
     key: str = "cond"
     method: str = "film"
-    apply_to: str = "x_dst"  # "x_dst" | "latent" | "both"
-    cond_dim: int = 0
+    cond_dim: int = 1
 
 
 class DecoderConditioning(nn.Module):
@@ -46,8 +45,6 @@ class DecoderConditioning(nn.Module):
         cfg: DotDict,
         *,
         xdst_dim_by_ds: Dict[str, int],
-        latent_dim: int,
-        mesh_xdst_dim: Optional[int] = None,
     ) -> None:
         super().__init__()
         cfg = DotDict(cfg)
@@ -55,31 +52,30 @@ class DecoderConditioning(nn.Module):
             enabled=bool(cfg),
             key=str(cfg.get("key", "cond")),
             method=str(cfg.get("method", "film")),
-            apply_to=str(cfg.get("apply_to", "x_dst")),
-            cond_dim=int(cfg.get("cond_dim", 0)),
+            cond_dim=int(cfg.get("cond_dim", 2)),
         )
 
         self.xdst_adapters = nn.ModuleDict()
         self.mesh_adapter: Optional[nn.Module] = None
         self.latent_adapter: Optional[nn.Module] = None
 
-        if not self.cfg.enabled:
-            return
-
-        if self.cfg.apply_to in {"x_dst", "both"}:
-            for ds, xdim in xdst_dim_by_ds.items():
-                self.xdst_adapters[ds] = build_decoder_conditioner(
-                    method=self.cfg.method, x_dim=int(xdim), cond_dim=self.cfg.cond_dim, cfg=cfg
-                )
-            if mesh_xdst_dim is not None:
-                self.mesh_adapter = build_decoder_conditioner(
-                    method=self.cfg.method, x_dim=int(mesh_xdst_dim), cond_dim=self.cfg.cond_dim, cfg=cfg
-                )
-
-        if self.cfg.apply_to in {"latent", "both"} and latent_dim > 0:
-            self.latent_adapter = build_decoder_conditioner(
-                method=self.cfg.method, x_dim=int(latent_dim), cond_dim=self.cfg.cond_dim, cfg=cfg
+        for ds, xdim in xdst_dim_by_ds.items():
+            self.xdst_adapters[ds] = build_decoder_conditioner(
+                method=self.cfg.method, x_dim=int(xdim), cond_dim=self.cfg.cond_dim, cfg=cfg
             )
+
+    @staticmethod
+    def _match_device_dtype(t: Tensor, ref: Tensor) -> Tensor:
+        """Move t to ref.device and (for floating types) ref.dtype.
+
+        This prevents CPU/CUDA mismatches when decoder_context tensors live on CPU
+        and also avoids dtype mismatches under AMP.
+        """
+        if t.device != ref.device:
+            t = t.to(ref.device)
+        if t.is_floating_point() and ref.is_floating_point() and t.dtype != ref.dtype:
+            t = t.to(dtype=ref.dtype)
+        return t
 
     def infer_t_out(self, decoder_context: Optional[dict], fallback: int) -> int:
         if not self.cfg.enabled or decoder_context is None:
@@ -98,12 +94,16 @@ class DecoderConditioning(nn.Module):
         t: int,
         union_name: Optional[str] = None,
         concat_union_from_datasets: Optional[list[str]] = None,
+        ref: Optional[Tensor] = None,
     ) -> Optional[Tensor]:
         """Returns cond_flat: [(B*E*G), C] or None.
+
         Supports union mesh:
           - prefer decoder_context[union_name][key]
           - else decoder_context["__union__"][key]
           - else concat datasets along grid dim in the provided order
+
+        If ref is provided, cond tensors are moved/cast to match ref's device/dtype.
         """
         if not self.cfg.enabled or decoder_context is None:
             return None
@@ -112,20 +112,45 @@ class DecoderConditioning(nn.Module):
 
         # union mesh requested
         if union_name is not None and dataset_name == union_name:
-            if union_name in decoder_context and k in decoder_context[union_name]:
+            if (
+                union_name in decoder_context
+                and isinstance(decoder_context[union_name], dict)
+                and k in decoder_context[union_name]
+            ):
                 cond_t = decoder_context[union_name][k][:, t]
-            elif "__union__" in decoder_context and k in decoder_context["__union__"]:
+            elif (
+                "__union__" in decoder_context
+                and isinstance(decoder_context["__union__"], dict)
+                and k in decoder_context["__union__"]
+            ):
                 cond_t = decoder_context["__union__"][k][:, t]
             elif concat_union_from_datasets is not None and all(
-                (ds in decoder_context and k in decoder_context[ds]) for ds in concat_union_from_datasets
+                (ds in decoder_context and isinstance(decoder_context[ds], dict) and k in decoder_context[ds])
+                for ds in concat_union_from_datasets
             ):
-                cond_t = torch.cat([decoder_context[ds][k][:, t] for ds in concat_union_from_datasets], dim=2)
+                parts = [decoder_context[ds][k][:, t] for ds in concat_union_from_datasets]
+
+                # Make sure cat happens on a single device
+                if ref is not None:
+                    parts = [self._match_device_dtype(p, ref) for p in parts]
+                else:
+                    dev0 = parts[0].device
+                    parts = [p.to(dev0) for p in parts]
+
+                cond_t = torch.cat(parts, dim=2)
             else:
                 return None
         else:
-            if dataset_name not in decoder_context or k not in decoder_context[dataset_name]:
+            if (
+                dataset_name not in decoder_context
+                or not isinstance(decoder_context[dataset_name], dict)
+                or k not in decoder_context[dataset_name]
+            ):
                 return None
             cond_t = decoder_context[dataset_name][k][:, t]  # [B,E,G,C]
+
+        if ref is not None:
+            cond_t = self._match_device_dtype(cond_t, ref)
 
         return einops.rearrange(cond_t, "b e g c -> (b e g) c")
 
@@ -140,15 +165,15 @@ class DecoderConditioning(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         if cond_flat is None or not self.cfg.enabled:
             return x_latent, x_dst
+        cond_flat = self._match_device_dtype(cond_flat, x_dst)
 
         if self.latent_adapter is not None:
             x_latent = self.latent_adapter(x_latent, cond_flat)
 
-        if self.cfg.apply_to in {"x_dst", "both"}:
-            if is_union_mesh and self.mesh_adapter is not None:
-                x_dst = self.mesh_adapter(x_dst, cond_flat)
-            elif dataset_name in self.xdst_adapters:
-                x_dst = self.xdst_adapters[dataset_name](x_dst, cond_flat)
+        if is_union_mesh and self.mesh_adapter is not None:
+            x_dst = self.mesh_adapter(x_dst, cond_flat)
+        elif dataset_name in self.xdst_adapters:
+            x_dst = self.xdst_adapters[dataset_name](x_dst, cond_flat)
 
         return x_latent, x_dst
 
@@ -164,7 +189,12 @@ class DecoderTimeConditioningFiLM(nn.Module):
             nn.Linear(hidden, 2 * x_dim),
         )
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
+        if cond.device != x.device:
+            cond = cond.to(x.device)
+        if cond.is_floating_point() and x.is_floating_point() and cond.dtype != x.dtype:
+            cond = cond.to(dtype=x.dtype)
+
         gb = self.net(cond)
         gamma, beta = gb.chunk(2, dim=-1)
         return x * (1.0 + gamma) + beta
@@ -184,7 +214,12 @@ class DecoderTimeConditioningCrossAttention(nn.Module):
         self.attn = nn.MultiheadAttention(embed_dim=x_dim, num_heads=num_heads, batch_first=True)
         self.out = nn.Sequential(nn.LayerNorm(x_dim), nn.Linear(x_dim, x_dim))
 
-    def forward(self, x: torch.Tensor, cond_tokens: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor, cond_tokens: Tensor) -> Tensor:
+        if cond_tokens.device != x.device:
+            cond_tokens = cond_tokens.to(x.device)
+        if cond_tokens.is_floating_point() and x.is_floating_point() and cond_tokens.dtype != x.dtype:
+            cond_tokens = cond_tokens.to(dtype=x.dtype)
+
         q = self.q(x)
         k = self.k(cond_tokens)
         v = self.v(cond_tokens)
@@ -203,14 +238,18 @@ class DecoderTimeConditioningProjConcat(nn.Module):
             nn.Linear(hidden, x_dim),
         )
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
+        if cond.device != x.device:
+            cond = cond.to(x.device)
+        if cond.is_floating_point() and x.is_floating_point() and cond.dtype != x.dtype:
+            cond = cond.to(dtype=x.dtype)
         return self.net(torch.cat([x, cond], dim=-1))
 
 
 def build_decoder_conditioner(*, method: str, x_dim: int, cond_dim: int, cfg: dict | None = None) -> nn.Module:
     cfg = cfg or {}
     method = str(method).lower()
-    if method in {"film", "fiLM".lower()}:
+    if method in {"film", "film".lower()}:
         return DecoderTimeConditioningFiLM(x_dim=x_dim, cond_dim=cond_dim, hidden=int(cfg.get("hidden", 128)))
     if method in {"cross_attention", "cross-attn", "xattn"}:
         return DecoderTimeConditioningCrossAttention(

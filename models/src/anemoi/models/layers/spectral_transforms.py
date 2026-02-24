@@ -23,6 +23,9 @@ LOGGER = logging.getLogger(__name__)
 class SpectralTransform(torch.nn.Module):
     """Abstract base class for spectral transforms."""
 
+    def __init__(self) -> None:
+        super().__init__()
+
     @abc.abstractmethod
     def forward(
         self,
@@ -80,7 +83,6 @@ class FFT2D(SpectralTransform):
             bottom/right edges before patch extraction.
         """
         super().__init__()
-
         self.x_dim = x_dim
         self.y_dim = y_dim
         self.patch_size = patch_size

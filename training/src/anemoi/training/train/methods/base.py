@@ -22,6 +22,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
@@ -138,7 +139,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -151,7 +152,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : dict[str, HeteroData]
+        graph_data : HeteroData
             Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
@@ -166,17 +167,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
         super().__init__()
         self.task = task
 
-        assert isinstance(graph_data, dict), "graph_data must be a dict keyed by dataset name"
+        assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
         # Handle dictionary of graph_data
-        graph_data = {name: data.to(self.device) for name, data in graph_data.items()}
-        self.dataset_names = list(graph_data.keys())
+        graph_data = graph_data.to(self.device)
+        self.dataset_names = list(data_indices.keys())
 
         # Create output_mask dictionary for each dataset
-        self.output_mask = {}
-        for name in self.dataset_names:
-            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data[name])
+        self.output_mask = {
+            name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
+        }
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
@@ -239,7 +240,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
-                graph_data=graph_data[dataset_name],
+                graph_data=graph_data,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
@@ -299,7 +300,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 grid_indices_configs[dataset_name],
                 reader_group_size=reader_group_size,
             )
-            self.grid_indices[dataset_name].setup(graph_data[dataset_name])
+            self.grid_indices[dataset_name].setup(graph_data)
         self.grid_dim = -2
 
         # check sharding support

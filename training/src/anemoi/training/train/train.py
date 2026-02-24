@@ -30,6 +30,8 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
 from torch_geometric.data import HeteroData
 
+from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
@@ -145,47 +147,6 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str | None = None) -> HeteroData:
-        """Create graph for a specific dataset, overriding the dataset path in config."""
-        # Determine filename
-        if self.config.hardware.files.graph is not None:
-            if dataset_name:
-                # Multi-dataset: append dataset name
-                base_name = self.config.hardware.files.graph
-                if base_name.endswith(".pt"):
-                    graph_name = base_name.replace(".pt", f"_{dataset_name}.pt")
-                else:
-                    graph_name = f"{base_name}_{dataset_name}.pt"
-            else:
-                # Single dataset: use original name
-                assert 1 > 2, "dataset_name must be provided when using multiple datasets."
-                graph_name = self.config.hardware.files.graph
-
-            graph_filename = Path(self.config.hardware.paths.graph, graph_name)
-
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        graph_config = self.config.graph
-
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
-
-        return GraphCreator(config=graph_config).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
-
     @cached_property
     @abstractmethod
     def profiler(self) -> None:
@@ -193,14 +154,30 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
+    def graph_data(self) -> HeteroData:
         """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
-        return graphs
+        # Determine filename
+        if (graph_filename := self.config.system.input.graph) is not None:
+            graph_filename = Path(graph_filename)
+
+            # Try loading existing
+            if graph_filename.exists() and not self.config.graph.overwrite:
+                from anemoi.graphs.utils import get_distributed_device
+
+                LOGGER.info("Loading graph data from %s", graph_filename)
+                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+
+            # TODO(): We could add some functionality to load partial graphs here, and compute the rest from the config.
+        else:
+            graph_filename = None
+
+        # Create new graph
+        from anemoi.graphs.create import GraphCreator
+
+        return GraphCreator(config=self.config.graph).create(
+            save_path=graph_filename,
+            overwrite=self.config.graph.overwrite,
+        )
 
     @cached_property
     def model(self) -> pl.LightningModule:

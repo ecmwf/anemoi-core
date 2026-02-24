@@ -165,14 +165,14 @@ def sort_edges_1hop_chunks(
     tuple[list[Tensor], list[Adj]]
         list of sorted edge attribute chunks, list of sorted edge_index chunks
     """
+    edge_index_list = []
+    edge_attr_list = []
     if isinstance(num_nodes, int):
         node_chunks = torch.arange(num_nodes, device=edge_index.device).tensor_split(num_chunks)
     else:
         nodes_src = torch.arange(num_nodes[0], device=edge_index.device)
         node_chunks = torch.arange(num_nodes[1], device=edge_index.device).tensor_split(num_chunks)
 
-    edge_index_list = []
-    edge_attr_list = []
     for node_chunk in node_chunks:
         if isinstance(num_nodes, int):
             edge_attr_chunk, edge_index_chunk = get_k_hop_edges(node_chunk, edge_attr, edge_index, num_nodes=num_nodes)
