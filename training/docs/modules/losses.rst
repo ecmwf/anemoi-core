@@ -133,9 +133,9 @@ Supported transforms include:
   known ``x_dim`` and ``y_dim``.
 * ``DCT2D``: 2D Discrete Cosine Transform for regular 2D fields. This transform requires
   the optional dependency ``torch-dct``.
-* ``EcTransOctahedralSHT``: Spherical Harmonic Transform (SHT) on the *octahedral reduced
-  Gaussian grid* using ecTrans assets (via precomputed ``npz`` assets, or generated with
-  ``ectrans4py`` if available).
+* ``ReducedSHT``: Spherical harmonic transform (SHT) on ECMWF's traditional reduced Gaussian grid. This can handle the
+  native grid of ERA5 such as N320.
+* ``OctahedralSHT``: Spherical harmonic transform (SHT) on the octahedral reduced Gaussian grid.
 
 .. note::
 
