@@ -246,6 +246,15 @@ available, then from the top-level directory of anemoi-core run:
 
    pytest training/tests/integration --slow
 
+For multigpu integration tests in
+``training/tests/integration/test_training_cycle_multigpu.py``, use:
+
+.. code:: bash
+
+   pytest -q training/tests/integration/test_training_cycle_multigpu.py --slow --multigpu
+
+These multigpu test configurations currently assume a node with 4 GPUs.
+
 *********************************************
  Configuration handling in integration tests
 *********************************************
