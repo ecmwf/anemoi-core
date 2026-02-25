@@ -31,8 +31,8 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
 
-GLOBAL_DEFAULT_ATOL = 1e-5
-GLOBAL_DEFAULT_RTOL = 1e-5
+GLOBAL_DEFAULT_ATOL = 1e-12
+GLOBAL_DEFAULT_RTOL = 1e-12
 
 
 def _env_flag(name: str, default: bool) -> bool:
