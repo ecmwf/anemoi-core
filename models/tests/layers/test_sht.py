@@ -94,6 +94,7 @@ def sht_setup(request):
     }
 
 
+@pytest.mark.gpu
 def test_idempotency_direct_inverse(sht_setup):
     """direct followed by inverse returns the original (band-limited) field."""
     truncation = sht_setup["truncation"]
@@ -111,6 +112,7 @@ def test_idempotency_direct_inverse(sht_setup):
     assert torch.allclose(before, after, rtol=tolerance)
 
 
+@pytest.mark.gpu
 def test_idempotency_inverse_direct(sht_setup):
     """inverse followed by direct returns the original spectral coefficients."""
     truncation = sht_setup["truncation"]
@@ -132,6 +134,7 @@ def test_idempotency_inverse_direct(sht_setup):
     assert maxdiff < tolerance
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_multiple_direct_calls(sht_setup):
     """Test direct transform can be called multiple times, to verify the CUDA graph functionality works correctly.
