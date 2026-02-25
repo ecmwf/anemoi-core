@@ -130,3 +130,20 @@ def test_idempotency_inverse_direct(sht_setup):
         maxdiff = max(maxdiff, torch.abs((ref - got) / ref).max().item())
 
     assert maxdiff < tolerance
+
+
+@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
+def test_multiple_direct_calls(sht_setup):
+    """Test direct transform can be called multiple times, to verify the CUDA graph functionality works correctly.
+    Reduced grids only.
+    """
+    dtype = sht_setup["dtype"]
+    direct = sht_setup["direct"]
+
+    before = torch.randn((1, 1, direct.n_grid_points), dtype=dtype)
+
+    once = direct(before)
+
+    twice = direct(before)
+
+    assert torch.all(once == twice)
