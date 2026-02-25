@@ -277,7 +277,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             preds = output[1]
             if isinstance(preds, dict):
                 preds = [preds]
-
             output = [
                 output[0],
                 [
@@ -682,19 +681,40 @@ class LongRolloutPlots(BasePlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        output: list[torch.Tensor],
-        batch: torch.Tensor,
+        output: list[dict[str,torch.Tensor]],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
     ) -> None:
         if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
-            batch = pl_module.allgather_batch(batch)
-            output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
+            batch = {
+                dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
+                for dataset_name, dataset_tensor in batch.items()
+            }
+            preds = output[1]
+            context = next(iter(batch.values())).device  # get device from any of the tensors in the batch
+            if not isinstance(preds, list):
 
+                raise TypeError(preds)
+
+            output = [
+                output[0],
+                [
+                    {
+                        dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
+                        for dataset_name, dataset_pred in pred.items()
+                    }
+                    for pred in preds
+                ],
+            ]
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for post_processor in self.post_processors.processors.values():
-                if hasattr(post_processor, "nan_locations"):
-                    post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
-            self.post_processors = self.post_processors.cpu()
+            for dataset_name in self.post_processors:
+                for post_processor in self.post_processors[dataset_name].processors.values():
+                    if hasattr(post_processor, "nan_locations"):
+                        post_processor.nan_locations = pl_module.allgather_batch(
+                            post_processor.nan_locations,
+                            dataset_name,
+                        )
+                self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
             precision_mapping = {
                 "16-mixed": torch.float16,
@@ -702,7 +722,6 @@ class LongRolloutPlots(BasePlotCallback):
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
-            context = torch.autocast(device_type=batch.device.type, dtype=dtype) if dtype is not None else nullcontext()
 
             if self.config.diagnostics.plot.asynchronous:
                 LOGGER.warning("Asynchronous plotting not supported for long rollout plots.")
