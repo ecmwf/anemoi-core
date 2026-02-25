@@ -133,7 +133,7 @@ def build_global_config(
 
 def _configure_multigpu_model_sharding(cfg: DictConfig) -> None:
     cfg.system.hardware.accelerator = "cuda"
-    cfg.system.hardware.num_gpus_per_node = 2
+    cfg.system.hardware.num_gpus_per_node = 4
     cfg.system.hardware.num_nodes = 1
     cfg.system.hardware.num_gpus_per_model = 2
     cfg.dataloader.read_group_size = 2
@@ -143,6 +143,23 @@ def _configure_multigpu_model_sharding(cfg: DictConfig) -> None:
     # Some base fixtures call OmegaConf.resolve() before this helper is used,
     # so we must also update the strategy block directly.
     cfg.training.strategy.num_gpus_per_model = 2
+    cfg.training.strategy.read_group_size = 2
+
+
+def _configure_multigpu_ensemble(cfg: DictConfig) -> None:
+    cfg.system.hardware.accelerator = "cuda"
+    cfg.system.hardware.num_gpus_per_node = 4
+    cfg.system.hardware.num_nodes = 1
+    cfg.system.hardware.num_gpus_per_model = 2
+    cfg.system.hardware.num_gpus_per_ensemble = 4
+    cfg.dataloader.read_group_size = 2
+    cfg.model.keep_batch_sharded = True
+    cfg.dataloader.batch_size.training = 1
+    cfg.dataloader.batch_size.validation = 1
+    # Some base fixtures call OmegaConf.resolve() before this helper is used,
+    # so we must also update the strategy block directly.
+    cfg.training.strategy.num_gpus_per_model = 2
+    cfg.training.strategy.num_gpus_per_ensemble = 4
     cfg.training.strategy.read_group_size = 2
 
 
@@ -336,6 +353,17 @@ def ensemble_config(
     cfg.training.multistep_input = 3
     cfg.training.multistep_output = 2
     return cfg, url_dataset
+
+
+@pytest.fixture
+def ensemble_multigpu_config(
+    ensemble_config: tuple[DictConfig, str],
+) -> tuple[DictConfig, str]:
+    cfg, url = ensemble_config
+    _configure_multigpu_ensemble(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, url
 
 
 @pytest.fixture
@@ -602,6 +630,16 @@ def diffusion_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, url_dataset
+
+
+@pytest.fixture
+def diffusion_multigpu_config(
+    diffusion_config: tuple[OmegaConf, str],
+) -> tuple[OmegaConf, str]:
+    cfg, url = diffusion_config
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    return cfg, url
 
 
 @pytest.fixture(
