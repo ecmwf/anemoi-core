@@ -306,12 +306,6 @@ def _generate_configs(try_warp_spec=True):
 
 @triton.jit
 def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
-    # TODO(cathal) possible bug here, debug by forcing this code path
-    #   The above exception was the direct cause of the following exception:
-
-    #   triton.compiler.errors.CompilationError: at 5:15:
-    #       return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
-    #       Shape element 0 must have type `constexpr[int]`, got `constexpr[<class 'triton.language.core.tensor'>]
     if isinstance(desc_or_ptr, tl.tensor_descriptor):
         return desc_or_ptr
     else:
@@ -393,16 +387,14 @@ def _attn_fwd(
         block_shape=[BLOCK_ITER, HEAD_DIM],
     )
 
-    # store output values, handling uneven ctx by masking out-of-bounds values and adjusting block size of output when necessary
-    output_block_size = BLOCK_FIXED
+    # For output: only create tensor descriptor when NOT in tail case
+    # (tail case uses raw pointer arithmetic to handle dynamic block size)
     tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
-    if UNEVEN_CTX and tail_case:
-        output_block_size = N_CTX - start_fixed * BLOCK_FIXED
     desc_o = _maybe_make_tensor_descriptor(
         desc_o,
         shape=[y_dim, HEAD_DIM],
         strides=[HEAD_DIM, 1],
-        block_shape=[output_block_size, HEAD_DIM],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
 
     # ****** 3) calculate offsets into the input and output tensors which this kernel is responsible for *****
@@ -431,6 +423,7 @@ def _attn_fwd(
 
     # load q: it will stay in SRAM throughout
     q = desc_q.load([fixed_offset, 0])
+
     if UNEVEN_CTX and tail_case:
         # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
         q = tl.where(offs_fixed[:, None] < N_CTX, q, 0.0)
@@ -605,22 +598,17 @@ def _attn_bwd_dkdv(
         block_shape=[BLOCK_ITER, HEAD_DIM],
     )
 
-    # When working with N_CTX values that are not divisible by BLOCK_FIXED, we need to adjust the block size of the output tensors in the last block, to avoid writing out-of-bounds values.
-    output_block_size = BLOCK_FIXED
-    tail_case = (start_fixed + 1) * BLOCK_FIXED > N_CTX
-    if UNEVEN_CTX and tail_case:
-        output_block_size = N_CTX - start_fixed * BLOCK_FIXED
     desc_dk = _maybe_make_tensor_descriptor(
         desc_dk,
         shape=[y_dim, HEAD_DIM],
         strides=[HEAD_DIM, 1],
-        block_shape=[output_block_size, HEAD_DIM],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
     desc_dv = _maybe_make_tensor_descriptor(
         desc_dv,
         shape=[y_dim, HEAD_DIM],
         strides=[HEAD_DIM, 1],
-        block_shape=[output_block_size, HEAD_DIM],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
 
     # ***** 4) allocate shared memory buffers for gradients and load fixed subset of K and V into shared memory *****
@@ -629,6 +617,8 @@ def _attn_bwd_dkdv(
     M += off_chz
     L += off_chz
     D += off_chz
+
+    tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
 
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
 
@@ -867,17 +857,11 @@ def _attn_bwd_dq(
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
-    # When working with N_CTX values that are not divisible by BLOCK_FIXED, we need to adjust the block size of the output tensors in the last block, to avoid writing out-of-bounds values.
-
-    output_block_size = BLOCK_FIXED
-    tail_fixed_block = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
-    if UNEVEN_CTX and tail_fixed_block:
-        output_block_size = N_CTX - start_fixed * BLOCK_FIXED
     desc_dq = _maybe_make_tensor_descriptor(
         desc_dq,
         shape=[y_dim, HEAD_DIM],
         strides=[HEAD_DIM, 1],
-        block_shape=[output_block_size, HEAD_DIM],
+        block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
 
     # ***** 4) allocate shared memory buffers for gradients and load fixed subset of Q and dO into shared memory *****
@@ -888,6 +872,7 @@ def _attn_bwd_dq(
 
     # generate offset array for fixed block
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
+    tail_fixed_block = (start_fixed + BLOCK_FIXED) > N_CTX
 
     q = desc_q.load([fixed_offset, 0])
     dq = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)  # gradient accumulator for dQ
@@ -1182,6 +1167,10 @@ class TritonAttention(torch.autograd.Function):
         _attn_bwd_preprocess[pre_grid](
             o, do, delta, N_CTX, n_ctx_rounded=n_ctx_rounded, PRE_BLOCK=PRE_BLOCK, HEAD_DIM=HEAD_DIM
         )
+
+        # for some reason, when using device-side tensor descriptors, the allocator must be set explictly before the backward pass, otherwise triton complains no allocator has been set
+        if not supports_host_descriptor():
+            set_allocator()
 
         # defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU
         # (SMs are essentially processors on a GPU, with typically 1024 threads per SM)
