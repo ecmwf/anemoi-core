@@ -1183,6 +1183,10 @@ class TritonAttention(torch.autograd.Function):
             return (triton.cdiv(n_ctx, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
 
         # Compute dK and dV
+        # for some reason, when using device-side tensor descriptors, the allocator must be set explictly before the backward pass, otherwise triton complains no allocator has been set
+        if not supports_host_descriptor():
+            set_allocator()
+
         _attn_bwd_dkdv[grid_dkdv](
             desc_q,
             desc_k,
@@ -1234,3 +1238,252 @@ class TritonAttention(torch.autograd.Function):
         )
 
         return dq, dk, dv, None, None, None, None
+
+
+def _generate_varlen_configs():
+    """Generates autotuning configs for the varlen forward kernel.
+
+    Uses raw pointer loads instead of tensor descriptors, so no pre_hook is needed.
+    """
+    if is_hip():
+        NUM_STAGES_OPTIONS = [1]
+    else:
+        NUM_STAGES_OPTIONS = [1, 2, 3, 4]
+
+    configs = [
+        triton.Config(
+            {"BLOCK_M": BM, "BLOCK_N": BN},
+            num_stages=s,
+            num_warps=w,
+        )
+        for BM in [16, 32, 64, 128]
+        for BN in [16, 32, 64, 128]
+        for s in NUM_STAGES_OPTIONS
+        for w in [4, 8]
+    ]
+
+    if "PYTEST_VERSION" in os.environ:
+        configs = [
+            triton.Config(
+                dict(BLOCK_M=32, BLOCK_N=16),
+                num_stages=1,
+                num_warps=4,
+            )
+        ]
+    return configs
+
+
+@triton.autotune(
+    configs=_generate_varlen_configs(),
+    key=["SEQLEN_Q", "SEQLEN_K", "HEAD_DIM"],
+    cache_results=False,
+)
+@triton.jit
+def _attn_varlen_fwd(
+    Q,  # pointer to Q tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+    K,  # pointer to K tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+    V,  # pointer to V tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+    O,  # pointer to output tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+    sm_scale,  # softmax scaling factor
+    seq_start_q,  # starting token offset for Q in the packed tensor (scalar)
+    seq_start_k,  # starting token offset for K/V in the packed tensor (scalar)
+    stride_qt,  # stride of Q along token dim (= N_HEAD * HEAD_DIM)
+    stride_qh,  # stride of Q along head dim (= HEAD_DIM)
+    stride_kt,
+    stride_kh,
+    stride_vt,
+    stride_vh,
+    stride_ot,
+    stride_oh,
+    SEQLEN_Q: tl.constexpr,  # sequence length for Q in this sequence
+    SEQLEN_K: tl.constexpr,  # sequence length for K/V in this sequence
+    HEAD_DIM: tl.constexpr,  # head dimension
+    BLOCK_M: tl.constexpr,  # block size for Q (fixed block)
+    BLOCK_N: tl.constexpr,  # block size for K/V (iter block)
+    dtype: tl.constexpr,  # output dtype
+):
+    """Varlen forward flash attention kernel for a single sequence.
+
+    One kernel launch handles one sequence. Each program computes one BLOCK_M-sized
+    chunk of the output for one head.
+
+    Grid: (cdiv(SEQLEN_Q, BLOCK_M), N_HEAD)
+    program_id(0) indexes the Q block within this sequence.
+    program_id(1) indexes the head.
+
+    Input tensors have layout [TOTAL_TOKENS, N_HEAD, HEAD_DIM] with strides provided.
+    seq_start_q and seq_start_k are the token offsets into the packed tensor for this sequence.
+    """
+
+    # ***** 1) Determine which block and head this program handles *****
+    pid_m = tl.program_id(0)  # block index within this sequence
+    pid_h = tl.program_id(1)  # head index
+
+    start_m = pid_m * BLOCK_M  # local token offset within sequence
+
+    # ***** 2) Compute pointers for Q, K, V, O for this (sequence, head) *****
+
+    offs_m = start_m + tl.arange(0, BLOCK_M)  # [BLOCK_M] - local token positions
+    offs_d = tl.arange(0, HEAD_DIM)  # [HEAD_DIM]
+
+    # Global token indices for Q
+    q_token_ids = seq_start_q + offs_m  # [BLOCK_M]
+
+    # Q pointers: [BLOCK_M, HEAD_DIM]
+    q_ptrs = Q + q_token_ids[:, None] * stride_qt + pid_h * stride_qh + offs_d[None, :]
+    q_mask = offs_m[:, None] < SEQLEN_Q
+
+    # Load Q block: [BLOCK_M, HEAD_DIM]
+    q = tl.load(q_ptrs, mask=q_mask, other=0.0)
+
+    # ***** 3) Initialize accumulators for online softmax *****
+    m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")  # running max
+    l_i = tl.zeros([BLOCK_M], dtype=tl.float32)  # running sum of exp
+    acc = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)  # output accumulator
+
+    qk_scale = sm_scale * 1.44269504  # sm_scale / log(2), to use exp2 instead of exp
+
+    MINUS_INF: tl.constexpr = float(-1.0e8)
+
+    # ***** 4) Main loop: iterate over K/V blocks *****
+    offs_n = tl.arange(0, BLOCK_N)  # [BLOCK_N]
+
+    for start_n in range(0, SEQLEN_K, BLOCK_N):
+        curr_offs_n = start_n + offs_n  # [BLOCK_N] - local token positions in K/V
+
+        # Global token indices for K/V
+        kv_token_ids = seq_start_k + curr_offs_n  # [BLOCK_N]
+        kv_mask = curr_offs_n < SEQLEN_K  # [BLOCK_N]
+
+        # Load K block transposed: [HEAD_DIM, BLOCK_N]
+        k_ptrs = K + kv_token_ids[None, :] * stride_kt + pid_h * stride_kh + offs_d[:, None]
+        k = tl.load(k_ptrs, mask=kv_mask[None, :], other=0.0)
+
+        # Compute QK^T: [BLOCK_M, HEAD_DIM] @ [HEAD_DIM, BLOCK_N] -> [BLOCK_M, BLOCK_N]
+        qk = tl.dot(q, k) * qk_scale
+
+        # Mask out-of-bounds K positions
+        qk = tl.where(kv_mask[None, :], qk, MINUS_INF)
+        # Also mask out-of-bounds Q positions
+        #qk = tl.where(q_mask[:, 1], qk, MINUS_INF)
+
+        # Online softmax update
+        m_ij = tl.maximum(m_i, tl.max(qk, 1))
+        p = tl.math.exp2(qk - m_ij[:, None])
+
+        # Correction factor for previous accumulator
+        alpha = tl.math.exp2(m_i - m_ij)
+        l_ij = tl.sum(p, 1)
+
+        # Update accumulator
+        acc = acc * alpha[:, None]
+
+        # Load V block: [BLOCK_N, HEAD_DIM]
+        v_ptrs = V + kv_token_ids[:, None] * stride_vt + pid_h * stride_vh + offs_d[None, :]
+        v = tl.load(v_ptrs, mask=kv_mask[:, None], other=0.0)
+
+        p = p.to(dtype)
+        acc = tl.dot(p, v, acc)
+
+        # Update running stats
+        l_i = l_i * alpha + l_ij
+        m_i = m_ij
+
+    # ***** 5) Finalize: normalize by softmax denominator *****
+    acc = acc / l_i[:, None]
+
+    # ***** 6) Store output *****
+    o_token_ids = seq_start_q + offs_m
+    o_ptrs = O + o_token_ids[:, None] * stride_ot + pid_h * stride_oh + offs_d[None, :]
+    o_mask = offs_m[:, None] < SEQLEN_Q
+    tl.store(o_ptrs, acc.to(dtype), mask=o_mask)
+
+
+class TritonAttentionVarlen(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cu_seqlens_q: torch.Tensor, cu_seqlens_k: torch.Tensor, causal: bool, window: int, sm_scale: float, min_tokens_per_kernel: int = 2000):
+        """Varlen flash attention forward pass.
+
+        Computes attention over variable-length sequences packed into a single tensor.
+        Launches one kernel per sequence so each kernel knows its sequence length at
+        compile time (as a tl.constexpr), enabling the Triton compiler to generate
+        optimal code per sequence length.
+
+        All per-sequence parameters are pre-computed on the CPU and kernel launches
+        are issued in a tight loop to minimise host-side enqueue overhead.
+        ``min_tokens_per_kernel`` is reserved for future batching optimisations
+        (e.g. CUDA graph capture/replay per group).
+
+        Currently supports global attention (no causal, no window masking).
+        Currently the following Head dimensions are supported: 16, 32, 64, 128, 256.
+
+        Args:
+            q: Query tensor of shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+            k: Key tensor of shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+            v: Value tensor of shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+            cu_seqlens_q: Cumulative sequence lengths for Q, shape [B+1], int32 on device
+            cu_seqlens_k: Cumulative sequence lengths for K, shape [B+1], int32 on device
+            causal: Whether to apply causal masking (not yet supported, must be False)
+            window: Sliding window size (-1 or 0 for no window, not yet supported)
+            sm_scale: Softmax scaling factor (typically 1/sqrt(HEAD_DIM))
+            min_tokens_per_kernel: Reserved for future batching (default 2000)
+
+        Returns:
+            Output tensor of shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+        """
+        assert not causal, "Causal masking not yet supported for varlen attention"
+        assert window <= 0 or window == -1, "Window masking not yet supported for varlen attention"
+
+        assert q.is_contiguous() and k.is_contiguous() and v.is_contiguous(), \
+            "Input tensors must be contiguous"
+        assert q.ndim == 3, f"Expected q to be 3D [TOTAL_TOKENS, N_HEAD, HEAD_DIM], got {q.ndim}D"
+
+        TOTAL_TOKENS, N_HEAD, HEAD_DIM = q.shape
+        assert HEAD_DIM in {16, 32, 64, 128, 256}, f"HEAD_DIM={HEAD_DIM} not supported"
+        assert k.shape[-1] == HEAD_DIM and v.shape[-1] == HEAD_DIM
+
+        o = torch.empty_like(q)
+
+        # Read cu_seqlens to CPU *once* to avoid per-iteration device syncs
+        batch_size = cu_seqlens_q.shape[0] - 1
+        cu_seqlens_q_cpu = cu_seqlens_q.cpu().tolist()
+        cu_seqlens_k_cpu = cu_seqlens_k.cpu().tolist()
+
+        dtype_triton = torch_dtype_to_triton(q.dtype)
+
+        # Strides are the same for every sequence; read once
+        stride_qt, stride_qh = q.stride(0), q.stride(1)
+        stride_kt, stride_kh = k.stride(0), k.stride(1)
+        stride_vt, stride_vh = v.stride(0), v.stride(1)
+        stride_ot, stride_oh = o.stride(0), o.stride(1)
+
+        # Launch one kernel per sequence in a tight loop
+        for b in range(batch_size):
+            seq_start_q = cu_seqlens_q_cpu[b]
+            seq_start_k = cu_seqlens_k_cpu[b]
+            seqlen_q = cu_seqlens_q_cpu[b + 1] - seq_start_q
+            seqlen_k = cu_seqlens_k_cpu[b + 1] - seq_start_k
+
+            if seqlen_q == 0:
+                continue
+
+            def grid(META, _seqlen_q=seqlen_q):
+                return (triton.cdiv(_seqlen_q, META["BLOCK_M"]), N_HEAD)
+
+            _attn_varlen_fwd[grid](
+                q, k, v, o,
+                sm_scale,
+                seq_start_q,
+                seq_start_k,
+                stride_qt, stride_qh,
+                stride_kt, stride_kh,
+                stride_vt, stride_vh,
+                stride_ot, stride_oh,
+                SEQLEN_Q=seqlen_q,
+                SEQLEN_K=seqlen_k,
+                HEAD_DIM=HEAD_DIM,
+                dtype=dtype_triton,
+            )
+
+        return o
