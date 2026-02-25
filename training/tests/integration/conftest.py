@@ -340,6 +340,7 @@ def hierarchical_multigpu_config(
     cfg.system.hardware.num_gpus_per_node = 2
     cfg.system.hardware.num_nodes = 1
     cfg.system.hardware.num_gpus_per_model = 2
+    cfg.model.keep_batch_sharded = True
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, [url_dataset]
