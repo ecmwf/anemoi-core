@@ -213,6 +213,20 @@ class BaseGraphModel(nn.Module):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
+    def _resolve_in_out_sharded(
+        self,
+        dataset_names: list[str],
+        grid_shard_shapes: dict[str, Optional[list]] | None,
+    ) -> dict[str, bool]:
+        in_out_sharded: dict[str, bool] = {}
+        for dataset_name in dataset_names:
+            if grid_shard_shapes is None:
+                in_out_sharded[dataset_name] = False
+            else:
+                in_out_sharded[dataset_name] = grid_shard_shapes[dataset_name] is not None
+
+        return in_out_sharded
+
     def _get_consistent_dim(self, x: dict[str, Tensor], dim: int) -> int:
         dim_sizes = [_x.shape[dim] for _x in x.values()]
         # Assert all datasets have the same sizes
