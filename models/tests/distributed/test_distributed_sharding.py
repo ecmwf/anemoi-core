@@ -18,6 +18,21 @@ import pytest
 import torch
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+
+    msg = f"Invalid value for {name}: {raw!r}. Use one of 1/0, true/false, yes/no, on/off."
+    raise ValueError(msg)
+
+
 def _requested_world_size() -> int:
     raw = os.getenv("ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE", "3")
     world_size = int(raw)
@@ -41,6 +56,10 @@ def _run_spawn_suite(backend: str, suite: str, nproc_per_node: int = 2) -> None:
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
+    deterministic = _env_flag("ANEMOI_DISTRIBUTED_TEST_DETERMINISTIC", default=True)
+    env["ANEMOI_DISTRIBUTED_TEST_DETERMINISTIC"] = "1" if deterministic else "0"
+    if deterministic and backend == "nccl":
+        env.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     completed = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)
     if completed.returncode != 0:
         pytest.fail(

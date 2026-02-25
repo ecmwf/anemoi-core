@@ -32,6 +32,43 @@ from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+
+    msg = f"Invalid value for {name}: {raw!r}. Use one of 1/0, true/false, yes/no, on/off."
+    raise ValueError(msg)
+
+
+def _float32_matmul_precision(default: str = "highest") -> str:
+    raw = os.getenv("ANEMOI_DISTRIBUTED_TEST_PRECISION", default)
+    value = raw.strip().lower()
+    if value not in {"highest", "high", "medium"}:
+        msg = "Invalid value for ANEMOI_DISTRIBUTED_TEST_PRECISION: " f"{raw!r}. Use one of: highest, high, medium."
+        raise ValueError(msg)
+    return value
+
+
+def _configure_numeric_settings(*, deterministic: bool, matmul_precision: str) -> None:
+    torch.set_float32_matmul_precision(matmul_precision)
+
+    if not deterministic:
+        return
+
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
+
 def _split_by_shapes(tensor: torch.Tensor, dim: int, shard_shapes: list[list[int]], rank: int) -> torch.Tensor:
     split_sizes = [shape[dim] for shape in shard_shapes]
     return torch.split(tensor, split_sizes, dim=dim)[rank].contiguous()
@@ -50,7 +87,13 @@ def _run_core_primitives(
     # shard_tensor: forward split + backward gather
     x = x_full.clone().requires_grad_(True)
     x_local_expected = _split_by_shapes(x_full, dim=0, shard_shapes=shard_shapes_dim0, rank=rank)
-    x_local = shard_tensor(x, dim=0, shapes=shard_shapes_dim0, mgroup=model_comm_group, gather_in_backward=True)
+    x_local = shard_tensor(
+        x,
+        dim=0,
+        shapes=shard_shapes_dim0,
+        mgroup=model_comm_group,
+        gather_in_backward=True,
+    )
     torch.testing.assert_close(x_local, x_local_expected)
     x_local.sum().backward()
     torch.testing.assert_close(x.grad, torch.ones_like(x))
@@ -76,7 +119,13 @@ def _run_core_primitives(
     sync_full = torch.arange(24, dtype=torch.float32, device=device).reshape(8, 3)
     sync_shapes = get_shard_shapes(sync_full, dim=0, model_comm_group=model_comm_group)
     sync_local = _split_by_shapes(sync_full, dim=0, shard_shapes=sync_shapes, rank=rank).clone().requires_grad_(True)
-    sync_gathered = sync_tensor(sync_local, dim=0, shapes=sync_shapes, mgroup=model_comm_group, gather_in_fwd=True)
+    sync_gathered = sync_tensor(
+        sync_local,
+        dim=0,
+        shapes=sync_shapes,
+        mgroup=model_comm_group,
+        gather_in_fwd=True,
+    )
     torch.testing.assert_close(sync_gathered, sync_full)
     sync_gathered.sum().backward()
     torch.testing.assert_close(sync_local.grad, torch.full_like(sync_local, float(world_size)))
@@ -84,7 +133,13 @@ def _run_core_primitives(
     # sync_tensor gather_in_fwd=False: identity in fwd, all-reduce in bwd.
     # expects same tensor shape across ranks in backward all-reduce.
     sync_replicated = sync_full.clone().requires_grad_(True)
-    sync_same = sync_tensor(sync_replicated, dim=0, shapes=sync_shapes, mgroup=model_comm_group, gather_in_fwd=False)
+    sync_same = sync_tensor(
+        sync_replicated,
+        dim=0,
+        shapes=sync_shapes,
+        mgroup=model_comm_group,
+        gather_in_fwd=False,
+    )
     torch.testing.assert_close(sync_same, sync_replicated.detach())
     sync_same.sum().backward()
     torch.testing.assert_close(sync_replicated.grad, torch.full_like(sync_replicated, float(world_size)))
@@ -158,7 +213,11 @@ def _run_rank(
     backend: str,
     suite: str,
     init_file: str,
+    deterministic: bool,
+    matmul_precision: str,
 ) -> None:
+    _configure_numeric_settings(deterministic=deterministic, matmul_precision=matmul_precision)
+
     if backend == "nccl":
         torch.cuda.set_device(rank)
         device = torch.device("cuda", rank)
@@ -192,6 +251,11 @@ def main() -> None:
     parser.add_argument("--suite", choices=["core", "channels", "transformer"], required=True)
     parser.add_argument("--world-size", type=int, default=2)
     args = parser.parse_args()
+    deterministic = _env_flag("ANEMOI_DISTRIBUTED_TEST_DETERMINISTIC", default=True)
+    matmul_precision = _float32_matmul_precision(default="highest")
+
+    if deterministic and args.backend == "nccl":
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
     if args.world_size < 2:
         msg = f"world-size must be >= 2, got {args.world_size}"
@@ -207,11 +271,21 @@ def main() -> None:
     try:
         mp.spawn(
             _run_rank,
-            args=(args.world_size, args.backend, args.suite, str(init_file)),
+            args=(
+                args.world_size,
+                args.backend,
+                args.suite,
+                str(init_file),
+                deterministic,
+                matmul_precision,
+            ),
             nprocs=args.world_size,
             join=True,
         )
-        print(f"Distributed {args.suite} suite passed on backend={args.backend}.", flush=True)
+        print(
+            f"Distributed {args.suite} suite passed on backend={args.backend}.",
+            flush=True,
+        )
     finally:
         init_file.unlink(missing_ok=True)
 

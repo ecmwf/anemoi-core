@@ -286,6 +286,14 @@ Notes:
 #. ``ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE`` controls GPU/process count.
 #. Primitive tests use world size 3 by default to run with awkward sharding.
 #. Ensemble parity tests require an even world size.
+#. Deterministic mode is enabled by default
+   (``ANEMOI_DISTRIBUTED_TEST_DETERMINISTIC=1``). Set it to ``0`` to disable.
+#. Float32 matmul precision is controlled via
+   ``ANEMOI_DISTRIBUTED_TEST_PRECISION`` with values ``highest`` (default),
+   ``high``, or ``medium``.
+#. Numerical tolerances can be overridden globally with
+   ``ANEMOI_DISTRIBUTED_TEST_ATOL`` and ``ANEMOI_DISTRIBUTED_TEST_RTOL``.
+   Defaults are ``1e-5`` for both.
 #. To stress awkward sharding for diffusion parity, run only diffusion
    with world size 3:
 

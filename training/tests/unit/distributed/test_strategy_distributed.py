@@ -18,6 +18,21 @@ import pytest
 import torch
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+
+    msg = f"Invalid value for {name}: {raw!r}. Use one of 1/0, true/false, yes/no, on/off."
+    raise ValueError(msg)
+
+
 def _requested_world_size(default: int = 3) -> int:
     raw = os.getenv("ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE", str(default))
     world_size = int(raw)
@@ -42,7 +57,17 @@ def _run_distributed_strategy_parity(backend: str, world_size: int, suite: str) 
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
-    completed = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)  # noqa: S603
+    deterministic = _env_flag("ANEMOI_DISTRIBUTED_TEST_DETERMINISTIC", default=True)
+    env["ANEMOI_DISTRIBUTED_TEST_DETERMINISTIC"] = "1" if deterministic else "0"
+    if deterministic and backend == "nccl":
+        env.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    completed = subprocess.run(  # noqa: S603
+        cmd,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
     if completed.returncode != 0:
         pytest.fail(
             "distributed strategy parity runner failed.\n"
@@ -57,8 +82,14 @@ def _run_distributed_strategy_parity(backend: str, world_size: int, suite: str) 
 def test_distributed_strategy_gradient_scaling_diffusion_parity_nccl() -> None:
     world_size = _requested_world_size()
     if not torch.cuda.is_available() or torch.cuda.device_count() < world_size:
-        pytest.skip(f"Requires at least {world_size} CUDA devices for distributed strategy gradient parity.")
-    _run_distributed_strategy_parity(backend="nccl", world_size=world_size, suite="diffusion")
+        pytest.skip(
+            f"Requires at least {world_size} CUDA devices for distributed strategy gradient parity.",
+        )
+    _run_distributed_strategy_parity(
+        backend="nccl",
+        world_size=world_size,
+        suite="diffusion",
+    )
 
 
 @pytest.mark.slow
@@ -71,8 +102,14 @@ def test_distributed_strategy_ensemble_partition_parity_nccl() -> None:
             "Set ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE=2 (or another even value).",
         )
     if not torch.cuda.is_available() or torch.cuda.device_count() < world_size:
-        pytest.skip(f"Requires at least {world_size} CUDA devices for distributed strategy ensemble parity.")
-    _run_distributed_strategy_parity(backend="nccl", world_size=world_size, suite="ensemble")
+        pytest.skip(
+            f"Requires at least {world_size} CUDA devices for distributed strategy ensemble parity.",
+        )
+    _run_distributed_strategy_parity(
+        backend="nccl",
+        world_size=world_size,
+        suite="ensemble",
+    )
 
 
 @pytest.mark.slow
@@ -88,4 +125,8 @@ def test_distributed_strategy_ensemble_world_step_scaling_nccl() -> None:
         pytest.skip(
             f"Requires at least {world_size} CUDA devices for distributed strategy ensemble world-step scaling.",
         )
-    _run_distributed_strategy_parity(backend="nccl", world_size=world_size, suite="ensemble_world_step")
+    _run_distributed_strategy_parity(
+        backend="nccl",
+        world_size=world_size,
+        suite="ensemble_world_step",
+    )
