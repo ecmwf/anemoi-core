@@ -192,6 +192,11 @@ class SphericalHarmonicTransform(Module):
         weight = torch.from_numpy(weight)
         weight = torch.einsum("mlk, k -> mlk", pct, weight)
 
+        self.rfft_current_output_shape = None
+        self._graph = None
+        self._graph_input = None
+        self._graph_output = None
+
         self.register_buffer("weight", weight, persistent=False)
 
     def rfft_rings_reduced(self, x: Tensor) -> Tensor:
@@ -208,20 +213,34 @@ class SphericalHarmonicTransform(Module):
             Fourier space field [..., latitude, zonal wavenumber m]
         """
 
-        # Prepare zero-padded output tensor for filling with rfft
-        output_tensor = torch.zeros(
-            *x.shape[:-1],
-            self.nlat,
-            max(self.lons_per_lat) // 2 + 1,
-            device=x.device,
-            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
+        input_shape = x.shape
+        output_shape = (*x.shape[:-1], self.nlat, max(self.lons_per_lat) // 2 + 1)
+
+        # if output_shape != self.rfft_current_output_shape:
+        LOGGER.info(
+            f"Compiling CUDA graph for rfft_rings_reduced with input_shape {input_shape} and output shape"
+            f"{output_shape}"
         )
+        self._graph_input = torch.zeros(input_shape, device=x.device, dtype=x.dtype)
+        self._graph_output = torch.zeros(
+            output_shape, device=x.device, dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
+        )
+        self.rfft_current_output_shape = output_shape
 
-        # Do a real-to-complex FFT on each latitude
+        # g = CUDAGraph()
+        # with graph(g):
+        self._graph_output.zero_()
+        self._graph_input.copy_(x)
         for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
-            output_tensor[..., i, : nlon // 2 + 1] = torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
+            self._graph_output[..., i, : nlon // 2 + 1] = torch.fft.rfft(
+                self._graph_input[..., slon : slon + nlon], norm="forward"
+            )
+            # self._graph = g
+        # else:
+        #     self._graph_input.copy_(x)
+        #     self._graph.replay()
 
-        return output_tensor
+        return self._graph_output.clone()
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a regular grid.
