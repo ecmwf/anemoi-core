@@ -13,6 +13,8 @@ import logging
 import numpy as np
 import torch
 from torch import Tensor
+from torch.cuda import CUDAGraph
+from torch.cuda import graph
 from torch.nn import Module
 
 LOGGER = logging.getLogger(__name__)
@@ -210,29 +212,37 @@ class SphericalHarmonicTransform(Module):
         input_shape = x.shape
         output_shape = (*x.shape[:-1], self.nlat, max(self.lons_per_lat) // 2 + 1)
 
-        # if output_shape != self.rfft_current_output_shape:
-        LOGGER.info(
-            f"Compiling CUDA graph for rfft_rings_reduced with input_shape {input_shape} and output shape"
-            f"{output_shape}"
-        )
-        self._graph_input = torch.zeros(input_shape, device=x.device, dtype=x.dtype)
-        self._graph_output = torch.zeros(
-            output_shape, device=x.device, dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
-        )
-        self.rfft_current_output_shape = output_shape
-
-        # g = CUDAGraph()
-        # with graph(g):
-        self._graph_output.zero_()
-        self._graph_input.copy_(x)
-        for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
-            self._graph_output[..., i, : nlon // 2 + 1] = torch.fft.rfft(
-                self._graph_input[..., slon : slon + nlon], norm="forward"
+        # If first call, or first call with these shapes
+        # Note that we assume if output_shape is the same, so is input_shape
+        if output_shape != self.rfft_current_output_shape:
+            print(
+                f"Compiling CUDA graph for rfft_rings_reduced with input_shape {input_shape} and output shape"
+                f"{output_shape}"
             )
-            # self._graph = g
-        # else:
-        #     self._graph_input.copy_(x)
-        #     self._graph.replay()
+
+            # These arrays must have the same lifetime as self
+            self._graph_input = torch.zeros(input_shape, device=x.device, dtype=x.dtype)
+            self._graph_output = torch.zeros(
+                output_shape, device=x.device, dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
+            )
+            self.rfft_current_output_shape = output_shape
+
+            # Capture the graph
+            self._graph = CUDAGraph()
+            with graph(self._graph):
+                for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
+                    self._graph_output[..., i, : nlon // 2 + 1] = torch.fft.rfft(
+                        self._graph_input[..., slon : slon + nlon], norm="forward"
+                    )
+        else:
+            print(
+                f"Reusing CUDA graph for rfft_rings_reduced with input_shape {input_shape} and output shape"
+                f"{output_shape}"
+            )
+
+        self._graph_input.copy_(x)
+        self._graph_output.zero_()
+        self._graph.replay()
 
         return self._graph_output.clone()
 
