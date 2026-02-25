@@ -179,6 +179,19 @@ def test_training_cycle_hierarchical(
     AnemoiTrainer(cfg).train()
 
 
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.multigpu
+def test_training_cycle_hierarchical_model_sharding(
+    hierarchical_multigpu_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = hierarchical_multigpu_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
 def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = hierarchical_config
     BaseSchema(**cfg)

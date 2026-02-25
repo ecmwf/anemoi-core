@@ -322,6 +322,30 @@ def hierarchical_config(
 
 
 @pytest.fixture
+def hierarchical_multigpu_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, list[str]]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_hierarchical"):
+        template = compose(config_name="hierarchical")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg.system.hardware.accelerator = "cuda"
+    cfg.system.hardware.num_gpus_per_node = 2
+    cfg.system.hardware.num_nodes = 1
+    cfg.system.hardware.num_gpus_per_model = 2
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, [url_dataset]
+
+
+@pytest.fixture
 def autoencoder_config(
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
