@@ -14,7 +14,7 @@ from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
 from .interpolator import GraphMultiOutInterpolator
-from .obsinterpolator import ObsGraphInterpolator
+from .obsinterpolator import GraphNowcaster
 
 __all__ = [
     "GraphAutoEncoder",
@@ -24,5 +24,5 @@ __all__ = [
     "GraphForecaster",
     "GraphInterpolator",
     "GraphMultiOutInterpolator",
-    "ObsGraphInterpolator",
+    "GraphNowcaster",
 ]

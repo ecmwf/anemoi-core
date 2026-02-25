@@ -25,8 +25,8 @@ from anemoi.training.train.tasks.base import BaseGraphModule
 LOGGER = logging.getLogger(__name__)
 
 
-class ObsGraphInterpolator(BaseGraphModule):
-    """ObsInterpolator: Interpolates between NWP states using surface observations.
+class GraphNowcaster(BaseGraphModule):
+    """Interpolates between NWP states using surface observations.
 
     A graph neural network that leverages surface observations to inform interpolation between NWP states
     for fine-scale, high-frequency nowcasts of atmospheric variables
@@ -102,7 +102,15 @@ class ObsGraphInterpolator(BaseGraphModule):
             ),
         )
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
+    
+    @property
+    def output_times(self) -> int:
+        """Number of interpolation times (outer loop in plot callbacks; one forward, n_step_output steps)."""
+        return len(self.interp_times)
 
+    def get_init_step(self, rollout_step: int) -> int:
+        return rollout_step
+    
     def _step(
         self,
         batch: dict[str, torch.Tensor],

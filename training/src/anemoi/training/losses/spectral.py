@@ -109,12 +109,10 @@ class SpectralLoss(BaseLoss):
             self.transform = DCT2D(**kwargs)
         elif transform == "reduced_sht":
             # expected additional args: grid
-            # optional args: truncation
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
             self.transform = ReducedSHT(**kwargs)
         elif transform == "octahedral_sht":
-            # expected additional args: nlat
-            # optional args: truncation
+            # expected additional args: lmax/mmax/folding
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
         else:
@@ -124,9 +122,7 @@ class SpectralLoss(BaseLoss):
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten spectral dimensions."""
         x_spec = self.transform.forward(x)
-        # flatten only transformed spatial/spectral dims into one "mode" axis
-        spatial_start_dim = x.ndim - 2
-        return x_spec.flatten(start_dim=spatial_start_dim, end_dim=-2)
+        return einops.rearrange(x_spec, "... y x v -> ... (y x) v")
 
 
 class SpectralL2Loss(SpectralLoss):
@@ -146,7 +142,6 @@ class SpectralL2Loss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
         **kwargs,
     ) -> torch.Tensor:
         del kwargs  # unused
@@ -312,7 +307,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        **kwargs,  # noqa: ARG002
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -336,7 +331,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(scaled, squash=squash, group=group)
 
     @property
     def name(self) -> str:

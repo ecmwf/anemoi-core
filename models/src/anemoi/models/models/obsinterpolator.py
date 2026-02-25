@@ -27,7 +27,7 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelObsInterpolator(AnemoiModelEncProcDec):
+class Nowcaster(AnemoiModelEncProcDec):
     """Message passing interpolating graph neural network."""
 
     def __init__(
@@ -83,7 +83,7 @@ class AnemoiModelObsInterpolator(AnemoiModelEncProcDec):
             self._cond_xdst[str(ds_name)] = build_decoder_conditioner(
                 method="film",
                 x_dim=xdst_dim,
-                cond_dim=2,
+                cond_dim=1+len(self.known_future_variables[ds_name]),
                 cfg=dec_cfg,
             )
 
@@ -109,6 +109,9 @@ class AnemoiModelObsInterpolator(AnemoiModelEncProcDec):
         # Remove qc_flags from numeric channels
         x_noqc = torch.cat([x[..., :qc_idx], x[..., qc_idx + 1 :]], dim=-1)
         return torch.cat([x_noqc, feats], dim=-1)
+
+    def _calculate_output_dim(self, dataset_name: str) -> int:
+        return self.num_output_channels[dataset_name]
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         boundings = len(self.known_future_variables[dataset_name])
@@ -256,10 +259,6 @@ class AnemoiModelObsInterpolator(AnemoiModelEncProcDec):
                                 and cond_flat.dtype != x_dst.dtype
                             ):
                                 cond_flat = cond_flat.to(dtype=x_dst.dtype)
-                            print(
-                                f"COND_T SHAPE for dataset {dataset_name}: {cond_t.shape}, COND_FLAT SHAPE: {cond_flat.shape}",
-                                flush=True,
-                            )
                             x_dst = self._cond_xdst[str(dataset_name)](x_dst, cond_flat)
 
                 x_out = self.decoder[dataset_name](
@@ -274,13 +273,22 @@ class AnemoiModelObsInterpolator(AnemoiModelEncProcDec):
                     keep_x_dst_sharded=in_out_sharded[dataset_name],
                     edge_shard_shapes=dec_edge_shard_shapes,
                 )
-
-                x_out = self._assemble_output(
-                    x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
-                )
-
+                x_out = einops.rearrange(
+                    x_out,
+                    "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
+                    batch=batch_size,
+                    ensemble=ensemble_size,
+                    time=1,
+                ).to(x[dataset_name].dtype).clone()
                 outs.append(x_out)
+            
+            concat = torch.cat(outs, dim=1)
+            concat[..., self._internal_output_idx[dataset_name]] += x_skip_dict[dataset_name][..., self._internal_input_idx[dataset_name]]
+    
+            for bounding in self.boundings[dataset_name]:
+                # bounding performed in the order specified in the config file
+                concat = bounding(concat)
 
-            y_pred[dataset_name] = torch.stack(outs, dim=1)
+            y_pred[dataset_name] = concat
 
         return y_pred
