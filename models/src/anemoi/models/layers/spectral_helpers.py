@@ -143,7 +143,9 @@ class SphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(self, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
+    def __init__(
+        self, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None, use_graphs: bool = True
+    ) -> None:
         r"""Initializes SphericalHarmonicTransform.
 
         Parameters
@@ -177,7 +179,7 @@ class SphericalHarmonicTransform(Module):
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
             LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
-            self.rfft_rings = self.rfft_rings_reduced
+            self.rfft_rings = self.rfft_rings_reduced_graphs if use_graphs else self.rfft_rings_reduced_naive
         else:
             LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
@@ -194,14 +196,43 @@ class SphericalHarmonicTransform(Module):
         weight = torch.from_numpy(weight)
         weight = torch.einsum("mlk, k -> mlk", pct, weight)
 
-        self.rfft_current_output_shape = None
+        self._rfft_current_output_shape = None
         self._graph = None
         self._graph_input = None
         self._graph_output = None
 
         self.register_buffer("weight", weight, persistent=False)
 
-    def rfft_rings_reduced(self, x: Tensor) -> Tensor:
+    def rfft_rings_reduced_naive(self, x: Tensor) -> Tensor:
+        r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+        """
+
+        # Prepare zero-padded output tensor for filling with rfft
+        output_tensor = torch.zeros(
+            *x.shape[:-1],
+            self.nlat,
+            max(self.lons_per_lat) // 2 + 1,
+            device=x.device,
+            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128,
+        )
+
+        # Do a real-to-complex FFT on each latitude
+        for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
+            output_tensor[..., i, : nlon // 2 + 1] = torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
+
+        return output_tensor
+
+    def rfft_rings_reduced_graphs(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
 
         Parameters
@@ -218,10 +249,10 @@ class SphericalHarmonicTransform(Module):
         input_shape = x.shape
         output_shape = (*x.shape[:-1], self.nlat, max(self.lons_per_lat) // 2 + 1)
 
-        # If first call, or first call with these shapes
+        # If first call, or first call with _these_ shapes
         # Note that we assume if output_shape is the same, so is input_shape
-        if output_shape != self.rfft_current_output_shape:
-            print(
+        if output_shape != self._rfft_current_output_shape:
+            LOGGER.info(
                 f"Compiling CUDA graph for rfft_rings_reduced with input_shape {input_shape} and output shape"
                 f"{output_shape}"
             )
@@ -231,7 +262,14 @@ class SphericalHarmonicTransform(Module):
             self._graph_output = torch.zeros(
                 output_shape, device=x.device, dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
             )
-            self.rfft_current_output_shape = output_shape
+
+            self._rfft_current_output_shape = output_shape
+
+            # Warmup phase so cuFFT does all its allocations / planning etc. BEFORE graph capturing starts
+            # Memory allocations not permitted inside the graph capture!
+            # Note also that output of FFT is not needed
+            for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
+                torch.fft.rfft(self._graph_input[..., slon : slon + nlon], norm="forward")
 
             # Capture the graph
             self._graph = CUDAGraph()
@@ -241,7 +279,7 @@ class SphericalHarmonicTransform(Module):
                         self._graph_input[..., slon : slon + nlon], norm="forward"
                     )
         else:
-            print(
+            LOGGER.info(
                 f"Reusing CUDA graph for rfft_rings_reduced with input_shape {input_shape} and output shape"
                 f"{output_shape}"
             )
