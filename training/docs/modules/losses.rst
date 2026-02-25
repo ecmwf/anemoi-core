@@ -171,25 +171,19 @@ Use this for limited-area or other regular 2D fields that can be reshaped to
          x_dim: 256
          y_dim: 128
 
-Example configuration (octahedral SHT via ecTrans assets)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Example configuration (reduced Gaussian grid SHT)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Use this for global models on the octahedral reduced grid:
+Use this for global models on the reduced Gaussian grid (only N320 supported so far):
 
 .. code-block:: yaml
 
    training_loss:
      datasets:
        your_dataset_name:
-         _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
-         transform: ectrans_octahedral_sht
-         truncation: 127
-         # Path to precomputed Legendre polynomials / weights.
-         # If the file does not exist, assets can optionally be generated when `ectrans4py`
-         # is installed and the path is writable.
-         filepath: /path/to/ectrans_assets_T127.npz
-         # Optional: control transform dtype
-         dtype: float32
+         _target_: anemoi.training.losses.SpectralCRPSLoss
+         transform: reduced_sht
+         grid: n320
 
 Combining spectral and grid-point losses
 ----------------------------------------
