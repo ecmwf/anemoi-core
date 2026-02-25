@@ -117,7 +117,7 @@ def _gather(
                 for _ in range(comm_size)
             ]
 
-            pad_size = max_shape[1] - input_.shape[1]
+            pad_size = max_shape[-1] - input_.shape[-1]
             input_ = torch.nn.functional.pad(input_, (0, pad_size), mode="constant", value=0)
         else:
             tensor_list = [
