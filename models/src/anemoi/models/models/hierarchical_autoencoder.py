@@ -408,9 +408,9 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     edge_attr=upscale_edge_attr,
                     edge_index=upscale_edge_index,
                     model_comm_group=model_comm_group,
-                    x_src_is_sharded=in_out_sharded[dataset_name],
-                    x_dst_is_sharded=in_out_sharded[dataset_name],
-                    keep_x_dst_sharded=in_out_sharded[dataset_name],
+                    x_src_is_sharded=True,
+                    x_dst_is_sharded=True,
+                    keep_x_dst_sharded=True,
                     edge_shard_shapes=us_edge_shard_shapes,
                 )
 
