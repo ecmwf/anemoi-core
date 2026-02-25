@@ -131,6 +131,21 @@ def build_global_config(
     return cfg, url_dataset, model_architecture
 
 
+def _configure_multigpu_model_sharding(cfg: DictConfig) -> None:
+    cfg.system.hardware.accelerator = "cuda"
+    cfg.system.hardware.num_gpus_per_node = 2
+    cfg.system.hardware.num_nodes = 1
+    cfg.system.hardware.num_gpus_per_model = 2
+    cfg.dataloader.read_group_size = 2
+    cfg.model.keep_batch_sharded = True
+    cfg.dataloader.batch_size.training = 1
+    cfg.dataloader.batch_size.validation = 1
+    # Some base fixtures call OmegaConf.resolve() before this helper is used,
+    # so we must also update the strategy block directly.
+    cfg.training.strategy.num_gpus_per_model = 2
+    cfg.training.strategy.read_group_size = 2
+
+
 @pytest.fixture(
     params=[["model=gnn"], ["model=graphtransformer"]],
     ids=["gnn", "graphtransformer"],
@@ -188,6 +203,17 @@ def stretched_config(
 
 
 @pytest.fixture
+def stretched_multigpu_config(
+    stretched_config: tuple[DictConfig, list[str]],
+) -> tuple[DictConfig, list[str]]:
+    cfg, urls = stretched_config
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, urls
+
+
+@pytest.fixture
 def multidatasets_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
@@ -232,6 +258,17 @@ def lam_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, [url_dataset, url_forcing_dataset]
+
+
+@pytest.fixture
+def lam_multigpu_config(
+    lam_config: tuple[DictConfig, list[str]],
+) -> tuple[DictConfig, list[str]]:
+    cfg, urls = lam_config
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, urls
 
 
 @pytest.fixture
@@ -336,14 +373,26 @@ def hierarchical_multigpu_config(
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    cfg.system.hardware.accelerator = "cuda"
-    cfg.system.hardware.num_gpus_per_node = 2
-    cfg.system.hardware.num_nodes = 1
-    cfg.system.hardware.num_gpus_per_model = 2
-    cfg.model.keep_batch_sharded = True
+    _configure_multigpu_model_sharding(cfg)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, [url_dataset]
+
+
+@pytest.fixture
+def graphtransformer_multigpu_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    cfg, url, _model_architecture = build_global_config(
+        ["model=graphtransformer"],
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+    )
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, url
 
 
 @pytest.fixture
