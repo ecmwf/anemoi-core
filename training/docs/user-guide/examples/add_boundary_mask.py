@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import math
 from pathlib import Path
 
 import numpy as np
@@ -9,17 +8,48 @@ import xarray as xr
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Add a boundary_mask variable to an Anemoi Zarr dataset."
+        description=(
+            "Add a boundary_mask variable to an Anemoi Zarr dataset, and optionally "
+            "rewrite time/dates coordinates in one pass."
+        )
     )
     parser.add_argument("input", type=Path, help="Input Zarr path")
     parser.add_argument("output", type=Path, help="Output Zarr path")
-    parser.add_argument("--lon-min", type=float, required=True)
-    parser.add_argument("--lon-max", type=float, required=True)
-    parser.add_argument("--lat-min", type=float, required=True)
-    parser.add_argument("--lat-max", type=float, required=True)
+    # Default to current RRFS subdomain bounds used in this repo workflow.
+    parser.add_argument("--lon-min", type=float, default=-105.0)
+    parser.add_argument("--lon-max", type=float, default=-90.0)
+    parser.add_argument("--lat-min", type=float, default=25.0)
+    parser.add_argument("--lat-max", type=float, default=40.0)
     parser.add_argument("--boundary-km", type=float, default=20.0)
     parser.add_argument("--var-name", type=str, default="boundary_mask")
+    parser.add_argument(
+        "--start",
+        type=str,
+        default=None,
+        help="Optional start datetime (e.g. 2024-05-05T00:00:00) to rewrite time/dates.",
+    )
+    parser.add_argument(
+        "--frequency",
+        type=str,
+        default=None,
+        help="Optional frequency (e.g. 1h or 60m) used with --start to rewrite time/dates.",
+    )
+    parser.add_argument(
+        "--time-unit",
+        default="s",
+        choices=["s", "ns"],
+        help="Datetime storage unit when rewriting time/dates (default: s).",
+    )
     return parser.parse_args()
+
+
+def _parse_frequency_to_timedelta64(freq: str) -> np.timedelta64:
+    freq = freq.strip().lower()
+    if freq.endswith("h"):
+        return np.timedelta64(int(freq[:-1]), "h")
+    if freq.endswith("m"):
+        return np.timedelta64(int(freq[:-1]), "m")
+    raise ValueError(f"Unsupported frequency '{freq}'. Expected suffix h or m.")
 
 
 def main():
@@ -151,6 +181,26 @@ def main():
     if isinstance(vars_meta, dict) and args.var_name not in vars_meta:
         vars_meta[args.var_name] = {"constant_in_time": True, "mars": {}}
         ds_out.attrs["variables_metadata"] = vars_meta
+
+    if (args.start is None) != (args.frequency is None):
+        raise SystemExit("Use --start and --frequency together, or neither.")
+    if args.start is not None and args.frequency is not None:
+        data_out = ds_out["data"]
+        if "time" not in data_out.dims:
+            raise SystemExit("Expected 'time' dimension in data.")
+        n_time = data_out.sizes["time"]
+
+        start = np.datetime64(args.start)
+        step = _parse_frequency_to_timedelta64(args.frequency)
+        dates = start + np.arange(n_time) * step
+        dt64 = dates.astype(f"datetime64[{args.time_unit}]")
+
+        ds_out["dates"] = xr.DataArray(dt64, dims=("time",))
+        ds_out["time"] = xr.DataArray(dt64, dims=("time",))
+
+        ds_out.attrs["start_date"] = str(dt64[0])
+        ds_out.attrs["end_date"] = str(dt64[-1])
+        ds_out.attrs["frequency"] = args.frequency
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     ds_out.to_zarr(args.output, mode="w")

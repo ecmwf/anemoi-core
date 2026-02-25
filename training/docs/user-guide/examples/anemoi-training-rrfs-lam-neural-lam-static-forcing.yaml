@@ -31,11 +31,6 @@ data:
             none:
               - landcover
               - orography
-              - icmr_850
-              - icmr_925
-              - snmr_850
-              - snmr_925
-              - refc
 
 system:
   hardware:
@@ -99,6 +94,27 @@ dataloader:
 training:
   max_epochs: 100
   max_steps: 150000
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          # Override Anemoi LAM defaults (q,t,u,v,z,sp,...) with RRFS variable names
+          # used in this workflow (sphum,temp,ugrd,vgrd,height,pres_0g,...).
+          weights:
+            default: 1
+            sphum: 0.6      # q
+            temp: 6         # t
+            ugrd: 0.8       # u
+            vgrd: 0.5       # v
+            height: 12      # z
+            pres_0g: 10     # sp
+            # RRFS-specific fields not present in Anemoi defaults; keep at default unless tuned:
+            refc: 1
+            clmr: 1
+            icmr: 1
+            rwmr: 1
+            snmr: 1
+            grle: 1
   metrics:
     datasets:
       data:

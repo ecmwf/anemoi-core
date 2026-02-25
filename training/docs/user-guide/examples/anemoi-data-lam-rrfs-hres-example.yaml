@@ -3,15 +3,17 @@
 #   /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.vYYYYMMDDHH.grib2
 # created from the shortest lead (0-5h) of each cycle.
 
-name: rrfs-conus-3km-20240505-20240512-1h
+name: rrfs-conus-3km-202405-1h
 
 description: >
   RRFS CONUS GRIB2 collapsed to a single valid-time axis using shortest lead
   forecasts (0-5h). One file per valid time.
 
 dates:
-  start: "2024-05-05T00:00:00"
-  end: "2024-05-05T23:00:00"
+  # One full month per run (example: May 2024).
+  # Use a monthly output path, e.g. rrfs-conus-3km-202405.zarr
+  start: "2024-05-01T00:00:00"
+  end: "2024-05-31T23:00:00"
   frequency: 1h
 
 build:
