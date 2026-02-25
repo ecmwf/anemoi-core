@@ -142,13 +142,17 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup]
     if comm_size == 1:
         return input_
 
+    # Ensure collectives receive contiguous buffers.
+    input_format = get_memory_format(input_)
+
     # All-reduce.
     if use_fp32:
         dtype = input_.dtype
-        inputf_ = input_.float()
+        inputf_ = input_.float().contiguous(memory_format=input_format)
         dist.all_reduce(inputf_, group=group)
         input_ = inputf_.to(dtype)
     else:
+        input_ = input_.contiguous(memory_format=input_format)
         dist.all_reduce(input_, group=group)
 
     return input_

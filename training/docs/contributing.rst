@@ -255,6 +255,45 @@ For multigpu integration tests in
 
 These multigpu test configurations currently assume a node with 4 GPUs.
 
+***********************************
+ Distributed strategy parity tests
+***********************************
+
+Model and training distributed tests are located in
+``models/tests/distributed`` and ``training/tests/unit/distributed``.
+
+Run model distributed primitive tests:
+
+.. code:: bash
+
+   ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE=3 \
+   pytest -q \
+   models/tests/distributed/test_distributed_sharding.py \
+   --multigpu -vv
+
+Run training distributed strategy tests:
+
+.. code:: bash
+
+   ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE=2 \
+   pytest -q \
+   training/tests/unit/distributed/test_strategy.py \
+   training/tests/unit/distributed/test_strategy_distributed.py \
+   --multigpu --slow -vv
+
+Notes:
+
+#. ``ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE`` controls GPU/process count.
+#. Primitive tests use world size 3 by default to run with awkward sharding.
+#. Ensemble parity tests require an even world size.
+#. To stress awkward sharding for diffusion parity, run only diffusion
+   with world size 3:
+
+.. code:: bash
+
+   ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE=3 \
+   pytest -q training/tests/unit/distributed/test_strategy_distributed.py -k diffusion --multigpu --slow -vv
+
 *********************************************
  Configuration handling in integration tests
 *********************************************
