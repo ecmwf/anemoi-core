@@ -21,6 +21,22 @@ LOGGER = logging.getLogger(__name__)
 def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
     r"""Helper routine which returns the Legendre-Gauss nodes and weights
     on the interval [a, b].
+
+    Parameters
+    ----------
+    n : int
+        Number of latitudes at weight to compute weights and latitudes.
+    a : float, optional
+        Left endpoint of the interval. Default is -1.0.
+    b : float, optional
+        Right endpoint of the interval. Default is 1.0.
+
+    Returns
+    -------
+    xlg : np.ndarray
+        Legendre-Gauss nodes (latitudes) on the interval [a, b].
+    wlg : np.ndarray
+        Legendre-Gauss weights on the interval [a, b].
     """
 
     xlg, wlg = np.polynomial.legendre.leggauss(n)
@@ -39,7 +55,21 @@ def legpoly(
     r"""Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
     The resulting tensor has shape (mmax, lmax, len(x)).
 
-    Note: this is derived from the version in torch-harmonics.
+    Parameters
+    ----------
+    mmax : int
+        Maximum zonal wavenumber + 1. Used to size the Legendre polynomials array.
+    lmax : int
+        Maximum total wavenumber + 1. Used to size the Legendre polynomials array.
+    x : np.ndarray
+        Points at which to evaluate the Legendre polynomials. Should be in the range [-1, 1].
+    inverse : bool, optional
+        Whether to invert the normalisation factor or not. Should be set to True for the inverse Legendre transform and
+        False for the forward Legendre transform. Default is False.
+
+    Notes
+    -----
+    This is derived from the version in torch-harmonics.
 
     Method of computation follows
     [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3:
@@ -76,8 +106,55 @@ def legpoly(
 
 
 class SphericalHarmonicTransform(Module):
+    r"""Generic class for performing direct (AKA forward) transforms from a global gridded tensor to a space with a
+    spherical harmonic basis.
+
+    Attributes
+    ----------
+    lmax : int
+        Maximum total wavenumber + 1. Used to size the Legendre polynomials array.
+    mmax : int
+        Maximum zonal wavenumber + 1. Used to size the Legendre polynomials array.
+    nlat : int
+        Number of latitudes in the grid, from pole to pole.
+    lons_per_lat : list[int]
+        Number of longitudinal points on each latitude ring, from pole to pole.
+    n_grid_points : int
+        Total number of grid points in the global grid.
+    slon : list[int]
+        Starting index of each latitude ring in the flattened grid dimension.
+    rlon : list[int]
+        Number of zeros to add to the end of each rFFT output, so that each zonal wavenumber Legendre transform has the
+        same shape.
+
+    Methods
+    -------
+    rfft_rings_reduced(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+    rfft_rings_regular(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a regular grid.
+    forward(x: Tensor) -> Tensor
+        Performs direct SHT transform (Fourier transform followed by Legendre transform).
+
+    Notes
+    -----
+    Inspired by the SHT in Nvidia's torch-harmonics.
+    """
 
     def __init__(self, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
+        r"""Initializes SphericalHarmonicTransform.
+
+        Parameters
+        ----------
+        lons_per_lat : list[int]
+            Number of longitudinal points on each latitude ring, from pole to pole.
+        lmax : int, optional
+            Maximum total wavenumber + 1. Used to size the Legendre polynomials array. If None, defaults to the number
+            of latitudes.
+        mmax : int, optional
+            Maximum zonal wavenumber + 1. Used to size the Legendre polynomials array. If None, defaults to the number
+            of latitudes.
+        """
 
         super().__init__()
 
@@ -118,7 +195,7 @@ class SphericalHarmonicTransform(Module):
         self.register_buffer("weight", weight, persistent=False)
 
     def rfft_rings_reduced(self, x: Tensor) -> Tensor:
-        """Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+        r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
 
         Parameters
         ----------
@@ -147,7 +224,7 @@ class SphericalHarmonicTransform(Module):
         return output_tensor
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
-        """Performs direct real-to-complex FFT on each latitude ring of a regular grid.
+        r"""Performs direct real-to-complex FFT on each latitude ring of a regular grid.
 
         Parameters
         ----------
@@ -163,7 +240,7 @@ class SphericalHarmonicTransform(Module):
         return torch.fft.rfft(x.reshape(*x.shape[:-1], self.nlat, self.lons_per_lat[0]), norm="forward")
 
     def forward(self, x: Tensor) -> Tensor:
-        """Performs direct SHT transform (Fourier transform followed by Legendre transform).
+        r"""Performs direct SHT transform (Fourier transform followed by Legendre transform).
 
         Parameters
         ----------
@@ -189,8 +266,49 @@ class SphericalHarmonicTransform(Module):
 
 
 class InverseSphericalHarmonicTransform(Module):
+    r"""Generic class for performing inverse (AKA backward) transforms from a spectral representation to a global gridded
+    tensor.
 
+    Attributes
+    ----------
+    lmax : int
+        Maximum total wavenumber + 1. Used to size the Legendre polynomials array.
+    mmax : int
+        Maximum zonal wavenumber + 1. Used to size the Legendre polynomials array.
+    nlat : int
+        Number of latitudes in the grid, from pole to pole.
+    lons_per_lat : list[int]
+        Number of longitudinal points on each latitude ring, from pole to pole.
+    n_grid_points : int
+        Total number of grid points in the global grid.
+
+    Methods
+    -------
+    irfft_rings_reduced(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+    irfft_rings_regular(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
+    forward(x: Tensor) -> Tensor
+        Performs inverse SHT transform (inverse Legendre transform followed by inverse Fourier transform).
+
+    Notes
+    -----
+    Inspired by the SHT in Nvidia's torch-harmonics.
+    """
     def __init__(self, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
+        r"""Initializes InverseSphericalHarmonicTransform.
+
+        Parameters
+        ----------
+        lons_per_lat : list[int]
+            Number of longitudinal points on each latitude ring, from pole to pole.
+        lmax : int, optional
+            Maximum total wavenumber + 1. Used to size the Legendre polynomials array. If None, defaults to the number
+            of latitudes.
+        mmax : int, optional
+            Maximum zonal wavenumber + 1. Used to size the Legendre polynomials array. If None, defaults to the number
+            of latitudes.
+        """
 
         super().__init__()
 
@@ -222,7 +340,7 @@ class InverseSphericalHarmonicTransform(Module):
         self.register_buffer("pct", pct, persistent=False)
 
     def irfft_rings_reduced(self, x: Tensor) -> Tensor:
-        """Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+        r"""Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
 
         Parameters
         ----------
@@ -243,7 +361,7 @@ class InverseSphericalHarmonicTransform(Module):
         )
 
     def irfft_rings_regular(self, x: Tensor) -> Tensor:
-        """Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
+        r"""Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
 
         Parameters
         ----------
@@ -259,7 +377,7 @@ class InverseSphericalHarmonicTransform(Module):
         return torch.fft.irfft(x, self.lons_per_lat[0], norm="forward").reshape(*x.shape[:-2], self.n_grid_points)
 
     def forward(self, x: Tensor) -> Tensor:
-        """Performs inverse SHT transform (inverse Legendre transform followed by inverse Fourier transform).
+        r"""Performs inverse SHT transform (inverse Legendre transform followed by inverse Fourier transform).
 
         Parameters
         ----------
