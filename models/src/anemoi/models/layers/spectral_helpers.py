@@ -13,8 +13,7 @@ import logging
 import numpy as np
 import torch
 from torch import Tensor
-from torch.cuda import CUDAGraph
-from torch.cuda import graph
+from torch.cuda.graphs import make_graphed_callables
 from torch.nn import Module
 
 LOGGER = logging.getLogger(__name__)
@@ -171,7 +170,7 @@ class SphericalHarmonicTransform(Module):
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
             LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
-            self.rfft_rings = self.rfft_rings_reduced_graphs if use_graphs else self.rfft_rings_reduced_naive
+            self.rfft_rings = self.rfft_rings_reduced_graphed_autograd if use_graphs else self.rfft_rings_reduced_naive
         else:
             LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
@@ -188,10 +187,7 @@ class SphericalHarmonicTransform(Module):
         weight = torch.from_numpy(weight)
         weight = torch.einsum("mlk, k -> mlk", pct, weight)
 
-        self._rfft_current_output_shape = None
-        self._graph = None
-        self._graph_input = None
-        self._graph_output = None
+        self._graphed_rfft_cache = {}
 
         self.register_buffer("weight", weight, persistent=False)
 
@@ -225,7 +221,12 @@ class SphericalHarmonicTransform(Module):
 
         return output_tensor
 
-    def rfft_rings_reduced_graphs(self, x: Tensor) -> Tensor:
+    def _rfft_reduced_impl(self, x: Tensor) -> Tensor:
+        r"""Helper used for the graphed reduced-grid FFT path."""
+
+        return self.rfft_rings_reduced_naive(x)
+
+    def rfft_rings_reduced_graphed_autograd(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
 
         Parameters
@@ -239,49 +240,18 @@ class SphericalHarmonicTransform(Module):
             Fourier space field [..., latitude, zonal wavenumber m]
         """
 
-        input_shape = x.shape
-        output_shape = (*x.shape[:-1], self.nlat, max(self.lons_per_lat) // 2 + 1)
+        if x.device.type != "cuda":
+            return self.rfft_rings_reduced_naive(x)
 
-        # If first call, or first call with _these_ shapes
-        # Note that we assume if output_shape is the same, so is input_shape
-        if output_shape != self._rfft_current_output_shape:
-            LOGGER.info(
-                f"Compiling CUDA graph for rfft_rings_reduced with input_shape {input_shape} and output shape"
-                f"{output_shape}"
-            )
-
-            # These arrays must have the same lifetime as self
-            self._graph_input = torch.zeros(input_shape, device=x.device, dtype=x.dtype)
-            self._graph_output = torch.zeros(
-                output_shape, device=x.device, dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
-            )
-
-            self._rfft_current_output_shape = output_shape
-
-            # Warmup phase so cuFFT does all its allocations / planning etc. BEFORE graph capturing starts
-            # Memory allocations not permitted inside the graph capture!
-            # Note also that output of FFT is not needed
-            for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
-                torch.fft.rfft(self._graph_input[..., slon : slon + nlon], norm="forward")
-
-            # Capture the graph
-            self._graph = CUDAGraph()
-            with graph(self._graph):
-                for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
-                    self._graph_output[..., i, : nlon // 2 + 1] = torch.fft.rfft(
-                        self._graph_input[..., slon : slon + nlon], norm="forward"
-                    )
+        key = (tuple(x.shape), x.dtype, x.device, x.requires_grad)
+        if key not in self._graphed_rfft_cache:
+            LOGGER.info(f"Compiling graphed callable for rfft_rings_reduced with input signature {key}")
+            sample_x = torch.zeros_like(x, requires_grad=x.requires_grad)
+            self._graphed_rfft_cache[key] = make_graphed_callables(self._rfft_reduced_impl, (sample_x,))
         else:
-            LOGGER.info(
-                f"Reusing CUDA graph for rfft_rings_reduced with input_shape {input_shape} and output shape"
-                f"{output_shape}"
-            )
+            LOGGER.info(f"Reusing graphed callable for rfft_rings_reduced with input signature {key}")
 
-        self._graph_input.copy_(x)
-        self._graph_output.zero_()
-        self._graph.replay()
-
-        return self._graph_output.clone()
+        return self._graphed_rfft_cache[key](x)
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
         """Performs direct real-to-complex FFT on each latitude ring of a regular grid.
