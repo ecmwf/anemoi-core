@@ -137,7 +137,7 @@ def _gather(
         if dist.get_backend(group) == "gloo":
             output = torch.cat(
                 [t[tuple(slice(None, s) for s in shapes[i])] for i, t in enumerate(tensor_list)], dim=dim_
-            )
+            ).contiguous(memory_format=input_format)
         else:
             output = torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
 
