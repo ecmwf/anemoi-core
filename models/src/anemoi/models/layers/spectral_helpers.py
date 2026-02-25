@@ -295,6 +295,7 @@ class InverseSphericalHarmonicTransform(Module):
     -----
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
+
     def __init__(self, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
         r"""Initializes InverseSphericalHarmonicTransform.
 
