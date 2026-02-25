@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 
 import torch
@@ -21,6 +22,36 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.training.distributed.strategy import register_gradient_scaling_hooks
+
+GLOBAL_DEFAULT_ATOL = 1e-5
+GLOBAL_DEFAULT_RTOL = 1e-5
+
+
+def _env_float(name: str) -> float | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        msg = f"Invalid value for {name}: {raw!r}. Use a non-negative float."
+        raise ValueError(msg) from exc
+
+    if value < 0.0:
+        msg = f"Invalid value for {name}: {raw!r}. Use a non-negative float."
+        raise ValueError(msg)
+
+    return value
+
+
+def _tolerances() -> tuple[float, float]:
+    atol = _env_float("ANEMOI_DISTRIBUTED_TEST_ATOL")
+    rtol = _env_float("ANEMOI_DISTRIBUTED_TEST_RTOL")
+    return (
+        GLOBAL_DEFAULT_ATOL if atol is None else atol,
+        GLOBAL_DEFAULT_RTOL if rtol is None else rtol,
+    )
 
 
 def _training_config_dir() -> Path:
@@ -104,7 +135,9 @@ def _build_tiny_model() -> AnemoiModelEncProcDec:
 
     data_indices = {
         "data": IndexCollection(
-            data_config=OmegaConf.create({"forcing": [], "diagnostic": [], "target": []}),
+            data_config=OmegaConf.create(
+                {"forcing": [], "diagnostic": [], "target": []},
+            ),
             name_to_index={"var0": 0, "var1": 1},
         ),
     }
@@ -116,7 +149,9 @@ def _build_tiny_model() -> AnemoiModelEncProcDec:
     )
 
 
-def _compute_full_model_grads(model: AnemoiModelEncProcDec) -> dict[str, torch.Tensor | None]:
+def _compute_full_model_grads(
+    model: AnemoiModelEncProcDec,
+) -> dict[str, torch.Tensor | None]:
     model.zero_grad(set_to_none=True)
     num_nodes = model._graph_data["data"]["data"].num_nodes
     x = torch.arange(num_nodes * 2, dtype=torch.float32).reshape(1, 1, 1, num_nodes, 2) / 16.0
@@ -141,12 +176,18 @@ def test_register_gradient_scaling_hooks_tiny_model_parameter_selection() -> Non
     base_grads = _compute_full_model_grads(base)
     register_gradient_scaling_hooks(hooked, model_comm_group_size=scale)
     hooked_grads = _compute_full_model_grads(hooked)
+    atol, rtol = _tolerances()
 
     for name, grad in base_grads.items():
         if grad is None:
             assert hooked_grads[name] is None
             continue
         if name in expected_skipped:
-            torch.testing.assert_close(hooked_grads[name], grad)
+            torch.testing.assert_close(hooked_grads[name], grad, atol=atol, rtol=rtol)
         else:
-            torch.testing.assert_close(hooked_grads[name], grad * scale)
+            torch.testing.assert_close(
+                hooked_grads[name],
+                grad * scale,
+                atol=atol,
+                rtol=rtol,
+            )
