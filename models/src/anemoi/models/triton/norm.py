@@ -317,7 +317,7 @@ def _norm_bwd_standalone(
 
 
 @triton.jit
-def _rms_norm_bwd_accumulate_dw(dw_partial_ptr, dw_ptr, N: tl.constexpr, H: tl.constexpr, C: tl.constexpr):
+def _norm_bwd_accumulate_dw(dw_partial_ptr, dw_ptr, N: tl.constexpr, H: tl.constexpr, C: tl.constexpr):
     """inputs:
         dw_partial_ptr: (N,C_pad)
         dw_ptr: (C_pad)
@@ -391,12 +391,7 @@ class _NormFunction(torch.autograd.Function):
         if ctx.elementwise_affine:
             if B > 1:
                 dw = torch.zeros((C,), device=x.device, dtype=torch.float32)
-                if ctx.norm_type == 1:
-                    _rms_norm_bwd_accumulate_dw[1,](dw_partial, dw, B, H, C)
-                elif ctx.norm_type == 2:
-                    raise NotImplementedError(
-                        "dw accumulation for LayerNorm is not implemented. Please reach out if you want this feature implemented."
-                    )
+                _norm_bwd_accumulate_dw[1,](dw_partial, dw, B, H, C)
             else:
                 dw = torch.squeeze(dw_partial, 0)
 
@@ -415,6 +410,9 @@ class RMSNorm(torch.nn.Module):
 
         if elementwise_affine:
             self.weight = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
+            LOGGER.warning(
+                "Using LayerNorm with elementwise_affine=True may be slow due to inefficient dw accumulation. This implementation is meant for testing purposes and is not optimised for performance."
+            )
         else:
             self.register_parameter("weight", None)
 
@@ -427,7 +425,7 @@ class RMSNorm(torch.nn.Module):
 
 class LayerNorm(torch.nn.Module):
     """Interface to triton LayerNorm.
-    Meant for testing purposes as the accumulation for dw when using elementwise_affine is not implemented.
+    Meant for testing purposes as the accumulation for dw when using elementwise_affine is implemented but is not computationally efficient.
     """
 
     def __init__(self, dim: int, elementwise_affine: bool = True):
@@ -436,6 +434,9 @@ class LayerNorm(torch.nn.Module):
 
         if elementwise_affine:
             self.weight = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
+            LOGGER.warning(
+                "Using LayerNorm with elementwise_affine=True may be slow due to inefficient dw accumulation. This implementation is meant for testing purposes and is not optimised for performance."
+            )
         else:
             self.register_parameter("weight", None)
 
