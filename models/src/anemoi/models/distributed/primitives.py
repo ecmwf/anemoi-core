@@ -17,6 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.utils import get_memory_format
 
+
 def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
     """Wrapper function for all_to_all across NCCL, MPI and Gloo backends.
     There is no all_to_all primitive for the Gloo backend. In that case each
@@ -51,6 +52,7 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
             req.wait()
     else:
         dist.all_to_all(output_list, input_list, group=group)
+
 
 def _split(input_: Tensor, dim_: int, shapes_: tuple, group: Optional[ProcessGroup] = None) -> Tensor:
     """Split the tensor along dim and keep the relevant slice."""
