@@ -54,11 +54,7 @@ edges:
     target_mask_attr_name: cutout_mask
   attributes: ${graph.attributes.edges}
 
-post_processors:
-  - _target_: anemoi.graphs.processors.RemoveUnconnectedNodes
-    nodes_name: data
-    ignore: cutout_mask # optional
-    save_mask_indices_to_attr: indices_connected_nodes # optional
+post_processors: []
 
 attributes:
   nodes:
