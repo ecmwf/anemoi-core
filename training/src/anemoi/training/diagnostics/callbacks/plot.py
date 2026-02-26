@@ -362,27 +362,11 @@ class BasePerEpochPlotCallback(BasePlotCallback):
 class LongRolloutPlots(BasePlotCallback):
     """Evaluates the model performance over a (longer) rollout window.
 
-    This function allows evaluating the performance of the model over an extended number
-    of rollout steps to observe long-term behavior.
-    Add the callback to the configuration file as follows:
-
-    Example::
-
-        - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
-            rollout:
-            - ${dataloader.validation_rollout}
-            video_rollout: ${dataloader.validation_rollout}
-            every_n_epochs: 1
-            sample_idx: ${diagnostics.plot.sample_idx}
-            parameters: ${diagnostics.plot.parameters}
-
-    The selected rollout steps for plots and video need to be lower or equal to dataloader.validation_rollout.
-    Increasing dataloader.validation_rollout has no effect on the rollout steps during training.
-    It ensures, that enough time steps are available for the plots and video in the validation batches.
-
-    The runtime of creating one animation of one variable for 56 rollout steps is about 1 minute.
-    Recommended use for video generation: Fork the run using fork_run_id for 1 additional epochs and enabled videos.
-
+    Updated to support multi-dataset batches:
+      batch: dict[dataset_name, tensor]
+      rollout_step yields y_pred as either:
+        - dict[dataset_name, tensor] (multi-dataset)
+        - tensor (single-dataset legacy)
     """
 
     def __init__(
@@ -397,43 +381,15 @@ class LongRolloutPlots(BasePlotCallback):
         per_sample: int = 6,
         every_n_epochs: int = 1,
         animation_interval: int = 400,
+        dataset_names: list[str] | None = None,
     ) -> None:
-        """Initialise LongRolloutPlots callback.
-
-        Parameters
-        ----------
-        config : OmegaConf
-            Config object
-        rollout : list[int]
-            Rollout steps to plot at
-        sample_idx : int
-            Sample to plot
-        parameters : list[str]
-            Parameters to plot
-        video_rollout : int, optional
-            Number of rollout steps for video, by default 0 (no video)
-        accumulation_levels_plot : list[float] | None
-            Accumulation levels to plot, by default None
-        colormaps : dict[str, Colormap] | None
-            Dictionary of colormaps, by default None
-        per_sample : int, optional
-            Number of plots per sample, by default 6
-        every_n_epochs : int, optional
-            Epoch frequency to plot at, by default 1
-        animation_interval : int, optional
-            Delay between frames in the animation in milliseconds, by default 400
-        """
-        super().__init__(config)
+        super().__init__(config, dataset_names=dataset_names)
 
         self.every_n_epochs = every_n_epochs
 
-        self.rollout = rollout
+        self.rollout = rollout or []
         self.video_rollout = video_rollout
-        self.max_rollout = 0
-        if self.rollout:
-            self.max_rollout = max(self.rollout)
-        else:
-            self.rollout = []
+        self.max_rollout = max(self.rollout) if self.rollout else 0
         if self.video_rollout:
             self.max_rollout = max(self.max_rollout, self.video_rollout)
 
@@ -446,8 +402,8 @@ class LongRolloutPlots(BasePlotCallback):
 
         LOGGER.info(
             (
-                "Setting up callback for plots with long rollout: rollout for plots = %s, ",
-                "rollout for video = %s, frequency = every %d epoch.",
+                "Setting up callback for plots with long rollout: rollout for plots = %s, "
+                "rollout for video = %s, frequency = every %d epoch."
             ),
             self.rollout,
             self.video_rollout,
@@ -457,110 +413,163 @@ class LongRolloutPlots(BasePlotCallback):
         if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
             LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
 
+    @staticmethod
+    def _select_pred(y_pred: Any, dataset_name: str) -> torch.Tensor:
+        """Select the per-dataset prediction tensor from y_pred."""
+        if isinstance(y_pred, dict):
+            return y_pred[dataset_name]
+        return y_pred
+
+    def _get_diagnostics(self, dataset_name: str) -> list[str]:
+        try:
+            diag = self.config.data.datasets[dataset_name].diagnostic
+        except Exception:
+            diag = None
+        return [] if diag is None else list(diag)
+
+    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_names: list[str],
         output: list[torch.Tensor],
-        batch: torch.Tensor,
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
+        **_: Any,
     ) -> None:
         _ = output
         start_time = time.time()
         logger = trainer.logger
 
-        # Initialize required variables for plotting
-        plot_parameters_dict = {
-            pl_module.data_indices.model.output.name_to_index[name]: (
-                name,
-                name not in self.config.data.get("diagnostic", []),
-            )
-            for name in self.parameters
-        }
         if self.latlons is None:
-            for dataset_name in self.dataset_names:
+            self.latlons = {}
+
+        # Ensure dataset_names only includes available keys
+        ds_names = [d for d in dataset_names if d in batch]
+        if not ds_names:
+            LOGGER.warning("LongRolloutPlots: no matching dataset_names in batch. dataset_names=%s batch_keys=%s", dataset_names, list(batch.keys()))
+            return
+
+        # Prepare per-dataset plotting metadata once
+        plot_parameters = {}
+        init_data0 = {}
+
+        for dataset_name in ds_names:
+            diagnostics = self._get_diagnostics(dataset_name)
+            di = pl_module.data_indices[dataset_name]
+
+            plot_parameters_dict = {
+                di.model.output.name_to_index[name]: (name, name not in diagnostics)
+                for name in self.parameters
+                if name in di.model.output.name_to_index
+            }
+            if not plot_parameters_dict:
+                LOGGER.warning("LongRolloutPlots: no parameters matched for dataset '%s' (requested=%s).", dataset_name, self.parameters)
+                continue
+
+            plot_parameters[dataset_name] = plot_parameters_dict
+
+            if dataset_name not in self.latlons:
                 self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
                 self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
-        assert batch.shape[1] >= self.max_rollout + pl_module.n_step_input, (
-            "Batch length not sufficient for requested validation rollout length! "
-            f"Set `dataloader.validation_rollout` to at least {max(self.rollout)}"
-        )
+            # input tensor at init time (already preprocessed in-place)
+            input_tensor_0 = (
+                batch[dataset_name][
+                    :,
+                    pl_module.n_step_input - 1,
+                    ...,
+                    di.data.output.full,
+                ]
+                .detach()
+                .cpu()
+            )
+            init_data0[dataset_name] = self.post_processors[dataset_name](input_tensor_0)[self.sample_idx]
 
-        # prepare input tensor for plotting
-        # the batch is already preprocessed in-place
-        input_tensor_0 = (
-            batch[
-                :,
-                pl_module.n_step_input - 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
-        data_0 = self.post_processors(input_tensor_0)[self.sample_idx]
+        # Drop datasets that failed parameter matching
+        ds_names = [d for d in ds_names if d in plot_parameters and d in init_data0]
+        if not ds_names:
+            return
 
+        # Video buffers per dataset
+        video_data_over_time: dict[str, list] = {}
+        vmin: dict[str, np.ndarray] = {}
+        vmax: dict[str, np.ndarray] = {}
         if self.video_rollout:
-            data_over_time = []
-            # collect min and max values for each variable for the colorbar
-            vmin, vmax = (np.inf * np.ones(len(plot_parameters_dict)), -np.inf * np.ones(len(plot_parameters_dict)))
+            for dataset_name in ds_names:
+                nvars = len(plot_parameters[dataset_name])
+                video_data_over_time[dataset_name] = []
+                vmin[dataset_name] = np.inf * np.ones(nvars, dtype=float)
+                vmax[dataset_name] = -np.inf * np.ones(nvars, dtype=float)
 
-        # Plot for each rollout step
         with torch.no_grad():
             for rollout_step, (_, _, y_pred) in enumerate(
                 pl_module.rollout_step(
-                    batch,
+                    batch,  # dict[str, tensor]
                     rollout=self.max_rollout,
                     validation_mode=True,
                 ),
             ):
-                # plot only if the current rollout step is in the list of rollout steps
+                # Plot requested rollout steps (1-indexed in config)
                 if (rollout_step + 1) in self.rollout:
-                    self._plot_rollout_step(
-                        pl_module,
-                        plot_parameters_dict,
-                        batch,
-                        data_0,
-                        rollout_step,
-                        y_pred,
-                        batch_idx,
-                        epoch,
-                        logger,
-                    )
+                    for dataset_name in ds_names:
+                        y_pred_ds = self._select_pred(y_pred, dataset_name)
+                        self._plot_rollout_step(
+                            pl_module=pl_module,
+                            dataset_name=dataset_name,
+                            plot_parameters_dict=plot_parameters[dataset_name],
+                            input_batch=batch[dataset_name],
+                            data_0=init_data0[dataset_name],
+                            rollout_step=rollout_step,
+                            y_pred=y_pred_ds,
+                            batch_idx=batch_idx,
+                            epoch=epoch,
+                            logger=logger,
+                        )
 
+                # Store video frames
                 if self.video_rollout and rollout_step < self.video_rollout:
-                    data_over_time, vmin, vmax = self._store_video_frame_data(
-                        data_over_time,
-                        y_pred,
-                        plot_parameters_dict,
-                        vmin,
-                        vmax,
+                    for dataset_name in ds_names:
+                        y_pred_ds = self._select_pred(y_pred, dataset_name)
+                        video_data_over_time[dataset_name], vmin[dataset_name], vmax[dataset_name] = self._store_video_frame_data(
+                            data_over_time=video_data_over_time[dataset_name],
+                            y_pred=y_pred_ds,
+                            dataset_name=dataset_name,
+                            plot_parameters_dict=plot_parameters[dataset_name],
+                            vmin=vmin[dataset_name],
+                            vmax=vmax[dataset_name],
+                        )
+
+            # Generate videos
+            if self.video_rollout:
+                for dataset_name in ds_names:
+                    self._generate_video_rollout(
+                        dataset_name=dataset_name,
+                        data_0=init_data0[dataset_name],
+                        data_over_time=video_data_over_time[dataset_name],
+                        plot_parameters_dict=plot_parameters[dataset_name],
+                        vmin=vmin[dataset_name],
+                        vmax=vmax[dataset_name],
+                        rollout_step=self.video_rollout,
+                        batch_idx=batch_idx,
+                        epoch=epoch,
+                        logger=logger,
+                        animation_interval=self.animation_interval,
                     )
 
-            # Generate and save video rollout animation if enabled
-            if self.video_rollout:
-                self._generate_video_rollout(
-                    data_0,
-                    data_over_time,
-                    plot_parameters_dict,
-                    vmin,
-                    vmax,
-                    self.video_rollout,
-                    batch_idx,
-                    epoch,
-                    logger,
-                    animation_interval=self.animation_interval,
-                )
-
-        LOGGER.info("Time taken to plot/animate samples for longer rollout: %d seconds", int(time.time() - start_time))
+        LOGGER.info(
+            "Time taken to plot/animate samples for longer rollout: %d seconds",
+            int(time.time() - start_time),
+        )
 
     @rank_zero_only
     def _plot_rollout_step(
         self,
         pl_module: pl.LightningModule,
-        plot_parameters_dict: dict,
+        dataset_name: str,
+        plot_parameters_dict: dict[int, tuple[str, bool]],
         input_batch: torch.Tensor,
         data_0: np.ndarray,
         rollout_step: int,
@@ -569,63 +578,77 @@ class LongRolloutPlots(BasePlotCallback):
         epoch: int,
         logger: pl.loggers.logger.Logger,
     ) -> None:
-        """Plot the predicted output, input, true target and error plots for a given rollout step."""
-        # prepare true output tensor for plotting
+        di = pl_module.data_indices[dataset_name]
+
+        # true output at this rollout step
         input_tensor_rollout_step = (
             input_batch[
                 :,
-                pl_module.n_step_input + rollout_step,  # (pl_module.n_step_input - 1) + (rollout_step + 1)
+                pl_module.n_step_input + rollout_step,  # (n_step_input - 1) + (rollout_step + 1)
                 ...,
-                pl_module.data_indices.data.output.full,
+                di.data.output.full,
             ]
             .detach()
             .cpu()
         )
-        data_rollout_step = self.post_processors(input_tensor_rollout_step)[self.sample_idx]
+        data_rollout_step = self.post_processors[dataset_name](input_tensor_rollout_step)[self.sample_idx]
+
         # predicted output tensor
-        output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
+        output_tensor = self.post_processors[dataset_name](y_pred.detach().cpu(), in_place=False)[
+            self.sample_idx : self.sample_idx + 1
+        ]
 
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
             self.per_sample,
-            self.latlons,
+            self.latlons[dataset_name],
             self.accumulation_levels_plot,
             data_0.squeeze(),
             data_rollout_step.squeeze(),
             output_tensor[0, 0, :, :],  # rolloutstep, first member
             colormaps=self.colormaps,
+            datashader=self.datashader_plotting,
         )
         self._output_figure(
             logger,
             fig,
             epoch=epoch,
-            tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_rank{pl_module.local_rank:01d}",
-            exp_log_tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
+            tag=(
+                f"pred_val_sample_{dataset_name}_rstep{rollout_step + 1:03d}_"
+                f"batch{batch_idx:04d}_rank{pl_module.local_rank:01d}"
+            ),
+            exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
         )
 
     def _store_video_frame_data(
         self,
         data_over_time: list,
         y_pred: torch.Tensor,
-        plot_parameters_dict: dict,
+        dataset_name: str,
+        plot_parameters_dict: dict[int, tuple[str, bool]],
         vmin: np.ndarray,
         vmax: np.ndarray,
     ) -> tuple[list, np.ndarray, np.ndarray]:
-        """Store the data for each frame of the video."""
-        # prepare predicted output tensors for video
-        output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
-        data_over_time.append(output_tensor[0, 0, :, np.array(list(plot_parameters_dict.keys()))])
-        # update min and max values for each variable for the colorbar
-        vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=0))
-        vmax[:] = np.maximum(vmax, np.nanmax(data_over_time[-1], axis=0))
+        # predicted output tensors for video
+        output_tensor = self.post_processors[dataset_name](y_pred.detach().cpu(), in_place=False)[
+            self.sample_idx : self.sample_idx + 1
+        ]
+        var_indices = np.array(list(plot_parameters_dict.keys()), dtype=int)
+        frame = output_tensor[0, 0, :, var_indices]  # [nodes, nvars]
+        data_over_time.append(frame)
+
+        # update per-variable min/max for colorbar
+        vmin[:] = np.minimum(vmin, np.nanmin(frame, axis=0))
+        vmax[:] = np.maximum(vmax, np.nanmax(frame, axis=0))
         return data_over_time, vmin, vmax
 
     @rank_zero_only
     def _generate_video_rollout(
         self,
+        dataset_name: str,
         data_0: np.ndarray,
         data_over_time: list,
-        plot_parameters_dict: dict,
+        plot_parameters_dict: dict[int, tuple[str, bool]],
         vmin: np.ndarray,
         vmax: np.ndarray,
         rollout_step: int,
@@ -634,102 +657,110 @@ class LongRolloutPlots(BasePlotCallback):
         logger: pl.loggers.logger.Logger,
         animation_interval: int = 400,
     ) -> None:
-        """Generate the video animation for the rollout."""
+        # data_0 is a single timestep sample: typically [ens?, nodes, vars] or [nodes, vars] depending on postproc
+        # Normalize to [nodes, vars] for scatter
+        if data_0.ndim == 3:
+            data0_nodes_vars = data_0[0, :, :]
+        else:
+            data0_nodes_vars = data_0
+
         for idx, (variable_idx, (variable_name, _)) in enumerate(plot_parameters_dict.items()):
-            # Create the animation and list to store the frames (artists)
             frames = []
-            # Prepare the figure
             fig, ax = plt.subplots(figsize=(10, 6), dpi=72)
             cmap = "viridis"
 
-            # Create initial data and colorbar
             ax, scatter_frame = get_scatter_frame(
                 ax,
-                data_0[0, :, variable_idx],
-                self.latlons,
+                data0_nodes_vars[:, variable_idx],
+                self.latlons[dataset_name],
                 cmap=cmap,
                 vmin=vmin[idx],
                 vmax=vmax[idx],
             )
-            ax.set_title(f"{variable_name}")
+            ax.set_title(f"{dataset_name}: {variable_name}")
             fig.colorbar(scatter_frame, ax=ax)
             frames.append([scatter_frame])
 
-            # Loop through the data and create the scatter plot for each frame
             for frame_data in data_over_time:
                 ax, scatter_frame = get_scatter_frame(
                     ax,
                     frame_data[:, idx],
-                    self.latlons,
+                    self.latlons[dataset_name],
                     cmap=cmap,
                     vmin=vmin[idx],
                     vmax=vmax[idx],
                 )
-                frames.append([scatter_frame])  # Each frame contains a list of artists (images)
+                frames.append([scatter_frame])
 
-            # Create the animation using ArtistAnimation
             anim = animation.ArtistAnimation(fig, frames, interval=animation_interval, blit=True)
             self._output_gif(
                 logger,
                 fig,
                 anim,
                 epoch=epoch,
-                tag=f"pred_val_animation_{variable_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0",
+                tag=(
+                    f"pred_val_animation_{dataset_name}_{variable_name}_"
+                    f"rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0"
+                ),
             )
 
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        output: list[dict[str,torch.Tensor]],
+        output: list[torch.Tensor],
         batch: dict[str, torch.Tensor],
         batch_idx: int,
     ) -> None:
-        if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
-            batch = {
-                dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
-                for dataset_name, dataset_tensor in batch.items()
-            }
-            preds = output[1]
-            context = next(iter(batch.values())).device  # get device from any of the tensors in the batch
-            if not isinstance(preds, list):
+        if batch_idx != 0 or (trainer.current_epoch + 1) % self.every_n_epochs != 0:
+            return
 
-                raise TypeError(preds)
+        if self.config.diagnostics.plot.asynchronous:
+            LOGGER.warning("Asynchronous plotting not supported for long rollout plots; running synchronously.")
 
-            output = [
-                output[0],
-                [
-                    {
-                        dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
-                        for dataset_name, dataset_pred in pred.items()
-                    }
-                    for pred in preds
-                ],
-            ]
-            self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for dataset_name in self.post_processors:
-                for post_processor in self.post_processors[dataset_name].processors.values():
-                    if hasattr(post_processor, "nan_locations"):
-                        post_processor.nan_locations = pl_module.allgather_batch(
-                            post_processor.nan_locations,
-                            dataset_name,
-                        )
-                self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
+        # Gather tensors per dataset (matches BasePerBatchPlotCallback behavior)
+        batch = {
+            dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
+            for dataset_name, dataset_tensor in batch.items()
+        }
 
-            precision_mapping = {
-                "16-mixed": torch.float16,
-                "bf16-mixed": torch.bfloat16,
-            }
-            prec = trainer.precision
-            dtype = precision_mapping.get(prec)
+        # (loss, [pred_dict1, pred_dict2, ...]) expected across the codebase
+        preds = output[1]
+        if not isinstance(preds, list):
+            preds = [preds]
 
-            if self.config.diagnostics.plot.asynchronous:
-                LOGGER.warning("Asynchronous plotting not supported for long rollout plots.")
+        output = [
+            output[0],
+            [
+                {
+                    dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
+                    for dataset_name, dataset_pred in pred.items()
+                }
+                for pred in preds
+            ],
+        ]
 
-            with context:
-                # Issue with running asyncronously, so call the plot function directly
-                self._plot(trainer, pl_module, output, batch, batch_idx, trainer.current_epoch)
+        self.post_processors = copy.deepcopy(pl_module.model.post_processors)
+        for dataset_name in list(self.post_processors.keys()):
+            for post_processor in self.post_processors[dataset_name].processors.values():
+                if hasattr(post_processor, "nan_locations"):
+                    post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations, dataset_name)
+            self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
+        precision_mapping = {"16-mixed": torch.float16, "bf16-mixed": torch.bfloat16}
+        dtype = precision_mapping.get(trainer.precision)
+        context = torch.autocast(device_type=list(batch.values())[0].device.type, dtype=dtype) if dtype else nullcontext()
+        print("PLOTTING LONG ROLLOUT", flush=True)
+        with context:
+            self._plot(
+                trainer,
+                pl_module,
+                self.dataset_names,
+                output,
+                batch,
+                batch_idx,
+                trainer.current_epoch,
+            )
 
 class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     """Visualize the node & edge trainable features defined."""
