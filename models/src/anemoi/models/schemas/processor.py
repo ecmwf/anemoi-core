@@ -9,6 +9,7 @@
 
 from typing import Any
 from typing import Literal
+from typing import Union
 
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -40,8 +41,16 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     "Number of layers of Graph Transformer processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
-    qk_norm: bool = Field(example=False)
-    "Normalize the query and key vectors. Default to False."
+    qk_norm: Union[str, bool] = Field(examples=["None", "layer_norm", "rms_norm", True, False])
+    "Normalize the query and key vectors. Options are 'None', 'layer_norm', 'rms_norm', True, False. Bools are supported for backward compatibility. If True, 'layer_norm' is used for normalization."
+
+    # convert qk_norm from bool to str for backward compatibility
+    @model_validator(mode="before")
+    def convert_qk_norm(cls, values: dict[str, Any]) -> dict[str, Any]:
+        qk_norm = values.get("qk_norm", "none")
+        if isinstance(qk_norm, bool):
+            values["qk_norm"] = "layer_norm" if qk_norm else "none"
+        return values
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:

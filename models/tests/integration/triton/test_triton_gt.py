@@ -55,17 +55,17 @@ class _GraphTransformerConvQKnorm(GraphTransformerConv):
 
     def __init__(
         self,
-        qk_norm: bool = False,
+        qk_norm: str = "none",
         **kwargs,
     ):
 
         super().__init__(**kwargs)
 
         self.qk_norm = qk_norm
-        if self.qk_norm == 1:  # rms norm
+        if self.qk_norm == "rms_norm":  # rms norm
             self.q_norm = torch.nn.RMSNorm(self.out_channels)
             self.k_norm = torch.nn.RMSNorm(self.out_channels)
-        elif self.qk_norm == 2:  # layer norm
+        elif self.qk_norm == "layer_norm":  # layer norm
             self.q_norm = torch.nn.LayerNorm(self.out_channels, bias=False)
             self.k_norm = torch.nn.LayerNorm(self.out_channels, bias=False)
 
@@ -78,7 +78,7 @@ class _GraphTransformerConvQKnorm(GraphTransformerConv):
         edge_index: Adj,
         size: Optional[Size] = None,
     ):
-        if self.qk_norm > 0:
+        if self.qk_norm != "none":
             query = self.q_norm(query)
             key = self.k_norm(key)
 
@@ -109,7 +109,7 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    qk_norm, w_qnorm, w_knorm = False, None, None
+    qk_norm, w_qnorm, w_knorm = 0, None, None
     out_triton = GraphTransformerFunction.apply(
         query, key, value, edge_attr_csc, csc, reverse, qk_norm, w_qnorm, w_knorm
     )
@@ -142,7 +142,7 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    qk_norm, w_qnorm, w_knorm = False, None, None
+    qk_norm, w_qnorm, w_knorm = 0, None, None
     out_triton = GraphTransformerFunction.apply(
         query, key, value, edge_attr_csc, csc, reverse, qk_norm, w_qnorm, w_knorm
     )
@@ -163,14 +163,14 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
         (4, 10, H, C, qk_norm, elementwise_affine)
         for H in (2, 6)
         for C in (4, 6)
-        for qk_norm in (0, 1, 2)
+        for qk_norm in ("none", "rms_norm", "layer_norm")
         for elementwise_affine in (
             False,
         )  # For performance reasons, we dont currently support elementwise_affine=True for the qk_norm
     ],
 )
 def test_graph_transformer_vs_reference_forward(
-    n_src: int, n_dst: int, h: int, d: int, qk_norm: bool, elementwise_affine: bool
+    n_src: int, n_dst: int, h: int, d: int, qk_norm: str, elementwise_affine: bool
 ):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
@@ -191,7 +191,7 @@ def test_graph_transformer_vs_reference_forward(
     # Reference pyg implementation
     gt_ref = _GraphTransformerConvQKnorm(out_channels=d, qk_norm=qk_norm)
 
-    if qk_norm > 0 and elementwise_affine:
+    if qk_norm != "none" and elementwise_affine:
         # Change the q_norm and k_norm weights from the default [1,] initalisation for testing purposes
         with torch.no_grad():
             gt_triton.w_qnorm[:] = torch.arange(d) * 0.1 + 1.0
@@ -225,14 +225,14 @@ def test_graph_transformer_vs_reference_forward(
         (4, 10, H, C, qk_norm, elementwise_affine)
         for H in (2, 6)
         for C in (4, 6)
-        for qk_norm in (0, 1, 2)
+        for qk_norm in ("none", "rms_norm", "layer_norm")
         for elementwise_affine in (
             False,
         )  # For performance reasons, we dont currently support elementwise_affine=True for the qk_norm
     ],
 )
 def test_graph_transformer_vs_reference_backward(
-    n_src: int, n_dst: int, h: int, d: int, qk_norm: int, elementwise_affine: bool
+    n_src: int, n_dst: int, h: int, d: int, qk_norm: str, elementwise_affine: bool
 ):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
@@ -250,7 +250,7 @@ def test_graph_transformer_vs_reference_backward(
     # Reference pyg implementation
     gt_ref = _GraphTransformerConvQKnorm(out_channels=d, qk_norm=qk_norm)
 
-    if qk_norm > 0 and elementwise_affine:
+    if qk_norm != "none" and elementwise_affine:
         # Change the q_norm and k_norm weights from the default [1,] initalisation for testing purposes
         with torch.no_grad():
             gt_triton.w_qnorm[:] = torch.arange(d) * 0.1 + 1.0
@@ -273,7 +273,7 @@ def test_graph_transformer_vs_reference_backward(
 
     loss_triton = out_triton.pow(2).sum()
     loss_triton.backward()
-    if qk_norm > 0 and elementwise_affine:
+    if qk_norm != "none" and elementwise_affine:
         grads_triton = (
             query.grad.clone(),
             key.grad.clone(),
@@ -293,7 +293,7 @@ def test_graph_transformer_vs_reference_backward(
     out_ref = gt_ref.forward(query, key, value, edge_attr, edge_index, size=(value.size(0), query.size(0)))
     loss_ref = out_ref.pow(2).sum()
     loss_ref.backward()
-    if qk_norm > 0 and elementwise_affine:
+    if qk_norm != "none" and elementwise_affine:
         grads_ref = (
             query.grad.clone(),
             key.grad.clone(),
@@ -311,7 +311,7 @@ def test_graph_transformer_vs_reference_backward(
     torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
     torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
 
-    if qk_norm > 0 and elementwise_affine:
+    if qk_norm != "none" and elementwise_affine:
         # Compare gradients on qk_norm weights
         torch.testing.assert_close(grads_triton[4], grads_ref[4], atol=tolerance, rtol=0)  # w_qnorm
         torch.testing.assert_close(grads_triton[5], grads_ref[5], atol=tolerance, rtol=0)  # w_knorm

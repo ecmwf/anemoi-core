@@ -445,7 +445,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         num_heads: int,
         edge_dim: int,
         bias: bool = True,
-        qk_norm: bool = False,
+        qk_norm: Union[str, bool] = "none",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
@@ -466,8 +466,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Edge dimension
         bias : bool, by default True,
             Add bias or not
-        qk_norm : bool, by default False
-            Normalize query and key
+        qk_norm : Union[str, bool], by default "none"
+            Normalize query and key. Options are 'none', 'layer_norm', 'rms_norm'. Bools are supported for backward compatibility. If True, 'layer_norm' is used for normalization.
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
         layer_kernels : DotDict
@@ -484,6 +484,9 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.out_channels_conv = out_channels // num_heads
         self.num_heads = num_heads
+
+        if isinstance(qk_norm, bool):
+            qk_norm = "layer_norm" if qk_norm else "none"
         self.qk_norm = qk_norm
 
         Linear = layer_kernels.Linear
@@ -526,25 +529,22 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             )
             self.graph_attention_backend = "pyg"
 
-        fused_qk_norm = int(os.getenv("FUSED_QK_NORM", "1"))  # TODO(cathal) replace with config
-        if not self.qk_norm:
-            fused_qk_norm = 0  # if not using qk norm, ensure fused_qk_norm is set to 0
         if self.graph_attention_backend == "triton":
             LOGGER.info(
-                f"{self.__class__.__name__} using triton graph attention backend with qk_normalisation mode: {'no fused normalisation' if fused_qk_norm == 0 else 'fused RMS normalisation' if fused_qk_norm == 1 else 'fused layer normalisation'} ({fused_qk_norm})."
+                f"{self.__class__.__name__} using triton graph attention backend with qk_normalisation mode: {self.qk_norm}."
             )
-            assert fused_qk_norm in (
-                0,
-                1,
-                2,
-            ), "FUSED_QK_NORM must be 0 (no normalisation), 1 (RMS normalisation) or 2 (layer normalisation)"
+            assert self.qk_norm in [
+                "none",
+                "rms_norm",
+                "layer_norm",
+            ], f"Invalid qk_norm {self.qk_norm} for triton backend. Valid options are 'none', 'rms_norm' and 'layer_norm'."
 
-            self.conv = GraphTransformer(self.out_channels_conv, fused_qk_norm)
+            self.conv = GraphTransformer(self.out_channels_conv, self.qk_norm)
         else:
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
         # Triton graph attention has a fused QK norm which will be used instead to perform QK normalisation
-        if self.qk_norm and (self.graph_attention_backend != "triton" or fused_qk_norm == 0):
+        if self.qk_norm != "none" and self.graph_attention_backend != "triton":
             LOGGER.info("Using standalone QK Norms")
             self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
             self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
@@ -821,7 +821,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         else:
             query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
 
-        if self.qk_norm:
+        if self.qk_norm != "none" and self.graph_attention_backend != "triton":
             query = self.q_norm(query)
             key = self.k_norm(key)
 
@@ -932,7 +932,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
         # Triton graphtransformer has a fused qk_norm option which is used instead
-        if self.qk_norm and (self.graph_attention_backend != "triton" or os.getenv("FUSED", "1") == "0"):
+        if self.qk_norm != "none" and self.graph_attention_backend != "triton":
             query = self.q_norm(query)
             key = self.k_norm(key)
 

@@ -589,28 +589,25 @@ class GraphTransformerFunction(torch.autograd.Function):
 
 
 class GraphTransformer(torch.nn.Module):
-    def __init__(self, dim: int, qk_norm: int = 0, elementwise_affine: bool = False):
+    def __init__(self, dim: int, qk_norm: str = "none", elementwise_affine: bool = False):
         super().__init__()
         self.dim = dim
-        self.qk_norm = qk_norm
         assert qk_norm in (
-            0,
-            1,
-            2,
-        ), "qk_norm must be 0 (no normalisation), 1 (RMS normalisation) or 2 (layer normalisation)"
+            "none",
+            "rms_norm",
+            "layer_norm",
+        ), "qk_norm must be 'none' (no normalisation), 'rms_norm' (RMS normalisation) or 'layer_norm' (layer normalisation)"
 
-        if qk_norm == 0 and elementwise_affine:
+        if qk_norm == "none" and elementwise_affine:
             raise ValueError(
-                "elementwise_affine=True is not supported when qk_norm=False, since there is no normalisation. Please set elementwise_affine=False if you do not want to use normalisation, or set qk_norm=True if you want to use normalisation with learnable weights."
+                "elementwise_affine=True is not supported when qk_norm='none', since there is no normalisation. Please set elementwise_affine=False if you do not want to use normalisation, or set qk_norm='rms_norm' or 'layer_norm' if you want to use normalisation with learnable weights."
             )
 
-        elif qk_norm > 0 and elementwise_affine:
+        elif qk_norm in ("rms_norm", "layer_norm") and elementwise_affine:
             raise NotImplementedError(
-                "elementwise_affine=True is not currently supported when qk_norm=True due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature."
+                "elementwise_affine=True is not currently supported when using fused qk_norm due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature."
             )
-
-        if self.qk_norm > 0:
-            LOGGER.info("Using fused QK norm in triton GT")
+        self.qk_norm = {"none": 0, "rms_norm": 1, "layer_norm": 2}[qk_norm]
 
         if elementwise_affine:
             self.w_qnorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)

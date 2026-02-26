@@ -32,8 +32,16 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
     "Size of trainable parameters vector. Default to 8."
     sub_graph_edge_attributes: list[str] = Field(examples=["edge_length", "edge_dirs"])
     "Edge attributes to consider in the encoder features."
-    qk_norm: bool = Field(example=False)
-    "Normalize the query and key vectors. Default to False."
+    qk_norm: Union[str, bool] = Field(examples=["None", "layer_norm", "rms_norm", True, False])
+    "Normalize the query and key vectors. Options are 'None', 'layer_norm', 'rms_norm', True, False. Bools are supported for backward compatibility. If True, 'layer_norm' is used for normalization."
+
+    # convert qk_norm from bool to str for backward compatibility
+    @model_validator(mode="before")
+    def convert_qk_norm(cls, values: dict[str, Any]) -> dict[str, Any]:
+        qk_norm = values.get("qk_norm", "none")
+        if isinstance(qk_norm, bool):
+            values["qk_norm"] = "layer_norm" if qk_norm else "none"
+        return values
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
