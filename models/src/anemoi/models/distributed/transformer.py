@@ -23,7 +23,7 @@ from anemoi.models.distributed.primitives import _alltoallwrapper
 def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all along the head dimension.
 
-    Split input along dimension dim_split and join after all_to_all along dimesion
+    Split input along dimension dim_split and join after all_to_all along dimension
     dim_concatenate.
     """
     comm_size = dist.get_world_size(group=group)

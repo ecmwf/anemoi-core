@@ -35,57 +35,6 @@ GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
 
 
-def _env_flag(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-
-    value = raw.strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-
-    msg = f"Invalid value for {name}: {raw!r}. Use one of 1/0, true/false, yes/no, on/off."
-    raise ValueError(msg)
-
-
-def _float32_matmul_precision(default: str = "highest") -> str:
-    raw = os.getenv("ANEMOI_DISTRIBUTED_TEST_PRECISION", default)
-    value = raw.strip().lower()
-    if value not in {"highest", "high", "medium"}:
-        msg = "Invalid value for ANEMOI_DISTRIBUTED_TEST_PRECISION: " f"{raw!r}. Use one of: highest, high, medium."
-        raise ValueError(msg)
-    return value
-
-
-def _env_float(name: str) -> float | None:
-    raw = os.getenv(name)
-    if raw is None:
-        return None
-
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        msg = f"Invalid value for {name}: {raw!r}. Use a non-negative float."
-        raise ValueError(msg) from exc
-
-    if value < 0.0:
-        msg = f"Invalid value for {name}: {raw!r}. Use a non-negative float."
-        raise ValueError(msg)
-
-    return value
-
-
-def _tolerances() -> tuple[float, float]:
-    atol = _env_float("ANEMOI_DISTRIBUTED_TEST_ATOL")
-    rtol = _env_float("ANEMOI_DISTRIBUTED_TEST_RTOL")
-    return (
-        GLOBAL_DEFAULT_ATOL if atol is None else atol,
-        GLOBAL_DEFAULT_RTOL if rtol is None else rtol,
-    )
-
-
 def _configure_numeric_settings(*, deterministic: bool, matmul_precision: str) -> None:
     torch.set_float32_matmul_precision(matmul_precision)
 
@@ -109,8 +58,9 @@ def _run_core_primitives(
     world_size: int,
     device: torch.device,
     model_comm_group: dist.ProcessGroup,
+    atol: float,
+    rtol: float,
 ) -> None:
-    atol, rtol = _tolerances()
 
     # Keep split sizes equal to ensure backend portability (Gloo all_gather requires equal tensor sizes).
     x_full = torch.arange(24, dtype=torch.float32, device=device).reshape(8, 3)
@@ -216,8 +166,9 @@ def _run_transformer_primitives(
     world_size: int,
     device: torch.device,
     model_comm_group: dist.ProcessGroup,
+    atol: float,
+    rtol: float,
 ) -> None:
-    atol, rtol = _tolerances()
 
     batch_size, num_heads, seq_len, channels = 2, 8, 8, 4
     x_full = torch.arange(
@@ -250,8 +201,9 @@ def _run_channel_primitives(
     world_size: int,
     device: torch.device,
     model_comm_group: dist.ProcessGroup,
+    atol: float,
+    rtol: float,
 ) -> None:
-    atol, rtol = _tolerances()
 
     if world_size < 2:
         msg = "Channel sharding test requires world_size >= 2."
@@ -286,6 +238,8 @@ def _run_rank(
     init_file: str,
     deterministic: bool,
     matmul_precision: str,
+    atol: float,
+    rtol: float,
 ) -> None:
     _configure_numeric_settings(deterministic=deterministic, matmul_precision=matmul_precision)
 
@@ -306,11 +260,11 @@ def _run_rank(
     try:
         group = dist.group.WORLD
         if suite == "core":
-            _run_core_primitives(rank, world_size, device, group)
+            _run_core_primitives(rank, world_size, device, group, atol, rtol)
         elif suite == "transformer":
-            _run_transformer_primitives(rank, world_size, device, group)
+            _run_transformer_primitives(rank, world_size, device, group, atol, rtol)
         else:
-            _run_channel_primitives(rank, world_size, device, group)
+            _run_channel_primitives(rank, world_size, device, group, atol, rtol)
         dist.barrier(group=group)
     finally:
         dist.destroy_process_group()
@@ -321,9 +275,13 @@ def main() -> None:
     parser.add_argument("--backend", choices=["gloo", "nccl"], required=True)
     parser.add_argument("--suite", choices=["core", "channels", "transformer"], required=True)
     parser.add_argument("--world-size", type=int, default=2)
+    parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--precision", choices=["highest", "high", "medium"], default="highest")
+    parser.add_argument("--atol", type=float, default=GLOBAL_DEFAULT_ATOL)
+    parser.add_argument("--rtol", type=float, default=GLOBAL_DEFAULT_RTOL)
     args = parser.parse_args()
-    deterministic = _env_flag("ANEMOI_DISTRIBUTED_TEST_DETERMINISTIC", default=True)
-    matmul_precision = _float32_matmul_precision(default="highest")
+    deterministic = args.deterministic
+    matmul_precision = args.precision
 
     if deterministic and args.backend == "nccl":
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
@@ -349,6 +307,8 @@ def main() -> None:
                 str(init_file),
                 deterministic,
                 matmul_precision,
+                args.atol,
+                args.rtol,
             ),
             nprocs=args.world_size,
             join=True,
