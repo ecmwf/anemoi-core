@@ -204,7 +204,7 @@ class AnemoiTrainer(ABC):
         return graphs
 
     @cached_property
-    def model(self) -> pl.LightningModule:
+    def model(self) -> pl.LightningModule:  # noqa: C901
         """Provide the model instance."""
         assert (
             not (
@@ -254,9 +254,45 @@ class AnemoiTrainer(ABC):
                 )
 
             model.data_indices = self.data_indices
-            # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            # Validate data indices between checkpoint and current config
+            loaded_datasets = []
+            initialized_datasets = []
+
+            for dataset_name, data_indices in self.data_indices.items():
+                # Check if this dataset exists in the checkpoint
+                if (
+                    isinstance(model._ckpt_model_name_to_index, dict)
+                    and dataset_name in model._ckpt_model_name_to_index
+                ):
+                    # Dataset found in checkpoint - validate variables match
+                    ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
+                    data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                    loaded_datasets.append(dataset_name)
+                else:
+                    # Dataset not found in checkpoint - will be randomly initialized
+                    LOGGER.warning(
+                        "Dataset '%s' NOT found in checkpoint. Encoder & decoder weights will be randomly initialized!",
+                        dataset_name,
+                    )
+                    initialized_datasets.append(dataset_name)
+
+            # Check for datasets in checkpoint but not in config (Scenario 4)
+            if isinstance(model._ckpt_model_name_to_index, dict):
+                ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
+                if ignored_datasets:
+                    for ignored_dataset in ignored_datasets:
+                        LOGGER.warning(
+                            "Dataset '%s' found in checkpoint but NOT in config. "
+                            "Encoder & decoder weights for '%s' will be ignored.",
+                            ignored_dataset,
+                            ignored_dataset,
+                        )
+
+            # Log summary of what was loaded
+            if loaded_datasets:
+                LOGGER.info("Successfully loaded weights for datasets: %s", loaded_datasets)
+            if initialized_datasets:
+                LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
