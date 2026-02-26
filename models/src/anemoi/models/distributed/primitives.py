@@ -54,6 +54,88 @@ def _split(input_: Tensor, dim_: int, shapes_: tuple, group: Optional[ProcessGro
     return output
 
 
+def _gather_into_tensor(
+    input_: Tensor,
+    dim_: int,
+    shapes: tuple,
+    group: ProcessGroup,
+) -> Tensor:
+    input_format = get_memory_format(input_)
+    input_ = input_.contiguous(memory_format=input_format)
+
+    out_shape = list(input_.shape)
+    out_shape[dim_] = sum(shape[dim_] for shape in shapes)
+
+    output = torch.empty(
+        out_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+    )
+
+    dist.all_gather_into_tensor(output, input_, group=group)
+
+    return output
+
+
+def _gather_with_padding(
+    input_: Tensor,
+    dim_: int,
+    shapes: tuple,
+    group: ProcessGroup,
+) -> Tensor:
+    input_format = get_memory_format(input_)
+    input_ = input_.contiguous(memory_format=input_format)
+
+    max_shape_dim = max(shape[dim_] for shape in shapes)
+    padded_shape = list(input_.shape)
+    padded_shape[dim_] = max_shape_dim
+
+    tensor_list = [
+        torch.empty(
+            padded_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+        )
+        for _ in range(len(shapes))
+    ]
+
+    # pad input_ to match max size in dim_
+    pad_size = max_shape_dim - input_.shape[dim_]
+    if pad_size > 0:
+        # pad format: (left_pad, right_pad, left_pad, right_pad, ...) descending from last dim
+        pad = (0, 0) * (input_.dim() - dim_ - 1) + (0, pad_size)
+        input_ = torch.nn.functional.pad(input_, pad, mode="constant", value=0)
+
+    dist.all_gather(tensor_list, input_, group=group)
+
+    # remove padding
+    tensor_list = [torch.narrow(t, dim_, 0, shape[dim_]) for t, shape in zip(tensor_list, shapes)]
+
+    return torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
+
+
+def _gather_default(
+    input_: Tensor,
+    dim_: int,
+    shapes: tuple,
+    group: ProcessGroup,
+) -> Tensor:
+    """Gather using all_gather with pre-allocated buffers."""
+    input_format = get_memory_format(input_)
+    input_ = input_.contiguous(memory_format=input_format)
+
+    tensor_list = [
+        torch.empty(
+            shapes[rank],
+            dtype=input_.dtype,
+            layout=input_.layout,
+            device=input_.device,
+            memory_format=input_format,
+        )
+        for rank in range(len(shapes))
+    ]
+
+    dist.all_gather(tensor_list, input_, group=group)
+
+    return torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
+
+
 def _gather(
     input_: Tensor,
     dim_: int,
@@ -76,72 +158,22 @@ def _gather(
     # See the License for the specific language governing permissions and
     # limitations under the License.
 
-    # get input format
-    input_format = get_memory_format(input_)
-
-    comm_size = dist.get_world_size(group=group)
     # Bypass the function if we are using only 1 GPU.
-    if comm_size == 1:
+    if dist.get_world_size == 1:
         return input_
 
     # sanity checks
     assert dim_ < input_.dim(), f"Error, cannot gather along {dim_} for tensor with {input_.dim()} dimensions."
 
-    # Size and dimension.
-    comm_rank = dist.get_rank(group=group)
-
-    input_ = input_.contiguous(memory_format=input_format)
-
     all_shards_equal_shape = all(shape == shapes[0] for shape in shapes)
-
     if dim_ == 0 and all_shards_equal_shape:  # requirement for all_gather_into_tensor
-        out_shape = list(input_.shape)
-        out_shape[dim_] = sum(shape[dim_] for shape in shapes)
+        return _gather_into_tensor(input_, dim_, shapes, group)
 
-        output = torch.empty(
-            out_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
-        )
+    requires_pad = dist.get_backend(group) == "gloo" and not all_shards_equal_shape
+    if requires_pad:
+        return _gather_with_padding(input_, dim_, shapes, group)
 
-        dist.all_gather_into_tensor(output, input_, group=group)
-    else:
-        if dist.get_backend(group) == "gloo":
-            max_shape = tuple(max(shape[dim] for shape in shapes) for dim in range(len(shapes[0])))
-            tensor_list = [
-                torch.empty(
-                    max_shape,
-                    dtype=input_.dtype,
-                    layout=input_.layout,
-                    device=input_.device,
-                    memory_format=input_format,
-                )
-                for _ in range(comm_size)
-            ]
-
-            pad_size = max_shape[-1] - input_.shape[-1]
-            input_ = torch.nn.functional.pad(input_, (0, pad_size), mode="constant", value=0)
-        else:
-            tensor_list = [
-                torch.empty(
-                    shapes[rank],
-                    dtype=input_.dtype,
-                    layout=input_.layout,
-                    device=input_.device,
-                    memory_format=input_format,
-                )
-                for rank in range(comm_size)
-            ]
-        tensor_list[comm_rank] = input_
-        dist.all_gather(tensor_list, input_, group=group)
-
-        # Note: torch.cat already creates a contiguous tensor.
-        if dist.get_backend(group) == "gloo":
-            output = torch.cat(
-                [t[tuple(slice(None, s) for s in shapes[i])] for i, t in enumerate(tensor_list)], dim=dim_
-            ).contiguous(memory_format=input_format)
-        else:
-            output = torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
-
-    return output
+    return _gather_default(input_, dim_, shapes, group)
 
 
 def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
