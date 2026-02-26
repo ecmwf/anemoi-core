@@ -87,15 +87,17 @@ class _GraphTransformerConvQKnorm(GraphTransformerConv):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d",
+    "n_src,n_dst,h,d,qk_norm",
     [
-        (4, 10, 2, 4),
-        (4, 10, 6, 4),  # tests num_heads != pow_of_2
-        (4, 10, 2, 6),  # tests  num_channels != pow_of_2
-        (4, 10, 6, 6),  # tests num_heads * num_channels != pow_of_2
+        (4, 10, 2, 4, 0),
+        (4, 10, 6, 4, 0),  # tests num_heads != pow_of_2
+        (4, 10, 2, 6, 0),  # tests  num_channels != pow_of_2
+        (4, 10, 6, 6, 0),  # tests num_heads * num_channels != pow_of_2
+        (4, 10, 6, 6, 1),  # tests fused layer normalisation
+        (4, 10, 6, 6, 2),  # tests fused RMS normalisation
     ],
 )
-def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
+def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int, qk_norm: int):
     """Test forward pass of GraphTransformerFunction."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
@@ -109,10 +111,7 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    qk_norm, w_qnorm, w_knorm = 0, None, None
-    out_triton = GraphTransformerFunction.apply(
-        query, key, value, edge_attr_csc, csc, reverse, qk_norm, w_qnorm, w_knorm
-    )
+    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse, qk_norm)
 
     # Verify output shape
     assert out_triton.shape == (n_dst, h, d), f"Expected shape {(n_dst, h, d)}, got {out_triton.shape}"
@@ -123,12 +122,17 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d",
+    "n_src,n_dst,h,d,qk_norm",
     [
-        (4, 10, 2, 4),
+        (4, 10, 2, 4, 0),
+        (4, 10, 6, 4, 0),  # tests num_heads != pow_of_2
+        (4, 10, 2, 6, 0),  # tests  num_channels != pow_of_2
+        (4, 10, 6, 6, 0),  # tests num_heads * num_channels != pow_of_2
+        (4, 10, 6, 6, 1),  # tests fused layer normalisation
+        (4, 10, 6, 6, 2),  # tests fused RMS normalisation
     ],
 )
-def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
+def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int, qk_norm: int):
     """Test backward pass of GraphTransformerFunction."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
@@ -142,9 +146,14 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    qk_norm, w_qnorm, w_knorm = 0, None, None
     out_triton = GraphTransformerFunction.apply(
-        query, key, value, edge_attr_csc, csc, reverse, qk_norm, w_qnorm, w_knorm
+        query,
+        key,
+        value,
+        edge_attr_csc,
+        csc,
+        reverse,
+        qk_norm,
     )
     loss = out_triton.pow(2).sum()
     loss.backward()
@@ -158,20 +167,10 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d,qk_norm,elementwise_affine",
-    [
-        (4, 10, H, C, qk_norm, elementwise_affine)
-        for H in (2, 6)
-        for C in (4, 6)
-        for qk_norm in ("none", "rms_norm", "layer_norm")
-        for elementwise_affine in (
-            False,
-        )  # For performance reasons, we dont currently support elementwise_affine=True for the qk_norm
-    ],
+    "n_src,n_dst,h,d,qk_norm",
+    [(4, 10, H, C, qk_norm) for H in (2, 6) for C in (4, 6) for qk_norm in ("none", "rms_norm", "layer_norm")],
 )
-def test_graph_transformer_vs_reference_forward(
-    n_src: int, n_dst: int, h: int, d: int, qk_norm: str, elementwise_affine: bool
-):
+def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int, qk_norm: str):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
@@ -187,17 +186,9 @@ def test_graph_transformer_vs_reference_forward(
     query_ref = torch.clone(query_triton)
     key_ref = torch.clone(key_triton)
 
-    gt_triton = GraphTransformer(d, qk_norm, elementwise_affine=elementwise_affine)
+    gt_triton = GraphTransformer(d, qk_norm)
     # Reference pyg implementation
     gt_ref = _GraphTransformerConvQKnorm(out_channels=d, qk_norm=qk_norm)
-
-    if qk_norm != "none" and elementwise_affine:
-        # Change the q_norm and k_norm weights from the default [1,] initalisation for testing purposes
-        with torch.no_grad():
-            gt_triton.w_qnorm[:] = torch.arange(d) * 0.1 + 1.0
-            gt_triton.w_knorm[:] = torch.arange(d) * 0.2 - 1.0
-            gt_ref.q_norm.weight[:] = torch.arange(d) * 0.1 + 1.0
-            gt_ref.k_norm.weight[:] = torch.arange(d) * 0.2 - 1.0
 
     size = (n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=size, reverse=True)
@@ -220,20 +211,10 @@ def test_graph_transformer_vs_reference_forward(
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d,qk_norm,elementwise_affine",
-    [
-        (4, 10, H, C, qk_norm, elementwise_affine)
-        for H in (2, 6)
-        for C in (4, 6)
-        for qk_norm in ("none", "rms_norm", "layer_norm")
-        for elementwise_affine in (
-            False,
-        )  # For performance reasons, we dont currently support elementwise_affine=True for the qk_norm
-    ],
+    "n_src,n_dst,h,d,qk_norm",
+    [(4, 10, H, C, qk_norm) for H in (2, 6) for C in (4, 6) for qk_norm in ("none", "rms_norm", "layer_norm")],
 )
-def test_graph_transformer_vs_reference_backward(
-    n_src: int, n_dst: int, h: int, d: int, qk_norm: str, elementwise_affine: bool
-):
+def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int, qk_norm: str):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
@@ -246,17 +227,9 @@ def test_graph_transformer_vs_reference_backward(
     value = torch.randn((n_src, h, d), requires_grad=True)
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
-    gt_triton = GraphTransformer(d, qk_norm, elementwise_affine=elementwise_affine)
+    gt_triton = GraphTransformer(d, qk_norm)
     # Reference pyg implementation
     gt_ref = _GraphTransformerConvQKnorm(out_channels=d, qk_norm=qk_norm)
-
-    if qk_norm != "none" and elementwise_affine:
-        # Change the q_norm and k_norm weights from the default [1,] initalisation for testing purposes
-        with torch.no_grad():
-            gt_triton.w_qnorm[:] = torch.arange(d) * 0.1 + 1.0
-            gt_triton.w_knorm[:] = torch.arange(d) * 0.2 - 1.0
-            gt_ref.q_norm.weight[:] = torch.arange(d) * 0.1 + 1.0
-            gt_ref.k_norm.weight[:] = torch.arange(d) * 0.2 - 1.0
 
     size = (n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=size, reverse=True)
@@ -273,17 +246,7 @@ def test_graph_transformer_vs_reference_backward(
 
     loss_triton = out_triton.pow(2).sum()
     loss_triton.backward()
-    if qk_norm != "none" and elementwise_affine:
-        grads_triton = (
-            query.grad.clone(),
-            key.grad.clone(),
-            value.grad.clone(),
-            edge_attr.grad.clone(),
-            gt_triton.w_qnorm.grad.clone(),
-            gt_triton.w_knorm.grad.clone(),
-        )
-    else:
-        grads_triton = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
+    grads_triton = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
 
     query.grad.zero_()
     key.grad.zero_()
@@ -293,25 +256,10 @@ def test_graph_transformer_vs_reference_backward(
     out_ref = gt_ref.forward(query, key, value, edge_attr, edge_index, size=(value.size(0), query.size(0)))
     loss_ref = out_ref.pow(2).sum()
     loss_ref.backward()
-    if qk_norm != "none" and elementwise_affine:
-        grads_ref = (
-            query.grad.clone(),
-            key.grad.clone(),
-            value.grad.clone(),
-            edge_attr.grad.clone(),
-            gt_ref.q_norm.weight.grad.clone(),
-            gt_ref.k_norm.weight.grad.clone(),
-        )
-    else:
-        grads_ref = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
+    grads_ref = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
     # Compare outputs and gradients
     tolerance = 1e-4
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
     torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
     torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
     torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
-
-    if qk_norm != "none" and elementwise_affine:
-        # Compare gradients on qk_norm weights
-        torch.testing.assert_close(grads_triton[4], grads_ref[4], atol=tolerance, rtol=0)  # w_qnorm
-        torch.testing.assert_close(grads_triton[5], grads_ref[5], atol=tolerance, rtol=0)  # w_knorm

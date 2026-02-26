@@ -48,9 +48,6 @@ def _gt_fwd(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # int, 0: no normalisation, 1: rms normalisation, 2: layer normalisation
-    elementwise_affine: tl.constexpr,  # bool, whether to apply learnable elementwise affine after normalisation (only relevant if qk_norm=True)
-    w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
-    w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
 ):
     pid = tl.program_id(0)
     dst_idx = pid
@@ -80,19 +77,10 @@ def _gt_fwd(
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     if qk_norm > 0:
-        C_pad_off = tl.arange(0, C_pad)
-        if elementwise_affine:
-            # w_k_norm and w_q_norm should be pointers to tensors
-            assert w_k_norm_ptr is not None and w_q_norm_ptr is not None
-            w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
-            w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
-        else:
-            w_q_norm = None
-            w_k_norm = None
         if qk_norm == 1:  # rms norm
-            q = _rms_norm_fwd(q, w_q_norm, C, elementwise_affine)
+            q = _rms_norm_fwd(q, None, C, False)
         elif qk_norm == 2:  # layer norm
-            q = _layer_norm_fwd(q, w_q_norm, C, elementwise_affine)
+            q = _layer_norm_fwd(q, None, C, False)
 
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
@@ -115,9 +103,9 @@ def _gt_fwd(
 
         if qk_norm > 0:
             if qk_norm == 1:  # rms norm
-                k = _rms_norm_fwd(k, w_k_norm, C, elementwise_affine)
+                k = _rms_norm_fwd(k, None, C, False)
             elif qk_norm == 2:  # layer norm
-                k = _layer_norm_fwd(k, w_k_norm, C, elementwise_affine)
+                k = _layer_norm_fwd(k, None, C, False)
 
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -179,10 +167,6 @@ def _gt_bwd_dst_pass(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # int, 0: no normalisation, 1: rms normalisation, 2: layer normalisation
-    elementwise_affine: tl.constexpr,  # bool, whether to apply learnable elementwise affine after normalisation (only relevant if qk_norm=True)
-    w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm
-    w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm
-    D_w_q_norm_partial_ptr,  # ptr [C] or None, depending on qk_norm
 ):
     dst_idx = tl.program_id(0)
     if dst_idx >= N_dst:
@@ -219,20 +203,11 @@ def _gt_bwd_dst_pass(
         # Since normalisation was done in the forward pass, we must renormalise it here
         # before we recompute elements of the attention forward pass
         q_unnorm = q  # need to save an unnormalised copy for the bwd pass later
-        if elementwise_affine:
-            # w_k_norm and w_q_norm should be pointers to tensors
-            assert w_k_norm_ptr is not None and w_q_norm_ptr is not None
-            C_pad_off = tl.arange(0, C_pad)
-            w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
-            # Load the weights for k_norm outside of the inner loop
-            w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
-        else:
-            w_q_norm = None
-            w_k_norm = None
+
         if qk_norm == 1:  # rms norm
-            q = _rms_norm_fwd(q, w_q_norm, C, elementwise_affine)
+            q = _rms_norm_fwd(q, None, C, False)
         elif qk_norm == 2:  # layer norm
-            q = _layer_norm_fwd(q, w_q_norm, C, elementwise_affine)
+            q = _layer_norm_fwd(q, None, C, False)
 
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
@@ -249,9 +224,9 @@ def _gt_bwd_dst_pass(
 
         # Normalise k if required
         if qk_norm == 1:  # rms norm
-            k = _rms_norm_fwd(k, w_k_norm, C, elementwise_affine)
+            k = _rms_norm_fwd(k, None, C, False)
         elif qk_norm == 2:  # layer norm
-            k = _layer_norm_fwd(k, w_k_norm, C, elementwise_affine)
+            k = _layer_norm_fwd(k, None, C, False)
 
         ke = k + e
         # score and alpha using saved M
@@ -274,12 +249,9 @@ def _gt_bwd_dst_pass(
     if qk_norm > 0:
         # Compute the backward pass of RMS norm
         if qk_norm == 1:  # rms norm
-            dq, dw_q_norm = _rms_norm_bwd(q_unnorm, w_q_norm, dq, C, elementwise_affine)
+            dq, dw_q_norm = _rms_norm_bwd(q_unnorm, None, dq, C, False)
         elif qk_norm == 2:  # layer norm
-            dq, dw_q_norm = _layer_norm_bwd(q_unnorm, w_q_norm, dq, C, elementwise_affine)
-        if elementwise_affine:
-            C_pad_off = tl.arange(0, C_pad)
-            tl.store(D_w_q_norm_partial_ptr + C_pad_off, dw_q_norm, mask=(C_pad_off < C))
+            dq, dw_q_norm = _layer_norm_bwd(q_unnorm, None, dq, C, False)
 
     # store D_j and dQ
     tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
@@ -312,10 +284,6 @@ def _gt_bwd_src_pass(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
     qk_norm: tl.constexpr,  # int, 0: no normalisation, 1: rms normalisation, 2: layer norm
-    elementwise_affine: tl.constexpr,  # bool, whether to apply learnable elementwise affine after normalisation (only relevant if qk_norm=True)
-    w_q_norm_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
-    w_k_norm_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
-    D_w_k_norm_partial_ptr,  # ptr [C] or None, depending on qk_norm and elementwise_affine
 ):
     src_idx = tl.program_id(0)
     if src_idx >= N_src:
@@ -342,20 +310,10 @@ def _gt_bwd_src_pass(
         # K is saved unnormalised,
         # Since normalisation was done in the fwd pass, we must renormalise now
         k_unnorm = k  # must save copy of unnormalised value for bwd pass later
-        if elementwise_affine:
-            # w_k_norm and w_q_norm should be pointers to tensors
-            assert w_k_norm_ptr is not None and w_q_norm_ptr is not None
-            # Load the weights for q_norm outside of the inner loop
-            C_pad_off = tl.arange(0, C_pad)
-            w_q_norm = tl.load(w_q_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
-            w_k_norm = tl.load(w_k_norm_ptr + C_pad_off, mask=(C_pad_off < C)).to(tl.float32)
-        else:
-            w_q_norm = None
-            w_k_norm = None
         if qk_norm == 1:  # rms norm
-            k = _rms_norm_fwd(k, w_k_norm, C, elementwise_affine)
+            k = _rms_norm_fwd(k, None, C, False)
         elif qk_norm == 2:  # layer norm
-            k = _layer_norm_fwd(k, w_k_norm, C, elementwise_affine)
+            k = _layer_norm_fwd(k, None, C, False)
 
     v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -375,9 +333,9 @@ def _gt_bwd_src_pass(
         dst_off = dst * H * C + H_C_off
         q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         if qk_norm == 1:  # rms norm
-            q = _rms_norm_fwd(q, w_q_norm, C, elementwise_affine)
+            q = _rms_norm_fwd(q, None, C, False)
         elif qk_norm == 2:  # layer norm
-            q = _layer_norm_fwd(q, w_q_norm, C, elementwise_affine)
+            q = _layer_norm_fwd(q, None, C, False)
         d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
@@ -413,12 +371,9 @@ def _gt_bwd_src_pass(
     if qk_norm > 0:
         # Compute the backward pass of RMS Norm
         if qk_norm == 1:  # rms norm
-            accK, dw_k_norm = _rms_norm_bwd(k_unnorm, w_k_norm, accK, C, elementwise_affine)
+            accK, dw_k_norm = _rms_norm_bwd(k_unnorm, None, accK, C, False)
         elif qk_norm == 2:  # layer norm
-            accK, dw_k_norm = _layer_norm_bwd(k_unnorm, w_k_norm, accK, C, elementwise_affine)
-        if elementwise_affine:
-            C_pad_off = tl.arange(0, C_pad)
-            tl.store(D_w_k_norm_partial_ptr + C_pad_off, dw_k_norm, mask=(C_pad_off < C))
+            accK, dw_k_norm = _layer_norm_bwd(k_unnorm, None, accK, C, False)
 
     # write final accumulated per-src grads
     tl.store(
@@ -450,7 +405,7 @@ class GraphTransformerFunction(torch.autograd.Function):
             )
 
     @staticmethod
-    def forward(ctx, q, k, v, e, csc, reverse, qk_norm, w_qnorm, w_knorm):
+    def forward(ctx, q, k, v, e, csc, reverse, qk_norm):
         """Args:
         q: [N_dst, H, C]
         k: [N_src, H, C]
@@ -459,8 +414,6 @@ class GraphTransformerFunction(torch.autograd.Function):
         csc: (row, colptr)
         reverse: (rowptr, edge_ids, edge_dst)
         qk_norm: int, 0: no normalisation, 1: rms normalisation, 2: layer normalisation
-        w_qnorm_ptr: [C] or None
-        w_knorm_ptr: [C] or None
         """
         row, colptr = csc
         rowptr, edge_ids, edge_dst = reverse
@@ -478,21 +431,17 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         # Set up qk_normalisation
         ctx.qk_norm = qk_norm
-        elementwise_affine = w_qnorm is not None and w_knorm is not None
-        ctx.elementwise_affine = elementwise_affine
 
-        _gt_fwd[(N_dst,)](
-            q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm, elementwise_affine, w_qnorm, w_knorm
-        )
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype, qk_norm)
 
         # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_qnorm, w_knorm)
+        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
         return out
 
     @staticmethod
     def backward(ctx, d_out):
         d_out = d_out.contiguous()
-        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst, w_qnorm, w_knorm = ctx.saved_tensors
+        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
 
         N_dst, H, C = q.shape
         N_src = k.shape[0]
@@ -502,29 +451,6 @@ class GraphTransformerFunction(torch.autograd.Function):
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
-
-        dW_qnorm_partial = None
-        dW_knorm_partial = None
-        if ctx.elementwise_affine:
-            assert (
-                w_qnorm is not None and w_knorm is not None
-            ), "Expected w_qnorm and w_knorm to be not None when elementwise_affine is True"
-            dW_qnorm_partial = torch.zeros(
-                (
-                    N_dst,
-                    C,
-                ),
-                device=d_out.device,
-                dtype=torch.float32,
-            )
-            dW_knorm_partial = torch.zeros(
-                (
-                    N_src,
-                    C,
-                ),
-                device=d_out.device,
-                dtype=torch.float32,
-            )
 
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
 
@@ -546,10 +472,6 @@ class GraphTransformerFunction(torch.autograd.Function):
             C,
             ctx.out_dtype,
             ctx.qk_norm,
-            ctx.elementwise_affine,
-            w_qnorm,
-            w_knorm,
-            dW_qnorm_partial,
         )
 
         # Pass B: source nodes (accumulate dK, dV, dE)
@@ -572,24 +494,13 @@ class GraphTransformerFunction(torch.autograd.Function):
             C,
             ctx.out_dtype,
             ctx.qk_norm,
-            ctx.elementwise_affine,
-            w_qnorm,
-            w_knorm,
-            dW_knorm_partial,
         )
 
-        dW_qnorm = None
-        dW_knorm = None
-        if ctx.elementwise_affine:
-            raise NotImplementedError(
-                "elementwise_affine=True is not currently supported in the backward pass due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature."
-            )
-
-        return dQ, dK, dV, dE, None, None, None, dW_qnorm, dW_knorm
+        return dQ, dK, dV, dE, None, None, None
 
 
 class GraphTransformer(torch.nn.Module):
-    def __init__(self, dim: int, qk_norm: str = "none", elementwise_affine: bool = False):
+    def __init__(self, dim: int, qk_norm: str = "none"):
         super().__init__()
         self.dim = dim
         assert qk_norm in (
@@ -598,23 +509,7 @@ class GraphTransformer(torch.nn.Module):
             "layer_norm",
         ), "qk_norm must be 'none' (no normalisation), 'rms_norm' (RMS normalisation) or 'layer_norm' (layer normalisation)"
 
-        if qk_norm == "none" and elementwise_affine:
-            raise ValueError(
-                "elementwise_affine=True is not supported when qk_norm='none', since there is no normalisation. Please set elementwise_affine=False if you do not want to use normalisation, or set qk_norm='rms_norm' or 'layer_norm' if you want to use normalisation with learnable weights."
-            )
-
-        elif qk_norm in ("rms_norm", "layer_norm") and elementwise_affine:
-            raise NotImplementedError(
-                "elementwise_affine=True is not currently supported when using fused qk_norm due to performance reasons. If you want elementwise affine normalisation, please open a ticket on the anemoi-core repository to request this feature."
-            )
         self.qk_norm = {"none": 0, "rms_norm": 1, "layer_norm": 2}[qk_norm]
-
-        if elementwise_affine:
-            self.w_qnorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
-            self.w_knorm = torch.nn.Parameter(torch.ones(dim), requires_grad=True)
-        else:
-            self.register_parameter("w_qnorm", None)
-            self.register_parameter("w_knorm", None)
 
     def forward(
         self,
@@ -626,6 +521,4 @@ class GraphTransformer(torch.nn.Module):
         reverse: tuple[Tensor, Tensor, Tensor],
     ) -> torch.Tensor:
 
-        return GraphTransformerFunction.apply(
-            query, key, value, edges_csc, csc, reverse, self.qk_norm, self.w_qnorm, self.w_knorm
-        )
+        return GraphTransformerFunction.apply(query, key, value, edges_csc, csc, reverse, self.qk_norm)
