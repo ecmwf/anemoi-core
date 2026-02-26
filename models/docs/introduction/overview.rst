@@ -68,7 +68,7 @@ The package currently includes the following model architectures:
    base architecture
 -  **AnemoiEnsModelEncProcDec**: The CRPS-optimized ensemble version
    that injects noise in the processor, e.g. AIFS-CRPS
--  **AnemoiModelEncProcDecInterpolator**: A specialized architecture for
+-  **AnemoiModelEncProcDecMultiOutInterpolator**: A specialized architecture for
    time interpolation
 
 All models support flexible layer kernel configuration, allowing for
