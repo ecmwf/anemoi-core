@@ -58,7 +58,6 @@ def _gather(
     input_: Tensor,
     dim_: int,
     shapes: tuple,
-    gather_in_backward: bool = True,
     group: Optional[ProcessGroup] = None,
 ) -> Tensor:
     """Gather tensors and concatenate along the last dimension."""
@@ -113,8 +112,7 @@ def _gather(
         ]
 
         tensor_list[comm_rank] = input_
-        if gather_in_backward:
-            dist.all_gather(tensor_list, input_, group=group)
+        dist.all_gather(tensor_list, input_, group=group)
 
         # Note: torch.cat already creates a contiguous tensor.
         output = torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
