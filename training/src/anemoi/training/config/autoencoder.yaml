@@ -3,7 +3,7 @@ defaults:
 - dataloader: native_grid
 - diagnostics: evaluation
 - system: example
-- graph: stretched_grid
+- graph: encoder_decoder_only
 - model: graphtransformer
 - training: autoencoder
 - _self_
@@ -27,12 +27,6 @@ model:
 
 training:
   model_task: anemoi.training.train.tasks.GraphAutoEncoder
-  scalers:
-    datasets:
-      data: # user-defined key in data
-        node_weights:
-          weight_frac_of_total: 0.25
-
 
 diagnostics:
   plot:
