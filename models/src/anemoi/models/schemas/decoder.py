@@ -38,7 +38,7 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Initialise the data extractor with zeros. Default to False."
 
     # convert qk_norm from bool to str for backward compatibility
-    @model_validator(mode="before")
+    @model_validator(mode="after")
     def convert_qk_norm(cls, values: dict[str, Any]) -> dict[str, Any]:
         qk_norm = values.get("qk_norm", "none")
         if isinstance(qk_norm, bool):

@@ -36,7 +36,7 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
     "Normalize the query and key vectors. Options are 'None', 'layer_norm', 'rms_norm', True, False. Bools are supported for backward compatibility. If True, 'layer_norm' is used for normalization."
 
     # convert qk_norm from bool to str for backward compatibility
-    @model_validator(mode="before")
+    @model_validator(mode="after")
     def convert_qk_norm(cls, values: dict[str, Any]) -> dict[str, Any]:
         qk_norm = values.get("qk_norm", "none")
         if isinstance(qk_norm, bool):
