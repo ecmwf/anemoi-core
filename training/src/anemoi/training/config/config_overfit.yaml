@@ -16,7 +16,7 @@ diagnostics:
     mlflow:
       enabled: True
       offline: False
-      experiment_name: 'uncond_diffusion_overfit_4vars_cond_mean'
+      experiment_name: 'uncond_diffusion_overfit_4vars_cond_mean_graph_multiscale'
       project_name: 'uncond_diffusion_overfit_4vars_cond_mean'
       run_name: 'overfitting'
       tracking_uri: 'https://mlflow.ecmwf.int'
@@ -31,7 +31,7 @@ diagnostics:
         every_n_epochs: 1000
   checkpoint:
     every_n_epochs:
-      save_frequency: 1000
+      save_frequency: 100
       num_models_saved: -1
   check_val_every_n_epoch: 1000
 
@@ -90,16 +90,15 @@ model:
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
-    output: /project/home/p200177/DE_371/avritj/experiments_anemoi/training/overfit_z_and_mean_cond/
+    output: /project/home/p200177/DE_371/avritj/experiments_anemoi/training/overfit_z_and_mean_cond_multiscalegraph_multiscaleloss/
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
-    graph: /project/home/p200177/DE_371/avritj/graph_AROME_full.pt
+    graph: /project/home/p200177/DE_371/avritj/multi_scale_res10.pt
   num_gpus_per_node: 4
   num_gpus_per_model: 2
-  num_nodes: 4
+  num_nodes: 1
 training:
   # Set max_epochs or max_steps. Training stops at the first limit reached.
-  max_steps: 20000
+  max_steps: 35000
   model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
   training_approach: probabilistic_high_noise 
-

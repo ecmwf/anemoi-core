@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH -J DE371_diffusion
 #SBATCH -A p200177
-#SBATCH -N 4
+#SBATCH -N 1
 #SBATCH -p gpu
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4

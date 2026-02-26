@@ -617,7 +617,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
                
         ################################### X MEAN SHARDING ###################################
-        x_mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean_train_vars.npy")).to(x.device).to(x.dtype)
+        x_mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean_train_vars.npy")).to(x.device).to(x.dtype)[...,:78]
         x_mean = x_mean.unsqueeze(0).expand(-1, 2, -1, -1, -1)
         indices = torch.tensor([0,1,3,7]).to(x_mean.device)
         x_mean = torch.index_select(x_mean, dim=-1, index=indices)
@@ -658,7 +658,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
-
         batch_size = x.shape[0]
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, 1, in_out_sharded, model_comm_group)
@@ -677,7 +676,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
             x, y_noised, batch_size, grid_shard_shapes, model_comm_group
         )
-
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
@@ -850,9 +848,9 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         #         y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
         # x = torch.zeros_like(x, device=x.device) #set condition to constant = 0 as in training
     #     print("shape de x ", x.shape)
-        x = x[...,3]  # shape: [1, 2, 1, 332840]
+        x = x[...,7]  # shape: [1, 2, 1, 332840]
     # 
-        x = x.unsqueeze(-1).repeat(1, 1, 1, 1, 4) # shape: [1, 2, 1, 332840, 78]
+        x = x.unsqueeze(-1).repeat(1, 1, 1, 1, 78) # shape: [1, 2, 1, 332840, 78]
 
         # x = (x - torch.mean(x))/torch.std(x)
         
@@ -876,7 +874,22 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
 
         print(f"x = {x}, de mean {torch.mean(x)} et std : {torch.std(x)}")
         # x = torch.zeros_like(x, device = x.device)
+ #########################################""
+        # x_mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean_train_vars.npy")).to(x.device).to(x.dtype)
+        # x_mean = x_mean.unsqueeze(0).expand(-1, 2, -1, -1, -1)
+        # indices = torch.tensor([0,1,3,7]).to(x_mean.device)
+        # x_mean = torch.index_select(x_mean, dim=-1, index=indices)
+        # shard_shapes = get_shard_shapes(x_mean, -2, model_comm_group=model_comm_group)
+        # x_mean = shard_tensor(x_mean, -2, shard_shapes, model_comm_group)
 
+        # mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean.npy")).to(x_mean.device).to(x_mean.dtype)
+        # stdev = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/stdev.npy")).to(x_mean.device).to(x_mean.dtype)
+
+        # mean = torch.index_select(mean,dim=0, index=indices)
+        # stdev = torch.index_select(stdev, dim=0, index=indices)
+
+        # x_mean = (x_mean - mean) / stdev
+#####################################################
         return sampler_instance.sample(
             x,
             y_init,

@@ -268,7 +268,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         nvars_input = len(self.data_indices.data.input.full)
         # Ground-truth output (only the target step, no multistep)
 
-        print(" DANS ROLLOUT STEP ???")
        
         y= batch[:, 0, ..., self.data_indices.data.output.full]
 

@@ -117,10 +117,10 @@ variable_groups:
      param: [q, t, u, v, w, z]
 
 metrics:
-- z_500
-- t_850
-- u_850
-- v_850
+- 10u
+- 10v
+- 2t
+
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
