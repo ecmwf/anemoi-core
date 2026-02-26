@@ -16,8 +16,8 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.utils import get_memory_format
 from anemoi.models.distributed.primitives import _alltoallwrapper
+from anemoi.models.distributed.utils import get_memory_format
 
 
 def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:

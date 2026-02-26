@@ -69,22 +69,23 @@ def _run_spawn_suite(backend: str, suite: str, nproc_per_node: int = 2) -> None:
             f"stderr:\n{completed.stderr}",
         )
 
+
 @pytest.mark.multigpu
 def test_distributed_graph_primitives_core_nccl() -> None:
-    backend = 'nccl' if torch.cuda.is_available() else 'gloo'
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
     world_size = _requested_world_size()
     _run_spawn_suite(backend=backend, suite="core", nproc_per_node=world_size)
 
 
 @pytest.mark.multigpu
 def test_distributed_graph_primitives_channels_nccl() -> None:
-    backend = 'nccl' if torch.cuda.is_available() else 'gloo'
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
     world_size = _requested_world_size()
     _run_spawn_suite(backend=backend, suite="channels", nproc_per_node=world_size)
 
 
 @pytest.mark.multigpu
 def test_distributed_transformer_sharding_nccl() -> None:
-    backend = 'nccl' if torch.cuda.is_available() else 'gloo'
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
     world_size = _requested_world_size()
     _run_spawn_suite(backend=backend, suite="transformer", nproc_per_node=world_size)
