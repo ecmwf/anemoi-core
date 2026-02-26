@@ -32,18 +32,10 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Size of trainable parameters vector. Default to 8."
     sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
     "Edge attributes to consider in the decoder features. Default to [edge_length, edge_dirs]"
-    qk_norm: Union[str, bool] = Field(examples=["None", "layer_norm", "rms_norm", True, False])
-    "Normalize the query and key vectors. Options are 'None', 'layer_norm', 'rms_norm', True, False. Bools are supported for backward compatibility. If True, 'layer_norm' is used for normalization."
+    qk_norm: Union[str, bool] = Field(examples=["none", "layer_norm", "rms_norm", True, False])
+    "Normalize the query and key vectors. Options are 'none', 'layer_norm', 'rms_norm', True, False. Bools are supported for backward compatibility. If True, 'layer_norm' is used for normalization."
     initialise_data_extractor_zero: bool = Field(example=False)
     "Initialise the data extractor with zeros. Default to False."
-
-    # convert qk_norm from bool to str for backward compatibility
-    @model_validator(mode="after")
-    def convert_qk_norm(cls, values: dict[str, Any]) -> dict[str, Any]:
-        qk_norm = values.get("qk_norm", "none")
-        if isinstance(qk_norm, bool):
-            values["qk_norm"] = "layer_norm" if qk_norm else "none"
-        return values
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
@@ -68,7 +60,7 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
 
 class TransformerDecoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.TransformerBackwardMapper"] = Field(..., alias="_target_")
-    "Transformer Encoder object from anemoi.models.layers.mapper."
+    "Transformer Decoder object from anemoi.models.layers.mapper."
     window_size: Union[NonNegativeInt, None] = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
