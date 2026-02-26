@@ -19,7 +19,11 @@ except ImportError:
         "Error. 'triton' is not installed. the RMSNorm triton implementation can not be used. Full error: {e}"
     )
 
+import logging
+
 from anemoi.models.triton.utils import build_masks_and_offsets
+
+LOGGER = logging.getLogger(__name__)
 
 
 @triton.jit
