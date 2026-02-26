@@ -183,17 +183,8 @@ class BaseAnemoiReader:
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
-        if isinstance(grid_shard_indices, slice):
-            # Load only shards into CPU memory
-            x = self.data[time_indices, :, :, grid_shard_indices]
-
-        else:
-            # Load full grid in CPU memory, select grid_shard after
-            # Note that anemoi-datasets currently doesn't support slicing + indexing
-            # in the same operation.
-            x = self.data[time_indices, :, :, :]
-            x = x[..., grid_shard_indices]  # select the grid shard
-
+        x = self.data[time_indices]
+        x = x[..., grid_shard_indices]
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
 

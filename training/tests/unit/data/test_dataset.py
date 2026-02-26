@@ -149,6 +149,74 @@ class TestNativeGridDataset:
         assert sample.shape[0] == 3  # 3 time steps
         assert sample.shape[2] == 4  # 4 selected gridpoints
 
+    def test_mimic_get_sample_raises_subset_indices_error(self) -> None:
+        """Mimic Subset failure path seen in get_sample traceback."""
+
+        class Subset:
+            def __init__(self) -> None:
+                self.values = np.random.default_rng(seed=0).standard_normal((12, 13, 1, 39902), dtype=np.float32)
+                self.shape = self.values.shape
+
+            def __getitem__(self, key: tuple[slice | int | list[int], slice, slice, slice] | slice | int) -> np.ndarray:
+                if key == (
+                    slice(0, 39902, None),
+                    slice(None, None, None),
+                    slice(None, None, None),
+                    slice(0, 1, 1),
+                ):
+                    msg = "indices"
+                    raise AttributeError(msg)
+                return self.values[key]
+
+        dataset = NativeGridDataset.__new__(NativeGridDataset)
+        dataset.data = Subset()
+        # previously raised AttributeError: 'list' object has no attribute 'indices'
+        dataset.get_sample(
+            time_indices=slice(0, 39902, None),
+            grid_shard_indices=slice(0, 1, 1),
+        )
+
+    def test_get_sample_matches_simplified_indexing_for_slice_inputs(self) -> None:
+        """Regression: current get_sample keeps legacy if/else output semantics."""
+
+        class Subset:
+            def __init__(self) -> None:
+                self.values = np.random.default_rng(seed=1).standard_normal((9, 101, 1, 40320), dtype=np.float32)
+                self.shape = self.values.shape
+
+            def __getitem__(self, key: tuple[slice | int | list[int], slice, slice, slice] | slice | int) -> np.ndarray:
+                return self.values[key]
+
+        dataset = NativeGridDataset.__new__(NativeGridDataset)
+        dataset.data = Subset()
+
+        def legacy_get_sample(
+            data: Subset,
+            time_indices: slice | int | list[int],
+            grid_shard_indices: np.ndarray | slice | None = None,
+        ) -> torch.Tensor:
+            # Mirror the original get_sample if/else structure.
+            if isinstance(grid_shard_indices, slice):
+                x = data[time_indices, :, :, grid_shard_indices]
+            else:
+                x = data[time_indices, :, :, :]
+                x = x[..., grid_shard_indices]
+            x = np.transpose(x, (0, 2, 3, 1))
+            return torch.from_numpy(x)
+
+        # if-branch (slice grid indices)
+        time_indices = slice(0, 40320, None)
+        grid_slice = slice(5, 6, 1)
+        current_if = dataset.get_sample(time_indices=time_indices, grid_shard_indices=grid_slice)
+        legacy_if = legacy_get_sample(dataset.data, time_indices, grid_slice)
+        assert torch.equal(current_if, legacy_if)
+
+        # else-branch (fancy grid indices)
+        grid_indices = np.array([0, 7, 100], dtype=np.int64)
+        current_else = dataset.get_sample(time_indices=time_indices, grid_shard_indices=grid_indices)
+        legacy_else = legacy_get_sample(dataset.data, time_indices, grid_indices)
+        assert torch.equal(current_else, legacy_else)
+
 
 @skip_if_offline
 def test_native_grid_dataset_accepts_dataset_dictionary(dataset_path: str) -> None:
