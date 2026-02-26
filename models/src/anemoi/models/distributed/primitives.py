@@ -159,7 +159,7 @@ def _gather(
     # limitations under the License.
 
     # Bypass the function if we are using only 1 GPU.
-    if dist.get_world_size == 1:
+    if dist.get_world_size(group=group) == 1:
         return input_
 
     # sanity checks
