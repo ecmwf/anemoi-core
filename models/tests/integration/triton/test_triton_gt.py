@@ -264,3 +264,74 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
     torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
     torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
+
+
+def test_graph_transformer_deterministic():
+    """Test that triton GraphTransformerFunction produces deterministic outputs.
+
+    Runs the forward and backward pass of the GraphTransformer 50 times and checks that the outputs and gradients are identical across runs.
+    """
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    n_src, n_dst, h, d = 10, 20, 4, 8
+    edge_index, m = build_bipartite_graph(n_src, n_dst)
+    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+
+    query = torch.randn((n_dst, h, d), requires_grad=True)
+    key = torch.randn((n_src, h, d), requires_grad=True)
+    value = torch.randn((n_src, h, d), requires_grad=True)
+    edge_attr = torch.randn((m, h, d), requires_grad=True)
+
+    edge_attr_csc = edge_attr[perm]
+    gt_triton = GraphTransformer(d, qk_norm="layer_norm")
+
+    # generate reference output and gradients
+    out_ref = gt_triton(query, key, value, edge_attr_csc, csc, reverse)
+    loss = out_ref.pow(2).sum()
+    loss.backward()
+
+    tolerance = 1e-4
+    # Store first run outputs
+    first_out = None
+    first_dq = None
+    first_dk = None
+    first_dv = None
+    first_de = None
+    dout = torch.randn_like(out_ref)
+
+    num_runs = 50
+    tolerance = 1e-4
+    for run in range(num_runs):
+        # Clone inputs to ensure fresh gradients each run
+        q_run = query.clone().detach().requires_grad_()
+        k_run = key.clone().detach().requires_grad_()
+        v_run = value.clone().detach().requires_grad_()
+        e_run = edge_attr.clone().detach().requires_grad_()
+
+        # Forward pass
+        out = gt_triton(q_run, k_run, v_run, e_run[perm], csc, reverse)
+
+        # Backward pass
+        out.backward(dout)
+
+        if run == 0:
+            # Store first run for comparison
+            first_out = out.detach().clone()
+            first_dq = q_run.grad.detach().clone()
+            first_dk = k_run.grad.detach().clone()
+            first_dv = v_run.grad.detach().clone()
+            first_de = e_run.grad.detach().clone()
+        else:
+            # Compare with first run - outputs should be bit-exact
+            try:
+                torch.testing.assert_close(out, first_out, atol=tolerance, rtol=0.0)
+                torch.testing.assert_close(q_run.grad, first_dq, atol=tolerance, rtol=0.0)
+                torch.testing.assert_close(k_run.grad, first_dk, atol=tolerance, rtol=0.0)
+                torch.testing.assert_close(v_run.grad, first_dv, atol=tolerance, rtol=0.0)
+                torch.testing.assert_close(e_run.grad, first_de, atol=tolerance, rtol=0.0)
+            except AssertionError as e:
+                raise AssertionError(
+                    f"Non-deterministic behavior detected on run {run + 1}/{num_runs}. "
+                    f"Output differs from first run. This may indicate non-deterministic behavior in the GraphTransformer implementation."
+                ) from e
