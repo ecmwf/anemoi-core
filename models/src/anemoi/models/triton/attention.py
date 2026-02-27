@@ -1066,9 +1066,7 @@ class TritonAttention(torch.autograd.Function):
         """
 
         # Ensure inputs are contiguous, important when working with pointers later
-        assert (
-            q.is_contiguous() and k.is_contiguous() and v.is_contiguous()
-        ), "Error. Input tensors to TritonAttention must be contiguous"
+        q = q.contiguous();k = k.contiguous();v = v.contiguous()
 
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K, HEAD_DIM_V = q.shape[-1], k.shape[-1], v.shape[-1]
