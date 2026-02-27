@@ -141,8 +141,7 @@ class BasicOrnsteinResidual(Module):
         self._internal_input_idx = input_idx
 
         muzero = torch.ones_like(weight)
-        coords = slice(0, 1) if zmean_term else slice(None)
-        muzero[1, :, coords, coords, :] = 0
+        muzero[1, :, :, :, :] = 1.0 if zmean_term else 0.0
 
         self.register_buffer("muzero", muzero)
         self.theta_buff = theta_buff
