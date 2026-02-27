@@ -126,13 +126,11 @@ class GraphNowcaster(BaseGraphModule):
                 assert (
                     len(self.known_future_indices[dataset_name]) > 0
                 ), "If no observed variables, need known future variables to derive bounds."
-                LOGGER.warning("Adding dataset %s to inputs, with no observed variables.", dataset_name)
                 x_init = data_batch[:, itemgetter(*self.boundary_times)(self.imap)][
                     ...,
                     self.known_future_indices[dataset_name],
                 ]  # bounds are derived from variables we know in the future
             else:
-                LOGGER.warning("Adding observation dataset %s to inputs.", dataset_name)
                 assert (
                     len(self.known_future_indices[dataset_name]) == 0
                 ), "Known future variables not supported for datasets with observed variables."

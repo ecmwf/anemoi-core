@@ -158,7 +158,7 @@ class SpectralL2Loss(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_2(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        result /= target.size(dim=TensorDim.GRID.value)
+        result /= target.size(dim=-2)
         return self.reduce(result, squash=squash, group=group)
 
 
@@ -194,7 +194,7 @@ class LogSpectralDistance(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_2(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        result /= target.size(dim=TensorDim.GRID.value)
+        result /= target.size(dim=-2)
         return torch.sqrt(self.reduce(result, squash=squash, group=group) + eps)
 
 
@@ -333,7 +333,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             without_scalers=_ensure_without_scalers_has_2(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        scaled /= target.size(dim=TensorDim.GRID.value)
+        scaled /= target.size(dim=-2)
         return self.reduce(scaled, squash=squash, group=group)
 
     @property

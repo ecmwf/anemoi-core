@@ -21,9 +21,12 @@ LOGGER = logging.getLogger(__name__)
 class RegionalTriMeshNodes(BaseNodeBuilder):
     """Regional triangular-mesh nodes defined from reference data coordinates.
 
-    The builder creates a regular lat/lon mesh over the reference-node domain
-    bounding box (optionally expanded by a margin). The resulting node cloud can
-    be triangulated with ``anemoi.graphs.edges.TriangulationEdges``.
+    The builder creates a staggered lat/lon mesh over the reference-node domain
+    bounding box (optionally expanded by a margin). Consecutive latitude rows are
+    offset by half a longitudinal step. Additionally, each row inserts midpoint
+    nodes between neighboring row nodes, which adds the coincident triangle-height
+    point inside each diamond cell. The resulting node cloud can be triangulated
+    with ``anemoi.graphs.edges.TriangulationEdges``.
 
     Parameters
     ----------
@@ -113,7 +116,8 @@ class RegionalTriMeshNodes(BaseNodeBuilder):
         lon_min = float(lon.min() - lon_margin)
         lon_max = float(lon.max() + lon_margin)
 
-        lat_step = self.spacing_km / EARTH_RADIUS
+        # Equilateral triangle row spacing under local planar approximation.
+        lat_step = (math.sqrt(3.0) / 2.0) * (self.spacing_km / EARTH_RADIUS)
         lon_step = self.spacing_km / (EARTH_RADIUS * cos_lat_mid)
 
         lats = np.arange(lat_min, lat_max + 0.5 * lat_step, lat_step, dtype=np.float64)
@@ -125,18 +129,48 @@ class RegionalTriMeshNodes(BaseNodeBuilder):
                 f"Try lowering spacing_km (current={self.spacing_km})."
             )
 
-        lon_grid, lat_grid = np.meshgrid(lons, lats, indexing="xy")
-        coords_rad = np.stack([lat_grid.ravel(), self._normalize_lon(lon_grid.ravel())], axis=1)
+        lon_min_ext = lon_min - 0.5 * lon_step
+        lon_max_ext = lon_max + 0.5 * lon_step
+
+        rows: list[np.ndarray] = []
+        for row_idx, lat_value in enumerate(lats):
+            row_offset = 0.5 * lon_step if row_idx % 2 else 0.0
+            row_lons = np.arange(lon_min_ext + row_offset, lon_max_ext + 0.5 * lon_step, lon_step, dtype=np.float64)
+            row = np.stack(
+                [
+                    np.full_like(row_lons, lat_value, dtype=np.float64),
+                    self._normalize_lon(row_lons),
+                ],
+                axis=1,
+            )
+            rows.append(row)
+
+            # Add midpoint nodes on each row segment to place one node at the
+            # coincident height-foot position inside each diamond cell.
+            if row_lons.size >= 2:
+                row_mid_lons = 0.5 * (row_lons[:-1] + row_lons[1:])
+                row_mid = np.stack(
+                    [
+                        np.full_like(row_mid_lons, lat_value, dtype=np.float64),
+                        self._normalize_lon(row_mid_lons),
+                    ],
+                    axis=1,
+                )
+                rows.append(row_mid)
+
+        coords_rad = np.concatenate(rows, axis=0)
 
         LOGGER.info(
             "RegionalTriMeshNodes created %d nodes from domain lat=[%.3f, %.3f] rad, lon=[%.3f, %.3f] rad "
-            "with spacing=%.1f km and margin=%.1f km.",
+            "with triangular spacing=%.1f km (lat_step=%.6f rad, lon_step=%.6f rad) and margin=%.1f km.",
             coords_rad.shape[0],
             lat_min,
             lat_max,
             lon_min,
             lon_max,
             self.spacing_km,
+            lat_step,
+            lon_step,
             self.margin_km,
         )
 
