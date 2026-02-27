@@ -23,6 +23,7 @@ from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
     from anemoi.models.triton.attention import TritonAttention
+    from anemoi.models.triton.attention import TritonAttentionVarlen
     from anemoi.models.triton.attention import is_hip
 
 try:
@@ -116,9 +117,74 @@ def attention_varlen_ref(
     return output
 
 
-# def test_triton_attention_deterministic():
-#    """ Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic. """
-#    raise NotImplementedError("TODO(cathal): implement this test.")
+@pytest.mark.gpu
+def test_triton_attention_deterministic():
+    """Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic."""
+
+    if not is_triton_available():
+        pytest.skip("Triton not available")
+
+    try:
+        DEVICE = triton.runtime.driver.active.get_active_torch_device()
+    except RuntimeError:
+        pytest.skip("No GPU detected")
+
+    attention = TritonAttention.apply
+
+    # Fixed test configuration: fp16, global attention (no causal, no window), fwd+bwd
+    Z, H, N_CTX, HEAD_DIM = 2, 4, 256, 64
+    dtype = torch.float16
+    causal = False
+    window_size = -1
+
+    # Create fixed inputs (use manual_seed for reproducibility of this test)
+    torch.manual_seed(42)
+    q = torch.rand((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).requires_grad_()
+    k = torch.rand((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).requires_grad_()
+    v = torch.rand((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).requires_grad_()
+    dout = torch.randn((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE)
+    sm_scale = 1 / math.sqrt(HEAD_DIM)
+
+    # Store first run outputs
+    first_out = None
+    first_dq = None
+    first_dk = None
+    first_dv = None
+
+    num_runs = 50
+    for run in range(num_runs):
+        # Clone inputs to ensure fresh gradients each run
+        q_run = q.clone().detach().requires_grad_()
+        k_run = k.clone().detach().requires_grad_()
+        v_run = v.clone().detach().requires_grad_()
+
+        # Forward pass
+        out = attention(q_run, k_run, v_run, causal, window_size, sm_scale)
+
+        # Backward pass
+        out.backward(dout)
+
+        if run == 0:
+            # Store first run for comparison
+            first_out = out.detach().clone()
+            first_dq = q_run.grad.detach().clone()
+            first_dk = k_run.grad.detach().clone()
+            first_dv = v_run.grad.detach().clone()
+        else:
+            # Compare with first run - outputs should be bit-exact
+            try:
+                torch.testing.assert_close(out, first_out, atol=0.0, rtol=0.0)
+                torch.testing.assert_close(q_run.grad, first_dq, atol=0.0, rtol=0.0)
+                torch.testing.assert_close(k_run.grad, first_dk, atol=0.0, rtol=0.0)
+                torch.testing.assert_close(v_run.grad, first_dv, atol=0.0, rtol=0.0)
+            except AssertionError as e:
+                raise AssertionError(
+                    f"Non-deterministic behavior detected on run {run + 1}/{num_runs}. "
+                    f"Output differs from first run. This indicates a race condition or "
+                    f"uninitialized memory access in the kernel."
+                ) from e
+
+    print(f"[triton-attn deterministic] All {num_runs} runs produced identical results ✓")
 
 
 @pytest.mark.gpu
@@ -127,9 +193,7 @@ def attention_varlen_ref(
 @pytest.mark.parametrize("H", [9])
 @pytest.mark.parametrize(
     "N_CTX",
-    [97, 128, 200, 384, 768, 1024, 1025, 2048],
-    # "N_CTX", [32]
-    # BLOCK_FIXED is locked to 128 for pytests, so 128 is the smallest possible context length
+    [97, 128, 200, 257, 384, 512, 768, 1025, 2048],
 )
 @pytest.mark.parametrize("HEAD_DIM", [64])
 @pytest.mark.parametrize("causal", [False])  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
@@ -267,6 +331,16 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
                 print("[triton-attn debug] tri_out[z, h, t, :8] =", tri_out[z, h, t, :8].detach().cpu())
                 print("[triton-attn debug] ref_out[z, h, t, :8] =", ref_out[z, h, t, :8].detach().cpu())
 
+                # Additional debug: check error pattern across tokens
+                per_token_max = diff[z, h, :, :].amax(dim=-1)
+                print(f"[triton-attn debug] max error per token in batch {z} head {h}:")
+                print(f"  First 10 tokens: {per_token_max[:10].detach().cpu()}")
+                print(f"  Last 10 tokens: {per_token_max[-10:].detach().cpu()}")
+
+                # Check if error is concentrated at boundaries
+                boundary_errors = (per_token_max > atol).sum()
+                print(f"[triton-attn debug] {boundary_errors}/{len(per_token_max)} tokens exceed tolerance")
+
             # Re-raise so the test still fails, but with extra context.
             raise
         return
@@ -286,6 +360,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
     if is_hip() and triton.runtime.driver.active.get_current_target().arch == "gfx90a":
         bwd_rtol = max(1e-2, bwd_rtol)
 
+    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=bwd_rtol)
     try:
         torch.testing.assert_close(tri_dv, ref_dv, atol=atol, rtol=bwd_rtol)
     except AssertionError:
@@ -316,4 +391,91 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         # Re-raise so the test still fails, but with extra context.
         raise
     torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=bwd_rtol)
-    torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=bwd_rtol)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("H", [4, 9])
+@pytest.mark.parametrize(
+    "seqlens",
+    [
+        [128],  # single sequence, even
+        [97],  # single sequence, uneven
+        [128, 128],  # two equal sequences
+        [64, 128, 256],  # three sequences, different lengths
+        [97, 200, 57],  # three sequences, all uneven
+        [512],  # larger single sequence
+        [33, 65, 129, 17],  # four sequences, mix of sizes
+    ],
+)
+@pytest.mark.parametrize("HEAD_DIM", [64])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("min_tokens_per_kernel", [100, 10000])
+def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype, min_tokens_per_kernel):
+    """Tests varlen flash attention forward pass against the reference implementation.
+
+    Packs multiple variable-length sequences into a single tensor and compares
+    the triton varlen kernel output against the naive PyTorch reference.
+    """
+    if not is_triton_available():
+        pytest.skip("Triton not available")
+
+    try:
+        DEVICE = triton.runtime.driver.active.get_active_torch_device()
+    except RuntimeError:
+        pytest.skip("No GPU detected")
+
+    sm_scale = 1.0 / math.sqrt(HEAD_DIM)
+
+    # Build cumulative sequence lengths
+    cu_seqlens = [0]
+    for s in seqlens:
+        cu_seqlens.append(cu_seqlens[-1] + s)
+    total_tokens = cu_seqlens[-1]
+    cu_seqlens_q = torch.tensor(cu_seqlens, dtype=torch.int32, device=DEVICE)
+    cu_seqlens_k = cu_seqlens_q.clone()  # Q and K have the same sequence lengths
+
+    # Create packed input tensors: [TOTAL_TOKENS, H, HEAD_DIM]
+    q = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+    k = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+    v = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+
+    # Compute reference output using the naive implementation
+    ref_out = attention_varlen_ref(q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale, causal=False, window_size=-1)
+
+    # Compute triton output
+    tri_out = TritonAttentionVarlen.apply(
+        q, k, v, cu_seqlens_q, cu_seqlens_k, False, -1, sm_scale, min_tokens_per_kernel
+    )
+
+    # Set tolerances
+    if dtype == torch.bfloat16:
+        atol = 5e-3
+        rtol = 1e-2
+    else:
+        atol = 1e-3
+        rtol = 0.0
+
+    try:
+        torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=rtol)
+    except AssertionError:
+        with torch.no_grad():
+            diff = (tri_out - ref_out).abs()
+            max_err = diff.max()
+            max_idx = (diff == max_err).nonzero(as_tuple=False)[0]
+            t, h, d = [int(x) for x in max_idx]
+            print(
+                f"[varlen-attn debug] global max abs error: {float(max_err.cpu())}"
+                f" at (token, head, dim)=({t}, {h}, {d})"
+            )
+            print(f"[varlen-attn debug] tri_out[t, h, :8] = {tri_out[t, h, :8].cpu()}")
+            print(f"[varlen-attn debug] ref_out[t, h, :8] = {ref_out[t, h, :8].cpu()}")
+
+            # Check per-sequence errors
+            for b, (s_start, s_end) in enumerate(zip(cu_seqlens[:-1], cu_seqlens[1:])):
+                seq_diff = diff[s_start:s_end].max()
+                print(f"[varlen-attn debug] seq {b} (len={s_end - s_start}) max error: {float(seq_diff.cpu())}")
+        raise
+
+    print(
+        f"[varlen-attn fwd] PASSED: H={H}, seqlens={seqlens}, HEAD_DIM={HEAD_DIM}, dtype={dtype}, min_tokens_per_kernel={min_tokens_per_kernel}"
+    )
