@@ -90,7 +90,6 @@ class _QCDebugPlotter:
         self._ensure_out_dir()
         q = qc_flags_i64.detach()
         q = q[:, 0].reshape(-1).to("cpu")
-        print("Q dtype", q.dtype, "shape", q.shape, flush=True)
 
 
         P = q.numel()
@@ -176,7 +175,6 @@ class QCDecodeBits(nn.Module):
 
     def forward(self, qc_flags: torch.Tensor) -> torch.Tensor:
         q = qc_flags.to(torch.int64).unsqueeze(-1)
-        print(q[:,0].mean(), q[:,0].max(), flush=True)
         b = self.bits.to(qc_flags.device).view(*([1] * (q.ndim - 1)), -1)
         out = ((q >> b) & 1).to(dtype=torch.float32)
         if self._dbg is not None:
@@ -257,7 +255,6 @@ class QCFeaturizer(nn.Module):
             raise ValueError("qc_cfg needs either bit_indices or num_bits")
 
         dbg_cfg = qc_cfg.get("debug_plot", {}) or {}
-        print("DBG QCFeaturizer dbg_cfg:", dbg_cfg, flush=True)
         self._dbg = _QCDebugPlotter(
             enabled=bool(dbg_cfg.get("enabled", False)),
             out_dir=str(dbg_cfg.get("out_dir", "/tmp/anemoi_qc_debug")),
