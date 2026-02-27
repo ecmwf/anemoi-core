@@ -398,13 +398,13 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 @pytest.mark.parametrize(
     "seqlens",
     [
-        [128],                    # single sequence, even
-        [97],                     # single sequence, uneven
-        [128, 128],               # two equal sequences
-        [64, 128, 256],           # three sequences, different lengths
-        [97, 200, 57],            # three sequences, all uneven
-        [512],                    # larger single sequence
-        [33, 65, 129, 17],        # four sequences, mix of sizes
+        [128],  # single sequence, even
+        [97],  # single sequence, uneven
+        [128, 128],  # two equal sequences
+        [64, 128, 256],  # three sequences, different lengths
+        [97, 200, 57],  # three sequences, all uneven
+        [512],  # larger single sequence
+        [33, 65, 129, 17],  # four sequences, mix of sizes
     ],
 )
 @pytest.mark.parametrize("HEAD_DIM", [64])
@@ -443,7 +443,9 @@ def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype, min_tokens_per
     ref_out = attention_varlen_ref(q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale, causal=False, window_size=-1)
 
     # Compute triton output
-    tri_out = TritonAttentionVarlen.apply(q, k, v, cu_seqlens_q, cu_seqlens_k, False, -1, sm_scale, min_tokens_per_kernel)
+    tri_out = TritonAttentionVarlen.apply(
+        q, k, v, cu_seqlens_q, cu_seqlens_k, False, -1, sm_scale, min_tokens_per_kernel
+    )
 
     # Set tolerances
     if dtype == torch.bfloat16:
@@ -474,4 +476,6 @@ def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype, min_tokens_per
                 print(f"[varlen-attn debug] seq {b} (len={s_end - s_start}) max error: {float(seq_diff.cpu())}")
         raise
 
-    print(f"[varlen-attn fwd] PASSED: H={H}, seqlens={seqlens}, HEAD_DIM={HEAD_DIM}, dtype={dtype}, min_tokens_per_kernel={min_tokens_per_kernel}")
+    print(
+        f"[varlen-attn fwd] PASSED: H={H}, seqlens={seqlens}, HEAD_DIM={HEAD_DIM}, dtype={dtype}, min_tokens_per_kernel={min_tokens_per_kernel}"
+    )

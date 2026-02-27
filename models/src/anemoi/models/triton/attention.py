@@ -1066,7 +1066,9 @@ class TritonAttention(torch.autograd.Function):
         """
 
         # Ensure inputs are contiguous, important when working with pointers later
-        q = q.contiguous();k = k.contiguous();v = v.contiguous()
+        q = q.contiguous()
+        k = k.contiguous()
+        v = v.contiguous()
 
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K, HEAD_DIM_V = q.shape[-1], k.shape[-1], v.shape[-1]
@@ -1363,7 +1365,7 @@ def _attn_varlen_fwd(
         # Mask out-of-bounds K positions
         qk = tl.where(kv_mask[None, :], qk, MINUS_INF)
         # Also mask out-of-bounds Q positions
-        #qk = tl.where(q_mask[:, 1], qk, MINUS_INF)
+        # qk = tl.where(q_mask[:, 1], qk, MINUS_INF)
 
         # Online softmax update
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -1400,7 +1402,18 @@ def _attn_varlen_fwd(
 class TritonAttentionVarlen(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cu_seqlens_q: torch.Tensor, cu_seqlens_k: torch.Tensor, causal: bool, window: int, sm_scale: float, min_tokens_per_kernel: int = 2000):
+    def forward(
+        ctx,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        cu_seqlens_k: torch.Tensor,
+        causal: bool,
+        window: int,
+        sm_scale: float,
+        min_tokens_per_kernel: int = 2000,
+    ):
         """Varlen flash attention forward pass.
 
         Computes attention over variable-length sequences packed into a single tensor.
@@ -1433,8 +1446,7 @@ class TritonAttentionVarlen(torch.autograd.Function):
         assert not causal, "Causal masking not yet supported for varlen attention"
         assert window <= 0 or window == -1, "Window masking not yet supported for varlen attention"
 
-        assert q.is_contiguous() and k.is_contiguous() and v.is_contiguous(), \
-            "Input tensors must be contiguous"
+        assert q.is_contiguous() and k.is_contiguous() and v.is_contiguous(), "Input tensors must be contiguous"
         assert q.ndim == 3, f"Expected q to be 3D [TOTAL_TOKENS, N_HEAD, HEAD_DIM], got {q.ndim}D"
 
         TOTAL_TOKENS, N_HEAD, HEAD_DIM = q.shape
@@ -1470,14 +1482,21 @@ class TritonAttentionVarlen(torch.autograd.Function):
                 return (triton.cdiv(_seqlen_q, META["BLOCK_M"]), N_HEAD)
 
             _attn_varlen_fwd[grid](
-                q, k, v, o,
+                q,
+                k,
+                v,
+                o,
                 sm_scale,
                 seq_start_q,
                 seq_start_k,
-                stride_qt, stride_qh,
-                stride_kt, stride_kh,
-                stride_vt, stride_vh,
-                stride_ot, stride_oh,
+                stride_qt,
+                stride_qh,
+                stride_kt,
+                stride_kh,
+                stride_vt,
+                stride_vh,
+                stride_ot,
+                stride_oh,
                 SEQLEN_Q=seqlen_q,
                 SEQLEN_K=seqlen_k,
                 HEAD_DIM=HEAD_DIM,
