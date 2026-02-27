@@ -14,6 +14,7 @@ from omegaconf import DictConfig
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.imputer import InputImputer
 
 
@@ -47,6 +48,19 @@ class IdentityProcessor(torch.nn.Module):
         del inverse, kwargs
         if not in_place:
             x = x.clone()
+        return x
+
+
+class DummyResidual(torch.nn.Module):
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_shapes=None,
+        model_comm_group=None,
+        n_step_output: int = 1,
+    ) -> torch.Tensor:
+        del model_comm_group, n_step_output
+        assert grid_shard_shapes is None
         return x
 
 
@@ -228,6 +242,127 @@ def test_apply_imputer_inverse_reinserts_nans() -> None:
     result = model._apply_imputer_inverse(post_processors, "data", out)
 
     assert torch.allclose(result, expected, equal_nan=True)
+
+
+def test_compute_tendency_without_input_post_processor() -> None:
+    model = _make_model()
+    indices = model.data_indices["data"]
+
+    x_t1 = torch.tensor([[[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]]])
+    x_t0 = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]])
+
+    out = model.compute_tendency(
+        {"data": x_t1},
+        {"data": x_t0},
+        {"data": IdentityProcessor()},
+        {"data": IdentityProcessor()},
+        input_post_processor=None,
+        skip_imputation=True,
+    )
+
+    expected = x_t1.clone()
+    expected[..., indices.model.output.prognostic] = x_t1[..., indices.model.output.prognostic] - x_t0
+    expected[..., indices.model.output.diagnostic] = x_t1[..., indices.model.output.diagnostic]
+    assert torch.allclose(out["data"], expected)
+
+
+def test_add_tendency_to_state_without_output_pre_processor() -> None:
+    model = _make_model()
+    indices = model.data_indices["data"]
+
+    tendency = torch.tensor([[[0.5, 1.5, 2.5], [3.5, 4.5, 5.5]]])
+    state_inp = torch.tensor([[[10.0, 20.0], [30.0, 40.0]]])
+
+    out = model.add_tendency_to_state(
+        {"data": state_inp},
+        {"data": tendency},
+        {"data": IdentityProcessor()},
+        {"data": IdentityProcessor()},
+        output_pre_processor=None,
+        skip_imputation=True,
+    )
+
+    expected = tendency.clone()
+    expected[..., indices.model.output.diagnostic] = tendency[..., indices.model.output.diagnostic]
+    expected[..., indices.model.output.prognostic] += state_inp
+    assert torch.allclose(out["data"], expected)
+
+
+def test_apply_reference_state_truncation_without_shards() -> None:
+    model = _make_model()
+    torch.nn.Module.__init__(model)
+    model.n_step_output = 1
+    model.residual = torch.nn.ModuleDict({"data": DummyResidual()})
+
+    x = {"data": torch.arange(1 * 1 * 1 * 2 * 4, dtype=torch.float32).reshape(1, 1, 1, 2, 4)}
+    out = model.apply_reference_state_truncation(x, grid_shard_shapes=None, model_comm_group=None)
+
+    indices = model.data_indices["data"].model.input.prognostic
+    expected = x["data"][..., indices]
+    assert torch.allclose(out["data"], expected)
+
+
+def test_before_sampling_keeps_reference_time_dimension() -> None:
+    model = _make_model()
+
+    batch = {"data": torch.randn(2, 4, 3, 2)}
+    pre_processors = {"data": IdentityProcessor()}
+
+    (xs, x_t0s), grid_shard_shapes = model._before_sampling(
+        batch,
+        pre_processors,
+        n_step_input=3,
+        model_comm_group=None,
+    )
+
+    assert grid_shard_shapes is None
+    assert xs["data"].shape == (2, 3, 1, 3, 2)
+    assert x_t0s["data"].shape == (2, 1, 1, 3, 2)
+
+
+def test_after_sampling_uses_single_step_reference_per_output_step() -> None:
+    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+    model.n_step_output = 2
+
+    # Two different reference timesteps; training-style behavior should always use the last one.
+    ref = torch.zeros((1, 2, 1, 2, 1), dtype=torch.float32)
+    ref[:, 0] = 1.0
+    ref[:, 1] = 2.0
+
+    def _mock_reference_state(*_args, **_kwargs):
+        return {"data": ref}
+
+    captured_state_inputs = []
+
+    def _spy_add_tendency(state_inp, tendency, *_args, **_kwargs):
+        captured_state_inputs.append(state_inp["data"].clone())
+        return tendency
+
+    model.apply_reference_state_truncation = _mock_reference_state
+    model.add_tendency_to_state = _spy_add_tendency
+
+    out = {"data": torch.ones((1, 2, 1, 2, 3), dtype=torch.float32)}
+    before_sampling_data = ({}, {"data": torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32)})
+    post_processors = torch.nn.ModuleDict({"data": IdentityProcessor()})
+
+    post_tend = StepwiseProcessors(["6h", "12h"])
+    post_tend.set("6h", IdentityProcessor())
+    post_tend.set("12h", IdentityProcessor())
+
+    model._after_sampling(
+        out,
+        post_processors,
+        before_sampling_data,
+        model_comm_group=None,
+        grid_shard_shapes=None,
+        gather_out=False,
+        post_processors_tendencies={"data": post_tend},
+    )
+
+    assert len(captured_state_inputs) == 2
+    expected_ref = ref[:, -1:].clone()
+    assert torch.allclose(captured_state_inputs[0], expected_ref)
+    assert torch.allclose(captured_state_inputs[1], expected_ref)
 
 
 def test_after_sampling_reinserts_nans() -> None:
