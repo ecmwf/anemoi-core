@@ -43,7 +43,8 @@ class ReferenceNodes(BaseNodeBuilder):
             "x" in graph[self.reference_node_name]
         ), f"Reference node '{self.reference_node_name}' does not have coordinates in 'x'."
 
-        graph[self.name].x = graph[self.reference_node_name].x.clone().to(dtype=torch.float32, device=self.device)
+        reference_coords = graph[self.reference_node_name].x
+        graph[self.name].x = reference_coords.clone().to(dtype=torch.float32, device=reference_coords.device)
         graph[self.name].node_type = type(self).__name__
 
         if graph[self.name].num_nodes >= 2:
