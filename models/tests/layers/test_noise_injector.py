@@ -15,27 +15,31 @@ from anemoi.models.layers.ensemble import NoiseConditioning
 from anemoi.models.layers.ensemble import NoiseInjector
 
 
-def _build_noise_graph() -> HeteroData:
+def _build_noise_graph(
+    source_node_name: str = "src_noise",
+    target_node_name: str = "dst_hidden",
+) -> tuple[HeteroData, tuple[str, str, str]]:
     graph = HeteroData()
-    graph["noise"].num_nodes = 2
-    graph["hidden"].num_nodes = 4
+    graph[source_node_name].num_nodes = 2
+    graph[target_node_name].num_nodes = 4
 
     edge_index = torch.tensor([[0, 1, 0, 1, 0, 1, 0, 1], [0, 0, 1, 1, 2, 2, 3, 3]])
     edge_weight = torch.tensor([0.3, 0.7, 0.3, 0.7, 0.3, 0.7, 0.3, 0.7])
 
-    graph[("noise", "to", "hidden")].edge_index = edge_index
-    graph[("noise", "to", "hidden")].gauss_weight = edge_weight
-    return graph
+    noise_edges_name = (source_node_name, "to", target_node_name)
+    graph[noise_edges_name].edge_index = edge_index
+    graph[noise_edges_name].gauss_weight = edge_weight
+    return graph, noise_edges_name
 
 
 def test_noise_conditioning_graph_projection_shape() -> None:
-    graph = _build_noise_graph()
+    graph, noise_edges_name = _build_noise_graph()
     injector = NoiseConditioning(
         noise_std=1,
         noise_channels_dim=2,
         noise_mlp_hidden_dim=4,
         layer_kernels={},
-        noise_edges_name=("noise", "to", "hidden"),
+        noise_edges_name=noise_edges_name,
         edge_weight_attribute="gauss_weight",
         row_normalize_noise_matrix=False,
         graph_data=graph,
@@ -43,7 +47,7 @@ def test_noise_conditioning_graph_projection_shape() -> None:
 
     batch_size = 2
     ensemble_size = 3
-    hidden_nodes = graph["hidden"].num_nodes
+    hidden_nodes = graph[noise_edges_name[2]].num_nodes
     x = torch.zeros((batch_size * ensemble_size * hidden_nodes, 8))
 
     _, noise = injector(
@@ -59,7 +63,7 @@ def test_noise_conditioning_graph_projection_shape() -> None:
 
 
 def test_noise_conditioning_rejects_mixed_sources() -> None:
-    graph = _build_noise_graph()
+    graph, noise_edges_name = _build_noise_graph()
     with pytest.raises(AssertionError, match="noise_matrix or noise_edges_name"):
         NoiseConditioning(
             noise_std=1,
@@ -67,20 +71,21 @@ def test_noise_conditioning_rejects_mixed_sources() -> None:
             noise_mlp_hidden_dim=4,
             layer_kernels={},
             noise_matrix="dummy.npz",
-            noise_edges_name=("noise", "to", "hidden"),
+            noise_edges_name=noise_edges_name,
             edge_weight_attribute="gauss_weight",
             graph_data=graph,
         )
 
 
 def test_noise_conditioning_requires_graph_data() -> None:
+    _, noise_edges_name = _build_noise_graph()
     with pytest.raises(AssertionError, match="graph_data must be provided"):
         NoiseConditioning(
             noise_std=1,
             noise_channels_dim=2,
             noise_mlp_hidden_dim=4,
             layer_kernels={},
-            noise_edges_name=("noise", "to", "hidden"),
+            noise_edges_name=noise_edges_name,
             edge_weight_attribute="gauss_weight",
             graph_data=None,
         )

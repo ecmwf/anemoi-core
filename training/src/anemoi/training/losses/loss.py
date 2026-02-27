@@ -22,19 +22,23 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-NESTED_LOSSES = {
-    "anemoi.training.losses.MultiscaleLossWrapper",
-    "anemoi.training.losses.multiscale.MultiscaleLossWrapper",
+NESTED_LOSS_CLASS_NAMES = {
+    "MultiscaleLossWrapper",
 }
-GRAPH_DATA_WRAPPER_LOSSES = {
-    "anemoi.training.losses.MultiscaleLossWrapper",
-    "anemoi.training.losses.multiscale.MultiscaleLossWrapper",
-    "anemoi.training.losses.CombinedLoss",
-    "anemoi.training.losses.combined.CombinedLoss",
-    "anemoi.training.losses.FilteringLossWrapper",
-    "anemoi.training.losses.filtering.FilteringLossWrapper",
+GRAPH_DATA_WRAPPER_CLASS_NAMES = {
+    "MultiscaleLossWrapper",
+    "CombinedLoss",
+    "FilteringLossWrapper",
 }
 LOGGER = logging.getLogger(__name__)
+
+
+def _target_class_name(loss_config: dict) -> str | None:
+    """Return the class name from Hydra's `_target_` field."""
+    target = loss_config.get("_target_")
+    if isinstance(target, str):
+        return target.rsplit(".", maxsplit=1)[-1]
+    return None
 
 
 # Future import breaks other type hints TODO Harrison Cook
@@ -78,7 +82,9 @@ def get_loss_function(
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
 
-    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
+    target_class_name = _target_class_name(loss_config)
+
+    if target_class_name in NESTED_LOSS_CLASS_NAMES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
         per_scale_loss = get_loss_function(
             OmegaConf.create(per_scale_loss_config),
@@ -96,7 +102,7 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    if graph_data is not None and loss_config.get("_target_") in GRAPH_DATA_WRAPPER_LOSSES:
+    if graph_data is not None and target_class_name in GRAPH_DATA_WRAPPER_CLASS_NAMES:
         loss_function = instantiate(loss_config, graph_data=graph_data, **kwargs, _recursive_=False)
     else:
         loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
