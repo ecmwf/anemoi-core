@@ -129,9 +129,10 @@ class BasePlotCallback(Callback, ABC):
         self,
         logger: pl.loggers.logger.Logger,
         fig: plt.Figure,
-        anim: animation.ArtistAnimation,
+        anim: animation.Animation,
         epoch: int,
         tag: str = "gnn",
+        fps: int = 8,
     ) -> None:
         """Animation output: save to file and/or display in notebook."""
         if self.save_basedir is not None:
@@ -142,7 +143,7 @@ class BasePlotCallback(Callback, ABC):
             )
 
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            anim.save(save_path, writer="pillow", fps=8)
+            anim.save(save_path, writer="pillow", fps=fps)
 
             if self.config.diagnostics.log.wandb.enabled:
                 LOGGER.warning("Saving gif animations not tested for wandb.")
@@ -506,7 +507,7 @@ class LongRolloutPlots(BasePlotCallback):
 
         with torch.no_grad():
             for rollout_step, (_, _, y_pred) in enumerate(
-                pl_module.rollout_step(
+                pl_module._rollout_step(
                     batch,  # dict[str, tensor]
                     rollout=self.max_rollout,
                     validation_mode=True,
@@ -634,12 +635,14 @@ class LongRolloutPlots(BasePlotCallback):
             self.sample_idx : self.sample_idx + 1
         ]
         var_indices = np.array(list(plot_parameters_dict.keys()), dtype=int)
-        frame = output_tensor[0, 0, :, var_indices]  # [nodes, nvars]
+        frame = output_tensor[0, 0, :, var_indices].numpy()  # [nodes, nvars]
         data_over_time.append(frame)
 
         # update per-variable min/max for colorbar
-        vmin[:] = np.minimum(vmin, np.nanmin(frame, axis=0))
-        vmax[:] = np.maximum(vmax, np.nanmax(frame, axis=0))
+        frame_min = np.nanmin(frame, axis=0)
+        frame_max = np.nanmax(frame, axis=0)
+        vmin[:] = np.where(np.isfinite(frame_min), np.minimum(vmin, frame_min), vmin)
+        vmax[:] = np.where(np.isfinite(frame_max), np.maximum(vmax, frame_max), vmax)
         return data_over_time, vmin, vmax
 
     @rank_zero_only
@@ -664,8 +667,11 @@ class LongRolloutPlots(BasePlotCallback):
         else:
             data0_nodes_vars = data_0
 
+        if not data_over_time:
+            LOGGER.warning("No rollout frames available for video generation (dataset=%s).", dataset_name)
+            return
+
         for idx, (variable_idx, (variable_name, _)) in enumerate(plot_parameters_dict.items()):
-            frames = []
             fig, ax = plt.subplots(figsize=(10, 6), dpi=72)
             cmap = "viridis"
 
@@ -679,20 +685,20 @@ class LongRolloutPlots(BasePlotCallback):
             )
             ax.set_title(f"{dataset_name}: {variable_name}")
             fig.colorbar(scatter_frame, ax=ax)
-            frames.append([scatter_frame])
 
-            for frame_data in data_over_time:
-                ax, scatter_frame = get_scatter_frame(
-                    ax,
-                    frame_data[:, idx],
-                    self.latlons[dataset_name],
-                    cmap=cmap,
-                    vmin=vmin[idx],
-                    vmax=vmax[idx],
-                )
-                frames.append([scatter_frame])
+            frame_values = [data0_nodes_vars[:, variable_idx]] + [frame_data[:, idx] for frame_data in data_over_time]
 
-            anim = animation.ArtistAnimation(fig, frames, interval=animation_interval, blit=True)
+            def _update(frame_id: int):
+                scatter_frame.set_array(frame_values[frame_id])
+                return (scatter_frame,)
+
+            anim = animation.FuncAnimation(
+                fig,
+                _update,
+                frames=len(frame_values),
+                interval=animation_interval,
+                blit=True,
+            )
             self._output_gif(
                 logger,
                 fig,
@@ -750,7 +756,6 @@ class LongRolloutPlots(BasePlotCallback):
         precision_mapping = {"16-mixed": torch.float16, "bf16-mixed": torch.bfloat16}
         dtype = precision_mapping.get(trainer.precision)
         context = torch.autocast(device_type=list(batch.values())[0].device.type, dtype=dtype) if dtype else nullcontext()
-        print("PLOTTING LONG ROLLOUT", flush=True)
         with context:
             self._plot(
                 trainer,
@@ -1386,6 +1391,176 @@ class PlotSample(BasePlotAdditionalMetrics):
                         tag=f"pred_val_sample_{dataset_name}_istep{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
                         exp_log_tag=f"val_pred_sample_{dataset_name}_istep{interp_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
                     )
+
+
+class MultiStepPlot(BasePlotAdditionalMetrics):
+    """Plots/animates all available output steps from one forward pass (no rollout)."""
+
+    def __init__(
+        self,
+        config: OmegaConf,
+        sample_idx: int,
+        parameters: list[str],
+        accumulation_levels_plot: list[float],
+        output_steps: int | None = None,
+        precip_and_related_fields: list[str] | None = None,
+        colormaps: dict[str, Colormap] | None = None,
+        per_sample: int = 6,
+        every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
+        focus_area: list[dict] | None = None,
+        video: bool = True,
+        animation_interval: int = 350,
+        video_fps: int = 8,
+        save_frames: bool = False,
+        max_steps: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        del kwargs
+        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
+        self.sample_idx = sample_idx
+        self.parameters = parameters
+        self.accumulation_levels_plot = accumulation_levels_plot
+        self.precip_and_related_fields = precip_and_related_fields
+        self.colormaps = colormaps
+        self.per_sample = per_sample
+        self.video = video
+        self.animation_interval = animation_interval
+        self.video_fps = video_fps
+        self.save_frames = save_frames
+        self.max_steps = max_steps if max_steps is not None else output_steps
+
+    @staticmethod
+    def _flatten_step_tensor(output_tensor: np.ndarray) -> np.ndarray:
+        arr = np.asarray(output_tensor)
+        if arr.ndim < 3:
+            msg = f"Expected at least 3 dimensions for output_tensor, got shape {arr.shape}."
+            raise ValueError(msg)
+        if arr.ndim == 3:
+            return arr
+        return arr.reshape(-1, arr.shape[-2], arr.shape[-1])
+
+    @rank_zero_only
+    def _plot(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        dataset_names: list[str],
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        batch: dict[str, torch.Tensor],
+        batch_idx: int,
+        epoch: int,
+        output_times: int,
+    ) -> None:
+        logger = trainer.logger
+        local_rank = pl_module.local_rank
+
+        for dataset_name in dataset_names:
+            diagnostics = (
+                []
+                if self.config.data.datasets[dataset_name].diagnostic is None
+                else self.config.data.datasets[dataset_name].diagnostic
+            )
+            plot_parameters_dict = {
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
+                    name,
+                    name not in diagnostics,
+                )
+                for name in self.parameters
+                if name in pl_module.data_indices[dataset_name].model.output.name_to_index
+            }
+            if not plot_parameters_dict:
+                LOGGER.warning("MultiStepPlot: no parameters matched for dataset '%s'.", dataset_name)
+                continue
+
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+
+            latlons, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
+
+            pred_steps = self._flatten_step_tensor(output_tensor)
+            max_by_truth = max(data.shape[0] - 1, 0)
+            n_steps = min(pred_steps.shape[0], max_by_truth)
+            if self.max_steps is not None:
+                n_steps = min(n_steps, self.max_steps)
+            if n_steps <= 0:
+                LOGGER.warning("MultiStepPlot: no valid steps to plot for dataset '%s'.", dataset_name)
+                continue
+
+            frame_images = []
+            for step in range(n_steps):
+                fig_step = plot_predicted_multilevel_flat_sample(
+                    plot_parameters_dict,
+                    self.per_sample,
+                    latlons,
+                    self.accumulation_levels_plot,
+                    data[0, ...].squeeze(),
+                    data[step + 1, ...].squeeze(),
+                    pred_steps[step, ...],
+                    datashader=self.datashader_plotting,
+                    precip_and_related_fields=self.precip_and_related_fields,
+                    colormaps=self.colormaps,
+                )
+
+                if self.save_frames:
+                    self._output_figure(
+                        logger,
+                        fig_step,
+                        epoch=epoch,
+                        tag=(
+                            "pred_val_multistep_"
+                            f"{dataset_name}_step{step + 1:02d}_batch{batch_idx:04d}_"
+                            f"rank{local_rank:01d}{self.focus_mask.tag}"
+                        ),
+                        exp_log_tag=(
+                            "val_pred_multistep_"
+                            f"{dataset_name}_step{step + 1:02d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        ),
+                    )
+                elif self.video:
+                    fig_step.canvas.draw()
+                    frame_images.append(np.array(fig_step.canvas.renderer.buffer_rgba()))
+                    plt.close(fig_step)
+                else:
+                    plt.close(fig_step)
+
+            if self.video and frame_images:
+                fig_anim, ax = plt.subplots(figsize=(10, 6), dpi=72)
+                ax.axis("off")
+                im = ax.imshow(frame_images[0], animated=True)
+                ax.set_title(f"{dataset_name}: multistep prediction ({n_steps} steps)")
+
+                def _update(frame_id: int):
+                    im.set_data(frame_images[frame_id])
+                    return (im,)
+
+                anim = animation.FuncAnimation(
+                    fig_anim,
+                    _update,
+                    frames=len(frame_images),
+                    interval=self.animation_interval,
+                    blit=True,
+                )
+                self._output_gif(
+                    logger,
+                    fig_anim,
+                    anim,
+                    epoch=epoch,
+                    tag=(
+                        "pred_val_multistep_animation_"
+                        f"{dataset_name}_steps{n_steps:02d}_batch{batch_idx:04d}_"
+                        f"rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    fps=self.video_fps,
+                )
+
+
+class TimeInterpolatorMultiStepPlot(MultiStepPlot):
+    """Backward-compatible alias of MultiStepPlot."""
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):

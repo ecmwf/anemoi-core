@@ -8,6 +8,7 @@
 #
 
 import logging
+from collections.abc import Mapping
 from typing import Optional
 
 import einops
@@ -16,6 +17,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.decoder_conditioning import build_decoder_conditioner
 from anemoi.models.models import AnemoiModelEncProcDec
@@ -51,6 +53,37 @@ class Nowcaster(AnemoiModelEncProcDec):
         """
         model_config = DotDict(model_config)
         dec_cfg = DotDict(getattr(model_config.model, "decoder_conditioning", {}))
+        self._decoder_graph_selection = DotDict(getattr(model_config.model, "decoder_graph_selection", {}))
+        self._decoder_selection_strategy = str(self._decoder_graph_selection.get("strategy", "all")).lower()
+        if self._decoder_selection_strategy == "default":
+            self._decoder_selection_strategy = "all"
+        self._decoder_selection_refresh = bool(
+            self._decoder_graph_selection.get(
+                "refresh_each_forward",
+                self._decoder_selection_strategy in {"random_points", "random_patches"},
+            ),
+        )
+        decoder_seed = self._decoder_graph_selection.get("seed", None)
+        self._decoder_selection_seed = int(decoder_seed) if decoder_seed is not None else None
+        self._decoder_selection_rng = torch.Generator(device="cpu")
+        if self._decoder_selection_seed is not None:
+            self._decoder_selection_rng.manual_seed(self._decoder_selection_seed)
+        self._decoder_selection_cache: dict[str, torch.Tensor] = {}
+
+        supported_strategies = {"all", "dataset", "union", "random_points", "random_patches"}
+        if self._decoder_selection_strategy not in supported_strategies:
+            raise ValueError(
+                f"Unsupported decoder_graph_selection.strategy='{self._decoder_selection_strategy}'. "
+                f"Supported values: {sorted(supported_strategies)}.",
+            )
+
+        if self._decoder_graph_selection:
+            LOGGER.info(
+                "Decoder graph selection strategy=%s provider_datasets=%s",
+                self._decoder_selection_strategy,
+                self._decoder_graph_selection.get("provider_datasets", "per-dataset default"),
+            )
+
         self._cond_key = str(dec_cfg.get("key", "cond"))
         qc_cfg = getattr(model_config.data, "qc", None)
         self._qc_enabled = qc_cfg is not None
@@ -86,6 +119,224 @@ class Nowcaster(AnemoiModelEncProcDec):
                 cond_dim=1+len(self.known_future_variables[ds_name]),
                 cfg=dec_cfg,
             )
+
+    @staticmethod
+    def _normalize_dataset_names(value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, (list, tuple)):
+            return [str(v) for v in value]
+        raise TypeError(f"Expected string or list/tuple of strings, got {type(value)!r}.")
+
+    def _resolve_provider_datasets(self, dataset_name: str) -> list[str]:
+        if "provider_datasets" in self._decoder_graph_selection:
+            cfg_value = self._decoder_graph_selection.get("provider_datasets")
+        elif self._decoder_selection_strategy == "union":
+            cfg_value = list(self.decoder_graph_provider.keys())
+        else:
+            cfg_value = dataset_name
+
+        if isinstance(cfg_value, Mapping):
+            cfg_value = cfg_value.get(dataset_name, cfg_value.get("default", dataset_name))
+        provider_datasets = self._normalize_dataset_names(cfg_value)
+        if provider_datasets == ["all"]:
+            provider_datasets = list(self.decoder_graph_provider.keys())
+        if not provider_datasets:
+            provider_datasets = [dataset_name]
+
+        expected_dst_nodes = self.node_attributes.num_nodes[dataset_name]
+        for provider_dataset in provider_datasets:
+            if provider_dataset not in self.decoder_graph_provider:
+                raise KeyError(
+                    f"decoder_graph_selection requested provider '{provider_dataset}', "
+                    f"but no decoder_graph_provider exists for it.",
+                )
+            provider_dst_nodes = self.node_attributes.num_nodes[provider_dataset]
+            if provider_dst_nodes != expected_dst_nodes:
+                raise ValueError(
+                    f"decoder_graph_selection provider '{provider_dataset}' cannot be used for target "
+                    f"dataset '{dataset_name}' because destination node counts differ: "
+                    f"{provider_dst_nodes} != {expected_dst_nodes}.",
+                )
+
+        return provider_datasets
+
+    @staticmethod
+    def _deduplicate_edges(edge_attr: torch.Tensor, edge_index: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if edge_index.numel() == 0:
+            return edge_attr, edge_index
+
+        dst_span = int(edge_index[1].max().item()) + 1
+        dst_span = max(dst_span, 1)
+        keys = edge_index[0].to(torch.int64) * dst_span + edge_index[1].to(torch.int64)
+        sorted_idx = torch.argsort(keys)
+        sorted_keys = keys[sorted_idx]
+        keep_sorted = torch.ones_like(sorted_keys, dtype=torch.bool)
+        keep_sorted[1:] = sorted_keys[1:] != sorted_keys[:-1]
+        keep_idx = sorted_idx[keep_sorted]
+        return edge_attr[keep_idx], edge_index[:, keep_idx]
+
+    def _collect_decoder_edges(self, dataset_name: str, batch_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+        provider_datasets = self._resolve_provider_datasets(dataset_name)
+        edge_attrs: list[torch.Tensor] = []
+        edge_indices: list[torch.Tensor] = []
+
+        for provider_dataset in provider_datasets:
+            edge_attr, edge_index, _ = self.decoder_graph_provider[provider_dataset].get_edges(
+                batch_size=batch_size,
+                model_comm_group=None,
+                shard_edges=False,
+            )
+            if edge_attr is None or edge_index is None:
+                continue
+            edge_attrs.append(edge_attr)
+            edge_indices.append(edge_index)
+
+        if not edge_attrs or not edge_indices:
+            raise ValueError(
+                f"No decoder edges available for dataset '{dataset_name}' with providers {provider_datasets}.",
+            )
+
+        if len(edge_attrs) == 1:
+            edge_attr, edge_index = edge_attrs[0], edge_indices[0]
+        else:
+            edge_attr = torch.cat(edge_attrs, dim=0)
+            edge_index = torch.cat(edge_indices, dim=1)
+
+        if bool(self._decoder_graph_selection.get("deduplicate", False)):
+            edge_attr, edge_index = self._deduplicate_edges(edge_attr, edge_index)
+
+        return edge_attr, edge_index
+
+    def _randperm(self, n: int, device: torch.device) -> torch.Tensor:
+        if self._decoder_selection_seed is None:
+            return torch.randperm(n, device=device)
+        return torch.randperm(n, generator=self._decoder_selection_rng).to(device=device)
+
+    def _resolve_num_points(self, n_available: int) -> int:
+        n_points = self._decoder_graph_selection.get("num_points", None)
+        if n_points is None:
+            fraction = self._decoder_graph_selection.get("fraction", None)
+            if fraction is not None:
+                n_points = max(1, int(round(float(fraction) * n_available)))
+        if n_points is None:
+            raise ValueError(
+                "decoder_graph_selection requires either 'num_points' or 'fraction' "
+                "for random_points/random_patches strategies.",
+            )
+        n_points = int(n_points)
+        if n_points <= 0:
+            raise ValueError("decoder_graph_selection.num_points must be > 0.")
+        return min(n_points, n_available)
+
+    def _sample_random_points(self, available_src: torch.Tensor) -> torch.Tensor:
+        n_points = self._resolve_num_points(int(available_src.numel()))
+        perm = self._randperm(int(available_src.numel()), available_src.device)
+        return available_src[perm[:n_points]]
+
+    def _sample_random_patches(self, available_src: torch.Tensor) -> torch.Tensor:
+        num_patches = int(self._decoder_graph_selection.get("num_patches", 1))
+        if num_patches <= 0:
+            raise ValueError("decoder_graph_selection.num_patches must be > 0 for random_patches.")
+
+        n_available = int(available_src.numel())
+        points_per_patch = int(self._decoder_graph_selection.get("points_per_patch", -1))
+
+        n_points_total = self._decoder_graph_selection.get("num_points", None)
+        if n_points_total is None:
+            fraction = self._decoder_graph_selection.get("fraction", None)
+            if fraction is not None:
+                n_points_total = max(1, int(round(float(fraction) * n_available)))
+
+        if n_points_total is None and points_per_patch > 0:
+            n_points_total = points_per_patch * num_patches
+        elif n_points_total is None:
+            n_points_total = self._resolve_num_points(n_available)
+
+        n_points_total = min(int(n_points_total), n_available)
+
+        if points_per_patch <= 0:
+            points_per_patch = max(1, int((n_points_total + num_patches - 1) / num_patches))
+        points_per_patch = min(points_per_patch, n_available)
+
+        hidden_coords = self.node_attributes.get_coordinates(self._graph_name_hidden)
+        available_src = available_src.to(hidden_coords.device)
+        available_coords = hidden_coords[available_src]
+
+        num_centers = min(num_patches, n_available)
+        center_perm = self._randperm(n_available, available_coords.device)
+        centers = available_coords[center_perm[:num_centers]].float()
+        dists = torch.cdist(centers, available_coords.float(), p=2.0)
+        nearest = torch.topk(dists, k=points_per_patch, largest=False).indices.reshape(-1)
+        selected = torch.unique(available_src[nearest])
+
+        if selected.numel() > n_points_total:
+            trim_perm = self._randperm(int(selected.numel()), selected.device)
+            selected = selected[trim_perm[:n_points_total]]
+
+        return selected
+
+    def _select_source_nodes(self, dataset_name: str, edge_index: torch.Tensor) -> Optional[torch.Tensor]:
+        strategy = self._decoder_selection_strategy
+        if strategy in {"all", "dataset", "union"}:
+            return None
+
+        if not self._decoder_selection_refresh and dataset_name in self._decoder_selection_cache:
+            return self._decoder_selection_cache[dataset_name].to(edge_index.device)
+
+        src_size = self.node_attributes.num_nodes[self._graph_name_hidden]
+        src_nodes = torch.unique(torch.remainder(edge_index[0], src_size))
+        if src_nodes.numel() == 0:
+            raise ValueError(f"No decoder source nodes available for dataset '{dataset_name}'.")
+
+        if strategy == "random_points":
+            selected = self._sample_random_points(src_nodes)
+        elif strategy == "random_patches":
+            selected = self._sample_random_patches(src_nodes)
+        else:
+            raise ValueError(f"Unsupported decoder selection strategy '{strategy}'.")
+
+        if not self._decoder_selection_refresh:
+            self._decoder_selection_cache[dataset_name] = selected.detach().cpu()
+
+        return selected.to(edge_index.device)
+
+    def _filter_edges_by_source(
+        self,
+        edge_attr: torch.Tensor,
+        edge_index: torch.Tensor,
+        selected_src: Optional[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if selected_src is None:
+            return edge_attr, edge_index
+
+        src_size = self.node_attributes.num_nodes[self._graph_name_hidden]
+        src_local = torch.remainder(edge_index[0], src_size)
+        keep_edges = torch.isin(src_local, selected_src)
+        if not torch.any(keep_edges):
+            raise ValueError("Decoder edge selection dropped all edges. Relax selection parameters.")
+
+        return edge_attr[keep_edges], edge_index[:, keep_edges]
+
+    def _get_decoder_edges(
+        self,
+        dataset_name: str,
+        *,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[tuple[list, list]]]:
+        edge_attr, edge_index = self._collect_decoder_edges(dataset_name, batch_size)
+        selected_src = self._select_source_nodes(dataset_name, edge_index)
+        edge_attr, edge_index = self._filter_edges_by_source(edge_attr, edge_index, selected_src)
+
+        if model_comm_group is None:
+            return edge_attr, edge_index, None
+
+        src_size = self.node_attributes.num_nodes[self._graph_name_hidden] * batch_size
+        dst_size = self.node_attributes.num_nodes[dataset_name] * batch_size
+        return shard_edges_1hop(edge_attr, edge_index, src_size, dst_size, model_comm_group)
 
     def _append_qc_features(self, x: torch.Tensor, *, dataset_name: str) -> torch.Tensor:
         """Append QC features at encoding time.
@@ -159,7 +410,7 @@ class Nowcaster(AnemoiModelEncProcDec):
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
 
-        in_out_sharded = {}
+        in_out_sharded = {dataset_name: False for dataset_name in dataset_names}
         if grid_shard_shapes is not None:
             for dataset_name, shard_shapes in grid_shard_shapes.items():
                 in_out_sharded[dataset_name] = shard_shapes is not None
@@ -168,7 +419,6 @@ class Nowcaster(AnemoiModelEncProcDec):
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
-        shard_shapes_data_dict = {}
         shard_shapes_data_dict = {}
         x_dst_base_dict = {}
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
@@ -233,8 +483,10 @@ class Nowcaster(AnemoiModelEncProcDec):
         # Decode: scan over target times, applying conditioning to x_dst.
         y_pred = {}
         for dataset_name in dataset_names:
-            dec_edge_attr, dec_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_size, model_comm_group=model_comm_group
+            dec_edge_attr, dec_edge_index, dec_edge_shard_shapes = self._get_decoder_edges(
+                dataset_name,
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
             )
 
             cond = None

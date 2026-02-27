@@ -15,6 +15,7 @@ from typing import Literal
 from typing import Optional
 
 from pydantic import Field
+from pydantic import NonNegativeFloat
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
 
@@ -130,6 +131,19 @@ class LimitedAreaIcosahedralandHealPixNodeSchema(BaseModel):
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
+class RegionalTriMeshNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.RegionalTriMeshNodes"] = Field(..., alias="_target_")
+    "Regional triangular mesh nodes derived from reference data bounds."
+    reference_node_name: str
+    "Name of the reference nodes used to infer regional bounds."
+    spacing_km: PositiveFloat = Field(example=10.0)
+    "Approximate spacing of the regional mesh in kilometers."
+    margin_km: NonNegativeFloat = Field(default=0.0, example=0.0)
+    "Optional margin around the inferred region in kilometers."
+    mask_attr_name: Optional[str] = None
+    "Optional mask attribute on reference nodes used to define bounds."
+
+
 class StretchedIcosahdralNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.StretchedTriNodes"] = Field(..., alias="_target_")
     "Class implementation for nodes based on iterative refinements of an icosahedron with 2 different resolutions."
@@ -154,6 +168,7 @@ NodeBuilderSchemas = Annotated[
     | ReducedGaussianGridNodeSchema
     | IcosahedralandHealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema
+    | RegionalTriMeshNodeSchema
     | StretchedIcosahdralNodeSchema,
     Field(discriminator="target_"),
 ]

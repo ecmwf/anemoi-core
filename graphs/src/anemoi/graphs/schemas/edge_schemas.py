@@ -78,6 +78,11 @@ class MultiScaleEdgeSchema(BaseModel):
     "Mask to apply to target nodes of the edges. Default to None."
 
 
+class TriangulationEdgeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.edges.TriangulationEdges"] = Field(..., alias="_target_")
+    "Triangulation based hidden-hidden edges for regional meshes."
+
+
 class HEALPixMultiScaleEdgesSchema(BaseModel):
     target_: Literal["anemoi.graphs.edges.HEALPixMultiScaleEdges"] = Field(..., alias="_target_")
     "HEALPix multi-scale edges implementation from anemoi.graphs.edges."
@@ -111,6 +116,6 @@ class EdgeAttributeSchema(BaseModel):
 
 
 EdgeBuilderSchemas = Annotated[
-    KNNEdgeSchema | CutoffEdgeSchema | MultiScaleEdgeSchema | HEALPixMultiScaleEdgesSchema | ICONTopologicalEdgeSchema,
+    KNNEdgeSchema | CutoffEdgeSchema | MultiScaleEdgeSchema | TriangulationEdgeSchema | HEALPixMultiScaleEdgesSchema | ICONTopologicalEdgeSchema,
     Field(discriminator="target_"),
 ]

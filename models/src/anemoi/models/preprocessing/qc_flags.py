@@ -75,19 +75,11 @@ class _QCDebugPlotter:
             self.bit_colors = dict(bit_colors)
             self.bit_labels = dict(bit_labels)
 
-    def _should_plot(self) -> bool:
-        if not self.enabled:
-            return False
-        return (self.call_i % self.every_n) == 1
-
     def _ensure_out_dir(self) -> None:
         os.makedirs(self.out_dir, exist_ok=True)
 
     @torch.no_grad()
     def plot_decode_overlay(self, *, qc_flags_i64: torch.Tensor, tag: str) -> None:
-        if not self._should_plot():
-            return
-
         import numpy as np
         import matplotlib
 
@@ -96,17 +88,14 @@ class _QCDebugPlotter:
         from matplotlib.patches import Patch
 
         self._ensure_out_dir()
-
         q = qc_flags_i64.detach()
-        q = q.reshape(-1).to("cpu")
+        q = q[:, 0].reshape(-1).to("cpu")
+        print("Q dtype", q.dtype, "shape", q.shape, flush=True)
+
 
         P = q.numel()
-        print("P", P)
-        if P == 0:
-            return
-
-        x = np.arange(q.shape[0], dtype=np.float32)
-        y = np.zeros_like(x)
+        x = np.arange(P, dtype=np.float32)
+        y = np.arange(P, dtype=np.float32)
         xlabel, ylabel = "point index", ""
 
         flags = q.numpy().astype(np.int64)
@@ -146,9 +135,6 @@ class _QCDebugPlotter:
 
     @torch.no_grad()
     def plot_valid_mask(self, *, valid_mask_f32: torch.Tensor, tag: str) -> None:
-        if not self._should_plot():
-            return
-
         import numpy as np
         import matplotlib
 
@@ -190,11 +176,10 @@ class QCDecodeBits(nn.Module):
 
     def forward(self, qc_flags: torch.Tensor) -> torch.Tensor:
         q = qc_flags.to(torch.int64).unsqueeze(-1)
+        print(q[:,0].mean(), q[:,0].max(), flush=True)
         b = self.bits.to(qc_flags.device).view(*([1] * (q.ndim - 1)), -1)
         out = ((q >> b) & 1).to(dtype=torch.float32)
-        print("DBG", self._dbg, flush=True)
         if self._dbg is not None:
-            print("PLOTTING QCDecodeBits overlay", flush=True)
             self._dbg.plot_decode_overlay(qc_flags_i64=qc_flags.to(torch.int64), tag="QCDecodeBits")
 
         return out
@@ -292,15 +277,6 @@ class QCFeaturizer(nn.Module):
             self.feat = QCPackedEmbedding(emb_dim=emb_dim, bit_indices=bit_indices)
         else:
             raise ValueError(f"Unknown QC featurizer method: {method}")
-
-    def set_latlons_deg_for_debug(self, latlons_deg: torch.Tensor) -> None:
-        """
-        Optional: call once from outside (e.g. after graph init) so the debug overlay
-        can plot in lon/lat space like your raw-data plot (without cartopy).
-        Expected shape [N,2] with columns [lat, lon] OR [lon, lat] as long as consistent
-        with your choice in _QCDebugPlotter.set_latlons_deg.
-        """
-        self._dbg.set_latlons_deg(latlons_deg)
 
     def forward(self, qc_flags: torch.Tensor) -> torch.Tensor:
         qc_features = self.feat(qc_flags)

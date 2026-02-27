@@ -296,9 +296,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_indices = {}
         grid_indices_configs = get_multiple_datasets_config(self.config.dataloader.grid_indices)
         for dataset_name in self.dataset_names:
-            self.grid_indices[dataset_name] = instantiate(
-                grid_indices_configs[dataset_name],
-                reader_group_size=reader_group_size,
+            self.grid_sizes[dataset_name] = graph_data[dataset_name].num_nodes
+            self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
+                self.grid_sizes[dataset_name],
+                reader_group_size,
             )
             self.grid_indices[dataset_name].setup(graph_data)
         self.grid_dim = -2

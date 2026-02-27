@@ -20,6 +20,7 @@ from pytorch_lightning.utilities import rank_zero_only
 from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot as _GraphTrainableFeaturesPlot
 from anemoi.training.diagnostics.callbacks.plot import PlotHistogram as _PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss as _PlotLoss
+from anemoi.training.diagnostics.callbacks.plot import MultiStepPlot as _MultiStepPlot
 from anemoi.training.diagnostics.callbacks.plot import PlotSample as _PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum as _PlotSpectrum
 
@@ -437,6 +438,10 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
             focus_area,
             **kwargs,
         )
+
+
+class MultiStepPlot(BaseEnsemblePlotCallback, _MultiStepPlot):
+    """Plots/animates multi-step predictions using first ensemble member."""
 
 
 class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
