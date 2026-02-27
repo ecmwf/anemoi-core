@@ -5,7 +5,7 @@ defaults:
 - system: example
 - graph: stretched_grid
 - model: graphtransformer
-- training: stretched
+- training: autoencoder
 - _self_
 
 config_validation: True
@@ -19,6 +19,7 @@ config_validation: True
 #     num_gpus_per_node: 1
 
 dataloader:
+  #validation_rollout: 0
   dataset:
     cutout:
       - dataset: ${system.input.dataset}
