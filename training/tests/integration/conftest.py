@@ -244,7 +244,7 @@ def lam_config_with_graph(
     cfg.graph = existing_graph_config
 
     dataset_name = "data"  # default dataset name
-    url_graph = "anemoi-integration-tests/training/graphs/lam-graph.pt"
+    url_graph = "anemoi-integration-tests/training/graphs/lam-graph-2026-02-19.pt"
     tmp_path_graph = Path(get_test_data(url_graph))
     dataset_graph_filename = tmp_path_graph.name.replace(".pt", f"_{dataset_name}.pt")
     tmp_path_graph.rename(tmp_path_graph.parent / dataset_graph_filename)
@@ -470,37 +470,6 @@ def global_config_with_checkpoint(
 
 
 @pytest.fixture
-def interpolator_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
-) -> tuple[DictConfig, str]:
-    """Compose a runnable configuration for the temporal-interpolation model.
-
-    It is based on `interpolator.yaml` and only patches paths pointing to the
-    sample dataset that the tests download locally.
-    """
-    # No model override here - the template already sets the dedicated
-    # interpolator model + GraphInterpolator Lightning task.
-    with initialize(
-        version_base=None,
-        config_path="../../src/anemoi/training/config",
-        job_name="test_interpolator",
-    ):
-        template = compose(config_name="interpolator")
-
-    use_case_modifications = OmegaConf.load(
-        Path.cwd() / "training/tests/integration/config/test_interpolator.yaml",
-    )
-    assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    assert isinstance(cfg, DictConfig)
-    return cfg, url_dataset
-
-
 def multi_output_interpolator_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,

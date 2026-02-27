@@ -9,8 +9,7 @@ anemoi-training:
 
 #. Deterministic Forecasting (GraphForecaster)
 #. Ensemble Forecasting (GraphEnsForecaster)
-#. Time Interpolation (GraphInterpolator)
-#. Multi-Output Time Interpolation (GraphMultiOutInterpolator)
+#. Time Interpolation (GraphMultiOutInterpolator)
 #. Diffusion-based Forecasting (GraphDiffusionForecaster)
 
 The model tasks specify the training objective and are specified in the
