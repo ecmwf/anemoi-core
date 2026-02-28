@@ -76,6 +76,10 @@ class GraphAutoEncoder(BaseGraphModule):
             self.n_step_input == self.n_step_output
         ), "Autoencoders must have the same number of input and output steps."
 
+    @property
+    def output_times(self) -> int:
+        return 1  # Autoencoder doesn't have rollout
+
     def _step(
         self,
         batch: dict[str, torch.Tensor],
@@ -118,7 +122,8 @@ class GraphAutoEncoder(BaseGraphModule):
             use_reentrant=False,
         )
 
-        return loss, metrics, y_pred
+        # All tasks return (loss, metrics, list of per-step dicts) for consistent plot callback contract.
+        return loss, metrics, [y_pred]
 
     def on_train_epoch_end(self) -> None:
         pass

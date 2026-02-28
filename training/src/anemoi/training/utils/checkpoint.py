@@ -81,6 +81,7 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
     # Load the checkpoint
+    LOGGER.debug("Loading checkpoint to device: %s", model.device)
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
 
     # apply chunking migration (fails silently otherwise leading to hard to debug issues)
