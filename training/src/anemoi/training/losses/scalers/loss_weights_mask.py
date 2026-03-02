@@ -12,6 +12,7 @@ import logging
 
 import torch
 
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.dataset_context import DatasetContext
 from anemoi.training.utils.enums import TensorDim
@@ -59,7 +60,11 @@ class NaNMaskScaler(BaseUpdatingScaler):
             processors.append(dataset_ctx.static.pre_processor)
 
         if self.use_processors_tendencies and dataset_ctx.static.pre_processor_tendencies is not None:
-            processors.append(dataset_ctx.static.pre_processor_tendencies)
+            tendency_processors = dataset_ctx.static.pre_processor_tendencies
+            if isinstance(tendency_processors, StepwiseProcessors):
+                processors.extend(proc for proc in tendency_processors if proc is not None)
+            else:
+                processors.append(tendency_processors)
 
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
         for pre_processors in processors:

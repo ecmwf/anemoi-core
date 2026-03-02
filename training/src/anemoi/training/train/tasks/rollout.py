@@ -40,10 +40,10 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
-        data_indices: IndexCollection,
+        data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -53,11 +53,11 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
+        graph_data : dict[str, HeteroData]
+            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
-        data_indices : IndexCollection
+        data_indices : dict[str, IndexCollection]
             Indices of the training data,
         metadata : dict
             Provenance information
@@ -83,6 +83,11 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
+    @property
+    def output_times(self) -> int:
+        """Number of rollout steps (outer loop in plot callbacks)."""
+        return max(1, self.rollout)
+
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
@@ -92,29 +97,36 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         rollout_step: int = 0,
     ) -> torch.Tensor:
         data_indices = dataset_ctx.static.data_indices
-        x = x.roll(-1, dims=1)
+        keep_steps = min(self.n_step_output, self.n_step_input)
 
-        # Get prognostic variables
-        x[:, -1, :, :, data_indices.model.input.prognostic] = y_pred[
-            ...,
-            data_indices.model.output.prognostic,
-        ]
+        x = x.roll(-keep_steps, dims=1)
 
-        x[:, -1] = dataset_ctx.static.output_mask.rollout_boundary(
-            x[:, -1],
-            batch[:, self.multi_step + rollout_step],
-            data_indices,
-            grid_shard_slice=dataset_ctx.dynamic.batch_grid_shard_slice,
-        )
+        # TODO(dieter): see if we can replace for loop with tensor operations
+        for i in range(keep_steps):
+            # Get prognostic variables
+            x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
+                :,
+                -(i + 1),
+                ...,
+                data_indices.model.output.prognostic,
+            ]
 
-        # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, data_indices.model.input.forcing] = batch[
-            :,
-            self.multi_step + rollout_step,
-            :,
-            :,
-            data_indices.data.input.forcing,
-        ]
+            batch_time_index = self.n_step_input + (rollout_step + 1) * self.n_step_output - (i + 1)
+
+            x[:, -(i + 1)] = dataset_ctx.static.output_mask.rollout_boundary(
+                x[:, -(i + 1)],
+                batch[:, batch_time_index],
+                data_indices,
+                grid_shard_slice=dataset_ctx.dynamic.batch_grid_shard_slice,
+            )
+
+            # get new "constants" needed for time-varying fields
+            x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
+                :,
+                batch_time_index,
+                ...,
+                data_indices.data.input.forcing,
+            ]
         return x
 
     def _advance_input(

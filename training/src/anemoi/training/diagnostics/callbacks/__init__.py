@@ -104,7 +104,6 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
                 # depending on the monitor flag on ModelCheckpoint.
                 # See https://lightning.ai/docs/pytorch/stable/common/checkpointing_intermediate.html for reference
                 AnemoiCheckpoint(
-                    config=config,
                     filename=name,
                     save_last=True,
                     **{save_key: save_frequency},

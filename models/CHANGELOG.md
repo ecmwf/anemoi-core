@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.12.1](https://github.com/ecmwf/anemoi-core/compare/models-0.12.0...models-0.12.1) (2026-02-09)
+
+
+### Features
+
+* **migrations:** Remove migration rollback ([#830](https://github.com/ecmwf/anemoi-core/issues/830)) ([5490b80](https://github.com/ecmwf/anemoi-core/commit/5490b80541ac938395ec80fd8fd5591ce6073e40))
+* Multi output steps ([#636](https://github.com/ecmwf/anemoi-core/issues/636)) ([99aaf71](https://github.com/ecmwf/anemoi-core/commit/99aaf715bd423acfc21a1794e231acdd7ee37ac4))
+* **training:** Make activation checkpoints configurable ([#797](https://github.com/ecmwf/anemoi-core/issues/797)) ([b06b450](https://github.com/ecmwf/anemoi-core/commit/b06b450509dfc2ff36a4a20f161676917ed976ae))
+
+
+### Bug Fixes
+
+* **models, graphs:** Models and graphs tests on gpu ([#854](https://github.com/ecmwf/anemoi-core/issues/854)) ([62f43ec](https://github.com/ecmwf/anemoi-core/commit/62f43ece38fceb9e3bf2a7d10fd769dde2dadc8d))
+* **models:** Multi-dataset fix for AnemoiEnsModelEncProcDec ([#852](https://github.com/ecmwf/anemoi-core/issues/852)) ([1327c8c](https://github.com/ecmwf/anemoi-core/commit/1327c8ce5a79003d170e4ef9c356b2775353659f))
+
 ## [0.12.0](https://github.com/ecmwf/anemoi-core/compare/models-0.11.3...models-0.12.0) (2026-01-28)
 
 

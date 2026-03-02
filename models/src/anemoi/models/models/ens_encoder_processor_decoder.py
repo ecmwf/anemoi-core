@@ -73,7 +73,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_ens_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+            n_step_output=self.n_step_output,
+        )
 
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -92,10 +97,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         if self.condition_on_residual:
+            x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
             x_data_latent = torch.cat(
                 (
                     x_data_latent,
-                    einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars"),
+                    einops.rearrange(x_skip_cond, "bse grid vars -> (bse grid) vars"),
                 ),
                 dim=-1,
             )
@@ -117,11 +123,23 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     ):
         ensemble_size = batch_ens_size // batch_size
         x_out = (
-            einops.rearrange(x_out, "(bs e n) f -> bs e n f", bs=batch_size, e=ensemble_size).to(dtype=dtype).clone()
+            einops.rearrange(
+                x_out,
+                "(bs e n) (time vars) -> bs time e n vars",
+                bs=batch_size,
+                e=ensemble_size,
+                time=self.n_step_output,
+            )
+            .to(dtype=dtype)
+            .clone()
         )
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+        assert (
+            x_skip.shape[1] == x_out.shape[1]
+        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
         x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
@@ -135,7 +153,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         *,
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: dict[str, list] | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """Forward operator.
@@ -165,8 +183,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ensemble_size = self._get_consistent_dim(x, 2)
 
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
-        in_out_sharded = grid_shard_shapes is not None
-        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
+        in_out_sharded = self._resolve_in_out_sharded(
+            dataset_names=dataset_names,
+            grid_shard_shapes=grid_shard_shapes,
+        )
+        for dataset_name in dataset_names:
+            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder
@@ -206,7 +228,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 edge_attr=encoder_edge_attr,
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
-                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                x_src_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 edge_shard_shapes=enc_edge_shard_shapes,
@@ -269,8 +291,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=True,  # x_latent always comes sharded
-                x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+                x_dst_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
+                keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
                 edge_shard_shapes=dec_edge_shard_shapes,
             )
 

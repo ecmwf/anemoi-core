@@ -25,6 +25,7 @@ from typing import Literal
 from weakref import WeakValueDictionary
 
 import mlflow
+from mlflow.exceptions import RestException
 from mlflow.tracking import MlflowClient
 from omegaconf import DictConfig
 from pytorch_lightning.callbacks import Checkpoint
@@ -321,15 +322,14 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         self._flag_log_hparams = log_hyperparams
         if self._resumed and not on_resume_create_child:
             LOGGER.info(
-                (
-                    "Resuming run without creating child run - MLFlow logs will not update the"
-                    "initial runs hyperparameters with those of the resumed run."
-                    "To update the initial run's hyperparameters, set "
-                    "`diagnostics.log.mlflow.on_resume_create_child: True`."
-                ),
+                "Resuming run without creating child run - MLFlow logs will not update the"
+                "initial runs hyperparameters with those of the resumed run."
+                "To update the initial run's hyperparameters, set "
+                "`diagnostics.log.mlflow.on_resume_create_child: True`.",
             )
             self._flag_log_hparams = False
 
+        # initialize server2server lineage attributes
         self._fork_run_server2server = None
         self._parent_run_server2server = None
         self._parent_dry_run = False
@@ -516,7 +516,15 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
                 cleaned_metrics.pop(k)
                 continue
             self._logged_metrics.add(metric_id)
-        return super().log_metrics(metrics=cleaned_metrics, step=step)
+        try:
+            return super().log_metrics(metrics=cleaned_metrics, step=step)
+        except RestException as e:
+            # Handle duplicate metric key issue gracefully
+            if "duplicate key value violates unique constraint" in str(e):
+                LOGGER.warning("Duplicate metric detected %s", e)
+            else:
+                # Re-raise if it's a different kind of error
+                raise
 
     @rank_zero_only
     def log_system_metrics(self) -> None:

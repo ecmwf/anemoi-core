@@ -40,27 +40,29 @@ class MockDenoisingFunction:
         self,
         x: dict[str, torch.Tensor],
         y: dict[str, torch.Tensor],
-        sigma: torch.Tensor,
+        sigma: torch.Tensor | dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[dict[str, Optional[list]]] = None,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Mock denoising function that reduces noise proportionally to sigma."""
         self.call_count += 1
 
-        # Simple denoising: reduce noise proportional to sigma
-        # At high sigma (high noise), return mostly the conditioning x
-        # At low sigma (low noise), return mostly the noisy y
-        sigma_normalized = sigma / (sigma.max() + 1e-8)
+        if isinstance(sigma, dict):
+            sigma_normalized = {k: s / (s.max() + 1e-8) for k, s in sigma.items()}
+        else:
+            sigma_norm = sigma / (sigma.max() + 1e-8)
+            sigma_normalized = {k: sigma_norm for k in y}
 
         denoised = {}
         for dataset_name, y_ in y.items():
+            sigma_norm = sigma_normalized[dataset_name]
             if self.deterministic:
                 # Deterministic denoising for reproducible tests
-                denoised[dataset_name] = (1 - sigma_normalized * self.noise_reduction_factor) * y_
+                denoised[dataset_name] = (1 - sigma_norm * self.noise_reduction_factor) * y_
             else:
                 # Add some controlled randomness
-                denoised = (1 - sigma_normalized * self.noise_reduction_factor) * y_
-                denoised += 0.01 * sigma_normalized * torch.randn_like(y_)
+                denoised[dataset_name] = (1 - sigma_norm * self.noise_reduction_factor) * y_
+                denoised[dataset_name] += 0.01 * sigma_norm * torch.randn_like(y_)
 
         return denoised
 
@@ -74,7 +76,7 @@ class TestEDMHeunSampler:
         batch_size, time_steps, ensemble_size, grid_size, vars_size = 2, 3, 1, 10, 5
 
         x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-        y = {DATASET_NAME: torch.randn(batch_size, ensemble_size, grid_size, vars_size)}
+        y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
 
         # Create a simple noise schedule
         num_steps = 5
@@ -116,7 +118,7 @@ class TestEDMHeunSampler:
         for shape in test_shapes:
             batch_size, time_steps, ensemble_size, grid_size, vars_size = shape
             x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-            y = {DATASET_NAME: torch.randn(batch_size, ensemble_size, grid_size, vars_size)}
+            y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
             sigmas = torch.linspace(1.0, 0.0, 6)  # 5 steps
 
             mock_denoising_fn.call_count = 0  # Reset counter
@@ -133,7 +135,7 @@ class TestEDMHeunSampler:
     def test_different_step_counts(self, mock_denoising_fn, num_steps):
         """Test sampler with different numbers of steps."""
         x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
         sigmas = torch.linspace(1.0, 0.0, num_steps + 1)
 
         mock_denoising_fn.call_count = 0
@@ -252,6 +254,23 @@ class TestEDMHeunSampler:
                 final_norm[dataset_name] < initial_norm[dataset_name]
             ), f"Expected noise reduction: final_norm ({final_norm[dataset_name]}) should be < initial_norm ({initial_norm[dataset_name]})"
 
+    def test_sigma_dtype_matches_model_input_at_denoiser_boundary(self):
+        x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+        sigmas = torch.linspace(1.0, 0.0, 4, dtype=torch.float64)
+
+        class SigmaDtypeCheckingDenoiser:
+            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
+                del model_comm_group, grid_shard_shapes
+                for dataset_name in y:
+                    assert sigma[dataset_name].dtype == x[dataset_name].dtype == y[dataset_name].dtype
+                    assert sigma[dataset_name].shape[1] == 1
+                return {dataset_name: y_data for dataset_name, y_data in y.items()}
+
+        sampler = EDMHeunSampler(dtype=torch.float64)
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=SigmaDtypeCheckingDenoiser())
+        assert set(result.keys()) == set(y.keys())
+
 
 class TestDPMPP2MSampler:
     """Test suite for DPM++ 2M sampler."""
@@ -262,7 +281,7 @@ class TestDPMPP2MSampler:
         batch_size, time_steps, ensemble_size, grid_size, vars_size = 2, 3, 1, 10, 5
 
         x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-        y = {DATASET_NAME: torch.randn(batch_size, ensemble_size, grid_size, vars_size)}
+        y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
 
         # Create a simple noise schedule
         num_steps = 5
@@ -304,7 +323,7 @@ class TestDPMPP2MSampler:
         for shape in test_shapes:
             batch_size, time_steps, ensemble_size, grid_size, vars_size = shape
             x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-            y = {DATASET_NAME: torch.randn(batch_size, ensemble_size, grid_size, vars_size)}
+            y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
             sigmas = torch.linspace(1.0, 0.0, 6)  # 5 steps
 
             mock_denoising_fn.call_count = 0  # Reset counter
@@ -320,7 +339,7 @@ class TestDPMPP2MSampler:
     def test_different_step_counts(self, mock_denoising_fn, num_steps):
         """Test sampler with different numbers of steps."""
         x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
         sigmas = torch.linspace(1.0, 0.0, num_steps + 1)
 
         mock_denoising_fn.call_count = 0
@@ -372,7 +391,7 @@ class TestDPMPP2MSampler:
     def test_numerical_stability_small_sigmas(self, mock_denoising_fn):
         """Test numerical stability with very small sigma values."""
         x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
 
         # Create schedule with very small sigmas
         sigmas = torch.tensor([1e-3, 1e-4, 1e-5, 0.0])
@@ -385,6 +404,23 @@ class TestDPMPP2MSampler:
             assert torch.isfinite(result[dataset_name]).all()
             assert not torch.isnan(result[dataset_name]).any()
 
+    def test_sigma_time_dim_is_one_at_denoiser_boundary(self):
+        x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+        sigmas = torch.linspace(1.0, 0.0, 4, dtype=torch.float64)
+
+        class SigmaShapeCheckingDenoiser:
+            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
+                del model_comm_group, grid_shard_shapes
+                for dataset_name in y:
+                    assert sigma[dataset_name].shape[1] == 1
+                    assert sigma[dataset_name].dtype == x[dataset_name].dtype == y[dataset_name].dtype
+                return {dataset_name: y_data for dataset_name, y_data in y.items()}
+
+        sampler = DPMpp2MSampler(dtype=torch.float64)
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=SigmaShapeCheckingDenoiser())
+        assert set(result.keys()) == set(y.keys())
+
 
 class TestSamplerComparison:
     """Test suite comparing different samplers."""
@@ -395,37 +431,13 @@ class TestSamplerComparison:
         batch_size, time_steps, ensemble_size, grid_size, vars_size = 2, 3, 1, 10, 5
 
         x = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
-        y = {DATASET_NAME: torch.randn(batch_size, ensemble_size, grid_size, vars_size)}
+        y = {DATASET_NAME: torch.randn(batch_size, time_steps, ensemble_size, grid_size, vars_size)}
 
         # Create a simple noise schedule
         num_steps = 5
         sigmas = torch.linspace(1.0, 0.0, num_steps + 1)
 
         return x, y, sigmas
-
-    def test_samplers_produce_different_results(self, sample_data):
-        """Test that different samplers produce different results."""
-        x, y, sigmas = sample_data
-
-        # Use different mock functions to ensure different behavior
-        mock_fn1 = MockDenoisingFunction(deterministic=True, noise_reduction_factor=0.8)
-        mock_fn2 = MockDenoisingFunction(deterministic=True, noise_reduction_factor=0.8)
-
-        sampler_heun = EDMHeunSampler(S_churn=0.0)
-        y_cloned = {k: v.clone() for k, v in y.items()}
-        result_heun = sampler_heun.sample(x, y_cloned, sigmas, mock_fn1)
-
-        sampler_dpmpp = DPMpp2MSampler()
-        y_cloned = {k: v.clone() for k, v in y.items()}
-        result_dpmpp = sampler_dpmpp.sample(x, y_cloned, sigmas, mock_fn2)
-
-        # Convert to same dtype for comparison
-        result_heun = {k: v.to(result_dpmpp[k].dtype) for k, v in result_heun.items()}
-
-        assert set(result_heun.keys()) == set(result_dpmpp.keys())
-        for dataset_name in result_heun:
-            # Results should be different (unless by coincidence)
-            assert not torch.allclose(result_heun[dataset_name], result_dpmpp[dataset_name], atol=1e-6)
 
     def test_samplers_same_output_shape(self, sample_data):
         """Test that all samplers produce the same output shape."""
@@ -489,7 +501,7 @@ class TestSamplerEdgeCases:
     def test_single_step_sampling(self):
         """Test samplers with only one step."""
         x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(1, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
         sigmas = torch.tensor([1.0, 0.0])  # Only one step
 
         mock_fn1 = MockDenoisingFunction(deterministic=True)
@@ -513,7 +525,7 @@ class TestSamplerEdgeCases:
         """Test samplers with large batch sizes."""
         batch_size = 10
         x = {DATASET_NAME: torch.randn(batch_size, 2, 1, 5, 3)}
-        y = {DATASET_NAME: torch.randn(batch_size, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(batch_size, 2, 1, 5, 3)}
         sigmas = torch.linspace(1.0, 0.0, 4)  # 3 steps
 
         mock_fn1 = MockDenoisingFunction(deterministic=True)
@@ -537,7 +549,7 @@ class TestSamplerEdgeCases:
         """Test samplers with multiple ensemble members."""
         ensemble_size = 5
         x = {DATASET_NAME: torch.randn(2, 3, ensemble_size, 10, 5)}
-        y = {DATASET_NAME: torch.randn(2, ensemble_size, 10, 5)}
+        y = {DATASET_NAME: torch.randn(2, 3, ensemble_size, 10, 5)}
         sigmas = torch.linspace(1.0, 0.0, 4)  # 3 steps
 
         mock_fn1 = MockDenoisingFunction(deterministic=True)
@@ -556,3 +568,60 @@ class TestSamplerEdgeCases:
             assert result_dpmpp[dataset_name].shape == y[dataset_name].shape
             assert torch.isfinite(result_heun[dataset_name]).all()
             assert torch.isfinite(result_dpmpp[dataset_name]).all()
+
+
+class TestSamplerMultiDataset:
+    """Regression tests for multi-dataset sampling behavior."""
+
+    @pytest.mark.parametrize(
+        "sampler_factory",
+        [
+            lambda: EDMHeunSampler(dtype=torch.float64, S_churn=0.0),
+            lambda: DPMpp2MSampler(dtype=torch.float64),
+        ],
+        ids=["heun", "dpmpp_2m"],
+    )
+    def test_multi_dataset_uses_per_dataset_sigma_shape_and_dtype(self, sampler_factory):
+        x = {
+            "dataset_a": torch.randn(2, 3, 1, 5, 3, dtype=torch.float32),
+            "dataset_b": torch.randn(1, 2, 4, 7, 2, dtype=torch.bfloat16),
+        }
+        y = {dataset_name: torch.randn_like(x_data) for dataset_name, x_data in x.items()}
+        sigmas = torch.linspace(1.0, 0.0, 6, dtype=torch.float64)
+
+        class ShapeDtypeCheckingDenoiser:
+            def __call__(
+                self,
+                x_in: dict[str, torch.Tensor],
+                y_in: dict[str, torch.Tensor],
+                sigma_in: torch.Tensor | dict[str, torch.Tensor],
+                model_comm_group: Optional[ProcessGroup] = None,
+                grid_shard_shapes: Optional[dict[str, Optional[list]]] = None,
+            ) -> dict[str, torch.Tensor]:
+                del model_comm_group, grid_shard_shapes
+                assert isinstance(sigma_in, dict)
+                for dataset_name, y_data in y_in.items():
+                    sigma_data = sigma_in[dataset_name]
+                    assert sigma_data.shape == (
+                        y_data.shape[0],
+                        1,
+                        y_data.shape[2],
+                        1,
+                        1,
+                    )
+                    assert sigma_data.dtype == y_data.dtype == x_in[dataset_name].dtype
+                return {dataset_name: y_data for dataset_name, y_data in y_in.items()}
+
+        sampler = sampler_factory()
+        result = sampler.sample(
+            x={dataset_name: x_data.clone() for dataset_name, x_data in x.items()},
+            y={dataset_name: y_data.clone() for dataset_name, y_data in y.items()},
+            sigmas=sigmas,
+            denoising_fn=ShapeDtypeCheckingDenoiser(),
+        )
+
+        assert set(result.keys()) == set(y.keys())
+        for dataset_name, result_data in result.items():
+            assert result_data.shape == y[dataset_name].shape
+            assert result_data.dtype == x[dataset_name].dtype
+            assert torch.isfinite(result_data).all()

@@ -483,9 +483,6 @@ class BenchmarkProfiler(Profiler):
             system_metrics_df = self.to_df(WandBSystemSummarizer(logger).summarize_system_metrics())
         elif logger_name == "mlflow":
             system_metrics_df = MLFlowSystemSummarizer(logger).summarize_mlflow_system_metrics()
-        elif logger_name == "tensorboard":
-            LOGGER.info("No system profiler data available for Tensorboard")
-            system_metrics_df = None
 
         self.system_report_fname = self.dirpath / "system_profiler.csv"
         self._save_report(system_metrics_df, self.system_report_fname)

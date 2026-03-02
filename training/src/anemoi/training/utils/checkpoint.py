@@ -81,11 +81,15 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
     # Load the checkpoint
+    LOGGER.debug("Loading checkpoint to device: %s", model.device)
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
 
     # apply chunking migration (fails silently otherwise leading to hard to debug issues)
     # this is due to loading with strict=False, planning to make this more robust in the future
     checkpoint = chunking_fix_migration(checkpoint)
+
+    # Refresh processor stats from the current dataset if configured.
+    model._update_checkpoint_state_dict_for_load(checkpoint)
 
     # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
