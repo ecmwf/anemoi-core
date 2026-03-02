@@ -13,9 +13,6 @@ dataloader:
       data:
         start: 2017-01-08 18:00:00
 
-model:
-  compile: null
-
 diagnostics:
   plot:
     parameters: [tp, 2t]
