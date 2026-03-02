@@ -498,6 +498,10 @@ class InterpolationMultiSchema(BaseTrainingSchema):
     explicit_times: ExplicitTimes
     "Time indices for input and output."
 
+    # Needed to allow to override default training configuration
+    # Forced to be None (null)
+    rollout: Literal[None] = None
+
 
 TrainingSchema = Annotated[
     ForecasterSchema
