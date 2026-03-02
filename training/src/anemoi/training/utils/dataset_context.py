@@ -26,7 +26,7 @@ class DatasetContextStatic:
     """Container for dataset-specific objects that are static across steps."""
 
     name: str
-    loss: BaseLoss | torch.nn.Module
+    loss: BaseLoss | torch.nn.Module | None
     metrics: Any
     val_metric_ranges: dict[str, Any]
     pre_processor: Any

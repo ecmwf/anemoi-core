@@ -417,9 +417,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return {
             dataset_name: DatasetContextStatic(
                 name=dataset_name,
-                loss=self.loss[dataset_name],
-                metrics=self.metrics[dataset_name],
-                val_metric_ranges=self.val_metric_ranges[dataset_name],
+                loss=self.loss.get(dataset_name, None),
+                metrics=self.metrics.get(dataset_name, {}),
+                val_metric_ranges=self.val_metric_ranges.get(dataset_name, {}),
                 pre_processor=self.model.pre_processors[dataset_name],
                 pre_processor_tendencies=(
                     pre_processors_tendencies[dataset_name]
@@ -513,7 +513,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if scaler is None:  # If scalar is None, no update to be applied
             return
 
-        if name in dataset_ctx.static.loss.scaler:  # If scalar in loss, update it
+        if (
+            dataset_ctx.static.loss is not None and name in dataset_ctx.static.loss.scaler
+        ):  # If scalar in loss, update it
             dataset_ctx.static.loss.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
         for metric in dataset_ctx.static.metrics.values():  # If scalar in metrics, update it
@@ -635,7 +637,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        return dataset_ctx.static.loss(
+        loss = dataset_ctx.static.loss
+        assert loss is not None, f"Dataset {dataset_ctx.static.name} has no configured loss."
+
+        return loss(
             y_pred,
             y,
             grid_shard_slice=dataset_ctx.dynamic.effective_grid_shard_slice,

@@ -184,6 +184,35 @@ def _set_base_task_attrs(
     obj.val_metric_ranges = {"data": {}}
 
 
+def test_refresh_dataset_context_static_supports_non_target_datasets() -> None:
+    """Datasets without a training loss should still get a static context."""
+    data_indices = {
+        "data": _make_minimal_index_collection(_NAME_TO_INDEX),
+        "aux": _make_minimal_index_collection(_NAME_TO_INDEX),
+    }
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    forecaster.dataset_names = list(data_indices.keys())
+    forecaster.data_indices = data_indices
+    forecaster.output_mask = {"data": NoOutputMask(), "aux": NoOutputMask()}
+    forecaster.loss = {"data": DummyLoss()}  # "aux" intentionally excluded from target datasets
+    forecaster.metrics = {"data": {}}
+    forecaster.val_metric_ranges = {"data": {}}
+
+    model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
+    model.pre_processors = {"data": lambda x: x, "aux": lambda x: x}
+    model.post_processors = {"data": lambda x, **_kwargs: x, "aux": lambda x, **_kwargs: x}
+    forecaster.model = model
+
+    forecaster.refresh_dataset_context_static()
+
+    assert set(forecaster.dataset_context_static.keys()) == {"data", "aux"}
+    assert forecaster.dataset_context_static["data"].loss is not None
+    assert forecaster.dataset_context_static["aux"].loss is None
+    assert forecaster.dataset_context_static["aux"].metrics == {}
+    assert forecaster.dataset_context_static["aux"].val_metric_ranges == {}
+
+
 def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forecaster output_times, get_init_step, and _step return shape (one instantiation)."""
     data_indices = _data_indices_single()
