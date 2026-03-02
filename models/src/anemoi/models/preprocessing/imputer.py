@@ -9,7 +9,6 @@
 
 
 import logging
-import warnings
 from abc import ABC
 from typing import Optional
 
@@ -417,4 +416,3 @@ class CopyImputer(BaseImputer):
                     ..., self.data_indices.data.input.name_to_index[value]
                 ][nan_locations[..., idx_src]]
         return x
-
