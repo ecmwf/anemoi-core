@@ -434,7 +434,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 ),
                 data_indices=self.data_indices[dataset_name],
                 output_mask=self.output_mask[dataset_name],
-                grid_indices=self.grid_indices[dataset_name],
             )
             for dataset_name in self.dataset_names
         }

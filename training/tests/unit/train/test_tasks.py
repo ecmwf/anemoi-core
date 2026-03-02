@@ -178,7 +178,6 @@ def _set_base_task_attrs(
     obj.model_comm_group_size = 1
     obj.grid_shard_shapes = {"data": None}
     obj.grid_shard_slice = {"data": None}
-    obj.grid_indices = {"data": None}
     obj.output_mask = {"data": NoOutputMask()}
     obj.loss = {"data": DummyLoss()}
     obj.metrics = {"data": {}}

@@ -35,7 +35,6 @@ class DatasetContextStatic:
     post_processor_tendencies: Any | None
     data_indices: IndexCollection
     output_mask: Any
-    grid_indices: Any
 
 
 @dataclass(frozen=True, slots=True)
