@@ -568,7 +568,7 @@ def global_config_with_checkpoint(
 
 
 @pytest.fixture
-def multi_output_interpolator_config(
+def interpolator_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, str]:
@@ -582,12 +582,12 @@ def multi_output_interpolator_config(
     with initialize(
         version_base=None,
         config_path="../../src/anemoi/training/config",
-        job_name="test_interpolator_multiout",
+        job_name="test_interpolator",
     ):
-        template = compose(config_name="interpolator_multiout")
+        template = compose(config_name="interpolator")
 
     use_case_modifications = OmegaConf.load(
-        Path.cwd() / "training/tests/integration/config/test_interpolator_multiout.yaml",
+        Path.cwd() / "training/tests/integration/config/test_interpolator.yaml",
     )
     assert isinstance(use_case_modifications, DictConfig)
 
