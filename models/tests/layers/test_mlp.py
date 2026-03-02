@@ -12,6 +12,7 @@ import pytest
 import torch
 
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.mlp import GatedMLPLayer
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -51,13 +52,52 @@ class TestMLP:
         mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, n_extra_layers=0)
         assert isinstance(mlp, MLP)
         assert isinstance(mlp.mlp, torch.nn.Sequential)
-        assert len(mlp.mlp) == 5
+        assert len(mlp.mlp) == 3
 
         mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 0, False, False)
-        assert len(mlp.mlp) == 5
+        assert len(mlp.mlp) == 3
 
         mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 1, False, False)
-        assert len(mlp.mlp) == 7
+        assert len(mlp.mlp) == 5
+
+    @pytest.mark.parametrize(
+        ("mlp_implementation", "gate_type"),
+        [
+            ("glu", torch.nn.Sigmoid),
+            ("swiglu", torch.nn.SiLU),
+            ("geglu", torch.nn.GELU),
+            ("reglu", torch.nn.ReLU),
+        ],
+    )
+    def test_init_gated_implementation(
+        self, num_features, hdim, num_out_feature, layer_kernels, mlp_implementation, gate_type
+    ):
+        mlp = MLP(
+            num_features,
+            hdim,
+            num_out_feature,
+            layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
+        )
+        assert isinstance(mlp.mlp[0], GatedMLPLayer)
+        assert isinstance(mlp.mlp[0].gating, gate_type)
+
+    def test_glu_activation_requires_mlp_implementation(self, num_features, hdim, num_out_feature):
+        layer_kernels = load_layer_kernels(
+            {"Activation": {"_target_": "anemoi.models.layers.activations.GLU", "dim": hdim}}
+        )
+        with pytest.raises(ValueError, match="GLU-based activations"):
+            MLP(
+                num_features,
+                hdim,
+                num_out_feature,
+                layer_kernels,
+                n_extra_layers=0,
+                layer_norm=False,
+                mlp_implementation="mlp",
+            )
 
     def test_forwards(self, batch_size, nlatlon, num_features, hdim, num_out_feature, layer_kernels):
         """Test MLP forward pass."""

@@ -108,7 +108,7 @@ class TestGNNBaseMapper:
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
         assert mapper.hidden_dim == mapper_init.hidden_dim
         assert mapper.out_channels_dst == mapper_init.out_channels_dst
-        assert isinstance(mapper.activation, nn.Module)
+        assert mapper.layer_factory is not None
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         # Should be a no-op in the base class
@@ -154,7 +154,7 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
         assert mapper.hidden_dim == mapper_init.hidden_dim
         # Forward mapper doesn't have out_channels_dst
-        assert isinstance(mapper.activation, nn.Module)
+        assert mapper.layer_factory is not None
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         x = pair_tensor

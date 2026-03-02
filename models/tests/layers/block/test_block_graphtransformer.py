@@ -15,9 +15,11 @@ import torch
 import torch.nn as nn
 
 import anemoi.models.layers.block
+from anemoi.models.layers.block import MLP
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.conv import GraphTransformerConv
+from anemoi.models.layers.mlp import GatedMLPLayer
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -132,9 +134,7 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
     assert isinstance(block.lin_edge, torch.nn.Linear), "block.lin_edge is not an instance of torch.nn.Linear"
     assert isinstance(block.conv, GraphTransformerConv), "block.conv is not an instance of GraphTransformerConv"
     assert isinstance(block.projection, torch.nn.Linear), "block.projection is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block.node_dst_mlp, torch.nn.Sequential
-    ), "block.node_dst_mlp is not an instance of torch.nn.Sequential"
+    assert isinstance(block.node_dst_mlp, MLP), "block.node_dst_mlp is not an instance of MLP"
     assert block.q_norm.bias is None
     assert block.k_norm.bias is None
     assert isinstance(
@@ -185,9 +185,7 @@ def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge
     assert isinstance(
         block_with_edge_mlp.projection, torch.nn.Linear
     ), "block.projection is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block_with_edge_mlp.node_dst_mlp, torch.nn.Sequential
-    ), "block.node_dst_mlp is not an instance of torch.nn.Sequential"
+    assert isinstance(block_with_edge_mlp.node_dst_mlp, MLP), "block.node_dst_mlp is not an instance of MLP"
     assert block_with_edge_mlp.q_norm.bias is None
     assert block_with_edge_mlp.k_norm.bias is None
     assert isinstance(
@@ -200,6 +198,29 @@ def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge
     assert isinstance(
         block_with_edge_mlp.edge_pre_mlp[1], _layer_kernels.Activation.func
     ), "block.edge_pre_mlp[1] is not an instance of layer_kernels.Activation"
+
+
+def test_edge_pre_mlp_remains_plain_when_node_mlp_is_gated():
+    layer_kernels = load_layer_kernels({"Activation": {"_target_": "torch.nn.GELU"}})
+    block = GraphTransformerProcessorBlock(
+        in_channels=8,
+        hidden_dim=16,
+        out_channels=8,
+        edge_dim=4,
+        layer_kernels=layer_kernels,
+        num_heads=2,
+        bias=True,
+        update_src_nodes=False,
+        qk_norm=False,
+        graph_attention_backend="pyg",
+        edge_pre_mlp=True,
+        mlp_implementation="swiglu",
+    )
+
+    # Node MLP follows selected implementation.
+    assert isinstance(block.node_dst_mlp.mlp[0], GatedMLPLayer)
+    # Edge pre-processing MLP is explicitly forced to standard MLP implementation.
+    assert isinstance(block.edge_pre_mlp[0], nn.Linear)
 
 
 def test_GraphTransformerProcessorBlock_shard_qkve_heads(init_proc, block):

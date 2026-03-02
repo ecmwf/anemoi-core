@@ -34,6 +34,8 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.mlp import build_feedforward_layer
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
@@ -108,11 +110,12 @@ class TransformerProcessorBlock(BaseBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        window_size: int,
+        window_size: Optional[int],
         layer_kernels: DotDict,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
@@ -137,10 +140,14 @@ class TransformerProcessorBlock(BaseBlock):
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
-        self.mlp = nn.Sequential(
-            layer_kernels.Linear(num_channels, hidden_dim),
-            layer_kernels.Activation(),
-            layer_kernels.Linear(hidden_dim, num_channels),
+        self.mlp = MLP(
+            in_features=num_channels,
+            hidden_dim=hidden_dim,
+            out_features=num_channels,
+            layer_kernels=layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
         )
 
     def forward(
@@ -177,11 +184,12 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        window_size: int,
+        window_size: Optional[int],
         layer_kernels: DotDict,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
@@ -195,6 +203,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             dropout_p=dropout_p,
             qk_norm=qk_norm,
             attention_implementation=attention_implementation,
+            mlp_implementation=mlp_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
@@ -245,6 +254,7 @@ class GraphConvBaseBlock(BaseBlock):
         out_channels: int,
         num_chunks: int,
         mlp_extra_layers: int = 0,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = True,
         layer_kernels: DotDict,
         edge_dim: Optional[int] = None,
@@ -276,7 +286,8 @@ class GraphConvBaseBlock(BaseBlock):
                 hidden_dim=out_channels,
                 out_features=out_channels,
                 layer_kernels=layer_kernels,
-                n_extra_layers=mlp_extra_layers,
+                n_extra_layers=mlp_extra_layers + 1,
+                mlp_implementation=mlp_implementation,
             )
         else:
             self.emb_edges = None
@@ -289,7 +300,8 @@ class GraphConvBaseBlock(BaseBlock):
             hidden_dim=out_channels,
             out_features=out_channels,
             layer_kernels=layer_kernels,
-            n_extra_layers=mlp_extra_layers,
+            n_extra_layers=mlp_extra_layers + 1,
+            mlp_implementation=mlp_implementation,
         )
 
         self.conv = GraphConv(
@@ -297,6 +309,7 @@ class GraphConvBaseBlock(BaseBlock):
             out_channels=out_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
+            mlp_implementation=mlp_implementation,
         )
 
     @abstractmethod
@@ -446,6 +459,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
@@ -488,7 +502,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
-        Activation = layer_kernels.Activation
         self.lin_key = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_query = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_value = Linear(in_channels, num_heads * self.out_channels_conv)
@@ -503,17 +516,23 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
-        self.node_dst_mlp = nn.Sequential(
-            Linear(out_channels, hidden_dim),
-            Activation(),
-            Linear(hidden_dim, out_channels),
+        self.node_dst_mlp = MLP(
+            in_features=out_channels,
+            hidden_dim=hidden_dim,
+            out_features=out_channels,
+            layer_kernels=layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
         )
 
         # Optional edge preprocessing MLP
         if edge_pre_mlp:
-            self.edge_pre_mlp = nn.Sequential(
-                Linear(edge_dim, edge_dim),
-                Activation(),
+            self.edge_pre_mlp = build_feedforward_layer(
+                in_features=edge_dim,
+                out_features=edge_dim,
+                layer_kernels=layer_kernels,
+                mlp_implementation="mlp",
             )
         else:
             self.edge_pre_mlp = nn.Identity()
@@ -682,6 +701,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         shard_strategy: str = "edges",
@@ -729,13 +749,13 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             num_heads=num_heads,
             bias=bias,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
             **kwargs,
         )
 
-        Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
 
         self.layer_norm_attention_src = LayerNorm(normalized_shape=in_channels)
@@ -743,10 +763,14 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         if self.update_src_nodes:
             self.layer_norm_mlp_src = LayerNorm(normalized_shape=out_channels)
-            self.node_src_mlp = nn.Sequential(
-                Linear(out_channels, hidden_dim),
-                layer_kernels.Activation(),
-                Linear(hidden_dim, out_channels),
+            self.node_src_mlp = MLP(
+                in_features=out_channels,
+                hidden_dim=hidden_dim,
+                out_features=out_channels,
+                layer_kernels=layer_kernels,
+                n_extra_layers=0,
+                layer_norm=False,
+                mlp_implementation=mlp_implementation,
             )
         else:
             self.layer_norm_mlp_src = nn.Identity()
@@ -847,6 +871,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
@@ -889,6 +914,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             num_heads=num_heads,
             bias=bias,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
