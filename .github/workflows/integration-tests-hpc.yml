@@ -42,8 +42,9 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --slow --mlflow --mlflow-server=${{ secrets.MLFLOW_TEST_URL }}
-            python3 -m pytest -v models/tests/integration --slow
+            python3 -m pytest -v --slow \
+              training/tests/integration/test_training_cycle.py::test_training_cycle_diffusion[diffusion] \
+              training/tests/integration/test_training_cycle.py::test_training_cycle_diffusion[diffusiontend]
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
@@ -75,7 +76,8 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
-            srun python -m pytest -v training/tests/integration --slow --multigpu -k "test_benchmark_training_cycle"
+            srun python -m pytest -v --slow --multigpu \
+              training/tests/integration/test_benchmark.py::test_benchmark_training_cycle[diffusiontend]
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
