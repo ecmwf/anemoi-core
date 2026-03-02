@@ -112,7 +112,7 @@ class BaseGraphModel(nn.Module):
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
-            self.num_input_channels_decoding_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
+            self.num_input_channels_decoding_forcings[dataset_name] = 0
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
