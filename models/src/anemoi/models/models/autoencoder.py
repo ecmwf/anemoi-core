@@ -76,6 +76,13 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
+    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        super()._calculate_shapes_and_indices(data_indices)
+        self._forcing_input_idx = {}
+        for dataset_name, dataset_indices in data_indices.items():
+            forcing_names = dataset_indices.model._forcing
+            self._forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in forcing_names]
+
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)

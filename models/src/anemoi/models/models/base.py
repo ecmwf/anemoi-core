@@ -131,7 +131,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         return (
-            self.n_step_output * self.num_input_channels_target_forcings[dataset_name]
+            self.n_step_output * self.num_input_channels_decoding_forcings[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
         )
 
