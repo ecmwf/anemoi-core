@@ -208,7 +208,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 0 : self.n_step_input,
                 ...,
                 dataset_ctx.static.data_indices.data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
+            ]  # (bs, n_step_input, latlon, nvar)
             msg = (
                 f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
                 f", {dataset_batch.shape[1]} !>= {required_time_steps}"
