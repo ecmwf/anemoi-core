@@ -296,8 +296,6 @@ performed. The user can specify the imputer for each dataset by setting
 ensuring that the variable value over NaNs becomes zero after mean-std
 normalisation. Another option is to impute with a given constant.
 
-The ``DynamicInputImputer`` can be used for fields where the NaN
-locations change in time.
 
 .. code:: yaml
 
