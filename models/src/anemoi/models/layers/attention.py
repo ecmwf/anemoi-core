@@ -242,7 +242,7 @@ class SDPAAttentionWrapper(nn.Module):
         softcap=None,
         alibi_slopes=None,
     ):
-        if softcap not in (None, 0):
+        if softcap is not None:
             raise NotImplementedError(
                 "Softcap not supported by Pytorchs SDPA. please switch to flash attention or disable softcap."
             )

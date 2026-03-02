@@ -197,7 +197,7 @@ class TransformerProcessor(BaseProcessor):
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
-        softcap: float = 0,
+        softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
         cpu_offload: bool = False,
@@ -226,7 +226,7 @@ class TransformerProcessor(BaseProcessor):
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
         softcap : float, optional
-            Anything > 0 activates softcapping flash attention, by default 0
+            Anything > 0 activates softcapping flash attention, by default None
         use_alibi_slopes : bool
             Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional

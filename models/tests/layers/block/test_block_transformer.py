@@ -113,7 +113,7 @@ class TestTransformerProcessorBlock:
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
-            softcap=0,
+            softcap=None,
             qk_norm=qk_norm,
         )
 

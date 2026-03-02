@@ -105,7 +105,7 @@ def test_forward_output(
         dropout_p=dropout_p,
         layer_kernels=layer_kernels,
         attention_implementation="scaled_dot_product_attention",
-        softcap=0,
+        softcap=None,
     )
 
     x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
