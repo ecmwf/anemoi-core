@@ -98,7 +98,7 @@ class BaseGraphModel(nn.Module):
         self.num_input_channels = {}
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
-        self.num_input_channels_target_forcings = {}
+        self.num_input_channels_decoding_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
         self._target_forcing_input_idx = {}
@@ -113,7 +113,8 @@ class BaseGraphModel(nn.Module):
             self._forcing_input_idx[dataset_name] = []  # TODO: Where do we define the target forcings?
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
-            self.num_input_channels_target_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
+            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
+            self.num_input_channels_decoding_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
