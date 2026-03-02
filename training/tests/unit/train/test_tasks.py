@@ -7,7 +7,6 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.preprocessing import Processors
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
@@ -26,8 +25,8 @@ class DummyLoss(torch.nn.Module):
 class DummyModel:
     def __init__(self, num_output_variables: int | None = None, output_times: int = 1, add_skip: bool = False) -> None:
         self.called_with: dict[str, Any] | None = None
-        self.pre_processors = Processors([])
-        self.post_processors = Processors([], inverse=True)
+        self.pre_processors = {"data": lambda x: x}
+        self.post_processors = {"data": lambda x, **_kwargs: x}
         self.output_times = output_times
         self.num_output_variables = num_output_variables
         self.add_skip = add_skip
@@ -179,6 +178,11 @@ def _set_base_task_attrs(
     obj.model_comm_group_size = 1
     obj.grid_shard_shapes = {"data": None}
     obj.grid_shard_slice = {"data": None}
+    obj.grid_indices = {"data": None}
+    obj.output_mask = {"data": NoOutputMask()}
+    obj.loss = {"data": DummyLoss()}
+    obj.metrics = {"data": {}}
+    obj.val_metric_ranges = {"data": {}}
 
 
 def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,6 +201,7 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     forecaster.loss = {"data": DummyLoss()}
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
+    forecaster.refresh_dataset_context_static()
 
     assert forecaster.output_times == 1
     for i in range(1, _CFG_FORECASTER.training.rollout.max + 1):
@@ -248,6 +253,8 @@ def test_graphdiffusionforecaster() -> None:
     class DummyDiffusion:
         def __init__(self, model: DummyDiffusionModel) -> None:
             self.model = model
+            self.pre_processors = model.pre_processors
+            self.post_processors = model.post_processors
 
     data_indices = _data_indices_single()
     forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
@@ -263,6 +270,7 @@ def test_graphdiffusionforecaster() -> None:
     forecaster.loss = {"data": DummyLoss()}
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
+    forecaster.refresh_dataset_context_static()
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     t = _CFG_DIFFUSION.training.multistep_input
@@ -282,19 +290,14 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
 
     forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
     pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices={"data": data_indices}, config=_CFG_FORECASTER)
     forecaster.n_step_input = 1
     forecaster.n_step_output = 1
     forecaster.rollout = 1
     forecaster.nens_per_device = 2
     forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
-    forecaster.model_comm_group = None
-    forecaster.model_comm_group_size = 1
-    forecaster.grid_shard_shapes = {"data": None}
-    forecaster.grid_shard_slice = {"data": None}
-    forecaster.output_mask = {"data": NoOutputMask()}
-    forecaster.data_indices = {"data": data_indices}
-    forecaster.dataset_names = ["data"]
-    forecaster.grid_dim = -2
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.refresh_dataset_context_static()
 
     def _compute_loss_metrics(
         y_pred: dict[str, torch.Tensor],
@@ -335,11 +338,13 @@ def test_rollout_advance_input_keeps_latest_steps(
 
     forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
     pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices={"data": data_indices}, config=_CFG_FORECASTER)
     forecaster.n_step_input = n_step_input
     forecaster.n_step_output = n_step_output
-    forecaster.output_mask = {"data": NoOutputMask()}
-    forecaster.data_indices = {"data": data_indices}
-    forecaster.grid_shard_slice = {"data": None}
+    forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.refresh_dataset_context_static()
+    dataset_ctx = forecaster._build_dataset_contexts()["data"]
 
     b, e, g, v = 1, 1, 2, len(_NAME_TO_INDEX)
     x = torch.zeros((b, forecaster.n_step_input, e, g, v), dtype=torch.float32)
@@ -358,8 +363,8 @@ def test_rollout_advance_input_keeps_latest_steps(
         x,
         y_pred,
         batch,
+        dataset_ctx=dataset_ctx,
         rollout_step=0,
-        dataset_name="data",
     )
     kept_steps = updated[0, :, 0, 0, 0].tolist()
     expected_next_input = expected
