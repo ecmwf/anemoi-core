@@ -15,6 +15,7 @@ import torch.nn as nn
 from hypothesis import given
 from hypothesis import settings
 
+import anemoi.models.layers.attention as attention_layers
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.utils import load_layer_kernels
@@ -173,3 +174,150 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
 
     assert x.grad is not None
     assert x.grad.shape == x.shape
+
+
+def test_multi_head_self_attention_forward_sdpa_rejects_window_size(layer_kernels):
+    num_heads = 4
+    embed_dim = 32
+    batch_size = 2
+    mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+        window_size=8,
+    )
+
+    x = torch.randn(batch_size * 2, embed_dim)
+    shapes = [list(x.shape)]
+    with pytest.raises(NotImplementedError, match="Sliding window attention is not supported"):
+        mhsa.forward(x, shapes, batch_size)
+
+
+def test_multi_head_self_attention_forward_sdpa_rejects_softcap(layer_kernels):
+    num_heads = 4
+    embed_dim = 32
+    batch_size = 2
+    mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+        softcap=0.5,
+    )
+
+    x = torch.randn(batch_size * 2, embed_dim)
+    shapes = [list(x.shape)]
+    with pytest.raises(NotImplementedError, match="Softcap not supported"):
+        mhsa.forward(x, shapes, batch_size)
+
+
+def test_multi_head_self_attention_forwards_window_size_and_softcap_to_flash(monkeypatch, layer_kernels):
+    captured = {}
+
+    class FakeFlashAttentionWrapper(nn.Module):
+        def __init__(self, use_rotary_embeddings=False, head_dim=None):
+            super().__init__()
+            captured["init_use_rotary_embeddings"] = use_rotary_embeddings
+            captured["init_head_dim"] = head_dim
+
+        def forward(
+            self,
+            query,
+            key,
+            value,
+            batch_size: int,
+            causal=False,
+            window_size=None,
+            dropout_p=0.0,
+            softcap=None,
+            alibi_slopes=None,
+        ):
+            captured["batch_size"] = batch_size
+            captured["causal"] = causal
+            captured["window_size"] = window_size
+            captured["softcap"] = softcap
+            return torch.zeros_like(query)
+
+    monkeypatch.setattr(attention_layers, "FlashAttentionWrapper", FakeFlashAttentionWrapper)
+
+    num_heads = 4
+    embed_dim = 32
+    batch_size = 2
+    grid = 3
+    window_size = 8
+    softcap = 0.4
+    mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="flash_attention",
+        window_size=window_size,
+        softcap=softcap,
+    )
+
+    x = torch.randn(batch_size * grid, embed_dim)
+    shapes = [list(x.shape)]
+    out = mhsa.forward(x, shapes, batch_size)
+
+    assert out.shape == x.shape
+    assert captured["init_head_dim"] == embed_dim // num_heads
+    assert captured["batch_size"] == batch_size
+    assert captured["window_size"] == window_size
+    assert captured["softcap"] == softcap
+
+
+def test_multi_head_cross_attention_forwards_window_size_and_softcap_to_flash(monkeypatch, layer_kernels):
+    captured = {}
+
+    class FakeFlashAttentionWrapper(nn.Module):
+        def __init__(self, use_rotary_embeddings=False, head_dim=None):
+            super().__init__()
+            captured["init_use_rotary_embeddings"] = use_rotary_embeddings
+            captured["init_head_dim"] = head_dim
+
+        def forward(
+            self,
+            query,
+            key,
+            value,
+            batch_size: int,
+            causal=False,
+            window_size=None,
+            dropout_p=0.0,
+            softcap=None,
+            alibi_slopes=None,
+        ):
+            captured["batch_size"] = batch_size
+            captured["causal"] = causal
+            captured["window_size"] = window_size
+            captured["softcap"] = softcap
+            return torch.zeros_like(query)
+
+    monkeypatch.setattr(attention_layers, "FlashAttentionWrapper", FakeFlashAttentionWrapper)
+
+    num_heads = 4
+    embed_dim = 32
+    batch_size = 2
+    grid = 3
+    window_size = 8
+    softcap = 0.4
+    mhca = MultiHeadCrossAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="flash_attention",
+        window_size=window_size,
+        softcap=softcap,
+    )
+
+    x_src = torch.randn(batch_size * grid, embed_dim)
+    x_dst = torch.randn(batch_size * grid, embed_dim)
+    shapes = [list(x_src.shape)]
+    out = mhca.forward((x_src, x_dst), shapes, batch_size)
+
+    assert out.shape == x_dst.shape
+    assert captured["init_head_dim"] == embed_dim // num_heads
+    assert captured["batch_size"] == batch_size
+    assert captured["window_size"] == window_size
+    assert captured["softcap"] == softcap

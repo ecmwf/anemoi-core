@@ -31,7 +31,7 @@ class TransformerProcessorConfig:
     attention_implementation: str = "scaled_dot_product_attention"
     softcap: float = 0
     use_alibi_slopes: bool = False
-    window_size: int = 10
+    window_size: int = None
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None

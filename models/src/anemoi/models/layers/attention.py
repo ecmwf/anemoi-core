@@ -228,18 +228,7 @@ class SDPAAttentionWrapper(nn.Module):
         from torch.nn.functional import scaled_dot_product_attention
 
         self.attention = scaled_dot_product_attention
-        self.mask = None
-        self.window_size = None
         LOGGER.info("Using scaled_dot_product_attention.")
-
-    def update_mask(self, seq_len, window_size: int, device: str):
-
-        self.mask = (
-            torch.abs(
-                torch.arange(seq_len, device=device).unsqueeze(0) - torch.arange(seq_len, device=device).unsqueeze(1)
-            )
-            <= window_size
-        )
 
     def forward(
         self,
@@ -253,25 +242,23 @@ class SDPAAttentionWrapper(nn.Module):
         softcap=None,
         alibi_slopes=None,
     ):
-        if softcap is not None:
-            NotImplementedError(
+        if softcap not in (None, 0):
+            raise NotImplementedError(
                 "Softcap not supported by Pytorchs SDPA. please switch to flash attention or disable softcap."
             )
         if alibi_slopes is not None:
-            NotImplementedError(
+            raise NotImplementedError(
                 "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
             )
-
-        sequence_len = query.shape[-2]
-
-        if window_size is not None and (self.mask is None or tuple(self.mask.shape) != (sequence_len, sequence_len)):
-            self.update_mask(sequence_len, window_size=window_size, device=query.device)
+        if window_size is not None:
+            raise NotImplementedError(
+                "Sliding window attention is not supported by Pytorchs SDPA. please switch to flash attention or disable window_size."
+            )
 
         out = self.attention(
             query,
             key,
             value,
-            attn_mask=self.mask,
             is_causal=causal,
             dropout_p=dropout_p,
         )
@@ -353,7 +340,7 @@ class FlashAttentionWrapper(nn.Module):
         value,
         batch_size: int,
         causal: bool = False,
-        window_size: int = None,
+        window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         softcap: Optional[float] = None,
         alibi_slopes: torch.Tensor = None,
