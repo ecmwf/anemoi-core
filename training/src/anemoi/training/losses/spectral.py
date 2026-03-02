@@ -112,7 +112,8 @@ class SpectralLoss(BaseLoss):
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
             self.transform = ReducedSHT(**kwargs)
         elif transform == "octahedral_sht":
-            # expected additional args: lmax/mmax/folding
+            # expected additional args: nlat
+            # TODO(sara): add support for mmax/lmax args
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
         else:

@@ -42,7 +42,7 @@ dependencies = [
   "anemoi-graphs>=0.5.2",
   "anemoi-models[migrations]>=0.9.5",
   "anemoi-training[mlflow]",
-  "anemoi-transform>=0.1.11",
+  "anemoi-transform>=0.1.21",
   "anemoi-utils[provenance]>=0.4.37",
   "datashader>=0.17",
   "einops>=0.6.1",

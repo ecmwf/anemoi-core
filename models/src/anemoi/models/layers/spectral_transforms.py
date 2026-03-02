@@ -173,6 +173,13 @@ class ReducedSHT(SpectralTransform):
         grid: str,
         **kwargs,
     ) -> None:
+        """SHT on a reduced Gaussian grid.
+
+        Parameters
+        ----------
+        grid : str
+            Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
+        """
         super().__init__()
 
         if grid != "n320":
@@ -182,6 +189,9 @@ class ReducedSHT(SpectralTransform):
 
         # Fetch regular grid data
         from anemoi.transform.grids.named import lookup
+
+        # To generate a grid
+        # anemoi-transform get-grid --source mars grid=n320,levtype=sfc,param=2t grid-n320.npz
 
         lats = lookup(grid)["latitudes"]
 
@@ -213,6 +223,13 @@ class OctahedralSHT(SpectralTransform):
         nlat: int,
         **kwargs,
     ) -> None:
+        """SHT on an octahedral reduced grid.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based on the octahedral grid structure.
+        """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
