@@ -185,7 +185,9 @@ class BaseAnemoiReader:
         """Get a sample from the dataset."""
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory
-            x = self.data[time_indices, :, :, grid_shard_indices]
+            # x = self.data[time_indices, :, :, grid_shard_indices]
+            x = self.data[time_indices]
+            x = x[..., grid_shard_indices] 
 
         else:
             # Load full grid in CPU memory, select grid_shard after
