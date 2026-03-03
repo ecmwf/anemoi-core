@@ -38,11 +38,11 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             allow_pickle=True,
         ).item()
         reduced_name_to_index = self.ds_train.name_to_index[2].keys()
-        use_residual_for = getattr(self.config.model, "residual_fields", None)
+        use_residual_for = getattr(self.config.data, "residual_fields", None)
         if use_residual_for is None:
             # Backward compatible: use residual stats for ALL variables
-            LOGGER.info("Using residual statistics for ALL variables (no filter specified)")
-            variables_to_use_residual = reduced_name_to_index
+            LOGGER.info("Not using residual statistics for any variable (no filter specified)")
+            variables_to_use_residual = [] #reduced_name_to_index
         else:
             # Only use residual stats for specified variables
             variables_to_use_residual = [var for var in use_residual_for if var in reduced_name_to_index]

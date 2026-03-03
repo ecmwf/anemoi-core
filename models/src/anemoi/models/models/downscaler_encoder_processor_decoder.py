@@ -101,8 +101,13 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             if v in self.data_indices.data.output.full
         }
         common_channels = set(input_name_to_index.keys()) & set(out_name_to_index.keys())
-        residual_fields = getattr(model_config, "residual_fields", [])
-
+        if isinstance(model_config['data'], dict):
+            residual_fields = model_config['data'].get("residual_fields", [])
+            in_hres_forcings_fields = model_config['data'].get("forcing", [])
+        else:
+            residual_fields = getattr(model_config['data'], "residual_fields", [])
+            in_hres_forcings_fields = getattr(model_config['data'], "forcing", [])
+     
         x_in_res_indices = []
         y_res_indices = []
         common_residual_fields = []
@@ -116,12 +121,9 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                     LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in in_lres dataset. Using it as a non-residual variable.")
                 else:
                     LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in out_hres dataset. Using it as a non-residual variable.")
-
         in_non_residual_fields = [field for field in input_name_to_index.keys() if field not in common_residual_fields]
         out_non_residual_fields = [field for field in out_name_to_index.keys() if field not in common_residual_fields]
-
-        in_hres_forcings_fields = getattr(model_config, "hres_forcing", [])
-
+        
         x_in_non_res_indices = [input_name_to_index[channel] for channel in in_non_residual_fields]
         y_non_res_indices = [out_name_to_index[channel] for channel in out_non_residual_fields]
         return (

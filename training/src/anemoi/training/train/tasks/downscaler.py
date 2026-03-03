@@ -154,9 +154,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """
 
         del batch_idx
-        # loss = torch.zeros(
-        #    1, dtype=batch[0].dtype, device=self.device, requires_grad=False
-        # )
 
         x_in, x_in_hres, y = batch
 
@@ -170,27 +167,21 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         y_residual_indices = self.model.model.y_residual_indices.to(device)
         x_in_residual_indices = self.model.model.x_in_residual_indices.to(device)
         y_non_residual_indices = self.model.model.y_non_residual_indices.to(device)
-        # x_in_hres_forcing_indices = self.x_in_hres_forcing_indices.to(device)
         
         y_target = torch.zeros_like(y).to(device)
-        # channel_indices = self.model.model.x_in_matching_channel_indices.to(x_in_interp_to_hres.device)
         if len(y_residual_indices): # if residual variables
             residuals_target = y[..., y_residual_indices] - x_in_interp_to_hres[..., x_in_residual_indices]
             y_target[..., y_residual_indices] = residuals_target
-        # Y = Y[:, :, :, ..., self.data_indices.data.output.full] #(see if necessary)
         if len(y_non_residual_indices): # if output non residual variables
             y_target[..., y_non_residual_indices] = y[..., y_non_residual_indices]
 
         x_in_interp_to_hres = self.model.pre_processors(
             x_in_interp_to_hres, dataset="input_lres"
         )  # need in place ?, in_place=False)
-        # x_in_interp_to_hres = x_in_interp_to_hres[  :, :, ..., self.data_indices.data.input[0].full] (see if necessary)
         x_in_hres = self.model.pre_processors(
             x_in_hres, dataset="input_hres"
         )  # , in_place=False
-        # x_in_hres = x_in_hres[:, :, ..., self.data_indices.data.input[1].full]
         y_target = self.model.pre_processors(y_target, dataset="output")
-
         # Scaler update
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
@@ -239,7 +230,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         y_pred_full[..., y_residual_indices] += x_in_interp_to_hres[..., x_in_residual_indices]
         # Add predicted residuals to the state
         y_preds = [y_pred_full, y_pred]
-
         return loss, metrics_next, y_preds
 
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
