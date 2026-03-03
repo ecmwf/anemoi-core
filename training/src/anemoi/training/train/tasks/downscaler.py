@@ -89,55 +89,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lres_grid_shard_slice = None
         self.hres_grid_shard_shapes = None
         self.hres_grid_shard_slice = None
-        self._set_channel_indices(data_indices)
-
-    def _set_channel_indices(self, data_indices):
-        input_name_to_index = self.data_indices.data.input[0].name_to_index
-        input_hres_name_to_index = self.data_indices.data.input[1].name_to_index
-        out_name_to_index = {
-            k: v
-            for k, v in self.data_indices.data.output.name_to_index.items()
-            if v in self.data_indices.data.output.full
-        }
-        LOGGER.info(f"input_name_to_index: {input_name_to_index}")
-        LOGGER.info(f"input_hres_name_to_index: {input_hres_name_to_index}")
-        LOGGER.info(f"out_name_to_index: {out_name_to_index}")
-        common_channels = set(input_name_to_index.keys()) & set(out_name_to_index.keys())
-        residual_fields = getattr(self.config.data, "residual_fields", [])
-        in_non_residual_fields = getattr(self.config.data, "in_non_residual_fields", [])
-        out_non_residual_fields = getattr(self.config.data, "out_non_residual_fields", [])
-        in_hres_forcings_fields = getattr(self.config.data, "forcing", [])
-        assert set(residual_fields).isdisjoint(set(in_non_residual_fields)), (
-                f"residual and non residual input variables overlap: {set(residual_fields).intersection(set(in_non_residual_fields))}. ",
-            )
-        assert set(residual_fields).isdisjoint(set(out_non_residual_fields)), (
-                f"residual and non residual output variables overlap: {set(residual_fields).intersection(set(out_non_residual_fields))}. ",
-            )
-
-        x_in_res_indices = []
-        y_res_indices = []
-        for channel_name in residual_fields:
-            if channel_name in common_channels:
-                x_in_res_indices.append(input_name_to_index[channel_name])
-                y_res_indices.append(out_name_to_index[channel_name])
-            else:
-                if channel_name not in input_name_to_index.keys():
-                    LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in in_lres dataset")
-                else:
-                    LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in out_hres dataset")
-
-        x_in_non_res_indices = [input_name_to_index[channel] for channel in in_non_residual_fields]
-        y_non_res_indices = [out_name_to_index[channel] for channel in out_non_residual_fields]
-
-        x_in_hres_forcing_indices = input_hres_name_to_index.values()
-        if len(x_in_hres_forcing_indices):
-            x_in_hres_forcing_indices = [input_hres_name_to_index[channel] for channel in in_hres_forcings_fields]
-
-        self.x_in_residual_indices = torch.tensor(x_in_res_indices)
-        self.y_residual_indices = torch.tensor(y_res_indices)
-        self.x_in_non_residual_indices = torch.tensor(x_in_non_res_indices)
-        self.y_non_residual_indices = torch.tensor(y_non_res_indices)
-        self.x_in_hres_forcing_indices = torch.tensor(x_in_hres_forcing_indices)
 
     def forward(
         self,
@@ -216,15 +167,15 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         )[:, None, ...]
         device = x_in_interp_to_hres.device
         # indices to device
-        y_residual_indices = self.y_residual_indices.to(device)
-        x_in_residual_indices = self.x_in_residual_indices.to(device)
-        y_non_residual_indices = self.y_non_residual_indices.to(device)
-        x_in_hres_forcing_indices = self.x_in_hres_forcing_indices.to(device)
+        y_residual_indices = self.model.model.y_residual_indices.to(device)
+        x_in_residual_indices = self.model.model.x_in_residual_indices.to(device)
+        y_non_residual_indices = self.model.model.y_non_residual_indices.to(device)
+        # x_in_hres_forcing_indices = self.x_in_hres_forcing_indices.to(device)
         
         y_target = torch.zeros_like(y).to(device)
         # channel_indices = self.model.model.x_in_matching_channel_indices.to(x_in_interp_to_hres.device)
         if len(y_residual_indices): # if residual variables
-            residuals_target = y[..., y_residual_indices] -  x_in_interp_to_hres[..., x_in_residual_indices]
+            residuals_target = y[..., y_residual_indices] - x_in_interp_to_hres[..., x_in_residual_indices]
             y_target[..., y_residual_indices] = residuals_target
         # Y = Y[:, :, :, ..., self.data_indices.data.output.full] #(see if necessary)
         if len(y_non_residual_indices): # if output non residual variables

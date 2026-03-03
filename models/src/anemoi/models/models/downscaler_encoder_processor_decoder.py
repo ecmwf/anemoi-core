@@ -60,10 +60,75 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             graph_data=graph_data,
             truncation_data=truncation_data,
         )
+        (
+            x_in_residual_indices,
+            y_residual_indices,
+            x_in_non_residual_indices,
+            y_non_residual_indices
+        ) = self._set_residual_channel_indices(data_indices, model_config)
         self.register_buffer(
             "x_in_matching_channel_indices",
             self._build_matching_channel_indices(),
             persistent=True,
+        )
+        self.register_buffer(
+            "x_in_residual_indices",
+            x_in_residual_indices,
+            persistent=True,
+        )
+        self.register_buffer(
+            "y_residual_indices",
+            y_residual_indices,
+            persistent=True,
+        )
+        self.register_buffer(
+            "x_in_non_residual_indices",
+            x_in_non_residual_indices,
+            persistent=True,
+        )
+        self.register_buffer(
+            "y_non_residual_indices",
+            y_non_residual_indices,
+            persistent=True,
+        )
+    
+    def _set_residual_channel_indices(self, data_indices, model_config):
+        input_name_to_index = self.data_indices.data.input[0].name_to_index
+        input_hres_name_to_index = self.data_indices.data.input[1].name_to_index
+        out_name_to_index = {
+            k: v
+            for k, v in self.data_indices.data.output.name_to_index.items()
+            if v in self.data_indices.data.output.full
+        }
+        common_channels = set(input_name_to_index.keys()) & set(out_name_to_index.keys())
+        residual_fields = getattr(model_config, "residual_fields", [])
+
+        x_in_res_indices = []
+        y_res_indices = []
+        common_residual_fields = []
+        for channel_name in residual_fields:
+            if channel_name in common_channels:
+                x_in_res_indices.append(input_name_to_index[channel_name])
+                y_res_indices.append(out_name_to_index[channel_name])
+                common_residual_fields.append(channel_name)
+            else:
+                if channel_name not in input_name_to_index.keys():
+                    LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in in_lres dataset. Using it as a non-residual variable.")
+                else:
+                    LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in out_hres dataset. Using it as a non-residual variable.")
+
+        in_non_residual_fields = [field for field in input_name_to_index.keys() if field not in common_residual_fields]
+        out_non_residual_fields = [field for field in out_name_to_index.keys() if field not in common_residual_fields]
+
+        in_hres_forcings_fields = getattr(model_config, "hres_forcing", [])
+
+        x_in_non_res_indices = [input_name_to_index[channel] for channel in in_non_residual_fields]
+        y_non_res_indices = [out_name_to_index[channel] for channel in out_non_residual_fields]
+        return (
+            torch.tensor(x_in_res_indices).to(torch.int32), 
+            torch.tensor(y_res_indices).to(torch.int32), 
+            torch.tensor(x_in_non_res_indices).to(torch.int32), 
+            torch.tensor(y_non_res_indices).to(torch.int32)
         )
 
     def _build_matching_channel_indices(self) -> torch.Tensor:
@@ -157,8 +222,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
 
         # residuals = y for direct channels, and y - x for inverse channels
         residuals = (
-            y[..., self.data_indices.data.output.full]
-            - x_in_interp_to_hres[..., self.data_indices.data.output.full] * mask
+            y[..., self.y_residual_indices]
+            - x_in_interp_to_hres[..., self.x_in_residual_indices] * mask[y_residual_indices]
         )
 
         norm_target = pre_processors_state(residuals, dataset="output", in_place=False)
@@ -738,7 +803,6 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         torch.Tensor
             the de-normalised state
         """
-        raise NotImplementedError('Rearrange variables here!')
         state_outp = post_processors_state(residuals, dataset="output", in_place=False)
 
         state_inp_denorm = post_processors_state(
@@ -746,7 +810,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             dataset="input_lres",
             in_place=False,
         )
-        channel_indices = self.x_in_matching_channel_indices.to(state_inp_denorm.device)
+        channel_indices = self.x_in_residual_indices.to(state_inp_denorm.device)
         state_outp += state_inp_denorm[..., channel_indices]
         return state_outp
 
