@@ -50,16 +50,6 @@ diagnostics:
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
         precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
         colormaps: ${diagnostics.plot.colormaps}
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
-        dataset_names: ["data"]
-        # every_n_batches: 100 # Override for batch frequency
-        # min_delta: 0.01 # Minimum distance between two consecutive points
-        sample_idx: ${diagnostics.plot.sample_idx}
-        every_n_batches: ${diagnostics.plot.frequency.batch}
-        output_steps: ${training.multistep_output}
-        parameters:
-        - z_500
-        - tp
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
         dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
