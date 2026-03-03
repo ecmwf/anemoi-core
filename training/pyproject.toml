@@ -19,9 +19,7 @@ license = { file = "LICENSE" }
 authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
-
 requires-python = ">=3.11,<3.14"
-
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -34,9 +32,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-
 dynamic = [ "version" ]
-
 dependencies = [
   "anemoi-datasets>=0.5.34",
   "anemoi-graphs>=0.5.2",
@@ -61,7 +57,6 @@ dependencies = [
   "tqdm>=4.65",
   "zarr>=2.14.2",
 ]
-
 # Optional extras: pip install anemoi-training[mlflow,tests], etc.
 optional-dependencies.all = [ "anemoi-training[remote]" ]
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
@@ -69,7 +64,6 @@ optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
   "pre-commit>=3.3.3",
 ]
-
 optional-dependencies.docs = [
   "autodoc-pydantic",
   "nbsphinx",
@@ -83,7 +77,6 @@ optional-dependencies.mlflow = [
   "anemoi-utils[mlflow]>=0.4.37",
   "mlflow-skinny>=2.11.1",
 ]
-
 optional-dependencies.plotting = [
   "cartopy>=0.25",
   "distinctipy>=1",
@@ -111,7 +104,6 @@ optional-dependencies.tests = [
 optional-dependencies.wandb = [
   "wandb>=0.22.2",
 ]
-
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
@@ -139,9 +131,8 @@ target-version = "py311"
 line-length = 120
 src = [ "src" ]
 exclude = [ "docs/" ]
-
 lint.select = [
-  "A", # flake8 builtins
+  "A",      # flake8 builtins
   # "ANN", # flake8-annotations
   "ANN001", # Type annotation
   "ANN201", # Return type public
@@ -156,49 +147,48 @@ lint.select = [
   "COM",    # Commas
   "CPY",    # Copyright
   # "C",  # pylint convention
-  "D", # pydocstyle
+  "D",      # pydocstyle
   # "DOC", # pydoclint
-  "DTZ", # Datetimes
-  "E",   # pycodestyle error
-  "EM",  # Error messages
-  "ERA", # Found unused code
-  "F",   # flake8 error
-  "FA",  # Future annotations
+  "DTZ",    # Datetimes
+  "E",      # pycodestyle error
+  "EM",     # Error messages
+  "ERA",    # Found unused code
+  "F",      # flake8 error
+  "FA",     # Future annotations
   # "EXE", # Executable
   # "FBT", # Boolean traps
-  "FLY",  # Fstrings
-  "FURB", # Modernising code
-  "G",    # flake8 logging format
-  "ICN",  # Import conventions
-  "ISC",  # Implicit string concatenation
-  "LOG",  # Logging
+  "FLY",    # Fstrings
+  "FURB",   # Modernising code
+  "G",      # flake8 logging format
+  "ICN",    # Import conventions
+  "ISC",    # Implicit string concatenation
+  "LOG",    # Logging
   # "I", # isort
-  "N",    # pep8 naming
-  "NPY",  # Numpys
-  "PERF", # Perfomance linting
-  "PGH",  # Pygrep hooks
-  "PIE",  # Misc lints
+  "N",      # pep8 naming
+  "NPY",    # Numpys
+  "PERF",   # Perfomance linting
+  "PGH",    # Pygrep hooks
+  "PIE",    # Misc lints
   # "PL",  # Pylint (superset of C, E, R, W)
-  "PT",  # Pytest
-  "PTH", # Use Pathlib
-  "Q",   # Quotes
-  "R",   # Refactor
-  "RET", # Return statements
-  "RSE", # Raises
-  "RUF", # Ruff specific
-  "S",   # bandit !IMPORTANT
-  "SIM", # flake8-simplify
-  "T10", # Debug statements
-  "T20", # Print statements
-  "TCH", # Type checking blocks
-  "TD",  # Todos
-  "TID", # Tidy imports
-  "TRY", # Exception handling antipatterns
-  "UP",  # Pyupgrade
-  "W",   # pycodestyle warning
-  "YTT", # flake8-2020
+  "PT",     # Pytest
+  "PTH",    # Use Pathlib
+  "Q",      # Quotes
+  "R",      # Refactor
+  "RET",    # Return statements
+  "RSE",    # Raises
+  "RUF",    # Ruff specific
+  "S",      # bandit !IMPORTANT
+  "SIM",    # flake8-simplify
+  "T10",    # Debug statements
+  "T20",    # Print statements
+  "TCH",    # Type checking blocks
+  "TD",     # Todos
+  "TID",    # Tidy imports
+  "TRY",    # Exception handling antipatterns
+  "UP",     # Pyupgrade
+  "W",      # pycodestyle warning
+  "YTT",    # flake8-2020
 ]
-
 lint.ignore = [
   "B018",
   "B028",
