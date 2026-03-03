@@ -60,7 +60,6 @@ optional-dependencies.migrations = [
   "jinja2>=3.1",
   "rich",
 ]
-
 optional-dependencies.spectral = [ "torch-dct>=0.1.6" ]
 optional-dependencies.tests = [ "anemoi-models[spectral]", "hypothesis>=6.11", "pytest>=8" ]
 urls.Documentation = "https://anemoi-models.readthedocs.io/"
