@@ -76,7 +76,6 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
 
 
 class BaseAnemoiReader:
-    """Anemoi data reader for native grid datasets."""
 
     def __init__(
         self,
@@ -90,7 +89,8 @@ class BaseAnemoiReader:
         if source is None:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
-        self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
+        LOGGER.info("NORMALIZED dataset config: %s", _normalize_dataset_config(source))
+        self.data = open_dataset(**_normalize_dataset_config(source), start=start, end=end)
 
     @property
     def dates(self) -> np.ndarray:
@@ -98,29 +98,9 @@ class BaseAnemoiReader:
         return self.data.dates
 
     @property
-    def grid_size(self) -> int:
-        """Return dataset grid size."""
-        return sum(self.data.grids)
-
-    @property
     def statistics(self) -> dict:
         """Return dataset statistics."""
         return self.data.statistics
-
-    def statistics_tendencies(
-        self,
-        timestep: int | str | datetime.timedelta | None = None,
-    ) -> dict | None:
-        """Return dataset tendency statistics."""
-        if timestep is None:
-            timestep = getattr(self, "timestep", None)
-        if timestep is None:
-            msg = "timestep must be provided to compute tendency statistics."
-            raise ValueError(msg)
-        try:
-            return self.data.statistics_tendencies(timestep)
-        except (KeyError, AttributeError):
-            return None
 
     @property
     def variables(self) -> list[str]:
@@ -143,14 +123,49 @@ class BaseAnemoiReader:
         return self.data.frequency
 
     @property
-    def supporting_arrays(self) -> dict:
-        """Return dataset supporting_arrays."""
-        return self.data.supporting_arrays()
-
-    @property
     def name_to_index(self) -> dict[str, int]:
         """Return dataset statistics."""
         return self.data.name_to_index
+
+    def __repr__(self) -> str:
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        return tree
+
+
+class AnemoiGriddedReader(BaseAnemoiReader):
+    """Anemoi data reader for gridded datasets. This can be either fields or observations."""
+    @property
+    def grid_size(self) -> int:
+        """Return dataset grid size."""
+        return sum(self.data.grids)
+
+    def statistics_tendencies(
+        self,
+        timestep: int | str | datetime.timedelta | None = None,
+    ) -> dict | None:
+        """Return dataset tendency statistics."""
+        if timestep is None:
+            timestep = getattr(self, "timestep", None)
+        if timestep is None:
+            msg = "timestep must be provided to compute tendency statistics."
+            raise ValueError(msg)
+        try:
+            return self.data.statistics_tendencies(timestep)
+        except (KeyError, AttributeError):
+            return None
+
+    @property
+    def supporting_arrays(self) -> dict:
+        """Return dataset supporting_arrays."""
+        return self.data.supporting_arrays()
 
     @property
     def resolution(self) -> str:
@@ -177,6 +192,14 @@ class BaseAnemoiReader:
     def has_trajectories(self) -> bool:
         """Return whether the dataset has trajectories."""
 
+    def tree(self, prefix: str = "") -> Tree:
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Frequency: {self.frequency}")
+        tree.add(f"Resolution: {self.resolution}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        return tree
+
     def get_sample(
         self,
         time_indices: slice | int | list[int],
@@ -197,31 +220,16 @@ class BaseAnemoiReader:
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
 
-    def __repr__(self) -> str:
-        console = Console(record=True, width=120)
-        with console.capture() as capture:
-            console.print(self.tree())
-        return capture.get()
 
-    def tree(self, prefix: str = "") -> Tree:
-        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
-        tree.add(f"Dataset: {self.data}")
-        tree.add(f"Frequency: {self.frequency}")
-        tree.add(f"Resolution: {self.resolution}")
-        tree.add(f"Num variables: {len(self.name_to_index)}")
-        return tree
-
-
-class NativeGridDataset(BaseAnemoiReader):
+class NativeGridDataset(AnemoiGriddedReader):
     """Native grid dataset."""
 
     @property
     def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
         return False
 
 
-class TrajectoryDataset(BaseAnemoiReader):
+class TrajectoryDataset(AnemoiGriddedReader):
     """Trajectory dataset."""
 
     def __init__(
@@ -239,7 +247,6 @@ class TrajectoryDataset(BaseAnemoiReader):
 
     @property
     def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
         return True
 
     @property
@@ -254,17 +261,69 @@ class TrajectoryDataset(BaseAnemoiReader):
         return tree
 
 
-def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
+def create_dataset(dataset_config: dict) -> AnemoiGriddedReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
+
+    is_tabular = dataset_config.pop("tabular", False)
     trajectory_config = dataset_config.pop("trajectory", {})
+
+    if is_tabular:
+        LOGGER.info("Creating a SparseObservationDataset from config %s...", dataset_config)
+        return SparseObservationDataset(**dataset_config)
+    
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
-        LOGGER.info("Creating TrajectoryDataset...")
+        LOGGER.info("Creating a TrajectoryDataset from config %s...", dataset_config)
         return TrajectoryDataset(
             **dataset_config,
             trajectory_start=trajectory_config["start"],
             trajectory_length=trajectory_config["length"],
         )
 
-    LOGGER.info("Creating NativeGridDataset...")
+    # default: gridded dataset without trajectories
+    LOGGER.info("Creating a NativeGridDataset from config %s ...", dataset_config)
     return NativeGridDataset(**dataset_config)
+
+
+class SparseObservationDataset(BaseAnemoiReader):
+    """Reader for sparse observation data (from tabular-zarrs)."""
+    @property
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
+        return False
+
+    @property
+    def missing(self) -> set[int]:
+        """Return dataset missing values mask."""
+        return set()
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Frequency: {self.data.frequency}")
+        tree.add(f"Window: {self.data.window}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        return tree
+
+    def _unpack_sample(self, x) -> tuple[np.ndarray, dict]:
+        """Unpack a sample from the dataset into data and metadata components."""
+        x_data = torch.from_numpy(x[None, ...])  # introduce a dummy ensemble dimension 
+        x_metadata = {
+            "latitudes": torch.from_numpy(x.latitudes),
+            "longitudes": torch.from_numpy(x.longitudes),
+            "timedeltas": torch.from_numpy(x.time_deltas.astype(np.float32)),
+            "boundaries": x.boundaries,
+            # optionally, we can include the actual dates of the observations if needed
+            # "dates": torch.from_numpy(x.dates.astype(np.int64)),
+        }
+        return x_data, x_metadata
+
+    def get_sample(
+        self,
+        time_indices: slice | int | list[int],
+        # TODO: figure out sharding for sparse obs
+        grid_shard_indices: np.ndarray | slice | None = None,  # ignored, for now
+    ) -> tuple[torch.Tensor, dict]:
+        """Get a sample from the dataset."""
+        x = self.data[time_indices, ...]  # shape = (latlons, variables)
+        return self._unpack_sample(x)

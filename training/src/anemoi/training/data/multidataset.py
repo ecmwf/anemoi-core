@@ -13,10 +13,12 @@ import os
 import random
 from functools import cached_property
 
+from typing import Any, Union
 import numpy as np
 import torch
 from rich.console import Console
 from rich.tree import Tree
+from torch import Tensor
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
@@ -27,6 +29,7 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
+Sample = dict[str, Union[Tensor, tuple[Tensor, dict[str, Any]]]]
 
 
 class MultiDataset(IterableDataset):
@@ -420,3 +423,41 @@ class MultiDataset(IterableDataset):
             subtree = dataset.tree(prefix=name)
             tree.add(subtree)
         return tree
+
+
+def collate_sparse(samples: list[tuple[Tensor, dict[str, Any]]]) -> tuple[list[Tensor], dict[str, Any]]:
+    """Collate a list of (Tensor, dict) sparse observation samples."""
+    tensors, metas = zip(*samples)
+
+    return list(tensors), {
+        "latitudes":  [m["latitudes"]  for m in metas],
+        "longitudes": [m["longitudes"] for m in metas],
+        "timedeltas": [m["timedeltas"] for m in metas],
+        "boundaries": [m["boundaries"] for m in metas],
+    }
+
+
+def multidataset_collator_func(batch: list[Sample]) -> dict[str, Any]:
+    """
+    Collator for MultiDataset samples, where each sample is a dict:
+      key   : dataset name (str)
+      value : Tensor of shape (1, N_i, v)           — gridded field
+            | Tuple[Tensor, Dict]                   — sparse observations
+
+    Returns a dict with the same keys, where each value is:
+      - List[Tensor]                                — for gridded fields
+      - Tuple[List[Tensor], Dict[str, List[Any]]]   — for sparse observations
+    """
+    keys = batch[0].keys()
+
+    collated = {}
+    for key in keys:
+        values = [sample[key] for sample in batch]
+
+        if isinstance(values[0], tuple):
+            collated[key] = collate_sparse(values)
+        else:
+            # single tensor, shape (bs, dates, ensemble, gridpoints, variables)
+            collated[key] = torch.stack([v for v in values], dim=0)
+
+    return collated

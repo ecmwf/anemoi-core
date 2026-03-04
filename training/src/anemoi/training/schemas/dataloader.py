@@ -84,6 +84,13 @@ class NativeDatasetSchema(BaseModel):
     "Starting datetime for sample of the dataset."
     end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
+    tabular: bool = Field(default=False)
+    "Indicates if the dataset is tabular."
+
+
+class ObservationDatasetSchema(NativeDatasetSchema):
+    """Observation dataset configuration schema."""
+    pass
 
 
 class TrajectorySchema(PydanticBaseModel):
@@ -125,11 +132,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    training: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema | ObservationDatasetSchema]
     "Training DatasetSchema."
-    validation: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    validation: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema | ObservationDatasetSchema]
     "Validation DatasetSchema."
-    test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema | ObservationDatasetSchema]
     "Test DatasetSchema."
     validation_rollout: NonNegativeInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
