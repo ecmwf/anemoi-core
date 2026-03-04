@@ -222,10 +222,12 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         mask = y.new_zeros(y.shape[-1])  # dtype/device matches y
         mask[inverse_indices] = 1
 
+        y_residual_indices = self.y_residual_indices.to(y.device)
+        x_in_residual_indices = self.x_in_residual_indices.to(y.device)
         # residuals = y for direct channels, and y - x for inverse channels
         residuals = (
-            y[..., self.y_residual_indices]
-            - x_in_interp_to_hres[..., self.x_in_residual_indices] * mask[y_residual_indices]
+            y[..., y_residual_indices]
+            - x_in_interp_to_hres[..., x_in_residual_indices] * mask[y_residual_indices]
         )
 
         norm_target = pre_processors_state(residuals, dataset="output", in_place=False)
@@ -251,9 +253,11 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         torch.Tensor
             The residuals tensor output from model.
         """
+        y_residual_indices = self.y_residual_indices.to(y.device)
+        x_in_residual_indices = self.x_in_residual_indices.to(y.device)
         residuals = (
-            y[..., self.data_indices.data.output.full]
-            - x_in_interp_to_hres[..., self.data_indices.data.output.full]
+            y[..., y_residual_indices] 
+            - x_in_interp_to_hres[..., x_in_residual_indices]
         )
 
         # to deal with residuals or direct prediction, see compute_tendency

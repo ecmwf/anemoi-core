@@ -226,8 +226,12 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             x_in_interp_to_hres, dataset="input_lres"
         )
         y_pred = self.model.post_processors(y_pred, dataset="output")
-        y_pred_full = y_pred
-        y_pred_full[..., y_residual_indices] += x_in_interp_to_hres[..., x_in_residual_indices]
+        
+        y_pred_full = torch.zeros_like(y_pred) #ensures distinct y_pred and y_pred_full
+        if len(y_non_residual_indices):
+            y_pred_full[:] = y_pred[:]
+        if len(y_residual_indices):
+            y_pred_full[..., y_residual_indices] += x_in_interp_to_hres[..., x_in_residual_indices]
         # Add predicted residuals to the state
         y_preds = [y_pred_full, y_pred]
         return loss, metrics_next, y_preds
