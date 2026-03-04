@@ -1,5 +1,0 @@
-modifiers:
-  - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-    checkpoint_path: null  # Path to checkpoint file
-    strict: false  # Allow parameter mismatches
-    skip_mismatched: true  # Skip parameters with shape mismatches
