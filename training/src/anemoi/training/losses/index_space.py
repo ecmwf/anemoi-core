@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from enum import Enum
+from enum import StrEnum
 
 
-class IndexSpace(str, Enum):
+class IndexSpace(StrEnum):
     """Tensor index-space for variable resolution in loss wrappers."""
 
     MODEL_OUTPUT = "model_output"
