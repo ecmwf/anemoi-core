@@ -103,6 +103,23 @@ Key methods to override when adapting or extending a model:
 -  ``_step``: Implements the forward pass and loss/metric computation
    for a single batch.
 
+Task ``_step`` return contract
+==============================
+
+Task implementations are expected to return a 3-tuple with a consistent
+shape across all task types:
+
+- ``loss``: a tensor scalar used for optimization.
+- ``metrics``: a mapping of metric names to tensors.
+- ``predictions``: a list of per-step dictionaries keyed by dataset
+  name.
+
+For single-output tasks (for example diffusion and autoencoder), the
+``predictions`` value is a one-element list. For rollout-based tasks,
+the list contains one entry per rollout step. This shared contract keeps
+plotting callbacks task-agnostic and avoids task-specific unpacking
+logic.
+
 .. automodule:: anemoi.training.train.tasks.forecaster
    :members:
    :no-undoc-members:
