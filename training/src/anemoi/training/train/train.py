@@ -258,6 +258,7 @@ class AnemoiTrainer(ABC):
             for (ckpt_dataname, ckpt_name_to_index), (dataname, data_indices) in zip(
                 model._ckpt_model_name_to_index.items(),
                 self.data_indices.items(),
+                strict=True,
             ):
                 assert ckpt_dataname == dataname
                 data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
