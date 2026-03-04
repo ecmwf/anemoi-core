@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Model modification system for flexible model preparation and transfer learning.
+"""Model modification system for flexible post-instantiation model preparation.
 
-This module provides a comprehensive system for modifying PyTorch models after
+This module provides a system for modifying PyTorch models after
 instantiation but before training. The system is built around the ``ModelModifier``
 pattern, which allows for composable, reusable, and configurable model modifications.
 
@@ -18,7 +18,6 @@ Key Components
 
 **ModelModifier (ABC)**: Abstract base class defining the modification interface
 **FreezingModelModifier**: Freeze specific model parameters to prevent updates
-**TransferLearningModelModifier**: Load weights from pretrained checkpoints
 **ModelModifierApplier**: Orchestrate application of multiple modifiers
 
 Core Features
@@ -28,7 +27,7 @@ Core Features
 - **Configurable**: Full Hydra configuration support with validation
 - **Extensible**: Easy to add new modifier types for custom use cases
 - **Robust**: Comprehensive error handling and logging throughout
-- **Flexible**: Support for various checkpoint sources (local, S3, HTTP, etc.)
+- **Focused**: Pure model modifications without external dependencies
 
 Quick Start Guide
 -----------------
@@ -38,11 +37,6 @@ Basic usage in YAML configuration::
     training:
       model_modifier:
         modifiers:
-          # Load pretrained weights
-          - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-            checkpoint_path: "/path/to/pretrained.ckpt"
-            strict: false
-
           # Freeze encoder layers
           - _target_: "anemoi.training.train.modify.FreezingModelModifier"
             submodules_to_freeze: ["encoder", "processor.0"]
@@ -51,17 +45,14 @@ Programmatic usage::
 
     from anemoi.training.train.modify import (
         FreezingModelModifier,
-        TransferLearningModelModifier,
         ModelModifierApplier
     )
     from omegaconf import DictConfig
 
     # Create modifiers
-    transfer_mod = TransferLearningModelModifier("pretrained.ckpt")
     freeze_mod = FreezingModelModifier(["encoder"])
 
     # Apply individually
-    model = transfer_mod.apply(model)
     model = freeze_mod.apply(model)
 
     # Or use the applier with configuration
@@ -72,32 +63,18 @@ Programmatic usage::
 Common Use Cases
 ----------------
 
-**Domain Adaptation**::
+**Selective Parameter Freezing**::
 
     modifiers:
-      - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-        checkpoint_path: "general_weather_model.ckpt"
       - _target_: "anemoi.training.train.modify.FreezingModelModifier"
-        submodules_to_freeze: ["encoder"]  # Keep feature extraction, adapt prediction
+        submodules_to_freeze: ["encoder"]  # Keep feature extraction frozen
 
-**Few-Shot Learning**::
+**Multi-Layer Freezing**::
 
     modifiers:
-      - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-        checkpoint_path: "large_pretrained_model.ckpt"
       - _target_: "anemoi.training.train.modify.FreezingModelModifier"
         submodules_to_freeze: ["encoder", "processor.0", "processor.1"]
-
-**Progressive Fine-tuning**::
-
-    modifiers:
-      - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-        checkpoint_path: "base_model.ckpt"
-      - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-        checkpoint_path: "domain_specific.ckpt"  # May override some base weights
-        strict: false
-      - _target_: "anemoi.training.train.modify.FreezingModelModifier"
-        submodules_to_freeze: ["encoder"]
+        # Freeze multiple layers for fine-tuning only top layers
 
 Architecture Integration
 ------------------------
@@ -118,8 +95,6 @@ Advanced Configuration
 **Conditional Modifiers**::
 
     modifiers:
-      - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-        checkpoint_path: ${pretrained_path}  # From environment or command line
       - _target_: "anemoi.training.train.modify.FreezingModelModifier"
         submodules_to_freeze: ${freeze_layers:["encoder"]}  # Default to encoder
 
@@ -184,8 +159,8 @@ Or using modifiers for more complex scenarios::
     training:
       model_modifier:
         modifiers:
-          - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-            checkpoint_path: "pretrained.ckpt"
+          - _target_: "anemoi.training.train.modify.FreezingModelModifier"
+            submodules_to_freeze: ["encoder"]
 
 See Also
 --------
@@ -205,7 +180,6 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -262,7 +236,6 @@ class ModelModifier(ABC):
     See Also
     --------
     FreezingModelModifier : Freeze specific model parameters
-    TransferLearningModelModifier : Load weights from pretrained checkpoints
     ModelModifierApplier : Orchestrates application of multiple modifiers
 
     Notes
@@ -387,7 +360,6 @@ class FreezingModelModifier(ModelModifier):
 
     See Also
     --------
-    TransferLearningModelModifier : Load pretrained weights before freezing
     ModelModifierApplier : Apply multiple modifiers in sequence
 
     Warnings
@@ -685,461 +657,6 @@ class FreezingModelModifier(ModelModifier):
         return frozen_count
 
 
-class TransferLearningModelModifier(ModelModifier):
-    """Load pretrained weights from checkpoints for transfer learning.
-
-    This modifier enables transfer learning by loading weights from a pretrained model
-    checkpoint into the current model. It provides flexible handling of architecture
-    differences through configurable strict/mismatch policies.
-
-    The modifier supports two operation modes:
-
-    1. **Primary mode**: When available, leverages Anemoi's extensible checkpoint loading
-       system which supports multiple source types including local files, S3,
-       HTTP URLs, and cloud storage services.
-
-    2. **Fallback mode**: A standalone implementation using standard PyTorch checkpoint
-       loading that works independently, ensuring the modifier functions even without
-       the extensible checkpoint loading system.
-
-    Both modes provide robust error handling and detailed logging for debugging weight
-    loading issues.
-
-    Parameters
-    ----------
-    checkpoint_path : str or Path
-        Path or URL to the checkpoint file. Supports:
-
-        - **Local paths**: ``"/path/to/model.ckpt"``
-        - **S3 URLs**: ``"s3://bucket/model.ckpt"``
-        - **HTTP URLs**: ``"https://example.com/model.ckpt"``
-        - **GCS URLs**: ``"gs://bucket/model.ckpt"``
-        - **Azure URLs**: ``"https://account.blob.core.windows.net/container/model.ckpt"``
-
-    strict : bool, default False
-        Whether to require exact parameter name matching between checkpoint and model.
-
-        - **True**: All checkpoint keys must exist in model, and vice versa
-        - **False**: Allow missing or extra keys with warnings
-
-    skip_mismatched : bool, default True
-        How to handle parameters with shape mismatches.
-
-        - **True**: Skip parameters with different shapes and log warnings
-        - **False**: Raise error on any shape mismatch
-
-    Examples
-    --------
-    Basic transfer learning configuration:
-
-    .. code-block:: yaml
-
-        training:
-          model_modifier:
-            modifiers:
-              - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-                checkpoint_path: "/path/to/pretrained.ckpt"
-                strict: false
-                skip_mismatched: true
-
-    Loading from different sources:
-
-    .. code-block:: yaml
-
-        # From S3
-        checkpoint_path: "s3://ml-models/weather-pretrained.ckpt"
-
-        # From HTTP
-        checkpoint_path: "https://models.example.com/pretrained.ckpt"
-
-        # From local file
-        checkpoint_path: "./checkpoints/pretrained_model.ckpt"
-
-    Programmatic usage:
-
-    .. code-block:: python
-
-        # Create modifier
-        transfer_mod = TransferLearningModelModifier(
-            checkpoint_path="pretrained.ckpt",
-            strict=False,
-            skip_mismatched=True
-        )
-
-        # Apply to model
-        model_with_weights = transfer_mod.apply(model)
-
-        # Check what was loaded
-        print(f"Loaded weights from: {transfer_mod.checkpoint_path}")
-
-    Advanced Usage Patterns
-    -----------------------
-
-    **Fine-tuning Pipeline**:
-        Combine with freezing for selective fine-tuning:
-
-        .. code-block:: yaml
-
-            modifiers:
-              # First: Load pretrained weights
-              - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-                checkpoint_path: "pretrained.ckpt"
-                strict: false
-                skip_mismatched: true
-
-              # Then: Freeze backbone layers
-              - _target_: "anemoi.training.train.modify.FreezingModelModifier"
-                submodules_to_freeze: ["encoder", "processor.0"]
-
-    **Cross-Resolution Transfer**:
-        Handle models with different input/output dimensions:
-
-        .. code-block:: yaml
-
-            checkpoint_path: "low_res_pretrained.ckpt"
-            strict: false          # Allow missing keys
-            skip_mismatched: true   # Skip shape mismatches
-
-    **Strict Loading for Exact Architectures**:
-        Ensure complete weight transfer for identical models:
-
-        .. code-block:: yaml
-
-            checkpoint_path: "exact_architecture.ckpt"
-            strict: true           # Require all keys match
-            skip_mismatched: false # Fail on any shape mismatch
-
-    Error Handling
-    --------------
-
-    The modifier provides detailed error messages for common issues:
-
-    - **File not found**: Clear message with path information
-    - **Corrupted checkpoint**: Detailed parsing error information
-    - **Key mismatches**: Lists missing/unexpected parameters
-    - **Shape mismatches**: Shows expected vs actual shapes
-    - **Network errors**: Retry information for remote sources
-
-    Notes
-    -----
-    - Loading happens during model initialization, before training begins
-    - Only model parameters are loaded; optimizer states are ignored
-    - The model's architecture must be compatible with checkpoint structure
-    - Checkpoint format must be PyTorch-compatible (``.pt``, ``.pth``, ``.ckpt``)
-    - Loading is performed using PyTorch's ``load_state_dict`` mechanism
-    - Progress is logged at INFO level for successful operations
-    - Warnings are logged for skipped/missing parameters
-
-    See Also
-    --------
-    FreezingModelModifier : Freeze specific parameters after loading
-    ModelModifierApplier : Chain multiple modifiers together
-    anemoi.training.utils.model_loading.load_model_from_checkpoint : Checkpoint loading (optional)
-
-    Raises
-    ------
-    FileNotFoundError
-        If checkpoint_path cannot be found or accessed
-    RuntimeError
-        If checkpoint is corrupted or incompatible
-    ValueError
-        If strict=True and there are key mismatches, or if skip_mismatched=False
-        and there are shape mismatches
-    ConnectionError
-        If remote checkpoint cannot be downloaded
-
-    Examples of Error Scenarios
-    ---------------------------
-
-    .. code-block:: python
-
-        # This will raise FileNotFoundError
-        modifier = TransferLearningModelModifier("/nonexistent/path.ckpt")
-
-        # This will raise ValueError if architectures don't match exactly
-        modifier = TransferLearningModelModifier(
-            "different_arch.ckpt",
-            strict=True,
-            skip_mismatched=False
-        )
-
-        # This will warn but continue loading compatible weights
-        modifier = TransferLearningModelModifier(
-            "partial_match.ckpt",
-            strict=False,
-            skip_mismatched=True
-        )
-    """
-
-    def __init__(self, checkpoint_path: Path | str, strict: bool = False, skip_mismatched: bool = True) -> None:
-        """Initialize the transfer learning modifier.
-
-        Parameters
-        ----------
-        checkpoint_path : str or Path
-            Path or URL to the checkpoint file. Can be local path or remote URL
-            (S3, HTTP, GCS, Azure). The path will be validated and normalized
-            during initialization.
-
-        strict : bool, default False
-            Whether to require exact parameter name matching between checkpoint
-            and model. When False, allows missing or extra parameters with warnings.
-            When True, requires all checkpoint parameters to exist in the model.
-
-        skip_mismatched : bool, default True
-            How to handle parameters with shape mismatches. When True, parameters
-            with incompatible shapes are skipped with warnings. When False, any
-            shape mismatch raises an error.
-
-        Raises
-        ------
-        TypeError
-            If checkpoint_path is not a string or Path object
-        ValueError
-            If checkpoint_path is empty or invalid
-
-        Notes
-        -----
-        The checkpoint file is not loaded during initialization - only the path
-        is stored. Actual loading happens when ``apply()`` is called.
-        """
-        if not checkpoint_path:
-            msg = "Checkpoint path (checkpoint_path) cannot be empty"
-            raise ValueError(msg)
-
-        self.checkpoint_path = Path(checkpoint_path)
-
-        self.strict = bool(strict)
-        self.skip_mismatched = bool(skip_mismatched)
-
-        LOGGER.debug(
-            "Initialized TransferLearningModelModifier: path=%s, strict=%s, skip_mismatched=%s",
-            self.checkpoint_path,
-            self.strict,
-            self.skip_mismatched,
-        )
-
-    def apply(self, model: torch.nn.Module) -> torch.nn.Module:
-        """Load pretrained weights into the model from the configured checkpoint.
-
-        This method delegates to Anemoi's extensible checkpoint loading system,
-        which handles various source types, error recovery, and detailed progress
-        reporting. The loading process:
-
-        1. Downloads/accesses the checkpoint file
-        2. Loads and validates the checkpoint structure
-        3. Matches parameters between checkpoint and model
-        4. Applies the configured strict/mismatch policies
-        5. Updates model parameters and reports results
-
-        Parameters
-        ----------
-        model : torch.nn.Module
-            The model to load weights into. Must be fully initialized with
-            the target architecture. The model is modified in-place.
-
-        Returns
-        -------
-        torch.nn.Module
-            The input model with loaded weights (same object, modified in-place).
-
-        Raises
-        ------
-        FileNotFoundError
-            If the checkpoint file cannot be found or accessed
-        RuntimeError
-            If the checkpoint is corrupted, incompatible, or cannot be loaded
-        ValueError
-            If strict=True and there are parameter name mismatches, or if
-            skip_mismatched=False and there are shape mismatches
-        ConnectionError
-            If a remote checkpoint cannot be downloaded
-
-        Notes
-        -----
-        - Loading progress is logged at INFO level
-        - Warnings are logged for skipped or mismatched parameters
-        - The model's training/eval state is preserved
-        - Only model parameters are loaded; optimizer states are ignored
-        - Memory usage is optimized for large checkpoints
-
-        Examples
-        --------
-        .. code-block:: python
-
-            modifier = TransferLearningModelModifier("pretrained.ckpt")
-
-            # This modifies the model in-place
-            loaded_model = modifier.apply(model)
-            assert loaded_model is model  # Same object
-
-            # Check which parameters were loaded
-            for name, param in model.named_parameters():
-                print(f"{name}: {param.shape}")
-        """
-        LOGGER.info("Loading transfer learning weights from: %s", self.checkpoint_path)
-
-        # Try to use extensible checkpoint loading system if available
-        try:
-            from anemoi.training.utils.model_loading import load_model_from_checkpoint
-
-            LOGGER.debug("Using extensible checkpoint loading system")
-            loaded_model = load_model_from_checkpoint(
-                model=model,
-                checkpoint_source=self.checkpoint_path,
-                loader_type="transfer_learning",
-                strict=self.strict,
-                skip_mismatched=self.skip_mismatched,
-            )
-            LOGGER.info(
-                "Successfully loaded transfer learning weights (strict=%s, skip_mismatched=%s)",
-                self.strict,
-                self.skip_mismatched,
-            )
-        except ImportError:
-            LOGGER.info("Extensible checkpoint loading system not available, using fallback implementation")
-            # Use fallback implementation
-            return self._fallback_transfer_learning_loading(model)
-        except Exception:
-            LOGGER.exception("Failed to load transfer learning weights from %s", self.checkpoint_path)
-            LOGGER.info("Attempting fallback implementation")
-            return self._fallback_transfer_learning_loading(model)
-        else:
-            return loaded_model
-
-    def _fallback_transfer_learning_loading(self, model: torch.nn.Module) -> torch.nn.Module:  # noqa: C901
-        """Fallback implementation for transfer learning when extensible system is not available.
-
-        This method provides basic transfer learning functionality using standard PyTorch
-        checkpoint loading with optional shape mismatch handling.
-
-        Parameters
-        ----------
-        model : torch.nn.Module
-            The model to load weights into
-
-        Returns
-        -------
-        torch.nn.Module
-            The model with loaded weights (same object, modified in-place)
-
-        Raises
-        ------
-        FileNotFoundError
-            If the checkpoint file cannot be found
-        RuntimeError
-            If the checkpoint cannot be loaded or is incompatible
-        ValueError
-            If strict=True and there are parameter mismatches
-        """
-        import torch
-
-        try:
-            # Load checkpoint - support both local files and basic URL schemes
-            if str(self.checkpoint_path).startswith(("http://", "https://")):
-                LOGGER.warning(
-                    "Loading from URL %s using basic implementation - "
-                    "consider using advanced checkpoint loading system for better reliability",
-                    self.checkpoint_path,
-                )
-
-            checkpoint = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
-
-            # Extract state_dict from checkpoint
-            if "state_dict" in checkpoint:
-                checkpoint_state_dict = checkpoint["state_dict"]
-                LOGGER.debug("Found state_dict in checkpoint")
-            elif "model_state_dict" in checkpoint:
-                checkpoint_state_dict = checkpoint["model_state_dict"]
-                LOGGER.debug("Found model_state_dict in checkpoint")
-            else:
-                # Assume the entire checkpoint is the state_dict
-                checkpoint_state_dict = checkpoint
-                LOGGER.debug("Using entire checkpoint as state_dict")
-
-        except Exception as e:
-            msg = f"Failed to load checkpoint from {self.checkpoint_path}: {e}"
-            LOGGER.exception(msg)
-            raise RuntimeError(msg) from e
-
-        # Get model's current state dict
-        model_state_dict = model.state_dict()
-
-        # Handle shape mismatches if skip_mismatched is True
-        if self.skip_mismatched:
-            filtered_state_dict = {}
-            skipped_count = 0
-
-            for key, checkpoint_param in checkpoint_state_dict.items():
-                if key in model_state_dict:
-                    model_param_shape = model_state_dict[key].shape
-                    checkpoint_param_shape = checkpoint_param.shape
-
-                    if model_param_shape == checkpoint_param_shape:
-                        filtered_state_dict[key] = checkpoint_param
-                    else:
-                        LOGGER.warning(
-                            "Skipping parameter '%s' due to shape mismatch: checkpoint shape %s vs model shape %s",
-                            key,
-                            checkpoint_param_shape,
-                            model_param_shape,
-                        )
-                        skipped_count += 1
-                else:
-                    if not self.strict:
-                        LOGGER.debug("Skipping parameter '%s' not found in model", key)
-                    else:
-                        filtered_state_dict[key] = checkpoint_param
-
-            if skipped_count > 0:
-                LOGGER.info("Skipped %d parameters due to shape mismatches", skipped_count)
-
-            checkpoint_state_dict = filtered_state_dict
-
-        # Load the state dict
-        try:
-            missing_keys, unexpected_keys = model.load_state_dict(checkpoint_state_dict, strict=self.strict)
-
-            # Report results
-            self._handle_missing_keys(missing_keys)
-            self._handle_unexpected_keys(unexpected_keys)
-
-            loaded_params = len(checkpoint_state_dict) - len(missing_keys)
-            total_params = len(model_state_dict)
-
-            LOGGER.info(
-                "Successfully loaded %d/%d parameters from checkpoint %s (strict=%s, skip_mismatched=%s)",
-                loaded_params,
-                total_params,
-                self.checkpoint_path,
-                self.strict,
-                self.skip_mismatched,
-            )
-
-        except Exception as e:
-            msg = f"Failed to load state dict into model: {e}"
-            LOGGER.exception(msg)
-            raise RuntimeError(msg) from e
-
-        return model
-
-    def _handle_missing_keys(self, missing_keys: list) -> None:
-        """Handle missing keys in checkpoint loading."""
-        if missing_keys:
-            if self.strict:
-                msg = f"Missing keys in checkpoint: {missing_keys}"
-                raise ValueError(msg)
-            LOGGER.warning("Missing keys in checkpoint (continuing): %s", missing_keys)
-
-    def _handle_unexpected_keys(self, unexpected_keys: list) -> None:
-        """Handle unexpected keys in checkpoint loading."""
-        if unexpected_keys:
-            if self.strict:
-                msg = f"Unexpected keys in checkpoint: {unexpected_keys}"
-                raise ValueError(msg)
-            LOGGER.warning("Unexpected keys in checkpoint (continuing): %s", unexpected_keys)
-
-
 class ModelModifierApplier:
     """Orchestrates the application of multiple model modifiers in sequence.
 
@@ -1186,10 +703,9 @@ class ModelModifierApplier:
         training:
           model_modifier:
             modifiers:
-              # Load pretrained weights first
-              - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-                checkpoint_path: "pretrained.ckpt"
-                strict: false
+              # Freeze specific layers
+              - _target_: "anemoi.training.train.modify.FreezingModelModifier"
+                submodules_to_freeze: ["encoder"]
 
               # Then freeze specific modules
               - _target_: "anemoi.training.train.modify.FreezingModelModifier"
@@ -1228,14 +744,9 @@ class ModelModifierApplier:
         .. code-block:: yaml
 
             modifiers:
-              # 1. Load base weights
-              - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-                checkpoint_path: "base_model.ckpt"
-
-              # 2. Load domain-specific weights (may override some base weights)
-              - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-                checkpoint_path: "domain_model.ckpt"
-                strict: false
+              # Freeze multiple layers in sequence
+              - _target_: "anemoi.training.train.modify.FreezingModelModifier"
+                submodules_to_freeze: ["encoder", "processor.0"]
 
               # 3. Freeze backbone, allow head fine-tuning
               - _target_: "anemoi.training.train.modify.FreezingModelModifier"
@@ -1262,8 +773,8 @@ class ModelModifierApplier:
         .. code-block:: yaml
 
             modifiers:
-              - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-                checkpoint_path: ${checkpoint_path}  # From command line or env
+              - _target_: "anemoi.training.train.modify.FreezingModelModifier"
+                submodules_to_freeze: ${freeze_layers}  # From command line or env
 
               # Only freeze in production mode
               - _target_: "anemoi.training.train.modify.FreezingModelModifier"
@@ -1292,7 +803,6 @@ class ModelModifierApplier:
     --------
     ModelModifier : Base class for all modifiers
     FreezingModelModifier : Freeze model parameters
-    TransferLearningModelModifier : Load pretrained weights
     hydra.utils.instantiate : Underlying instantiation mechanism
 
     Raises

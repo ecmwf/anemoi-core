@@ -15,16 +15,14 @@ training. The test suite covers:
 
 1. **Core Abstractions**: Tests for the ModelModifier abstract base class
 2. **Freezing Functionality**: Parameter freezing with validation
-3. **Transfer Learning**: Checkpoint loading with flexible weight transfer
-4. **Modifier Orchestration**: Sequential application of multiple modifiers
-5. **Integration Scenarios**: Combined modifier workflows
+3. **Modifier Orchestration**: Sequential application of multiple modifiers
+4. **Integration Scenarios**: Combined modifier workflows
 
 Test Organization
 -----------------
 - MockModel: Simple neural network for testing modifications
 - TestModelModifier: Core abstraction and interface tests
 - TestFreezingModelModifier: Parameter freezing functionality
-- TestTransferLearningModelModifier: Weight loading and transfer
 - TestModelModifierApplier: Orchestration and composition
 - TestModelModifierIntegration: End-to-end workflows
 
@@ -39,7 +37,6 @@ Key Testing Principles
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from typing import Any
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -49,13 +46,9 @@ import torch
 import torch.nn as nn
 from omegaconf import DictConfig
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 from anemoi.training.train.modify import FreezingModelModifier
 from anemoi.training.train.modify import ModelModifier
 from anemoi.training.train.modify import ModelModifierApplier
-from anemoi.training.train.modify import TransferLearningModelModifier
 
 
 class MockModel(nn.Module):
@@ -311,124 +304,6 @@ class TestFreezingModelModifier:
         assert all(not p.requires_grad for p in model.encoder.parameters())
 
 
-class TestTransferLearningModelModifier:
-    """Comprehensive tests for the TransferLearningModelModifier.
-
-    This test class validates the transfer learning functionality including:
-    - Checkpoint loading from various sources
-    - Weight transfer with exact and partial matches
-    - Handling of architecture mismatches
-    - Fallback mechanisms when external loaders are unavailable
-    - Integration with freezing for fine-tuning workflows
-
-    The tests cover both modes of operation:
-    1. Standalone fallback using torch.load directly
-    2. Integration with external checkpoint loading system (when available)
-    """
-
-    def create_test_checkpoint(self, temp_dir: Path, include_mismatched_layer: bool = False) -> Path:
-        """Create a test checkpoint file with optional architecture mismatches.
-
-        Parameters
-        ----------
-        temp_dir : Path
-            Directory to save the checkpoint
-        include_mismatched_layer : bool
-            If True, creates a checkpoint with different layer dimensions
-            to test mismatch handling
-
-        Returns
-        -------
-        Path
-            Path to the created checkpoint file
-        """
-        checkpoint_path = temp_dir / "transfer_checkpoint.ckpt"
-
-        if include_mismatched_layer:
-            # Create model with different output size for testing mismatch handling
-            class MismatchedModel(MockModel):
-                def __init__(self):
-                    super().__init__()
-                    self.decoder = nn.Linear(20, 10)  # Different output size
-
-            test_model = MismatchedModel()
-        else:
-            test_model = MockModel()
-
-        state_dict = test_model.state_dict()
-
-        checkpoint_data = {"state_dict": state_dict, "hyper_parameters": {"data_indices": MagicMock()}}
-        checkpoint_data["hyper_parameters"]["data_indices"].name_to_index = {"test_var": 0}
-
-        torch.save(checkpoint_data, checkpoint_path)
-        return checkpoint_path
-
-    def test_init(self) -> None:
-        """Test TransferLearningModelModifier initialization."""
-        checkpoint_path = "/path/to/checkpoint.ckpt"
-        modifier = TransferLearningModelModifier(checkpoint_path)
-        assert str(modifier.checkpoint_path) == checkpoint_path
-        assert modifier.strict is False  # default
-        assert modifier.skip_mismatched is True  # default
-
-    def test_init_with_parameters(self) -> None:
-        """Test TransferLearningModelModifier initialization with custom parameters."""
-        checkpoint_path = "/path/to/checkpoint.ckpt"
-        modifier = TransferLearningModelModifier(checkpoint_path, strict=True, skip_mismatched=False)
-        assert str(modifier.checkpoint_path) == checkpoint_path
-        assert modifier.strict is True
-        assert modifier.skip_mismatched is False
-
-    def test_apply_fallback_with_mock_checkpoint(self) -> None:
-        """Test applying transfer learning using fallback implementation."""
-        checkpoint_path = "/fake/checkpoint.ckpt"
-        modifier = TransferLearningModelModifier(checkpoint_path, strict=False, skip_mismatched=True)
-        model = MockModel()
-
-        # Create a mock state dict
-        mock_state_dict = {
-            "encoder.weight": torch.randn(20, 10),
-            "encoder.bias": torch.randn(20),
-            "decoder.weight": torch.randn(5, 20),
-            "decoder.bias": torch.randn(5),
-        }
-
-        # Mock torch.load to return our fake checkpoint
-        with patch("torch.load") as mock_torch_load:
-            mock_torch_load.return_value = {"state_dict": mock_state_dict}
-
-            result = modifier.apply(model)
-
-            assert result is model
-            # Note: checkpoint_path is converted to Path internally
-            from pathlib import Path
-
-            mock_torch_load.assert_called_once_with(Path(checkpoint_path), map_location="cpu", weights_only=False)
-
-    def test_apply_fallback_with_shape_mismatch(self) -> None:
-        """Test fallback implementation handles shape mismatches correctly."""
-        checkpoint_path = "/fake/checkpoint.ckpt"
-        modifier = TransferLearningModelModifier(checkpoint_path, strict=False, skip_mismatched=True)
-        model = MockModel()
-
-        # Create a mock state dict with shape mismatches
-        mock_state_dict = {
-            "encoder.weight": torch.randn(30, 10),  # Wrong size - should be (20, 10)
-            "encoder.bias": torch.randn(20),  # Correct size
-            "decoder.weight": torch.randn(5, 20),  # Correct size
-            "decoder.bias": torch.randn(5),  # Correct size
-            "nonexistent.weight": torch.randn(10, 10),  # Doesn't exist in model
-        }
-
-        with patch("torch.load") as mock_torch_load:
-            mock_torch_load.return_value = {"state_dict": mock_state_dict}
-
-            result = modifier.apply(model)
-
-            assert result is model
-            # Only parameters with matching shapes should be loaded
-
-
 class TestModelModifierApplier:
     """Tests for the ModelModifierApplier orchestration component.
 
@@ -579,44 +454,30 @@ class TestModelModifierIntegration:
     - Handle edge cases in combination
     """
 
-    def test_transfer_learning_after_freezing_fallback(self) -> None:
-        """Test complete transfer learning workflow with parameter freezing.
+    def test_freezing_after_checkpoint_loading(self) -> None:
+        """Test parameter freezing after checkpoint loading.
 
         This integration test simulates a common fine-tuning scenario:
-        1. Load pretrained weights from a checkpoint
+        1. Assume weights have been loaded via main branch functionality
         2. Freeze the encoder to preserve learned features
         3. Keep decoder trainable for task-specific adaptation
-
-        Uses the fallback mechanism to ensure functionality even without
-        external checkpoint loading infrastructure.
         """
-        checkpoint_path = "/fake/checkpoint.ckpt"
         model = MockModel()
 
-        # Create mock state dict
-        mock_state_dict = {
-            "encoder.weight": torch.randn(20, 10),
-            "encoder.bias": torch.randn(20),
-        }
+        # Simulate that weights have already been loaded
+        # (this would be done by main branch transfer_learning_loading)
+        model.encoder.weight.data = torch.randn(20, 10)
+        model.encoder.bias.data = torch.randn(20)
 
-        with patch("torch.load") as mock_torch_load:
-            mock_torch_load.return_value = {"state_dict": mock_state_dict}
+        # Apply freezing modifier
+        freeze_modifier = FreezingModelModifier(["encoder"])
+        model = freeze_modifier.apply(model)
 
-            # Apply modifiers in sequence
-            # First apply transfer learning
-            transfer_modifier = TransferLearningModelModifier(checkpoint_path)
-            model = transfer_modifier.apply(model)
+        # Verify results
+        assert all(not p.requires_grad for p in model.encoder.parameters())
+        assert all(p.requires_grad for p in model.decoder.parameters())
 
-            # Then freeze encoder
-            freeze_modifier = FreezingModelModifier(["encoder"])
-            model = freeze_modifier.apply(model)
-
-            # Verify results
-            mock_torch_load.assert_called_once()
-            assert all(not p.requires_grad for p in model.encoder.parameters())
-            assert all(p.requires_grad for p in model.decoder.parameters())
-
-    def test_full_pipeline_with_applier_fallback(self) -> None:
+    def test_full_pipeline_with_applier(self) -> None:
         """Test complete modifier pipeline using configuration-driven approach.
 
         This comprehensive test validates the entire workflow from Hydra
@@ -624,8 +485,7 @@ class TestModelModifierIntegration:
 
         1. Configuration parsing and validation
         2. Dynamic modifier instantiation via Hydra
-        3. Sequential application of transfer learning and freezing
-        4. Proper fallback handling when external systems are unavailable
+        3. Sequential application of freezing modifiers
 
         This represents the typical production usage pattern where all
         modifications are specified in configuration files.
@@ -639,14 +499,12 @@ class TestModelModifierIntegration:
                     "model_modifier": {
                         "modifiers": [
                             {
-                                "_target_": "anemoi.training.train.modify.TransferLearningModelModifier",
-                                "checkpoint_path": "/fake/checkpoint.ckpt",
-                                "strict": False,
-                                "skip_mismatched": True,
+                                "_target_": "anemoi.training.train.modify.FreezingModelModifier",
+                                "submodules_to_freeze": ["encoder"],
                             },
                             {
                                 "_target_": "anemoi.training.train.modify.FreezingModelModifier",
-                                "submodules_to_freeze": ["encoder"],
+                                "submodules_to_freeze": ["decoder"],
                             },
                         ],
                     },
@@ -654,17 +512,8 @@ class TestModelModifierIntegration:
             },
         )
 
-        # Mock torch.load for the fallback implementation
-        mock_state_dict = {
-            "encoder.weight": torch.randn(20, 10),
-            "encoder.bias": torch.randn(20),
-        }
+        result = applier.process(model, config)
 
-        with patch("torch.load") as mock_torch_load:
-            mock_torch_load.return_value = {"state_dict": mock_state_dict}
-
-            result = applier.process(model, config)
-
-            assert result is not None
-            assert all(not p.requires_grad for p in result.encoder.parameters())
-            mock_torch_load.assert_called_once()
+        assert result is not None
+        assert all(not p.requires_grad for p in result.encoder.parameters())
+        assert all(not p.requires_grad for p in result.decoder.parameters())
