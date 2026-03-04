@@ -168,12 +168,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         x_in_residual_indices = self.model.model.x_in_residual_indices.to(device)
         y_non_residual_indices = self.model.model.y_non_residual_indices.to(device)
         
-        y_target = torch.zeros_like(y).to(device)
+        y_target = torch.clone(y)
         if len(y_residual_indices): # if residual variables
-            residuals_target = y[..., y_residual_indices] - x_in_interp_to_hres[..., x_in_residual_indices]
-            y_target[..., y_residual_indices] = residuals_target
-        if len(y_non_residual_indices): # if output non residual variables
-            y_target[..., y_non_residual_indices] = y[..., y_non_residual_indices]
+            y_target[..., y_residual_indices] -= x_in_interp_to_hres[..., x_in_residual_indices]
 
         x_in_interp_to_hres = self.model.pre_processors(
             x_in_interp_to_hres, dataset="input_lres"
@@ -226,10 +223,8 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             x_in_interp_to_hres, dataset="input_lres"
         )
         y_pred = self.model.post_processors(y_pred, dataset="output")
-        
-        y_pred_full = torch.zeros_like(y_pred) #ensures distinct y_pred and y_pred_full
-        if len(y_non_residual_indices):
-            y_pred_full[:] = y_pred[:]
+
+        y_pred_full = y_pred.clone() #ensures distinct y_pred and y_pred_full
         if len(y_residual_indices):
             y_pred_full[..., y_residual_indices] += x_in_interp_to_hres[..., x_in_residual_indices]
         # Add predicted residuals to the state
