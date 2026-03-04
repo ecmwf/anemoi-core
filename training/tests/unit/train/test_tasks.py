@@ -7,7 +7,6 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.preprocessing import Processors
 from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
