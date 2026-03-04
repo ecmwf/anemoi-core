@@ -5,7 +5,7 @@ defaults:
 - system: example
 - graph: multi_scale
 - model: graphtransformer
-- training: interpolator
+- training: default
 - _self_
 
 config_validation: True
@@ -30,9 +30,12 @@ model:
   latent_skip: False # True/False for skip connection on latent mesh
 
 training:
+  model_task: anemoi.training.train.tasks.GraphMultiOutInterpolator
   # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
     input: [0, 6]
     target: [1, 2, 3, 4, 5]
+  multistep_input: 2
   multistep_output: 5
-  model_task: anemoi.training.train.tasks.GraphMultiOutInterpolator
+
+  rollout: null # override the default, it does not make sense for an interpolator

@@ -20,6 +20,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
 from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 
@@ -89,10 +90,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         self.n_step_input = 1
 
-    @property
-    def output_times(self) -> int:
-        """Number of interpolation times (outer loop in plot callbacks; one forward, n_step_output steps)."""
-        return len(self.interp_times)
+        self._plot_adapter = InterpolatorMultiOutPlotAdapter(self)
 
     def _step(
         self,
@@ -125,6 +123,3 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         # All tasks return (loss, metrics, list of per-step dicts) for consistent plot callback contract.
         return loss, metrics, [y_pred]
-
-    def get_init_step(self, rollout_step: int) -> int:
-        return rollout_step
