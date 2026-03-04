@@ -34,6 +34,11 @@ class CheckVariableOrder(pl.callbacks.Callback):
             # Only compare if dataset exists in model (handles transfer learning scenarios)
             if dataset_name in model_name_to_index and dataset_name in data_name_to_index:
                 data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
+            else:
+                LOGGER.debug(
+                    "Skipping variable comparison for dataset '%s' (not found in checkpoint)",
+                    dataset_name,
+                )
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the training data.

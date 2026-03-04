@@ -203,8 +203,73 @@ class AnemoiTrainer(ABC):
             graphs[dataset_name] = self._create_graph_for_dataset(dataset_source, dataset_name)
         return graphs
 
+    def _validate_transfer_learning_datasets(
+        self,
+        model: pl.LightningModule,
+    ) -> None:
+        """Validate dataset compatibility between checkpoint and config for transfer learning.
+
+        This method handles multiple transfer learning scenarios when loading a checkpoint:
+
+        - **Scenario 1**: Exact match (checkpoint datasets == config datasets)
+          All weights are loaded normally.
+
+        - **Scenario 2**: Adding datasets (config has datasets not in checkpoint)
+          Missing datasets will have their encoder & decoder weights randomly initialized.
+          The shared processor weights are still transferred.
+
+        - **Scenario 3**: Removing datasets (checkpoint has datasets not in config)
+          Extra datasets in checkpoint are ignored (their weights are not loaded).
+
+        - **Scenario 4**: Swapping datasets (combination of scenarios 2 and 3)
+          Some datasets are added (randomly initialized), others are removed (ignored).
+
+        -----
+        - Logs warnings for datasets that are missing or ignored
+        - Logs info summary of loaded and initialized datasets
+        - The shared processor weights are always transferred
+        """
+        loaded_datasets = []
+        initialized_datasets = []
+
+        # Check if checkpoint has multi-dataset format
+        if not isinstance(model._ckpt_model_name_to_index, dict):
+            return
+
+        # Validate each dataset in current config against checkpoint
+        for dataset_name, data_indices in self.data_indices.items():
+            if dataset_name in model._ckpt_model_name_to_index:
+                # Dataset found in checkpoint - validate variables match
+                ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
+                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                loaded_datasets.append(dataset_name)
+            else:
+                # Dataset not found in checkpoint - will be randomly initialized
+                LOGGER.warning(
+                    "Dataset '%s' NOT found in checkpoint. Encoder & decoder weights will be randomly initialized!",
+                    dataset_name,
+                )
+                initialized_datasets.append(dataset_name)
+
+        # Check for datasets in checkpoint but not in config
+        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
+        if ignored_datasets:
+            for ignored_dataset in ignored_datasets:
+                LOGGER.warning(
+                    "Dataset '%s' found in checkpoint but NOT in config. "
+                    "Encoder & decoder weights for '%s' will be ignored.",
+                    ignored_dataset,
+                    ignored_dataset,
+                )
+
+        # Log summary of what was loaded
+        if loaded_datasets:
+            LOGGER.info("Successfully loaded weights for datasets: %s", loaded_datasets)
+        if initialized_datasets:
+            LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
+
     @cached_property
-    def model(self) -> pl.LightningModule:  # noqa: C901
+    def model(self) -> pl.LightningModule:
         """Provide the model instance."""
         assert (
             not (
@@ -255,44 +320,7 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config
-            loaded_datasets = []
-            initialized_datasets = []
-
-            for dataset_name, data_indices in self.data_indices.items():
-                # Check if this dataset exists in the checkpoint
-                if (
-                    isinstance(model._ckpt_model_name_to_index, dict)
-                    and dataset_name in model._ckpt_model_name_to_index
-                ):
-                    # Dataset found in checkpoint - validate variables match
-                    ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
-                    data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
-                    loaded_datasets.append(dataset_name)
-                else:
-                    # Dataset not found in checkpoint - will be randomly initialized
-                    LOGGER.warning(
-                        "Dataset '%s' NOT found in checkpoint. Encoder & decoder weights will be randomly initialized!",
-                        dataset_name,
-                    )
-                    initialized_datasets.append(dataset_name)
-
-            # Check for datasets in checkpoint but not in config (Scenario 4)
-            if isinstance(model._ckpt_model_name_to_index, dict):
-                ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
-                if ignored_datasets:
-                    for ignored_dataset in ignored_datasets:
-                        LOGGER.warning(
-                            "Dataset '%s' found in checkpoint but NOT in config. "
-                            "Encoder & decoder weights for '%s' will be ignored.",
-                            ignored_dataset,
-                            ignored_dataset,
-                        )
-
-            # Log summary of what was loaded
-            if loaded_datasets:
-                LOGGER.info("Successfully loaded weights for datasets: %s", loaded_datasets)
-            if initialized_datasets:
-                LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
+            self._validate_transfer_learning_datasets(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
