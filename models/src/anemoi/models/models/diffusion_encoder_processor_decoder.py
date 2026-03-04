@@ -848,11 +848,11 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         #         y_init = self.prepare_sample_SDEdit(x, shape, init_sigma)
         # x = torch.zeros_like(x, device=x.device) #set condition to constant = 0 as in training
     #     print("shape de x ", x.shape)
-        x = x[...,7]  # shape: [1, 2, 1, 332840]
-    # 
-        x = x.unsqueeze(-1).repeat(1, 1, 1, 1, 78) # shape: [1, 2, 1, 332840, 78]
+    #     x = x[...,3]  # shape: [1, 2, 1, 332840]
+    # # 
+    #     x = x.unsqueeze(-1).repeat(1, 1, 1, 1, 4) # shape: [1, 2, 1, 332840, 78]
 
-        # x = (x - torch.mean(x))/torch.std(x)
+    #     x = (x - torch.mean(x))/torch.std(x)
         
         # print('max x : ', torch.max(x))
         # print("min x : ", torch.min(x))
@@ -933,7 +933,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         # To do so, we must remove from the condition tensor the forcings variables.
         print("DANS PREPARE SAMPLE SDEDIT")
         print("init sigma : ", init_sigma)
-        print("DANS SDEDIT : ", x)
+        print("DANS SDEDIT : ", x, x.shape)
         
         forcings = self.data_indices["forcing"] 
         name_to_index = self.data_indices["name_to_index"]
@@ -948,7 +948,9 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         mask = torch.ones(x.shape[-1], dtype=torch.bool, device=x.device) #creating a mask to removed the forcing variables, keeping only the prognostics variables
         mask[idx_to_drop] = False
         _x = x[:,-1,:,:,mask] #We take only the time t= t0 (dim 1 corresponding to time = (t0-1, t0))
-        y_init = (torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma + _x).to(x.device)
+        _x_ = x[:,-1,:,:,:]
+        print("shape dans sdedit : ", shape)
+        y_init = (torch.randn(shape, device=x.device, dtype=init_sigma.dtype) * init_sigma + _x_).to(x.device)
         print("y _init", y_init)
         return y_init
     
