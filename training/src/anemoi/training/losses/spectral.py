@@ -244,23 +244,20 @@ class FourierCorrelationLoss(SpectralLoss):
         target_spectral = self._to_spectral_flat(target)
         n_modes = pred_spectral.size(dim=TensorDim.GRID.value)
 
+        # compute correlation per mode before applying any external weighting
+        # keeps the ratio bounded by Cauchy-Schwarz (up to numerical error)
         cross = torch.real(pred_spectral * torch.conj(target_spectral))
+        denom = torch.sqrt(torch.abs(pred_spectral) ** 2 * torch.abs(target_spectral) ** 2 + eps)
+        correlation = torch.clamp(cross / denom, min=-1.0, max=1.0)
 
-        cross = self.scale(
-            cross,
+        # apply weighting/scaling after correlation is computed
+        result = (1 - correlation) / n_modes
+        result = self.scale(
+            result,
             scaler_indices,
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        numerator = 0.5 * torch.sum(cross, dim=TensorDim.GRID.value, keepdim=True)
-
-        denom = torch.sqrt(
-            torch.sum(torch.abs(pred_spectral) ** 2, dim=TensorDim.GRID.value, keepdim=True)
-            * torch.sum(torch.abs(target_spectral) ** 2, dim=TensorDim.GRID.value, keepdim=True)
-            + eps,
-        )
-
-        result = (1 - numerator / denom) / n_modes
         return self.reduce(result, squash=squash, group=group)
 
 
@@ -339,6 +336,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         group = group if is_sharded else None
 
         pred, target = self._mask_nans_pre_transform(pred, target)
+        # → [..., modes, vars]
         pred_spec = self._to_spectral_flat(pred)
         tgt_spec = self._to_spectral_flat(target)
         n_modes = pred_spec.size(dim=TensorDim.GRID.value)
