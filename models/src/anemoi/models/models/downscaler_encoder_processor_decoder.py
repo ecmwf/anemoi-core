@@ -95,7 +95,9 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             for k, v in self.data_indices.data.output.name_to_index.items()
             if v in self.data_indices.data.output.full
         }
+
         common_channels = set(input_name_to_index.keys()) & set(out_name_to_index.keys())
+
         if isinstance(model_config['data'], dict):
             residual_fields = model_config['data'].get("residual_fields", [])
             in_hres_forcings_fields = model_config['data'].get("forcing", [])
@@ -121,6 +123,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         
         x_in_non_res_indices = [input_name_to_index[channel] for channel in in_non_residual_fields]
         y_non_res_indices = [out_name_to_index[channel] for channel in out_non_residual_fields]
+
         return (
             torch.tensor(x_in_res_indices).to(torch.int32), 
             torch.tensor(y_res_indices).to(torch.int32), 
@@ -185,14 +188,68 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         torch.Tensor
             The residuals tensor output from model.
         """
-        y_residual_indices = self.y_residual_indices.to(y.device)
-        x_in_residual_indices = self.x_in_residual_indices.to(y.device)
-        residuals = y[..., y_residual_indices] - x_in_interp_to_hres[..., x_in_residual_indices]
+        y_with_residuals = y.clone()
+        if len(self.y_residual_indices):
+            y_residual_indices = self.y_residual_indices.to(y.device)
+            x_in_residual_indices = self.x_in_residual_indices.to(y.device)
+            y_with_residuals = y[..., y_residual_indices] - x_in_interp_to_hres[..., x_in_residual_indices]
+        return y_with_residuals
+
+    def compute_direct_predictions(
+        self,
+        y_pred: torch.Tensor,
+        x_in_interp_to_hres: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute high-res direct prediction interpolated low-res input and residual prediction.
+
+        Parameters
+        ----------
+
+        y_pred : torch.Tensor
+            The high-resolution residual prediction tensor with shape (bs, ens, latlon, nvar)
+        x_in_interp_to_hres : torch.Tensor
+            The interpolated low-resolution input tensor with shape (bs, ens, latlon, nvar)
+
+        Returns
+        -------
+        torch.Tensor
+            The residuals tensor output from model.
+        """
+        y_pred_direct_prediction = y_pred.clone()
+        if len(self.y_residual_indices):
+            y_residual_indices = self.y_residual_indices.to(y.device)
+            x_in_residual_indices = self.x_in_residual_indices.to(y.device)
+            y_pred_direct_prediction = y_pred[..., y_residual_indices] + x_in_interp_to_hres[..., x_in_residual_indices]
+        return y_pred_direct_prediction
+
+    def compute_residuals_legacy(
+        self,
+        y: torch.Tensor,
+        x_in_interp_to_hres: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute residuals between high-res target and interpolated low-res input.
+
+        Parameters
+        ----------
+
+        y : torch.Tensor
+            The high-resolution target tensor with shape (bs, ens, latlon, nvar)
+        x_in_interp_to_hres : torch.Tensor
+            The interpolated low-resolution input tensor with shape (bs, ens, latlon, nvar)
+
+        Returns
+        -------
+        torch.Tensor
+            The residuals tensor output from model.
+        """
+        residuals = (
+            y[..., self.data_indices.data.output.full]
+            - x_in_interp_to_hres[..., self.data_indices.data.output.full]
+        )
 
         # to deal with residuals or direct prediction, see compute_tendency
         # in diffusion_encoder_processor_decoder.py
         return residuals
-
     def _interpolate_to_high_res(
         self, x, grid_shard_shapes=None, model_comm_group=None
     ):
