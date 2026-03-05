@@ -6,72 +6,144 @@ Creating monthly dataset:
   recipe:     ./tmp/anemoi-data-rrfs-202405.yaml
   raw:        ./tmp/rrfs-monthly/rrfs-conus-3km-202405-raw.zarr
   final:      ./tmp/rrfs-monthly/rrfs-conus-3km-202405-bcmask-time-s.zarr
-2026-03-05 04:37:37 INFO 🎬 Task init((),{}) starting
-2026-03-05 04:37:44 INFO Setting flatten_grid=True in config
-2026-03-05 04:37:44 INFO Setting ensemble_dimension=2 in config
-2026-03-05 04:37:44 INFO Setting flatten_grid=True in config
-2026-03-05 04:37:44 INFO Setting ensemble_dimension=2 in config
-2026-03-05 04:37:44 INFO {'start': '2024-05-02T09:00:00', 'end': '2024-05-31T20:00:00', 'frequency': '1h', 'group_by': 'monthly'}
-2026-03-05 04:37:44 INFO Groups(dates=1,StartEndDates(2024-05-02 09:00:00..2024-05-31 20:00:00 every 1:00:00))
-2026-03-05 04:37:44 INFO Groups: Groups(dates=1,StartEndDates(2024-05-02 09:00:00..2024-05-31 20:00:00 every 1:00:00))
-Traceback (most recent call last):
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 266, in cli_main
-    cmd.run(args)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/commands/create.py", line 102, in run
-    self.serial_create(args)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/commands/create.py", line 118, in serial_create
-    task("init", options)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/commands/create.py", line 52, in task
-    c = creator_factory(what.replace("-", "_"), **options)
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/__init__.py", line 1618, in creator_factory
-    return cls(**kwargs)
-           ^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/__init__.py", line 630, in __init__
-    self.minimal_input = self.input.select(one_date)
-                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/input/__init__.py", line 65, in select
-    return context.create_result(self.action(context, argument))
-                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/input/action.py", line 268, in __call__
-    return self.input(context, argument)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/input/action.py", line 156, in __call__
-    result = action(context, argument)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/input/action.py", line 120, in __call__
-    results += action(context, argument)
-               ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/input/action.py", line 156, in __call__
-    result = action(context, argument)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/input/action.py", line 177, in __call__
-    return context.register(self.call_object(context, source, argument), self.path)
-                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/input/action.py", line 189, in call_object
-    return source.execute(context.source_argument(argument))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/sources/legacy.py", line 46, in execute
-    return self._execute(self.context, dates, *self.args, **self.kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/datasets/create/sources/grib.py", line 140, in _execute
-    paths = Pattern(path).substitute(*args, date=dates, allow_extra=True, **kwargs)
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/earthkit/data/utils/patterns.py", line 563, in substitute
-    return self._substitute_many(params, allow_extra=allow_extra)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/earthkit/data/utils/patterns.py", line 594, in _substitute_many
-    m = self.substitute(n, allow_extra=allow_extra)
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/earthkit/data/utils/patterns.py", line 565, in substitute
-    return self._substitute_one(params, allow_extra=allow_extra)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/earthkit/data/utils/patterns.py", line 576, in _substitute_one
-    result.append(p.substitute(params))
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/earthkit/data/utils/patterns.py", line 399, in substitute
-    raise ValueError("Missing parameter '{}'".format(self.name))
-ValueError: Missing parameter 'valid_datetime'
-2026-03-05 04:38:21 ERROR 
-💣 Missing parameter 'valid_datetime'
-2026-03-05 04:38:21 ERROR 💣 Exiting
+2026-03-05 04:47:09 INFO 🎬 Task init((),{}) starting
+2026-03-05 04:47:10 INFO Setting flatten_grid=True in config
+2026-03-05 04:47:10 INFO Setting ensemble_dimension=2 in config
+2026-03-05 04:47:10 INFO Setting flatten_grid=True in config
+2026-03-05 04:47:10 INFO Setting ensemble_dimension=2 in config
+2026-03-05 04:47:10 INFO {'start': '2024-05-02T09:00:00', 'end': '2024-05-31T20:00:00', 'frequency': '1h', 'group_by': 'monthly'}
+2026-03-05 04:47:10 INFO Groups(dates=1,StartEndDates(2024-05-02 09:00:00..2024-05-31 20:00:00 every 1:00:00))
+2026-03-05 04:47:10 INFO Groups: Groups(dates=1,StartEndDates(2024-05-02 09:00:00..2024-05-31 20:00:00 every 1:00:00))
+2026-03-05 04:47:28 WARNING Expected 40 fields, got 80 (kwargs={'valid_datetime': ['2024-05-02T09:00:00'], 'param': ['u', 'v', 't', 'q', 'gh', 'clwmr', 'icmr', 'rwmr', 'snmr', 'grle'], 'typeOfLevel': 'isobaricInhPa', 'levelist': [925, 850, 500, 200], 'step': 0}, paths=['/scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2']) Received empty dates - assuming this is static data.
+2026-03-05 04:47:28 INFO Registering data at path: ('input', 'pipe', '0', 'join', '0', 'pipe', '0', 'grib')
+2026-03-05 04:47:28 INFO Registering data at path: ('input', 'pipe', '0', 'join', '0', 'pipe', '1', 'rename')
+2026-03-05 04:47:28 INFO Registering data at path: ('input', 'pipe', '0', 'join', '0', 'pipe', '2', 'rename')
+2026-03-05 04:47:28 INFO Registering data at path: ('input', 'pipe', '0', 'join', '0', 'pipe')
+2026-03-05 04:47:31 INFO Registering data at path: ('input', 'pipe', '0', 'join', '1', 'pipe', '0', 'grib')
+2026-03-05 04:47:31 INFO Registering data at path: ('input', 'pipe', '0', 'join', '1', 'pipe', '1', 'rename')
+2026-03-05 04:47:31 INFO Registering data at path: ('input', 'pipe', '0', 'join', '1', 'pipe')
+2026-03-05 04:47:34 WARNING Expected 1 fields, got 2 (kwargs={'valid_datetime': ['2024-05-02T09:00:00'], 'param': ['smref'], 'typeOfLevel': 'surface', 'step': 0}, paths=['/scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2']) Received empty dates - assuming this is static data.
+2026-03-05 04:47:34 INFO Registering data at path: ('input', 'pipe', '0', 'join', '2', 'pipe', '0', 'grib')
+2026-03-05 04:47:34 INFO Registering data at path: ('input', 'pipe', '0', 'join', '2', 'pipe', '1', 'rename')
+2026-03-05 04:47:34 INFO Registering data at path: ('input', 'pipe', '0', 'join', '2', 'pipe')
+2026-03-05 04:47:36 WARNING Expected 3 fields, got 6 (kwargs={'valid_datetime': ['2024-05-02T09:00:00'], 'shortName': ['sdswrf', 'lsm', 'orog'], 'typeOfLevel': 'surface', 'step': 0}, paths=['/scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2']) Received empty dates - assuming this is static data.
+2026-03-05 04:47:36 INFO Registering data at path: ('input', 'pipe', '0', 'join', '3', 'pipe', '0', 'grib')
+2026-03-05 04:47:36 INFO Registering data at path: ('input', 'pipe', '0', 'join', '3', 'pipe', '1', 'rename')
+2026-03-05 04:47:36 INFO Registering data at path: ('input', 'pipe', '0', 'join', '3', 'pipe')
+2026-03-05 04:47:36 INFO Registering data at path: ('input', 'pipe', '0', 'join')
+📁: ('PATH', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v2024050209.grib2')
+📁: ('PATH', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v2024050209.grib2')
+📁: ('PATH', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v2024050209.grib2')
+📁: ('PATH', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v2024050209.grib2')
+Regridding:   0%|          | 0/90 [00:00<?, ?it/s]Regridding:   1%|          | 1/90 [00:00<00:50,  1.77it/s]Regridding:  10%|█         | 9/90 [00:00<00:04, 17.19it/s]Regridding:  16%|█▌        | 14/90 [00:00<00:03, 24.01it/s]Regridding:  24%|██▍       | 22/90 [00:00<00:01, 36.44it/s]Regridding:  33%|███▎      | 30/90 [00:00<00:01, 47.01it/s]Regridding:  41%|████      | 37/90 [00:01<00:01, 49.69it/s]Regridding:  49%|████▉     | 44/90 [00:01<00:00, 52.10it/s]Regridding:  58%|█████▊    | 52/90 [00:01<00:00, 59.11it/s]Regridding:  67%|██████▋   | 60/90 [00:01<00:00, 63.85it/s]Regridding:  74%|███████▍  | 67/90 [00:01<00:00, 65.40it/s]Regridding:  83%|████████▎ | 75/90 [00:01<00:00, 66.10it/s]Regridding:  91%|█████████ | 82/90 [00:01<00:00, 60.18it/s]Regridding:  99%|█████████▉| 89/90 [00:01<00:00, 56.91it/s]Regridding: 100%|██████████| 90/90 [00:01<00:00, 45.92it/s]
+2026-03-05 04:47:44 INFO Registering data at path: ('input', 'pipe', '1', 'regrid')
+2026-03-05 04:47:44 INFO Registering data at path: ('input', 'pipe')
+2026-03-05 04:47:44 INFO Minimal input for 'init' step (using only the first date) : GroupOfDates(dates=['2024-05-02T09:00:00'])
+2026-03-05 04:47:44 INFO <anemoi.datasets.create.input.result.field.FieldResult object at 0x7f0d471f30e0>
+2026-03-05 04:47:44 INFO Config loaded ok:
+2026-03-05 04:47:44 INFO Found 708 datetimes.
+2026-03-05 04:47:44 INFO Dates: Found 708 datetimes, in 1 groups: 
+2026-03-05 04:47:44 INFO Missing dates: 0
+
+❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌
+
+Building a 3D hypercube using ['valid_datetime', 'param_level', 'number']
+
+Number of unique values found for each coordinate:
+  valid_datetime      : 1
+      2024-05-02T09:00:00
+  param_level         : 45
+      clmr_200
+      clmr_500
+      clmr_850
+      clmr_925
+      grle_200
+      grle_500
+      grle_850
+      grle_925
+      height_200
+      height_500
+      height_850
+      height_925
+      icmr_200
+      icmr_500
+      icmr_850
+      icmr_925
+      landcover
+      orography
+      pres_0g
+      refc
+      rwmr_200
+      rwmr_500
+      rwmr_850
+      rwmr_925
+      snmr_200
+      snmr_500
+      snmr_850
+      snmr_925
+      sphum_200
+      sphum_500
+      sphum_850
+      sphum_925
+      swdown
+      temp_200
+      temp_500
+      temp_850
+      temp_925
+      ugrd_200
+      ugrd_500
+      ugrd_850
+      ugrd_925
+      vgrd_200
+      vgrd_500
+      vgrd_850
+      vgrd_925
+  number              : 1
+      0
+
+Shape of the hypercube           : (1, 45, 1)
+Number of expected fields        : 45 = 1 x 45 x 1
+Number of fields in the dataset  : 90
+Difference                       : 45
+
+More fields in dataset that expected for ['valid_datetime', 'param_level', 'number']. This means that some fields are duplicated.
+Duplicated fields:
+
+  ('2024-05-02T09:00:00', 'clmr_200', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(clwmr,200,20240502,900,0,None), (metadata={'param': 'clmr'})), (metadata={'param': 'clmr_200'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 200, 'level': 200, 'shortName': 'clwmr', 'paramId': 260018}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(clwmr,200,20240502,900,0,None), (metadata={'param': 'clmr'})), (metadata={'param': 'clmr_200'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 200, 'level': 200, 'shortName': 'clwmr', 'paramId': 260018}
+  ('2024-05-02T09:00:00', 'clmr_500', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(clwmr,500,20240502,900,0,None), (metadata={'param': 'clmr'})), (metadata={'param': 'clmr_500'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 500, 'level': 500, 'shortName': 'clwmr', 'paramId': 260018}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(clwmr,500,20240502,900,0,None), (metadata={'param': 'clmr'})), (metadata={'param': 'clmr_500'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 500, 'level': 500, 'shortName': 'clwmr', 'paramId': 260018}
+  ('2024-05-02T09:00:00', 'clmr_850', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(clwmr,850,20240502,900,0,None), (metadata={'param': 'clmr'})), (metadata={'param': 'clmr_850'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 850, 'level': 850, 'shortName': 'clwmr', 'paramId': 260018}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(clwmr,850,20240502,900,0,None), (metadata={'param': 'clmr'})), (metadata={'param': 'clmr_850'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 850, 'level': 850, 'shortName': 'clwmr', 'paramId': 260018}
+  ('2024-05-02T09:00:00', 'clmr_925', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(clwmr,925,20240502,900,0,None), (metadata={'param': 'clmr'})), (metadata={'param': 'clmr_925'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 925, 'level': 925, 'shortName': 'clwmr', 'paramId': 260018}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(clwmr,925,20240502,900,0,None), (metadata={'param': 'clmr'})), (metadata={'param': 'clmr_925'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 925, 'level': 925, 'shortName': 'clwmr', 'paramId': 260018}
+  ('2024-05-02T09:00:00', 'grle_200', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(grle,200,20240502,900,0,None), (metadata={'param': 'grle'})), (metadata={'param': 'grle_200'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 200, 'level': 200, 'shortName': 'grle', 'paramId': 260028}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(grle,200,20240502,900,0,None), (metadata={'param': 'grle'})), (metadata={'param': 'grle_200'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 200, 'level': 200, 'shortName': 'grle', 'paramId': 260028}
+  ('2024-05-02T09:00:00', 'grle_500', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(grle,500,20240502,900,0,None), (metadata={'param': 'grle'})), (metadata={'param': 'grle_500'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 500, 'level': 500, 'shortName': 'grle', 'paramId': 260028}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(grle,500,20240502,900,0,None), (metadata={'param': 'grle'})), (metadata={'param': 'grle_500'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 500, 'level': 500, 'shortName': 'grle', 'paramId': 260028}
+  ('2024-05-02T09:00:00', 'grle_850', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(grle,850,20240502,900,0,None), (metadata={'param': 'grle'})), (metadata={'param': 'grle_850'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 850, 'level': 850, 'shortName': 'grle', 'paramId': 260028}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(grle,850,20240502,900,0,None), (metadata={'param': 'grle'})), (metadata={'param': 'grle_850'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 850, 'level': 850, 'shortName': 'grle', 'paramId': 260028}
+  ('2024-05-02T09:00:00', 'grle_925', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(grle,925,20240502,900,0,None), (metadata={'param': 'grle'})), (metadata={'param': 'grle_925'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 925, 'level': 925, 'shortName': 'grle', 'paramId': 260028}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(grle,925,20240502,900,0,None), (metadata={'param': 'grle'})), (metadata={'param': 'grle_925'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 925, 'level': 925, 'shortName': 'grle', 'paramId': 260028}
+  ('2024-05-02T09:00:00', 'height_200', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(gh,200,20240502,900,0,None), (metadata={'param': 'height'})), (metadata={'param': 'height_200'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 200, 'level': 200, 'shortName': 'gh', 'paramId': 156}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(gh,200,20240502,900,0,None), (metadata={'param': 'height'})), (metadata={'param': 'height_200'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 200, 'level': 200, 'shortName': 'gh', 'paramId': 156}
+  ('2024-05-02T09:00:00', 'height_500', 0)
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(gh,500,20240502,900,0,None), (metadata={'param': 'height'})), (metadata={'param': 'height_500'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 500, 'level': 500, 'shortName': 'gh', 'paramId': 156}
+    NewLatLonField(NewMetadataField(NewDataField(NewMetadataField(NewMetadataField(GribField(gh,500,20240502,900,0,None), (metadata={'param': 'height'})), (metadata={'param': 'height_500'})), (shape=(310249,))), (metadata={})), (No specific representation for NewLatLonField)) {'date': 20240502, 'time': 900, 'step': 0, 'valid_datetime': '2024-05-02T09:00:00', 'levtype': 'pl', 'levelist': 500, 'level': 500, 'shortName': 'gh', 'paramId': 156}
+... 35 more
+
+To solve this issue, you can:
+  - Provide a better selection, like 'step: 0' or 'level: 1000'
+  - Change the way 'param' is computed using 'variable_naming' in the 'build' section.
+
+❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌❌
+
