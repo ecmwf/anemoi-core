@@ -23,7 +23,7 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.train.tasks.base import BaseGraphModule
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-
+import pandas as pd
 if TYPE_CHECKING:
 
     from collections.abc import Mapping
@@ -157,60 +157,54 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         x_in, x_in_hres, y = batch
 
+        # interpolate low-res input to high-res
         x_in_interp_to_hres = self.model.model.apply_interpolate_to_high_res(
             x_in[:, 0, ...],
             grid_shard_shapes=self.lres_grid_shard_shapes,
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
-        device = x_in_interp_to_hres.device
-        # indices to device
-        y_residual_indices = self.model.model.y_residual_indices.to(device)
-        x_in_residual_indices = self.model.model.x_in_residual_indices.to(device)
-        y_non_residual_indices = self.model.model.y_non_residual_indices.to(device)
         
-        y_target = torch.clone(y)
-        if len(y_residual_indices): # if residual variables
-            y_target[..., y_residual_indices] -= x_in_interp_to_hres[..., x_in_residual_indices]
+        # compute target with residual and non_residual variables
+        y_target = self.model.model.compute_residuals(y, x_in_interp_to_hres)
 
-        x_in_interp_to_hres = self.model.pre_processors(
+        # normalize inputs and target
+        x_in_interp_to_hres_norm = self.model.pre_processors(
             x_in_interp_to_hres, dataset="input_lres"
-        )  # need in place ?, in_place=False)
-        x_in_hres = self.model.pre_processors(
+        ) 
+        x_in_hres_norm = self.model.pre_processors(
             x_in_hres, dataset="input_hres"
-        )  # , in_place=False
-        y_target = self.model.pre_processors(y_target, dataset="output")
+        ) 
+        y_target_norm = self.model.pre_processors(y_target, dataset="output")
+
         # Scaler update
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
-            shape=(y_target.shape[0],) + (1,) * (y_target.ndim - 2),
+            shape=(y_target_norm.shape[0],) + (1,) * (y_target_norm.ndim - 2),
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
             rho=self.rho,
-            device=y_target.device,
+            device=y_target_norm.device,
         )
 
         # get targets and noised targets
-        y_target_noised = self._noise_target(y_target, sigma)
+        y_target_norm_noised = self._noise_target(y_target_norm, sigma)
 
         # prediction, fwd_with_preconditioning
-        # time_for_pred = time.time()
-
         y_pred = self(
-            x_in_interp_to_hres,
-            x_in_hres,
-            y_target_noised,
+            x_in_interp_to_hres_norm,
+            x_in_hres_norm,
+            y_target_norm_noised,
             sigma,
         )  # shape is (bs, ens, latlon, nvar)
-        # print("time for pred", time.time() - time_for_pred)
 
         # Use checkpoint for compute_loss_metrics
         loss, metrics_next = checkpoint(
             self.compute_loss_metrics,
             y_pred=y_pred[:, 0, ...],
-            y=y_target[:, 0, ...],  # removing time dim for loss computation,
+            y=y_target_norm[:, 0, ...],  # removing time dim for loss computation,
             rollout_step=0,
             training_mode=training_mode,
             validation_mode=validation_mode,
@@ -218,17 +212,15 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             use_reentrant=False,
         )
 
-        # Denormalize tensors
-        x_in_interp_to_hres = self.model.post_processors(
-            x_in_interp_to_hres, dataset="input_lres"
-        )
-        y_pred = self.model.post_processors(y_pred, dataset="output")
+        # Denormalize output tensors
+        y_pred_denorm = self.model.post_processors(y_pred, dataset="output")
 
-        y_pred_full = y_pred.clone() #ensures distinct y_pred and y_pred_full
-        if len(y_residual_indices):
-            y_pred_full[..., y_residual_indices] += x_in_interp_to_hres[..., x_in_residual_indices]
+        # convert residual predictions to direct predictions
+        y_pred_full = self.model.model.compute_direct_predictions(y_pred_denorm, x_in_interp_to_hres)
+
         # Add predicted residuals to the state
         y_preds = [y_pred_full, y_pred]
+
         return loss, metrics_next, y_preds
 
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
