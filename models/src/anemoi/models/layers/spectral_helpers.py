@@ -207,7 +207,7 @@ class SphericalHarmonicTransform(Module):
             self.nlat,
             max(self.lons_per_lat) // 2 + 1,
             device=x.device,
-            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
+            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128,
         )
 
         # Do a real-to-complex FFT on each latitude

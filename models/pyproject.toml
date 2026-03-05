@@ -35,13 +35,13 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
+  "anemoi-transform>=0.1.2",
   # Fix certain dependencies during development
   "anemoi-utils>=0.1.9",
   "einops>=0.6.1",
   "hydra-core>=1.3",
   "torch>=2.3",
   "torch-geometric>=2.3",
-  "anemoi-transform>=0.1.2",
 ]
 optional-dependencies.all = [ "anemoi-models[migrations]" ]
 optional-dependencies.dev = [

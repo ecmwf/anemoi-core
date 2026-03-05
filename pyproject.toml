@@ -4,16 +4,15 @@ version = "0.1.0"
 description = "Workspace for anemoi packages"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "anemoi-graphs",
-    "anemoi-models",
-    "anemoi-training"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
+dependencies = [ "anemoi-graphs", "anemoi-models", "anemoi-training" ]
 
-[tool.uv.sources]
-anemoi-graphs={workspace=true}
-anemoi-models={workspace=true}
-anemoi-training={workspace=true}
-
-[tool.uv.workspace]
-members=["training", "models", "graphs"]
+[tool.uv]
+sources.anemoi-graphs = { workspace = true }
+sources.anemoi-models = { workspace = true }
+sources.anemoi-training = { workspace = true }
+workspace.members = [ "graphs", "models", "training" ]
