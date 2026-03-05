@@ -11,6 +11,7 @@ import datetime
 import logging
 import os
 import random
+import time
 from functools import cached_property
 
 import numpy as np
@@ -39,6 +40,7 @@ class MultiDataset(IterableDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
+        debug: dict | None = None,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -59,7 +61,11 @@ class MultiDataset(IterableDataset):
         self.shuffle = shuffle
         self.timestep = timestep
         self.dataset_names = list(data_readers.keys())
-        self.grid_indices = grid_indices
+        debug = debug or {}
+        self.timing_data_enabled = bool(getattr(debug, "timing_data_enabled", False))
+        self.timing_data_every = max(1, int(getattr(debug, "timing_data_every", 50)))
+        self.timing_rank0_only = bool(getattr(debug, "timing_rank0_only", True))
+        self._timing_sample_counter = 0
 
         # Create individual NativeGridDataset for each dataset with its own grid_indices
         self.datasets = {}
@@ -352,18 +358,49 @@ class MultiDataset(IterableDataset):
         )
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        start = index + self.data_relative_date_indices[0]
-        end = index + self.data_relative_date_indices[-1] + 1
+        self._timing_sample_counter += 1
+        log_timing = self.timing_data_enabled and self._timing_sample_counter % self.timing_data_every == 0
+        if log_timing and self.timing_rank0_only:
+            log_timing = self.global_rank == 0 and self.reader_group_rank == 0
+        if log_timing:
+            t0 = time.perf_counter()
+            per_dataset_ms = {}
+
+        time_start = index + self.data_relative_date_indices[0]
+        time_end = index + self.data_relative_date_indices[-1] + 1
         if len(self.data_relative_date_indices) > 1:
             timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
         else:
             timeincrement = 1  # single time step
-        time_indices = slice(start, end, timeincrement)
+        time_indices = slice(time_start, time_end, timeincrement)
 
         x = {}
         for name, dataset in self.datasets.items():
-            grid_shard_indices = self.grid_indices[name].get_shard_indices(self.reader_group_rank)
-            x[name] = dataset.get_sample(time_indices, grid_shard_indices)
+            shard_start, shard_end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+            if log_timing:
+                t_ds = time.perf_counter()
+            x[name] = dataset.get_sample(time_indices, slice(shard_start, shard_end))
+            if log_timing:
+                per_dataset_ms[name] = (time.perf_counter() - t_ds) * 1e3
+
+        if log_timing:
+            total_ms = (time.perf_counter() - t0) * 1e3
+            per_dataset_s = ", ".join(f"{name}={ms:.1f}ms" for name, ms in per_dataset_ms.items())
+            LOGGER.info(
+                (
+                    "Timing data_fetch label=%s rank=%d worker=%s sample=%d total_ms=%.1f "
+                    "time_indices=(%d:%d:%d) %s"
+                ),
+                self.label,
+                self.global_rank,
+                getattr(self, "worker_id", -1),
+                self._timing_sample_counter,
+                total_ms,
+                time_start,
+                time_end,
+                timeincrement,
+                per_dataset_s,
+            )
 
         return x
 

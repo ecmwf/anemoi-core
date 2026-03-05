@@ -9,6 +9,7 @@
 
 
 import logging
+import time
 from collections.abc import Mapping
 from operator import itemgetter
 
@@ -116,9 +117,17 @@ class GraphNowcaster(BaseGraphModule):
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[Tensor, Mapping[str, Tensor], Tensor]:
+        t0 = time.perf_counter()
+        profile_model = self._should_log_step_timing()
+        decode_dataset_names = tuple(self.target_dataset_names)
         x, y = {}, {}
+        processed_batch = {}
         for dataset_name, data_batch in batch.items():
-            data_batch = self.model.pre_processors[dataset_name](data_batch)
+            # Batch tensors are already preprocessed in BaseGraphModule.on_after_batch_transfer().
+            # Keep model inputs in a non-double floating dtype; float64 can break mixed precision matmuls.
+            if data_batch.is_floating_point() and data_batch.dtype == torch.float64:
+                data_batch = data_batch.float()
+            processed_batch[dataset_name] = data_batch
             obs = {var.item() for var in self.data_indices[dataset_name].data.input.full}.difference(
                 set(self.known_future_indices[dataset_name]),
             )
@@ -140,10 +149,20 @@ class GraphNowcaster(BaseGraphModule):
                     ...,
                     list(obs),
                 ]  # here only past steps are used for observed vars
-            y[dataset_name] = data_batch[:, itemgetter(*self.interp_times)(self.imap)]
+            if dataset_name in decode_dataset_names:
+                y[dataset_name] = data_batch[:, itemgetter(*self.interp_times)(self.imap)]
             x[dataset_name] = x_init
-        decoder_ctx = self._build_decoder_context(batch)
-        y_pred = self(x, decoder_context=decoder_ctx)
+        t_preprocess = time.perf_counter()
+        decoder_ctx = self._build_decoder_context(processed_batch, decode_dataset_names=decode_dataset_names)
+        t_ctx = time.perf_counter()
+        y_pred = self(
+            x,
+            decoder_context=decoder_ctx,
+            decode_dataset_names=decode_dataset_names,
+            profile_model=profile_model,
+            profile_model_tag=f"global_step={int(self.global_step)} validation={validation_mode}",
+        )
+        t_forward = time.perf_counter()
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
@@ -151,10 +170,29 @@ class GraphNowcaster(BaseGraphModule):
             validation_mode=validation_mode,
             use_reentrant=False,
         )
+        t_loss = time.perf_counter()
+        if profile_model:
+            LOGGER.info(
+                (
+                    "Timing nowcaster_step global_step=%d validation=%s preprocess_ms=%.1f "
+                    "decoder_ctx_ms=%.1f model_forward_ms=%.1f loss_ms=%.1f total_ms=%.1f"
+                ),
+                int(self.global_step),
+                validation_mode,
+                (t_preprocess - t0) * 1e3,
+                (t_ctx - t_preprocess) * 1e3,
+                (t_forward - t_ctx) * 1e3,
+                (t_loss - t_forward) * 1e3,
+                (t_loss - t0) * 1e3,
+            )
 
         return loss, metrics, y_pred
 
-    def _build_decoder_context(self, batch: dict[str, torch.Tensor]) -> dict[str, dict[str, torch.Tensor]]:
+    def _build_decoder_context(
+        self,
+        batch: dict[str, torch.Tensor],
+        decode_dataset_names: tuple[str, ...] | None = None,
+    ) -> dict[str, dict[str, torch.Tensor]]:
         """Build decoder_context with key 'cond'.
 
         cond[t] = concat(target_forcings_at_t, time_fraction)
@@ -164,7 +202,8 @@ class GraphNowcaster(BaseGraphModule):
         dtype = next(iter(batch.values())).dtype
 
         ctx = {}
-        for ds in self.dataset_names:
+        active_datasets = decode_dataset_names or tuple(self.dataset_names)
+        for ds in active_datasets:
             idxs = self.known_future_indices[ds]
             grid_size = batch[ds].shape[3]
             n_forc = len(idxs)

@@ -13,7 +13,7 @@ import logging
 import einops
 import torch
 import torch.fft
-import torch.nn as nn
+import torch.nn.functional as F
 
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 from anemoi.training.utils.enums import TensorDim
@@ -55,6 +55,9 @@ class FFT2D(SpectralTransform):
         y_dim: int,
         apply_filter: bool = True,
         nodes_slice: tuple[int, int | None] | None = None,
+        patch_size: tuple[int, int] | None = None,
+        patch_stride: tuple[int, int] | None = None,
+        patch_padding: bool = False,
         **kwargs,
     ) -> None:
         """2D FFT Transform.
@@ -67,20 +70,65 @@ class FFT2D(SpectralTransform):
             size of the spatial dimension y of the original data in 2D
         apply_filter: bool
             Apply low-pass filter to ignore frequencies beyond the Nyquist limit
+        patch_size: tuple[int, int] | None
+            Optional patch size `(patch_y, patch_x)` for patch-wise FFT.
+            If None, FFT is applied on the full `(y, x)` field.
+        patch_stride: tuple[int, int] | None
+            Optional patch stride `(stride_y, stride_x)` for patch-wise FFT.
+            Defaults to `patch_size` (non-overlapping patches).
+        patch_padding: bool
+            If True, allow non-divisible `(y_dim, x_dim)` by zero-padding on the
+            bottom/right edges before patch extraction.
         """
         super().__init__()
 
         self.x_dim = x_dim
         self.y_dim = y_dim
+        self.patch_size = patch_size
+        self.patch_stride = patch_stride or patch_size
+        self.patch_padding = patch_padding
+        self.patch_pad_y = 0
+        self.patch_pad_x = 0
         nodes_slice = nodes_slice or (0, None)  # we don't want einops to silently fail
         # by slicing random parts of the input
         self.nodes_slice = slice(*nodes_slice)
         self.apply_filter = apply_filter
+
+        if self.patch_size is not None:
+            patch_y, patch_x = self.patch_size
+            if patch_y <= 0 or patch_x <= 0:
+                raise ValueError("patch_size must contain strictly positive values")
+            if patch_y > self.y_dim or patch_x > self.x_dim:
+                raise ValueError(
+                    f"patch_size {self.patch_size} must fit within full grid (y_dim={self.y_dim}, x_dim={self.x_dim})"
+                )
+            if self.patch_stride is None:
+                self.patch_stride = self.patch_size
+            stride_y, stride_x = self.patch_stride
+            if stride_y <= 0 or stride_x <= 0:
+                raise ValueError("patch_stride must contain strictly positive values")
+            rem_y = (self.y_dim - patch_y) % stride_y
+            rem_x = (self.x_dim - patch_x) % stride_x
+            if rem_y != 0 or rem_x != 0:
+                if not self.patch_padding:
+                    raise ValueError(
+                        "patch_size/patch_stride must tile the grid with integer patch counts "
+                        "when patch_padding=False: "
+                        f"got patch_size={self.patch_size}, patch_stride={self.patch_stride}, "
+                        f"grid=({self.y_dim}, {self.x_dim})"
+                    )
+                self.patch_pad_y = (stride_y - rem_y) % stride_y
+                self.patch_pad_x = (stride_x - rem_x) % stride_x
+
         if apply_filter:
-            self.filter = self.lowpass_filter(x_dim, y_dim)
+            if self.patch_size is None:
+                self.filter = self.lowpass_filter(x_dim, y_dim)
+            else:
+                patch_y, patch_x = self.patch_size
+                self.filter = self.lowpass_filter(patch_x, patch_y)
 
     @staticmethod
-    def lowpass_filter(x_dim: torch.Tensor, y_dim: torch.Tensor) -> torch.Tensor:
+    def lowpass_filter(x_dim: int, y_dim: int) -> torch.Tensor:
         fx = torch.fft.fftfreq(x_dim)
         fy = torch.fft.fftfreq(y_dim)
 
@@ -107,7 +155,32 @@ class FFT2D(SpectralTransform):
                 f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
             ) from e
 
-        fft = torch.fft.fft2(data, dim=(-2, -3))
+        if self.patch_size is None:
+            fft = torch.fft.fft2(data, dim=(-2, -3))
+            if self.apply_filter:
+                fft *= self.filter.to(device=data.device, dtype=data.dtype)
+            return fft
+
+        patch_y, patch_x = self.patch_size
+        stride_y, stride_x = self.patch_stride
+        lead_shape = data.shape[:-3]
+        var = data.shape[-1]
+        flat = data.reshape(-1, self.y_dim, self.x_dim, var)
+        flat = einops.rearrange(flat, "n y x v -> n v y x")
+        if self.patch_pad_y > 0 or self.patch_pad_x > 0:
+            # Pad only bottom/right to preserve top-left alignment.
+            flat = F.pad(flat, (0, self.patch_pad_x, 0, self.patch_pad_y))
+        unfolded = F.unfold(flat, kernel_size=(patch_y, patch_x), stride=(stride_y, stride_x))
+        n_patches = unfolded.shape[-1]
+        patches = unfolded.transpose(1, 2).reshape(-1, n_patches, var, patch_y, patch_x)
+        fft = torch.fft.fft2(patches, dim=(-2, -1))
+
+        padded_y = self.y_dim + self.patch_pad_y
+        padded_x = self.x_dim + self.patch_pad_x
+        n_patches_y = (padded_y - patch_y) // stride_y + 1
+        n_patches_x = (padded_x - patch_x) // stride_x + 1
+        fft = fft.reshape(*lead_shape, n_patches_y, n_patches_x, var, patch_y, patch_x)
+        fft = einops.rearrange(fft, "... py px v y x -> ... py px y x v")
         if self.apply_filter:
             fft *= self.filter.to(device=data.device, dtype=data.dtype)
         return fft

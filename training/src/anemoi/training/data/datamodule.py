@@ -175,12 +175,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
+        debug_cfg = getattr(self.config.dataloader, "debug", {})
         return MultiDataset(
             data_readers=datasets,
             relative_date_indices=self.relative_date_indices(val_rollout),
             timestep=self.config.data.timestep,
             shuffle=shuffle,
             label=label,
+            debug=debug_cfg,
         )
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:

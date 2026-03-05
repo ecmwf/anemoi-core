@@ -8,6 +8,7 @@
 #
 
 import logging
+import time
 from typing import Optional
 
 import einops
@@ -137,6 +138,9 @@ class Nowcaster(AnemoiModelEncProcDec):
         x: dict[str, torch.Tensor],
         *,
         decoder_context: Optional[dict[str, dict[str, torch.Tensor]]] = None,
+        decode_dataset_names: Optional[tuple[str, ...] | list[str]] = None,
+        profile_model: bool = False,
+        profile_model_tag: str | None = None,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, list] | None = None,
     ) -> dict[str, torch.Tensor]:
@@ -156,6 +160,29 @@ class Nowcaster(AnemoiModelEncProcDec):
           y_pred per dataset with shape [B,T_out,E,G,C_out]
         """
         dataset_names = list(x.keys())
+        decode_datasets = list(decode_dataset_names) if decode_dataset_names is not None else dataset_names
+        unknown_decode_datasets = [name for name in decode_datasets if name not in dataset_names]
+        if unknown_decode_datasets:
+            raise KeyError(f"decode_dataset_names contains unknown datasets: {unknown_decode_datasets}")
+
+        device = next(iter(x.values())).device
+
+        def _stamp() -> float:
+            if not profile_model:
+                return 0.0
+            if device.type == "cuda":
+                torch.cuda.synchronize(device=device)
+            return time.perf_counter()
+
+        t_model_start = _stamp()
+        encoder_time = {name: 0.0 for name in dataset_names}
+        encoder_edges_time = {name: 0.0 for name in dataset_names}
+        assemble_time = {name: 0.0 for name in dataset_names}
+        qc_time = {name: 0.0 for name in dataset_names}
+        decoder_time = {name: 0.0 for name in decode_datasets}
+        decoder_edges_time = {name: 0.0 for name in decode_datasets}
+        decode_condition_time = {name: 0.0 for name in decode_datasets}
+
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
 
@@ -170,10 +197,24 @@ class Nowcaster(AnemoiModelEncProcDec):
         x_data_latent_dict = {}
         shard_shapes_data_dict = {}
         x_dst_base_dict = {}
+        t_hidden_attr_start = _stamp()
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        t_hidden_attr_end = _stamp()
+        hidden_attr_time = t_hidden_attr_end - t_hidden_attr_start
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
         for dataset_name in dataset_names:
-            x_aug = self._append_qc_features(x[dataset_name], dataset_name=dataset_name)
+            x_in = x[dataset_name]
+            if (
+                x_in.is_floating_point()
+                and x_hidden_latent.is_floating_point()
+                and x_in.dtype != x_hidden_latent.dtype
+            ):
+                x_in = x_in.to(dtype=x_hidden_latent.dtype)
+            t_qc_start = _stamp()
+            x_aug = self._append_qc_features(x_in, dataset_name=dataset_name)
+            t_qc_end = _stamp()
+            qc_time[dataset_name] = t_qc_end - t_qc_start
+            t_stage_start = _stamp()
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
                 x_aug,
                 batch_size=batch_size,
@@ -181,17 +222,23 @@ class Nowcaster(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
             )
+            t_after_assemble = _stamp()
+            assemble_time[dataset_name] = t_after_assemble - t_stage_start
             x_dst_base_dict[dataset_name] = x_data_latent
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
+            t_edges_start = _stamp()
             encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
             )
+            t_after_edges = _stamp()
+            encoder_edges_time[dataset_name] = t_after_edges - t_edges_start
 
+            t_encoder_start = _stamp()
             x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_size,
@@ -204,13 +251,19 @@ class Nowcaster(AnemoiModelEncProcDec):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 edge_shard_shapes=enc_edge_shard_shapes,
             )
+            t_after_encoder = _stamp()
+            encoder_time[dataset_name] = t_after_encoder - t_encoder_start
             x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
         x_latent = sum(dataset_latents.values())
+        t_processor_edges_start = _stamp()
         processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
+        t_after_processor_edges = _stamp()
+        processor_edges_time = t_after_processor_edges - t_processor_edges_start
+        t_processor_start = _stamp()
         x_latent_proc = self.processor(
             x=x_latent,
             batch_size=batch_size,
@@ -220,24 +273,30 @@ class Nowcaster(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
             edge_shard_shapes=proc_edge_shard_shapes,
         )
+        t_after_processor = _stamp()
+        processor_time = t_after_processor - t_processor_start
 
         x_latent_proc = x_latent_proc + x_latent
         t_out = self.n_step_output
         if decoder_context is not None:
-            for ds in dataset_names:
+            for ds in decode_datasets:
                 if ds in decoder_context:
                     t_out = int(decoder_context[ds][self._cond_key].shape[1])
                     break
 
         # Decode: scan over target times, applying conditioning to x_dst.
         y_pred = {}
-        for dataset_name in dataset_names:
+        for dataset_name in decode_datasets:
+            t_decoder_dataset_start = _stamp()
+            t_decoder_edges_start = _stamp()
             dec_edge_attr, dec_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
             )
+            t_decoder_edges_end = _stamp()
+            decoder_edges_time[dataset_name] = t_decoder_edges_end - t_decoder_edges_start
 
             cond = None
             if decoder_context is not None and dataset_name in decoder_context:
@@ -248,6 +307,7 @@ class Nowcaster(AnemoiModelEncProcDec):
                 x_dst = x_dst_base_dict[dataset_name]
                 x_lat = x_latent_proc
                 if cond is not None:
+                    t_cond_start = _stamp()
                     cond_t = cond[:, t]
                     cond_flat = einops.rearrange(cond_t, "batch ensemble grid c -> (batch ensemble grid) c")
 
@@ -262,6 +322,8 @@ class Nowcaster(AnemoiModelEncProcDec):
                             ):
                                 cond_flat = cond_flat.to(dtype=x_dst.dtype)
                             x_dst = self._cond_xdst[str(dataset_name)](x_dst, cond_flat)
+                    t_cond_end = _stamp()
+                    decode_condition_time[dataset_name] += t_cond_end - t_cond_start
 
                 x_out = self.decoder[dataset_name](
                     (x_lat, x_dst),
@@ -292,5 +354,46 @@ class Nowcaster(AnemoiModelEncProcDec):
                 concat = bounding(concat)
 
             y_pred[dataset_name] = concat
+            t_decoder_dataset_end = _stamp()
+            decoder_time[dataset_name] = t_decoder_dataset_end - t_decoder_dataset_start
+
+        t_model_end = _stamp()
+        if profile_model:
+            total_ms = (t_model_end - t_model_start) * 1e3
+            enc_ms = sum(encoder_time.values()) * 1e3
+            enc_edge_ms = sum(encoder_edges_time.values()) * 1e3
+            assemble_ms = sum(assemble_time.values()) * 1e3
+            dec_ms = sum(decoder_time.values()) * 1e3
+            dec_edge_ms = sum(decoder_edges_time.values()) * 1e3
+            cond_ms = sum(decode_condition_time.values()) * 1e3
+            processor_ms = processor_time * 1e3
+            processor_edge_ms = processor_edges_time * 1e3
+            qc_ms = sum(qc_time.values()) * 1e3
+            hidden_attr_ms = hidden_attr_time * 1e3
+            accounted_ms = (
+                hidden_attr_ms + qc_ms + assemble_ms + enc_edge_ms + enc_ms + processor_edge_ms + processor_ms + dec_ms
+            )
+            other_ms = total_ms - accounted_ms
+            LOGGER.info(
+                "Timing nowcaster_model%s total_ms=%.1f hidden_attr_ms=%.1f qc_ms=%.1f assemble_ms=%.1f "
+                "enc_edges_ms=%.1f enc_ms=%.1f proc_edges_ms=%.1f proc_ms=%.1f dec_edges_ms=%.1f "
+                "dec_cond_ms=%.1f dec_ms=%.1f other_ms=%.1f "
+                "encoded=%s decoded=%s",
+                f" {profile_model_tag}" if profile_model_tag else "",
+                total_ms,
+                hidden_attr_ms,
+                qc_ms,
+                assemble_ms,
+                enc_edge_ms,
+                enc_ms,
+                processor_edge_ms,
+                processor_ms,
+                dec_edge_ms,
+                cond_ms,
+                dec_ms,
+                other_ms,
+                dataset_names,
+                decode_datasets,
+            )
 
         return y_pred
