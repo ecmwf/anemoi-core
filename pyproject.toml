@@ -1,0 +1,19 @@
+[project]
+name = "anemoi-core"
+version = "0.1.0"
+description = "Workspace for anemoi packages"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anemoi-graphs",
+    "anemoi-models",
+    "anemoi-training"
+]
+
+[tool.uv.sources]
+anemoi-graphs={workspace=true}
+anemoi-models={workspace=true}
+anemoi-training={workspace=true}
+
+[tool.uv.workspace]
+members=["training", "models", "graphs"]
