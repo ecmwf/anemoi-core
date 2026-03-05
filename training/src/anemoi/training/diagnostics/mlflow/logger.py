@@ -316,7 +316,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         self.offline = offline
         self.log_system = system
         self.log_terminal = terminal
-        self.expand_hyperparams = expand_hyperparams if expand_hyperparams else ["config"]
+        self.expand_hyperparams = expand_hyperparams or ["config"]
         self._resumed = run_id is not None
         self._forked = fork_run_id is not None
         self._flag_log_hparams = log_hyperparams
