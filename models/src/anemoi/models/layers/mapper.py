@@ -425,7 +425,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         )
 
         size = (x_src.shape[0], x_dst.shape[0])  # node sizes of local graph shard
-        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
+        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_MAPPER
 
         dst_chunks = torch.arange(size[1], device=x_dst.device).tensor_split(num_chunks)
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
