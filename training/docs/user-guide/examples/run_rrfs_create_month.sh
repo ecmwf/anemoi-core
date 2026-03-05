@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Create one monthly RRFS Zarr dataset, then add boundary_mask and rewrite time coords.
+# Create one RRFS Zarr dataset (month-tagged output), then add boundary_mask and
+# rewrite time coords.
 #
 # Usage:
 #   run_rrfs_create_month.sh <YYYYMM> [output_dir] [recipe_yaml]
@@ -40,37 +41,46 @@ LON_MAX="${LON_MAX:--90}"
 BOUNDARY_KM="${BOUNDARY_KM:-20}"
 TIME_UNIT="${TIME_UNIT:-s}"
 
-read -r START END NAME_TAG <<EOF
-$(python - <<PY
-from datetime import datetime, timedelta
-yyyymm = "${YYYYMM}"
-year = int(yyyymm[:4])
-month = int(yyyymm[4:6])
-start = datetime(year, month, 1, 0, 0, 0)
-if month == 12:
-    nstart = datetime(year + 1, 1, 1, 0, 0, 0)
-else:
-    nstart = datetime(year, month + 1, 1, 0, 0, 0)
-end = nstart - timedelta(hours=1)
-print(start.strftime("%Y-%m-%dT%H:%M:%S"), end.strftime("%Y-%m-%dT%H:%M:%S"), f"{year:04d}{month:02d}")
-PY
-)
-EOF
+NAME_TAG="$YYYYMM"
 
 mkdir -p "$OUT_DIR" "./tmp"
 TMP_RECIPE="./tmp/anemoi-data-rrfs-${NAME_TAG}.yaml"
 RAW_ZARR="${OUT_DIR}/rrfs-conus-3km-${NAME_TAG}-raw.zarr"
 FINAL_ZARR="${OUT_DIR}/rrfs-conus-3km-${NAME_TAG}-bcmask-time-${TIME_UNIT}.zarr"
 
-# Build a month-specific recipe copy.
+# Build a month-tagged recipe copy (date range stays exactly as in the source recipe).
 cp "$RECIPE" "$TMP_RECIPE"
 sed -i -E "s|^name:.*$|name: rrfs-conus-3km-${NAME_TAG}-1h|g" "$TMP_RECIPE"
-sed -i -E "s|^  start:.*$|  start: \"${START}\"|g" "$TMP_RECIPE"
-sed -i -E "s|^  end:.*$|  end: \"${END}\"|g" "$TMP_RECIPE"
+
+read -r START END FREQ <<EOF
+$(python - <<PY
+import re
+from pathlib import Path
+
+text = Path("${TMP_RECIPE}").read_text(encoding="utf-8")
+
+def pick(key: str):
+    m = re.search(rf"^\\s*{key}:\\s*\\\"?([^\\\"\\n]+)\\\"?\\s*$", text, flags=re.M)
+    return m.group(1).strip() if m else ""
+
+start = pick("start")
+end = pick("end")
+freq = pick("frequency")
+if not start or not end or not freq:
+    raise SystemExit(
+        "ERROR: Could not parse dates.start/end/frequency from recipe. "
+        "Please ensure they are set under 'dates:'."
+    )
+print(start, end, freq)
+PY
+)
+EOF
 
 echo "Creating monthly dataset:"
 echo "  month:      $YYYYMM"
+echo "  source yaml: $RECIPE"
 echo "  start/end:  $START -> $END"
+echo "  frequency:  $FREQ"
 echo "  recipe:     $TMP_RECIPE"
 echo "  raw:        $RAW_ZARR"
 echo "  final:      $FINAL_ZARR"
@@ -87,7 +97,7 @@ python training/docs/user-guide/examples/add_boundary_mask.py \
   --boundary-km "$BOUNDARY_KM" \
   --var-name boundary_mask \
   --start "$START" \
-  --frequency 1h \
+  --frequency "$FREQ" \
   --time-unit "$TIME_UNIT"
 
 echo "Done: $FINAL_ZARR"
