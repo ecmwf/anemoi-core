@@ -84,6 +84,12 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             self._forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in forcing_names]
             self.num_input_channels_decoding_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
 
+    def _calculate_target_dim(self, dataset_name: str) -> int:
+        return (
+            self.n_step_output * self.num_input_channels_forcings[dataset_name]
+            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+        )
+
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
