@@ -24,7 +24,7 @@ input:
     - join:
         - pipe:
             - grib:
-                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{valid_datetime:strftime(%Y%m%d%H)}.grib2
                 param:
                   - u
                   - v
@@ -54,7 +54,7 @@ input:
                 param: "{param}_{level}"
         - pipe:
             - grib:
-                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{valid_datetime:strftime(%Y%m%d%H)}.grib2
                 param: [sp, tmp]
                 typeOfLevel: surface
             - rename:
@@ -63,7 +63,7 @@ input:
                   tmp: temp_sfc
         - pipe:
             - grib:
-                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{valid_datetime:strftime(%Y%m%d%H)}.grib2
                 param: [smref]
                 typeOfLevel: surface
             - rename:
@@ -71,7 +71,7 @@ input:
                   smref: refc
         - pipe:
             - grib:
-                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
+                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{valid_datetime:strftime(%Y%m%d%H)}.grib2
                 shortName: [sdswrf, lsm, orog]
                 typeOfLevel: surface
             - rename:

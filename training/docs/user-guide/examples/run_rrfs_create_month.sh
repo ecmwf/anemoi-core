@@ -52,29 +52,15 @@ FINAL_ZARR="${OUT_DIR}/rrfs-conus-3km-${NAME_TAG}-bcmask-time-${TIME_UNIT}.zarr"
 cp "$RECIPE" "$TMP_RECIPE"
 sed -i -E "s|^name:.*$|name: rrfs-conus-3km-${NAME_TAG}-1h|g" "$TMP_RECIPE"
 
-read -r START END FREQ <<EOF
-$(python - <<PY
-import re
-from pathlib import Path
+START="$(sed -n -E 's/^[[:space:]]*start:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' "$TMP_RECIPE" | head -n1)"
+END="$(sed -n -E 's/^[[:space:]]*end:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' "$TMP_RECIPE" | head -n1)"
+FREQ="$(sed -n -E 's/^[[:space:]]*frequency:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' "$TMP_RECIPE" | head -n1)"
 
-text = Path("${TMP_RECIPE}").read_text(encoding="utf-8")
-
-def pick(key: str):
-    m = re.search(rf"^\\s*{key}:\\s*\\\"?([^\\\"\\n]+)\\\"?\\s*$", text, flags=re.M)
-    return m.group(1).strip() if m else ""
-
-start = pick("start")
-end = pick("end")
-freq = pick("frequency")
-if not start or not end or not freq:
-    raise SystemExit(
-        "ERROR: Could not parse dates.start/end/frequency from recipe. "
-        "Please ensure they are set under 'dates:'."
-    )
-print(start, end, freq)
-PY
-)
-EOF
+if [[ -z "${START}" || -z "${END}" || -z "${FREQ}" ]]; then
+  echo "ERROR: Could not parse dates.start/end/frequency from $TMP_RECIPE"
+  echo "Please ensure they are set under 'dates:'."
+  exit 3
+fi
 
 echo "Creating monthly dataset:"
 echo "  month:      $YYYYMM"
@@ -85,7 +71,7 @@ echo "  recipe:     $TMP_RECIPE"
 echo "  raw:        $RAW_ZARR"
 echo "  final:      $FINAL_ZARR"
 
-anemoi-datasets create "$TMP_RECIPE" "$RAW_ZARR"
+anemoi-datasets create "$TMP_RECIPE" "$RAW_ZARR" --overwrite
 
 python training/docs/user-guide/examples/add_boundary_mask.py \
   "$RAW_ZARR" \
