@@ -19,6 +19,7 @@ from scipy.spatial import SphericalVoronoi
 from scipy.spatial import Voronoi
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.datasets.data import open_dataset
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
@@ -355,7 +356,7 @@ class CosineLatWeightedAttribute(BaseLatWeightedAttribute):
 
 
 class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
-    r"""Latitude-weighted area weights for rectilinear grids.
+    """Latitude-weighted area weights for rectilinear grids.
 
     Attributes
     ----------
@@ -395,3 +396,50 @@ class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
         # Compute the area of each node
         area_km = dict(zip(unique_lats, ring_area_km / lat_counts))
         return np.array([area_km[lat] for lat in latitudes])
+
+
+class AnemoiDatasetVariableWeights(BaseNodeAttribute):
+    """Load area weights from a variable in the dataset.
+
+    Attributes
+    ----------
+    variable : str
+        Name of the variable to use as weights.
+    norm : str, optional
+        Method to use to normalise the weights.
+
+    Methods
+    -------
+    get_raw_values(self, nodes)
+        Extract the data and convert it to a Torch tensor object.
+    """
+
+    def __init__(self, variable: str, norm: str | None = None, dtype: str = "float32") -> None:
+        super().__init__(norm, dtype)
+        self.variable = variable
+
+    def _read_data(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+        """Read the weighting variable from the dataset."""
+        return open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        """Extract the data and convert it to a Torch tensor object.
+
+        Parameters
+        ----------
+        nodes : NodeStorage
+            Nodes of the graph.
+        kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        torch.Tensor
+            Area weights for the nodes.
+        """
+        assert nodes["node_type"] in [
+            "ZarrDatasetNodes",
+            "AnemoiDatasetNodes",
+        ], f"{self.__class__.__name__} can only be used with AnemoiDatasetNodes."
+        data = torch.from_numpy(self._read_data(nodes))
+        return self.post_process(data)
