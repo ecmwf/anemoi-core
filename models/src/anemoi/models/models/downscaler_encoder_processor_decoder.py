@@ -192,7 +192,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         if len(self.y_residual_indices):
             y_residual_indices = self.y_residual_indices.to(y.device)
             x_in_residual_indices = self.x_in_residual_indices.to(y.device)
-            y_with_residuals = y[..., y_residual_indices] - x_in_interp_to_hres[..., x_in_residual_indices]
+            y_with_residuals[..., y_residual_indices] -= x_in_interp_to_hres[..., x_in_residual_indices]
         return y_with_residuals
 
     def compute_direct_predictions(
@@ -219,7 +219,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         if len(self.y_residual_indices):
             y_residual_indices = self.y_residual_indices.to(y_pred.device)
             x_in_residual_indices = self.x_in_residual_indices.to(y_pred.device)
-            y_pred_direct_prediction = y_pred[..., y_residual_indices] + x_in_interp_to_hres[..., x_in_residual_indices]
+            y_pred_direct_prediction[..., y_residual_indices] += x_in_interp_to_hres[..., x_in_residual_indices]
         return y_pred_direct_prediction
 
     def compute_residuals_legacy(
