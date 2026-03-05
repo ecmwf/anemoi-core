@@ -188,7 +188,7 @@ class SphericalHarmonicTransform(Module):
         self.register_buffer("weight", weight, persistent=False)
 
     def rfft_rings_reduced(self, x: Tensor) -> Tensor:
-        r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+        """Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
 
         Parameters
         ----------
@@ -217,7 +217,7 @@ class SphericalHarmonicTransform(Module):
         return output_tensor
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
-        r"""Performs direct real-to-complex FFT on each latitude ring of a regular grid.
+        """Performs direct real-to-complex FFT on each latitude ring of a regular grid.
 
         Parameters
         ----------
@@ -233,7 +233,7 @@ class SphericalHarmonicTransform(Module):
         return torch.fft.rfft(x.reshape(*x.shape[:-1], self.nlat, self.lons_per_lat[0]), norm="forward")
 
     def forward(self, x: Tensor) -> Tensor:
-        r"""Performs direct SHT transform (Fourier transform followed by Legendre transform).
+        """Performs direct SHT transform (Fourier transform followed by Legendre transform).
 
         Parameters
         ----------
@@ -327,7 +327,7 @@ class InverseSphericalHarmonicTransform(Module):
         self.register_buffer("pct", pct, persistent=False)
 
     def irfft_rings_reduced(self, x: Tensor) -> Tensor:
-        r"""Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+        """Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
 
         Parameters
         ----------
@@ -348,7 +348,7 @@ class InverseSphericalHarmonicTransform(Module):
         )
 
     def irfft_rings_regular(self, x: Tensor) -> Tensor:
-        r"""Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
+        """Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
 
         Parameters
         ----------
@@ -364,7 +364,7 @@ class InverseSphericalHarmonicTransform(Module):
         return torch.fft.irfft(x, self.lons_per_lat[0], norm="forward").reshape(*x.shape[:-2], self.n_grid_points)
 
     def forward(self, x: Tensor) -> Tensor:
-        r"""Performs inverse SHT transform (inverse Legendre transform followed by inverse Fourier transform).
+        """Performs inverse SHT transform (inverse Legendre transform followed by inverse Fourier transform).
 
         Parameters
         ----------
