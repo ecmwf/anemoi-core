@@ -184,12 +184,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         # Y = Y[:, :, :, ..., self.data_indices.data.output.full] #(see if necessary)
 
         x_in_interp_to_hres = self.model.pre_processors(
-            x_in_interp_to_hres, dataset="input_lres"
-        )  # need in place ?, in_place=False)
-        # x_in_interp_to_hres = x_in_interp_to_hres[  :, :, ..., self.data_indices.data.input[0].full] (see if necessary)
-        x_in_hres = self.model.pre_processors(x_in_hres, dataset="input_hres")  # , in_place=False
-        # x_in_hres = x_in_hres[:, :, ..., self.data_indices.data.input[1].full]
-        residuals_target = self.model.pre_processors(residuals_target, dataset="output")
+            x_in_interp_to_hres, dataset="input_lres", in_place=False
+        )
+        x_in_hres = self.model.pre_processors(x_in_hres, dataset="input_hres", in_place=False)
+        residuals_target = self.model.pre_processors(residuals_target, dataset="output", in_place=False)
 
         # Scaler update
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)

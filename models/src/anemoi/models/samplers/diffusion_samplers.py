@@ -214,7 +214,7 @@ class EDMHeunSampler(DiffusionSampler):
         S_max: float = float("inf"),
         S_noise: float = 1.0,
         dtype: torch.dtype = torch.float64,
-        eps_prec: float = 1e-10,
+        eps_prec: float = 0.0,
         **kwargs,
     ):
         self.S_churn = S_churn
