@@ -169,12 +169,12 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         # normalize inputs and target
         x_in_interp_to_hres_norm = self.model.pre_processors(
-            x_in_interp_to_hres, dataset="input_lres"
+            x_in_interp_to_hres, dataset="input_lres", in_place=False
         ) 
         x_in_hres_norm = self.model.pre_processors(
-            x_in_hres, dataset="input_hres"
+            x_in_hres, dataset="input_hres", in_place=False
         ) 
-        y_target_norm = self.model.pre_processors(y_target, dataset="output")
+        y_target_norm = self.model.pre_processors(y_target, dataset="output", in_place=False)
 
         # Scaler update
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
@@ -213,7 +213,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         )
 
         # Denormalize output tensors
-        y_pred_denorm = self.model.post_processors(y_pred, dataset="output")
+        y_pred_denorm = self.model.post_processors(y_pred, dataset="output", in_place=False)
 
         # convert residual predictions to direct predictions
         y_pred_full = self.model.model.compute_direct_predictions(y_pred_denorm, x_in_interp_to_hres)
