@@ -18,7 +18,8 @@ from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
-from anemoi.training.losses.spectral import SpectralCRPSLoss
+from anemoi.training.losses import SpectralCRPSLoss
+from anemoi.training.losses import SpectralL2Loss
 
 
 def test_combined_loss() -> None:
@@ -125,6 +126,39 @@ def test_combined_loss_with_spectral_crps_backward() -> None:
 
     mse = WeightedMSELoss()
     spectral = SpectralCRPSLoss(node_weights=node_weights, transform="fft2d", x_dim=x_dim, y_dim=y_dim)
+
+    loss = CombinedLoss(
+        losses=[mse, spectral],
+        loss_weights=[1.0, 0.25],
+    )
+
+    out = loss(pred, target)
+    assert out.ndim == 0
+    assert torch.isfinite(out).all()
+
+    out.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_combined_loss_with_spectral_l2_loss_backward() -> None:
+
+    def _octahedral_expected_points(nlat: int) -> int:
+        half = [4 * (i + 1) + 16 for i in range(nlat // 2)]
+        nlon = half + half[::-1]
+        return int(sum(nlon))
+
+    nlat = 8
+    nvars = 3
+    expected_points = _octahedral_expected_points(nlat)
+    # Match the typical tensor layout used by Anemoi losses:
+    pred = torch.zeros((2, 1, 1, expected_points, nvars), requires_grad=True)
+    target = torch.zeros_like(pred)    
+
+
+    mse = WeightedMSELoss()
+    spectral = SpectralL2Loss(transform="octahedral_sht",
+                nlat=nlat,)
 
     loss = CombinedLoss(
         losses=[mse, spectral],
