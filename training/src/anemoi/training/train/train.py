@@ -40,6 +40,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.graph_config import merge_projection_and_graph_config
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -164,7 +165,8 @@ class AnemoiTrainer(ABC):
         # Create new graph
         from anemoi.graphs.create import GraphCreator
 
-        graph_config = self.config.graph
+        graph_config = OmegaConf.create(OmegaConf.to_container(self.config.graph, resolve=False))
+        merge_projection_and_graph_config(graph_config)
 
         # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
         if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):

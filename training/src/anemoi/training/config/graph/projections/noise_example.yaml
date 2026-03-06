@@ -1,0 +1,32 @@
+noise:
+  edges_name: ["noise", "to", "${graph.hidden}"]
+  edge_weight_attribute: gauss_weight
+
+  nodes:
+    noise:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+        grid: o32
+
+  edges:
+    - source_name: noise
+      target_name: ${graph.hidden}
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 32
+      attributes:
+        gauss_weight:
+          _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+          norm: l1
+          sigma: 1.0
+
+# Model config (noise injector):
+#
+# model:
+#   noise_injector:
+#     _target_: anemoi.models.layers.ensemble.NoiseConditioning
+#     noise_std: 1
+#     noise_channels_dim: 4
+#     noise_mlp_hidden_dim: 32
+#     noise_edges_name: ${graph.projections.noise.edges_name}
+#     edge_weight_attribute: ${graph.projections.noise.edge_weight_attribute}

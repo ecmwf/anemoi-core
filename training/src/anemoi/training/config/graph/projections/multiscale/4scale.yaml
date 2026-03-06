@@ -1,0 +1,110 @@
+---
+defaults:
+  # Load graph/projections/smooth_knn*_n320.yaml and mount each config under
+  # the matching local path in "smoothers" (e.g. smoothers.smooth_1x).
+  # Hydra composition: each entry is loaded first, then `_self_` applies this
+  # file so we can reference composed values via ${graph.projections.multiscale...}.
+  # Use graph/projections/multiscale=4scale_o96 to switch to o96 smoothers.
+  - /graph/projections@smoothers.smooth_1x: smooth_knn16_n320
+  - /graph/projections@smoothers.smooth_2x: smooth_knn32_n320
+  - /graph/projections@smoothers.smooth_4x: smooth_knn64_n320
+  - /graph/projections@smoothers.smooth_8x: smooth_knn128_n320
+  - _self_
+
+# 4-scale multiscale smoothing (K=16/32/64/128) on the same geometry as graph.data.
+smoothers:
+  smooth_1x:
+    node_name: smooth_1x
+  smooth_2x:
+    node_name: smooth_2x
+  smooth_4x:
+    node_name: smooth_4x
+  smooth_8x:
+    node_name: smooth_8x
+
+matrices:
+  # Order matters for multiscale loss: smoothest -> ... -> least smooth -> none.
+  - edges_name:
+      - ${graph.projections.multiscale.smoothers.smooth_8x.node_name}
+      - "to"
+      - ${graph.projections.multiscale.smoothers.smooth_8x.node_name}
+    edge_weight_attribute: ${graph.projections.multiscale.smoothers.smooth_8x.edge_weight_attribute}
+  - edges_name:
+      - ${graph.projections.multiscale.smoothers.smooth_4x.node_name}
+      - "to"
+      - ${graph.projections.multiscale.smoothers.smooth_4x.node_name}
+    edge_weight_attribute: ${graph.projections.multiscale.smoothers.smooth_4x.edge_weight_attribute}
+  - edges_name:
+      - ${graph.projections.multiscale.smoothers.smooth_2x.node_name}
+      - "to"
+      - ${graph.projections.multiscale.smoothers.smooth_2x.node_name}
+    edge_weight_attribute: ${graph.projections.multiscale.smoothers.smooth_2x.edge_weight_attribute}
+  - edges_name:
+      - ${graph.projections.multiscale.smoothers.smooth_1x.node_name}
+      - "to"
+      - ${graph.projections.multiscale.smoothers.smooth_1x.node_name}
+    edge_weight_attribute: ${graph.projections.multiscale.smoothers.smooth_1x.edge_weight_attribute}
+  - null
+
+nodes:
+  smooth_1x:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReferenceNodes
+      reference_node_name: ${graph.projections.multiscale.smoothers.smooth_1x.reference_node_name}
+  smooth_2x:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReferenceNodes
+      reference_node_name: ${graph.projections.multiscale.smoothers.smooth_2x.reference_node_name}
+  smooth_4x:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReferenceNodes
+      reference_node_name: ${graph.projections.multiscale.smoothers.smooth_4x.reference_node_name}
+  smooth_8x:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReferenceNodes
+      reference_node_name: ${graph.projections.multiscale.smoothers.smooth_8x.reference_node_name}
+
+edges:
+  - source_name: ${graph.projections.multiscale.smoothers.smooth_1x.node_name}
+    target_name: ${graph.projections.multiscale.smoothers.smooth_1x.node_name}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: ${graph.projections.multiscale.smoothers.smooth_1x.num_nearest_neighbours}
+    attributes:
+      gauss_weight:
+        _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+        norm: ${graph.projections.multiscale.smoothers.smooth_1x.gaussian_norm}
+        sigma: ${graph.projections.multiscale.smoothers.smooth_1x.sigma}
+
+  - source_name: ${graph.projections.multiscale.smoothers.smooth_2x.node_name}
+    target_name: ${graph.projections.multiscale.smoothers.smooth_2x.node_name}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: ${graph.projections.multiscale.smoothers.smooth_2x.num_nearest_neighbours}
+    attributes:
+      gauss_weight:
+        _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+        norm: ${graph.projections.multiscale.smoothers.smooth_2x.gaussian_norm}
+        sigma: ${graph.projections.multiscale.smoothers.smooth_2x.sigma}
+
+  - source_name: ${graph.projections.multiscale.smoothers.smooth_4x.node_name}
+    target_name: ${graph.projections.multiscale.smoothers.smooth_4x.node_name}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: ${graph.projections.multiscale.smoothers.smooth_4x.num_nearest_neighbours}
+    attributes:
+      gauss_weight:
+        _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+        norm: ${graph.projections.multiscale.smoothers.smooth_4x.gaussian_norm}
+        sigma: ${graph.projections.multiscale.smoothers.smooth_4x.sigma}
+
+  - source_name: ${graph.projections.multiscale.smoothers.smooth_8x.node_name}
+    target_name: ${graph.projections.multiscale.smoothers.smooth_8x.node_name}
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: ${graph.projections.multiscale.smoothers.smooth_8x.num_nearest_neighbours}
+    attributes:
+      gauss_weight:
+        _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+        norm: ${graph.projections.multiscale.smoothers.smooth_8x.gaussian_norm}
+        sigma: ${graph.projections.multiscale.smoothers.smooth_8x.sigma}
