@@ -100,7 +100,7 @@ def legpoly(
                 - np.sqrt((n + m - 1) / (n - m) * (2 * n + 1) / (2 * n - 3) * (n - m - 1) / (n + m)) * vdm[m, n - 2, :]
             )
 
-    vdm = vdm[:mmax + 1, :lmax + 1]
+    vdm = vdm[: mmax + 1, : lmax + 1]
 
     return vdm
 
@@ -155,7 +155,9 @@ class SphericalHarmonicTransform(Module):
         self.lons_per_lat = lons_per_lat
         self.nlat = len(self.lons_per_lat)
         self.truncation = truncation
-        assert 0 < self.truncation <= self.nlat, f"Truncation {self.truncation} must be between 1 and number of latitudes {self.nlat}"
+        assert (
+            0 < self.truncation <= self.nlat
+        ), f"Truncation {self.truncation} must be between 1 and number of latitudes {self.nlat}"
         self.n_grid_points = sum(self.lons_per_lat)
 
         # Set offsets to start of each latitude in flattened grid dimension
@@ -250,7 +252,6 @@ class SphericalHarmonicTransform(Module):
 
         rl = torch.einsum("...km, mlk -> ...lm", x[..., : self.truncation + 1, 0], self.weight.to(x.dtype))
         im = torch.einsum("...km, mlk -> ...lm", x[..., : self.truncation + 1, 1], self.weight.to(x.dtype))
-        # TODO(sara) truncation + 1 is correct here?
 
         x = torch.stack((rl, im), -1)
         x = torch.view_as_complex(x)
