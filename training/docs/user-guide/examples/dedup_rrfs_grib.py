@@ -30,9 +30,9 @@ def run_cmd(args: list[str], stdin_text: str | None = None) -> subprocess.Comple
     )
 
 
-def parse_inventory_lines(stdout: str) -> list[tuple[int, tuple[str, str, str, str]]]:
-    """Return list of (record_index, dedup_key)."""
-    result: list[tuple[int, tuple[str, str, str, str]]] = []
+def parse_inventory_lines(stdout: str) -> list[tuple[str, tuple[str, str, str, str]]]:
+    """Return list of (raw_inventory_line, dedup_key)."""
+    result: list[tuple[str, tuple[str, str, str, str]]] = []
     for raw in stdout.splitlines():
         line = raw.strip()
         if not line:
@@ -42,25 +42,23 @@ def parse_inventory_lines(stdout: str) -> list[tuple[int, tuple[str, str, str, s
         # idx, offset, date_token, var, level, fcst_type, ...
         if len(parts) < 6:
             continue
-        try:
-            idx = int(parts[0])
-        except ValueError:
-            continue
         key = (parts[2], parts[3], parts[4], parts[5])
-        result.append((idx, key))
+        result.append((line, key))
     return result
 
 
-def dedup_indices(inv: list[tuple[int, tuple[str, str, str, str]]]) -> tuple[list[int], int]:
+def dedup_inventory_lines(
+    inv: list[tuple[str, tuple[str, str, str, str]]],
+) -> tuple[list[str], int]:
     seen: set[tuple[str, str, str, str]] = set()
-    keep: list[int] = []
+    keep: list[str] = []
     dup_count = 0
-    for idx, key in inv:
+    for raw_line, key in inv:
         if key in seen:
             dup_count += 1
             continue
         seen.add(key)
-        keep.append(idx)
+        keep.append(raw_line)
     return keep, dup_count
 
 
@@ -96,7 +94,7 @@ def process_file(src: Path, dst: Path, overwrite: bool, dry_run: bool) -> tuple[
     if not entries:
         raise RuntimeError(f"No inventory records parsed from {src}")
 
-    keep, dup_count = dedup_indices(entries)
+    keep, dup_count = dedup_inventory_lines(entries)
     if dry_run:
         return len(entries), dup_count
 
@@ -104,9 +102,9 @@ def process_file(src: Path, dst: Path, overwrite: bool, dry_run: bool) -> tuple[
         dst.unlink()
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    # Feed selected record numbers to wgrib2 stdin.
-    idx_text = "\n".join(str(i) for i in keep) + "\n"
-    out = run_cmd(["wgrib2", str(src), "-i", "-grib", str(dst)], stdin_text=idx_text)
+    # Feed selected inventory lines to wgrib2 stdin (`-i` expects inventory format).
+    inv_text = "\n".join(keep) + "\n"
+    out = run_cmd(["wgrib2", str(src), "-i", "-grib", str(dst)], stdin_text=inv_text)
     if out.returncode != 0:
         raise RuntimeError(f"wgrib2 -i -grib failed for {src} -> {dst}:\n{out.stderr}")
 
@@ -206,4 +204,3 @@ def main(argv: Iterable[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-
