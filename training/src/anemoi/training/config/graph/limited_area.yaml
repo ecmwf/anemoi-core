@@ -6,7 +6,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.data.dataset}
+      dataset: ${dataloader.training.datasets.data.dataset_config}
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
