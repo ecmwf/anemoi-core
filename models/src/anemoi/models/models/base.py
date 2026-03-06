@@ -112,11 +112,15 @@ class BaseGraphModel(nn.Module):
         for dataset_name, dataset_indices in data_indices.items():
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
-            self._decoding_forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing]
+            self._decoding_forcing_input_idx[dataset_name] = [
+                dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing
+            ]
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
-            self.num_input_channels_decoding_forcings[dataset_name] = len(self._decoding_forcing_input_idx[dataset_name])
+            self.num_input_channels_decoding_forcings[dataset_name] = len(
+                self._decoding_forcing_input_idx[dataset_name]
+            )
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
@@ -135,7 +139,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # Default behaviour is to pass the same input as to the encoder.
-        # TODO: abstract different options into the base class 
+        # TODO: abstract different options into the base class
         return self._calculate_input_dim(dataset_name)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
