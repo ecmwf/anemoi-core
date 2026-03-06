@@ -175,7 +175,6 @@ class NoOutputMaskSchema(BaseModel):
 
 class Boolean1DSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.Boolean1DMask"] = Field(..., alias="_target_")
-    nodes_name: str = Field(examples="data")
     attribute_name: str = Field(example="cutout_mask")
 
 
