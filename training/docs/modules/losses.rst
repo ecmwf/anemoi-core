@@ -119,7 +119,7 @@ Some loss functions operate in spectral space rather than directly in grid-point
 This is useful when the error characteristics are better expressed by scale (wavenumber)
 than by location, or when the loss should emphasise/regularise specific ranges of scales.
 
-In Anemoi, spectral losses follow the same API as other losses (scalars/node weights, reduction,
+In Anemoi, spectral losses follow the same API as other losses (scalers/node weights, reduction,
 etc.), but they additionally require a *spectral transform* configuration.
 
 Spectral transforms
@@ -364,10 +364,10 @@ If multiple groups are defined for a variable, the first group in the
 `variable_groups` is used. If the variable is not in any group, it is
 assigned to the default group.
 
-Custom Scalars
+Custom Scalers
 ==============
 
-To create a custom scalar, subclass the ``BaseScaler`` and implement the
+To create a custom scaler, subclass the ``BaseScaler`` and implement the
 ``get_scaling_values`` method. This method should return an array of the
 scaling values. Set ``scale_dims`` to the dimensions that the scaling
 values should be applied to.
@@ -383,16 +383,16 @@ values should be applied to.
          # Custom scaling logic here
          return scaling_values
 
-This scalar will only be instantiated once at the start of training, and
+This scaler will only be instantiated once at the start of training, and
 thus cannot adapt throughout batches and epochs.
 
-Custom Updating Scalars
+Custom Updating Scalers
 -----------------------
 
-If you want a scalar that adapts throughout the training process, you
+If you want a scaler that adapts throughout the training process, you
 can subclass the ``BaseUpdatingScaler``.
 
-As with the ``BaseScaler``, set the initial scalar values at the start
+As with the ``BaseScaler``, set the initial scaler values at the start
 of training by implementing the ``get_scaling_values`` method.
 Currently, two callbacks to update at are available, at the start of
 training, and at the start of every batch.
@@ -486,18 +486,17 @@ losses above.
                - __target__: anemoi.training.losses.mae.WeightedMAELoss
             scalers: ['variable']
             loss_weights: [1.0,0.5]
-            scalars: ['variable']
 
 All extra kwargs passed to ``CombinedLoss`` are passed to each of the
 loss functions, and the loss weights are used to scale the individual
 losses before combining them.
 
-If ``scalars`` is not given in the underlying loss functions, all the
-scalars given to the ``CombinedLoss`` are used.
+If ``scalers`` is not given in the underlying loss functions, all the
+scalers given to the ``CombinedLoss`` are used.
 
-If different scalars are required for each loss, the root level scalars
-of the ``CombinedLoss`` should contain all the scalars required by the
-individual losses. Then the scalars for each loss can be set in the
+If different scalers are required for each loss, the root level scalers
+of the ``CombinedLoss`` should contain all the scalers required by the
+individual losses. Then the scalers for each loss can be set in the
 individual loss config.
 
 .. code:: yaml
@@ -508,11 +507,11 @@ individual loss config.
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
                   - _target_: anemoi.training.losses.mse.WeightedMSELoss
-                  scalars: ['variable']
+                  scalers: ['variable']
                   - _target_: anemoi.training.losses.mae.WeightedMAELoss
-                  scalars: ['loss_weights_mask']
+                  scalers: ['loss_weights_mask']
             loss_weights: [1.0, 1.0]
-            scalars: ['*']
+            scalers: ['*']
 
 .. automodule:: anemoi.training.losses.combined
    :members:
