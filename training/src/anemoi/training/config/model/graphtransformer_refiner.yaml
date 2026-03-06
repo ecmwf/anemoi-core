@@ -49,7 +49,7 @@ encoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "pyg"  # Options: "triton", "pyg"
-  edge_pre_mlp: False
+  edge_pre_mlp: True
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -65,14 +65,14 @@ decoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "pyg"  # Options: "triton", "pyg"
-  edge_pre_mlp: False
+  edge_pre_mlp: True
 
 refiner:
   _target_: anemoi.models.layers.mapper.GraphTransformerRefinerMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
   refiner_channels: 256
-  num_refiners: 1
+  num_refiners: 2
   use_src_embedding: False
   use_dst_embedding: False
   num_chunks: 4
@@ -85,7 +85,7 @@ refiner:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "pyg"
-  edge_pre_mlp: False
+  edge_pre_mlp: True
 
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection

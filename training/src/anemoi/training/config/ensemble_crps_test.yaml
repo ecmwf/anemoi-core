@@ -3,8 +3,8 @@ defaults:
 - dataloader: native_grid
 - diagnostics: evaluation_ens
 - system: example
-- graph: encoder_decoder_only
-- model: transformer_ens
+- graph: multi_scale_refiner
+- model: transformer_ens_refiner
 - training: ensemble
 - override /graph/projections/multiscale@_global_.graph.projections.multiscale: 4scale
 - _self_
@@ -51,4 +51,8 @@ training:
     datasets:
       data:
         weights: [1.0, 1.0, 1.0, 1.0, 1.0]
+  validation_metrics:
+    datasets:
+      data:
+        multiscale: null
   max_epochs: 1
