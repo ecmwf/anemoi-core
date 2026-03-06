@@ -271,6 +271,7 @@ def test_transfer_learning_loading_raises_on_old_checkpoint_data_indices_format(
     with pytest.raises(TypeError, match="older version of anemoi-core"):
         transfer_learning_loading(new_module, ckpt_path)
 
+
 def test_validate_transfer_learning_add_dataset() -> None:
     """Test adding a new dataset during transfer learning (Scenario A → A+B)."""
     # Setup: checkpoint has ERA5, config has ERA5 + CERRA
@@ -290,6 +291,7 @@ def test_validate_transfer_learning_add_dataset() -> None:
     assert len(era5_index.compare_called_with) == 1
     # Assert: compare_variables was NOT called for CERRA (not in checkpoint)
     assert len(cerra_index.compare_called_with) == 0
+
 
 def test_validate_transfer_learning_swap_datasets() -> None:
     """Test swapping datasets during transfer learning (Scenario A+B -> A+C)."""
@@ -325,6 +327,7 @@ def test_validate_transfer_learning_non_dict_checkpoint_format_returns_early() -
     AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
 
     assert len(era5_index.compare_called_with) == 0
+
 
 def test_validate_transfer_learning_remove_dataset() -> None:
     """Test removing a dataset during transfer learning (Scenario A+B → A)."""
