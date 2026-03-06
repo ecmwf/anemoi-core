@@ -185,6 +185,9 @@ Use this for global models on the reduced Gaussian grid (only N320 supported so 
          transform: reduced_sht
          grid: n320
 
+Truncation is by default set to 319 for n320 grids, but can be set to a higher or lower value in the config file.
+This truncation parameter defines how many wave numbers are included in the spectral representation.
+
 Combining spectral and grid-point losses
 ----------------------------------------
 
