@@ -37,11 +37,9 @@ def test_benchmark_dataloader(
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
     import time
 
-    from anemoi.graphs.create import GraphCreator
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
     cfg, test_case = benchmark_config
-    cfg.graph.nodes.data.node_builder.dataset = cfg.system.input.dataset
 
     # Use a time-based seed to avoid page cache effects between benchmark runs
     random_seed = str(int(time.time()))
@@ -49,11 +47,8 @@ def test_benchmark_dataloader(
     os.environ["ANEMOI_BASE_SEED"] = random_seed
     LOGGER.info("Benchmarking dataloader for configuration: %s (seed=%s)", test_case, random_seed)
 
-    # Initialize the forecaster to get graph data
-    graph = GraphCreator(config=cfg.graph).create(overwrite=True)
-
-    # Initialize datamodule with graph data
-    datamodule = AnemoiDatasetsDataModule(config=cfg, graph_data={"data": graph})
+    # Initialize datamodule
+    datamodule = AnemoiDatasetsDataModule(config=cfg)
 
     # Get training dataloader
     train_dataloader = datamodule.train_dataloader()
