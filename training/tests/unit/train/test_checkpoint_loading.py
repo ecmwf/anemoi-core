@@ -243,6 +243,40 @@ def test_validate_transfer_learning_add_dataset() -> None:
     # Assert: compare_variables was NOT called for CERRA (not in checkpoint)
     assert len(cerra_index.compare_called_with) == 0
 
+def test_validate_transfer_learning_swap_datasets() -> None:
+    """Test swapping datasets during transfer learning (Scenario A+B -> A+C)."""
+    era5_index = DummyIndexWithCompare()
+    era5_index.name_to_index = {"t2m": 0, "u10": 1}
+
+    icon_index = DummyIndexWithCompare()
+    icon_index.name_to_index = {"t2m": 0, "msl": 1}
+
+    trainer = SimpleNamespace(data_indices={"era5": era5_index, "icon": icon_index})
+    model = SimpleNamespace(
+        _ckpt_model_name_to_index={
+            "era5": {"t2m": 0, "u10": 1},
+            "cerra": {"t2m": 0, "tp": 1},
+        },
+    )
+
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
+
+    assert len(era5_index.compare_called_with) == 1
+    assert len(icon_index.compare_called_with) == 0
+    assert era5_index.compare_called_with[0] == ({"t2m": 0, "u10": 1}, {"t2m": 0, "u10": 1})
+
+
+def test_validate_transfer_learning_non_dict_checkpoint_format_returns_early() -> None:
+    """Test early return when checkpoint uses non multi-dataset format."""
+    era5_index = DummyIndexWithCompare()
+    era5_index.name_to_index = {"t2m": 0, "u10": 1}
+
+    trainer = SimpleNamespace(data_indices={"era5": era5_index})
+    model = SimpleNamespace(_ckpt_model_name_to_index={"t2m": 0, "u10": 1})
+
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
+
+    assert len(era5_index.compare_called_with) == 0
 
 def test_validate_transfer_learning_remove_dataset() -> None:
     """Test removing a dataset during transfer learning (Scenario A+B → A)."""
