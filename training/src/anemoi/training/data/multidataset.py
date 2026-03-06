@@ -372,7 +372,8 @@ class MultiDataset(IterableDataset):
         x = {}
         for name, dataset in self.datasets.items():
             # self.shard_shapes is lazily initalised to None
-            # This if statement guards against the case where shard_shapes is not set (e.g. if set_comm_group_info hasn't been called yet)
+            # This if statement guards against the case where shard_shapes is not set
+            # (e.g. if set_comm_group_info hasn't been called yet)
             if self.shard_shapes is not None and self.shard_shapes[name] is not None:
                 start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
                 grid_indices = slice(start, end)
