@@ -1014,32 +1014,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def _setup_loss_and_metrics(self) -> None:
         """Build output masks, scalers, losses and metrics using datamodule info.
 
-        Called from ``setup(stage='fit')``. Accesses ``self.trainer.datamodule``
-        for grid information (latlons, cutout_mask, etc.).
+        Called from ``setup(stage='fit')``. Accesses ``self.trainer.datamodule`` for grid information
+        (latlons, cutout_mask, etc.).
         """
         datamodule = self.trainer.datamodule
         config = self.config
-        data_indices = self.data_indices
-        metadata = self.model.metadata
-        statistics = self.statistics
-        statistics_tendencies = self.statistics_tendencies
 
         # --- Output masks (from datamodule grid info) ---
+        output_mask_cfg = get_multiple_datasets_config(config.model.output_mask)
         self.output_mask = {}
-        for name in self.dataset_names:
-            output_mask_cfg = config.model.output_mask
-            # If the mask config expects a mask tensor, try to get cutout info from the datamodule
-            try:
-                cutout_mask = torch.from_numpy(datamodule.ds_train.datasets[name].cutout_mask)
-                self.output_mask[name] = instantiate(output_mask_cfg, mask=cutout_mask)
-            except (ValueError, KeyError):
-                # No cutout grid or mask not configured — use NoOutputMask
-                self.output_mask[name] = instantiate(output_mask_cfg)
+        for name, mask_cfg in output_mask_cfg.items():
+            self.output_mask[name] = instantiate(mask_cfg, dataset=datamodule.ds_train.datasets[name])
 
         # Merge output mask supporting_arrays into model's supporting_arrays
         for dataset_name, mask in self.output_mask.items():
-            if mask.supporting_arrays:
-                self.model.supporting_arrays.setdefault(dataset_name, {}).update(mask.supporting_arrays)
+            self.model.supporting_arrays.setdefault(dataset_name, {}).update(mask.supporting_arrays)
 
         # --- Scalers, loss, and metrics ---
         dataset_variable_groups = get_multiple_datasets_config(config.training.variable_groups)
@@ -1057,52 +1046,44 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
             metadata_extractor = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
-                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
+                metadata_variables=self.model.metadata["dataset"][dataset_name].get("variables_metadata"),
             )
-
-            # Get latlons from the datamodule for this dataset
-            latlons = datamodule.latlons.get(dataset_name)
-
-            # Pass graph_data from the model for backward-compatible scalers
-            # (e.g., GraphNodeAttributeScaler). The graph is now owned by the model.
-            graph_data = self.model.model._graph_data.get(dataset_name)
 
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
-                data_indices=data_indices[dataset_name],
-                statistics=statistics[dataset_name],
+                data_indices=self.data_indices[dataset_name],
+                statistics=self.statistics[dataset_name],
                 statistics_tendencies=(
-                    statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
+                    self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None
                 ),
                 metadata_extractor=metadata_extractor,
                 nodes_name=dataset_name,
                 output_mask=self.output_mask[dataset_name],
-                latlons=latlons,
-                graph_data=graph_data,
+                latlons=datamodule.latlons.get(dataset_name),
             )
             self.scalers[dataset_name] = dataset_scalers
             self.updating_scalars[dataset_name] = dataset_updating_scalars
 
             self.val_metric_ranges[dataset_name] = get_metric_ranges(
                 metadata_extractor,
-                output_data_indices=data_indices[dataset_name].model.output,
+                output_data_indices=self.data_indices[dataset_name].model.output,
                 metrics_to_log=metrics_to_log[dataset_name],
             )
 
             self.loss[dataset_name] = get_loss_function(
                 loss_configs[dataset_name],
                 dataset_scalers,
-                data_indices[dataset_name],
+                self.data_indices[dataset_name],
             )
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
-                data_indices=data_indices[dataset_name],
+                data_indices=self.data_indices[dataset_name],
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
-                data_indices[dataset_name],
+                self.data_indices[dataset_name],
             )
 
         if config.training.loss_gradient_scaling:

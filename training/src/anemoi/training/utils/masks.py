@@ -43,37 +43,24 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
 
     Parameters
     ----------
-    mask : torch.Tensor
-        A 1-D boolean tensor to use as the mask.
-    nodes : object, optional
-        **Deprecated.** A NodeStorage-like object. If provided together with
-        ``attribute_name``, the mask is extracted as ``nodes[attribute_name]``.
-    attribute_name : str, optional
-        **Deprecated.** Attribute key on *nodes*.
+    mask : str
+        A name of dataset mask to use. Options: `cutout_mask` and `boundary_mask` are supported if `cutout` operation
+        has been used to define the dataset.
+    data_reader : BaseAnemoiReader
+        The data reader to use for loading the mask if `mask` is a string.
     """
 
     def __init__(
         self,
-        mask: torch.Tensor | None = None,
-        nodes: object | None = None,
-        attribute_name: str | None = None,
+        mask: str,
+        data_reader: "BaseAnemoiReader",
     ) -> None:
         super().__init__()
-
-        if mask is not None:
-            mask = mask.bool().squeeze()
-        elif nodes is not None and attribute_name is not None:
-            warnings.warn(
-                "Boolean1DMask(nodes, attribute_name) is deprecated. "
-                "Pass a raw torch.Tensor mask instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            mask = nodes[attribute_name].bool().squeeze()
-        else:
-            msg = "Either 'mask' or both 'nodes' and 'attribute_name' must be provided."
+        if not hasattr(data_reader, mask):
+            msg = f"Data reader does not have mask attribute '{mask}'."
             raise ValueError(msg)
 
+        mask = getattr(data_reader, mask).bool().squeeze()
         self.register_buffer("mask", mask)
 
     @property

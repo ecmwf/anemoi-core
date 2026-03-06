@@ -21,7 +21,7 @@ from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.training.data.dataset import create_dataset
+from anemoi.training.data.data_reader import create_data_reader
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
@@ -44,7 +44,7 @@ class MultiDataset(IterableDataset):
 
         Parameters
         ----------
-        datasets_config : dict
+        data_readers : dict
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices: list
@@ -62,7 +62,7 @@ class MultiDataset(IterableDataset):
         self.dataset_names = list(data_readers.keys())
 
         # Create each dataset
-        self.datasets = {name: create_dataset(data_reader) for name, data_reader in data_readers.items()}
+        self.datasets = {name: create_data_reader(data_reader) for name, data_reader in data_readers.items()}
 
         # relative_date_indices are computed in terms of data frequency
         # data_relative_date_indices are in terms of the specific dataset

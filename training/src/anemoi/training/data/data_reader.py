@@ -10,7 +10,7 @@
 import datetime
 import logging
 from abc import abstractmethod
-from functools import cached_property
+from functools import cache, cached_property
 
 import numpy as np
 import torch
@@ -223,8 +223,8 @@ class BaseAnemoiReader:
         return tree
 
 
-class NativeGridDataset(BaseAnemoiReader):
-    """Native grid dataset."""
+class NativeGridDataReader(BaseAnemoiReader):
+    """Native grid data reader."""
 
     @property
     def has_trajectories(self) -> bool:
@@ -232,8 +232,8 @@ class NativeGridDataset(BaseAnemoiReader):
         return False
 
 
-class TrajectoryDataset(BaseAnemoiReader):
-    """Trajectory dataset."""
+class TrajectoryDataReader(BaseAnemoiReader):
+    """Trajectory data reader."""
 
     def __init__(
         self,
@@ -265,17 +265,17 @@ class TrajectoryDataset(BaseAnemoiReader):
         return tree
 
 
-def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
+def create_data_reader(dataset_config: dict) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
-        LOGGER.info("Creating TrajectoryDataset...")
-        return TrajectoryDataset(
+        LOGGER.info("Creating TrajectoryDataReader...")
+        return TrajectoryDataReader(
             **dataset_config,
             trajectory_start=trajectory_config["start"],
             trajectory_length=trajectory_config["length"],
         )
 
-    LOGGER.info("Creating NativeGridDataset...")
-    return NativeGridDataset(**dataset_config)
+    LOGGER.info("Creating NativeGridDataReader...")
+    return NativeGridDataReader(**dataset_config)
