@@ -58,6 +58,22 @@ background thread, allowing plotting tasks to be offloaded to worker
 threads. This setup keeps the main thread responsive, handling
 plot-related tasks asynchronously and efficiently in the background.
 
+Plot adapter compatibility
+==========================
+
+Task-specific plot adapters normalize output handling so plotting
+callbacks can use the same interface across task types:
+
+- forecaster tasks use ``ForecasterPlotAdapter``;
+- diffusion tasks use ``DiffusionPlotAdapter``;
+- autoencoder tasks use ``AutoencoderPlotAdapter``;
+- multi-output interpolation uses
+  ``InterpolatorMultiOutPlotAdapter``.
+
+These adapters rely on the shared task ``_step`` return format
+``(loss, metrics, predictions)`` where ``predictions`` is always a list
+of dataset-keyed dictionaries.
+
 **Focus Area**
 
 Plotting callbacks (such as ``PlotSample``, ``PlotLoss``, and ``LongRolloutPlots``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
@@ -88,6 +104,19 @@ performance and detail.
    produce smoother-looking plots due to the aggregation of data points.
 * If `datashader` is set to False, matplotlib.scatter is used, which provides
    sharper and more detailed visuals but may be slower for large datasets.
+
+**Projection**
+
+Plotting callbacks also support ``config.diagnostics.plot.projection_kind``
+to control the map projection used for geospatial figures.
+
+- ``equirectangular`` (default): regular axes, no Cartopy dependency.
+- ``lambert_conformal``: regional Lambert Conformal projection fitted to
+  the plotted latitude/longitude domain (requires Cartopy).
+
+When ``datashader: True`` is enabled, plotting is forced to
+``equirectangular`` because Datashader rendering does not support
+Cartopy transforms.
 
 **Note** - this asynchronous behaviour is only available for the
 plotting callbacks.
@@ -122,6 +151,7 @@ which is recommended for interactive terminals and
    plot:
       asynchronous: True # Whether to plot asynchronously
       datashader: True # Whether to use datashader for plotting (faster)
+      projection_kind: equirectangular # or lambert_conformal (requires Cartopy)
       frequency: # Frequency of the plotting
       batch: 750
       epoch: 5

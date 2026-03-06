@@ -82,9 +82,8 @@ def checkpoint_settings(tmp_path: str) -> dict[str : str | bool]:
 
 
 @pytest.fixture
-def callback(tmp_path: str, config: DictConfig, checkpoint_settings: dict) -> AnemoiCheckpoint:
+def callback(tmp_path: str, checkpoint_settings: dict) -> AnemoiCheckpoint:
     callback = AnemoiCheckpoint(
-        config=config,
         filename="{step}",
         save_last=True,
         train_time_interval=datetime.timedelta(seconds=0.1),

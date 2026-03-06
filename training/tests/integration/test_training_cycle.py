@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pydantic import ValidationError
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -43,6 +44,22 @@ def test_config_validation_global_config(global_config: tuple[DictConfig, str, s
     BaseSchema(**cfg)
 
 
+def test_config_validation_rejects_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = global_config
+    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    with pytest.raises(ValidationError, match="projection_kind"):
+        BaseSchema(**cfg)
+
+
+def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = global_config
+    cfg.config_validation = False
+    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    cfg_obj = OmegaConf.to_object(cfg)
+    unvalidated = UnvalidatedBaseSchema(**DictConfig(cfg_obj))
+    assert unvalidated.diagnostics.plot.projection_kind == "invalid_projection"
+
+
 def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:
     from anemoi.training.diagnostics.logger import get_mlflow_logger
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
@@ -56,10 +73,27 @@ def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
 
-    logger = get_mlflow_logger(config)
+    from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
-    if config.diagnostics.log.mlflow.enabled:
-        assert Path(config.diagnostics.log.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
+    config = convert_to_omegaconf(config)
+
+    # Minimal inputs required by get_mlflow_logger
+    run_id = None
+    fork_run_id = None
+    paths = config.system.output
+    logger_config = config.diagnostics.log
+
+    logger_cfg = getattr(logger_config, "mlflow", None)
+    if getattr(logger_cfg, "enabled", False):
+        LOGGER.info("%s logger enabled", "MLFLOW")
+
+        logger = get_mlflow_logger(
+            run_id=run_id,
+            fork_run_id=fork_run_id,
+            paths=paths,
+            logger_config=logger_config,
+        )
+        assert Path(logger_config.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
         assert isinstance(logger, AnemoiMLflowLogger)
 
 
