@@ -204,7 +204,7 @@ def test_transfer_learning_loading_preserves_checkpoint_processors_when_disabled
         "state_dict": old_module.state_dict(),
         "hyper_parameters": {
             "config": _make_minimal_ckpt_config(),
-            "data_indices": SimpleNamespace(name_to_index={}),
+           "data_indices": {'data':SimpleNamespace(name_to_index={})},
         },
     }
     ckpt_path = tmp_path / "checkpoint.pt"
