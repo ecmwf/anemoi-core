@@ -73,7 +73,7 @@ encoder:
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  graph_attention_backend: "pyg"  # Options: "triton", "pyg"
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -88,7 +88,7 @@ decoder:
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  graph_attention_backend: "pyg"  # Options: "triton", "pyg"
 
 refiner:
   _target_: anemoi.models.layers.mapper.GraphTransformerRefinerMapper
@@ -107,7 +107,7 @@ refiner:
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
-  graph_attention_backend: "triton"
+  graph_attention_backend: "pyg"
   edge_pre_mlp: False
 
 residual:
