@@ -10,9 +10,9 @@
 import gc
 import logging
 import os
-import resource
 from pathlib import Path
 
+import psutil
 import pytest
 from omegaconf import DictConfig
 from torch.cuda import empty_cache
@@ -52,50 +52,20 @@ def test_benchmark_dataloader(
     # Get training dataloader
     train_dataloader = datamodule.train_dataloader()
 
-    # Record current CPU memory (RSS) for the whole process tree before the benchmark
-    def _read_rss_kib(pid: int) -> int:
-        """Read VmRSS (in kB) from /proc/<pid>/status. Returns 0 on failure."""
-        try:
-            with open(f"/proc/{pid}/status") as f:
-                for line in f:
-                    if line.startswith("VmRSS:"):
-                        return int(line.split()[1])
-        except (FileNotFoundError, PermissionError, ProcessLookupError):
-            pass
-        return 0
-
-    def _get_descendant_pids(root_pid: int) -> list[int]:
-        """Return all descendant PIDs of root_pid by walking /proc/*/status."""
-        descendants = []
-        for entry in os.listdir("/proc"):
-            if not entry.isdigit():
-                continue
+    # Record total process tree RSS before the benchmark
+    def get_tree_rss_mib() -> float:
+        """Sum RSS of current process and all children (in MiB)."""
+        proc = psutil.Process()
+        total = proc.memory_info().rss
+        for child in proc.children(recursive=True):
             try:
-                with open(f"/proc/{entry}/status") as f:
-                    for line in f:
-                        if line.startswith("PPid:"):
-                            ppid = int(line.split()[1])
-                            if ppid == root_pid:
-                                child_pid = int(entry)
-                                descendants.append(child_pid)
-                                descendants.extend(_get_descendant_pids(child_pid))
-                            break
-            except (FileNotFoundError, PermissionError, ProcessLookupError):
-                continue
-        return descendants
+                total += child.memory_info().rss
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        return total / (1024 * 1024)
 
-    def get_process_tree_rss_kib() -> tuple[int, int, int]:
-        """Return (master_rss, children_rss, total_rss) in kB for the whole process tree."""
-        my_pid = os.getpid()
-        master_rss = _read_rss_kib(my_pid)
-        children_rss = sum(_read_rss_kib(pid) for pid in _get_descendant_pids(my_pid))
-        return master_rss, children_rss, master_rss + children_rss
-
-    master_before, children_before, total_before = get_process_tree_rss_kib()
-    LOGGER.info(
-        "CPU RSS before benchmark: master %.2f MiB, children %.2f MiB, total %.2f MiB",
-        master_before / 1024, children_before / 1024, total_before / 1024,
-    )
+    rss_before = get_tree_rss_mib()
+    LOGGER.info("Process tree RSS before benchmark: %.2f MiB", rss_before)
 
     # Benchmark batch sampling speed
     num_batches_to_test = 100
@@ -123,23 +93,17 @@ def test_benchmark_dataloader(
     batches_per_second = batch_count / elapsed_time
     time_per_batch_ms = (elapsed_time / batch_count) * 1000
 
-    # Record current CPU memory (RSS) for the whole process tree after the benchmark
-    master_after, children_after, total_after = get_process_tree_rss_kib()
+    # Record total process tree RSS after the benchmark
+    rss_after = get_tree_rss_mib()
 
     LOGGER.info("Dataloader Performance Results:")
     LOGGER.info("  Total batches: %d", batch_count)
     LOGGER.info("  Total time: %.2f seconds", elapsed_time)
     LOGGER.info("  Throughput: %.2f it/s", batches_per_second)
     LOGGER.info("  Time per batch: %.2f ms", time_per_batch_ms)
-    LOGGER.info("  Master RSS before:   %.2f MiB", master_before / 1024)
-    LOGGER.info("  Master RSS after:    %.2f MiB", master_after / 1024)
-    LOGGER.info("  Master RSS delta:    %.2f MiB", (master_after - master_before) / 1024)
-    LOGGER.info("  Children RSS before: %.2f MiB", children_before / 1024)
-    LOGGER.info("  Children RSS after:  %.2f MiB", children_after / 1024)
-    LOGGER.info("  Children RSS delta:  %.2f MiB", (children_after - children_before) / 1024)
-    LOGGER.info("  Total RSS before:    %.2f MiB", total_before / 1024)
-    LOGGER.info("  Total RSS after:     %.2f MiB", total_after / 1024)
-    LOGGER.info("  Total RSS delta:     %.2f MiB", (total_after - total_before) / 1024)
+    LOGGER.info("  Process tree RSS before: %.2f MiB", rss_before)
+    LOGGER.info("  Process tree RSS after:  %.2f MiB", rss_after)
+    LOGGER.info("  Process tree RSS delta:  %.2f MiB", rss_after - rss_before)
 
 
 @pytest.mark.multigpu
