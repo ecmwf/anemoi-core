@@ -41,7 +41,12 @@ def test_benchmark_dataloader(
 
     cfg, test_case = benchmark_config
     cfg.graph.nodes.data.node_builder.dataset = cfg.system.input.dataset
-    LOGGER.info("Benchmarking dataloader for configuration: %s", test_case)
+
+    # Use a time-based seed to avoid page cache effects between benchmark runs
+    random_seed = str(int(time.time()))
+    original_seed = os.environ.get("ANEMOI_BASE_SEED")
+    os.environ["ANEMOI_BASE_SEED"] = random_seed
+    LOGGER.info("Benchmarking dataloader for configuration: %s (seed=%s)", test_case, random_seed)
 
     # Initialize the forecaster to get graph data
     graph = GraphCreator(config=cfg.graph).create(overwrite=True)
@@ -104,6 +109,12 @@ def test_benchmark_dataloader(
     LOGGER.info("  Process tree RSS before: %.2f MiB", rss_before)
     LOGGER.info("  Process tree RSS after:  %.2f MiB", rss_after)
     LOGGER.info("  Process tree RSS delta:  %.2f MiB", rss_after - rss_before)
+
+    # Restore original seed so other tests are unaffected
+    if original_seed is not None:
+        os.environ["ANEMOI_BASE_SEED"] = original_seed
+    else:
+        os.environ.pop("ANEMOI_BASE_SEED", None)
 
 
 @pytest.mark.multigpu
