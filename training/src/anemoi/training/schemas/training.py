@@ -7,7 +7,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from enum import Enum
+from enum import StrEnum
 from functools import partial
 from typing import Annotated
 from typing import Any
@@ -143,7 +143,7 @@ class NaNMaskScalerSchema(BaseModel):
     "Flag to include processors for tendencies when building the loss mask."
 
 
-class TendencyScalerTargets(str, Enum):
+class TendencyScalerTargets(StrEnum):
     stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
     var = "anemoi.training.losses.scalers.VarTendencyScaler"
 
@@ -157,7 +157,7 @@ class TendencyScalerSchema(BaseModel):
     "Timestep key used to select tendency statistics for scalers."
 
 
-class VariableLevelScalerTargets(str, Enum):
+class VariableLevelScalerTargets(StrEnum):
     relu_scaler = "anemoi.training.losses.scalers.ReluVariableLevelScaler"
     linear_scaler = "anemoi.training.losses.scalers.LinearVariableLevelScaler"
     polynomial_sclaer = "anemoi.training.losses.scalers.PolynomialVariableLevelScaler"
@@ -245,7 +245,7 @@ ScalerSchema = (
 )
 
 
-class ImplementedLossesUsingBaseLossSchema(str, Enum):
+class ImplementedLossesUsingBaseLossSchema(StrEnum):
     kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
     afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
     rmse = "anemoi.training.losses.RMSELoss"
@@ -354,7 +354,7 @@ LossSchemas = (
 )
 
 
-class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
+class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):
     ddp_ens = "anemoi.training.distributed.strategy.DDPEnsGroupStrategy"
     ddp = "anemoi.training.distributed.strategy.DDPGroupStrategy"
 
@@ -491,6 +491,10 @@ class InterpolationMultiSchema(BaseTrainingSchema):
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
+
+    # Needed to allow to override default training configuration
+    # Forced to be None (null)
+    rollout: Literal[None] = None
 
 
 TrainingSchema = Annotated[
