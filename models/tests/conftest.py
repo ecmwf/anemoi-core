@@ -7,8 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import os
+
 import pytest
 import torch
+
+# Fix: Triton autotune config selection happens at module-import time, so tests need to set
+# an explicit flag before importing the kernels. Without this, pytest silently used the full
+# autotune grid because the old PYTEST_VERSION check was never set by the test runner.
+os.environ.setdefault("ANEMOI_TRITON_TEST_MODE", "1")
 
 
 @pytest.fixture(scope="module")

@@ -173,3 +173,158 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
 
     assert x.grad is not None
     assert x.grad.shape == x.shape
+
+
+def test_multi_head_self_attention_accepts_triton_attention_alias(layer_kernels, monkeypatch):
+    class DummyTritonWrapper(nn.Module):
+        def __init__(self):
+            super().__init__()
+
+    monkeypatch.setattr("anemoi.models.layers.attention.TritonAttentionWrapper", DummyTritonWrapper)
+
+    mhsa = MultiHeadSelfAttention(
+        4,
+        64,
+        layer_kernels,
+        attention_implementation="triton_attention",
+    )
+
+    assert isinstance(mhsa.attention, DummyTritonWrapper)
+    assert mhsa.attention_implementation == "triton"
+
+
+def test_multi_head_self_attention_reads_backend_override_at_runtime(layer_kernels, monkeypatch):
+    class DummyTritonWrapper(nn.Module):
+        def __init__(self):
+            super().__init__()
+
+    monkeypatch.setattr("anemoi.models.layers.attention.TritonAttentionWrapper", DummyTritonWrapper)
+    monkeypatch.delenv("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", raising=False)
+
+    mhsa = MultiHeadSelfAttention(
+        4,
+        64,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+    )
+    assert mhsa.attention_implementation == "scaled_dot_product_attention"
+
+    monkeypatch.setenv("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "triton_attention")
+    mhsa.set_attention_function()
+
+    assert isinstance(mhsa.attention, DummyTritonWrapper)
+    assert mhsa.attention_implementation == "triton"
+
+
+def test_multi_head_self_attention_builds_backend_when_env_matches_config(layer_kernels, monkeypatch):
+    monkeypatch.setenv("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "scaled_dot_product_attention")
+
+    mhsa = MultiHeadSelfAttention(
+        4,
+        64,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+    )
+
+    assert isinstance(mhsa.attention, nn.Module)
+    assert mhsa.attention_implementation == "scaled_dot_product_attention"
+
+
+def test_triton_attention_requires_matching_qkv_shapes():
+    from anemoi.models.triton.attention import TritonAttention
+
+    class DummyCtx:
+        def save_for_backward(self, *args):
+            self.saved_tensors = args
+
+    q = torch.randn(1, 2, 3, 16)
+    k = torch.randn(1, 2, 5, 16)
+    v = torch.randn(1, 2, 5, 16)
+
+    with pytest.raises(AssertionError, match="share batch, head, and sequence dimensions"):
+        TritonAttention.forward(DummyCtx(), q, k, v, False, -1, 0.25)
+
+
+def test_triton_attention_preserves_zero_window(monkeypatch):
+    import anemoi.models.triton.attention as triton_attention_module
+
+    captured = {}
+
+    class DummyKernel:
+        def __getitem__(self, _grid):
+            def launcher(*args, **kwargs):
+                captured.update(kwargs)
+
+            return launcher
+
+    class DummyCtx:
+        def save_for_backward(self, *args):
+            self.saved_tensors = args
+
+    monkeypatch.setattr(
+        triton_attention_module,
+        "_system_specific_settings",
+        lambda q, k, v, o, _: (None, None, None, None, {}),
+    )
+    monkeypatch.setattr(triton_attention_module, "_attn_fwd", DummyKernel())
+    monkeypatch.setattr(triton_attention_module, "torch_dtype_to_triton", lambda dtype: dtype)
+
+    q = torch.randn(1, 2, 3, 16)
+    out = triton_attention_module.TritonAttention.forward(DummyCtx(), q, q, q, False, 0, 0.25)
+
+    assert out.shape == q.shape
+    assert captured["WINDOW"] == 0
+
+
+def test_triton_attention_backward_returns_one_gradient_per_input(monkeypatch):
+    import anemoi.models.triton.attention as triton_attention_module
+
+    class DummyKernel:
+        def __getitem__(self, _grid):
+            def launcher(*args, **kwargs):
+                return None
+
+            return launcher
+
+    class DummyCtx:
+        def __init__(self, q, k, v, o, m):
+            self.saved_tensors = (q, k, v, o, m)
+            self.sm_scale = 0.25
+            self.causal = False
+            self.window = -1
+
+    monkeypatch.setattr(
+        triton_attention_module,
+        "_system_specific_settings",
+        lambda q, k, v, o, _: (None, None, None, None, {}),
+    )
+    monkeypatch.setattr(triton_attention_module, "_attn_bwd_preprocess", DummyKernel())
+    monkeypatch.setattr(triton_attention_module, "_attn_bwd_dkdv", DummyKernel())
+    monkeypatch.setattr(triton_attention_module, "_attn_bwd_dq", DummyKernel())
+    monkeypatch.setattr(triton_attention_module, "supports_host_descriptor", lambda: True)
+    monkeypatch.setattr(triton_attention_module, "torch_dtype_to_triton", lambda dtype: dtype)
+
+    q = torch.randn(1, 2, 3, 16)
+    k = torch.randn(1, 2, 3, 16)
+    v = torch.randn(1, 2, 3, 16)
+    o = torch.randn(1, 2, 3, 16)
+    m = torch.randn(1, 2, 128)
+    grads = triton_attention_module.TritonAttention.backward(DummyCtx(q, k, v, o, m), torch.randn_like(o))
+
+    assert len(grads) == 6
+
+
+def test_triton_test_mode_env_controls_autotune_configs(monkeypatch):
+    import anemoi.models.triton.attention as triton_attention_module
+
+    monkeypatch.delenv("PYTEST_VERSION", raising=False)
+
+    monkeypatch.setenv("ANEMOI_TRITON_TEST_MODE", "0")
+    assert len(triton_attention_module._generate_configs()) > 1
+    assert len(triton_attention_module._generate_varlen_configs()) > 1
+
+    monkeypatch.setenv("ANEMOI_TRITON_TEST_MODE", "1")
+    # Fix: pytest now uses an explicit ANEMOI_TRITON_TEST_MODE flag, so these helpers must
+    # collapse to the single deterministic config that keeps correctness tests fast and stable.
+    assert len(triton_attention_module._generate_configs()) == 1
+    assert len(triton_attention_module._generate_varlen_configs()) == 1

@@ -142,6 +142,41 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
     ), "block.edge_pre_mlp is not an instance of torch.nn.Identity"
 
 
+def test_GraphTransformerProcessorBlock_initializes_backend_when_env_matches_config(init_proc, monkeypatch):
+    monkeypatch.setenv("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", "pyg")
+    block_module = importlib.reload(anemoi.models.layers.block)
+    try:
+        (
+            in_channels,
+            hidden_dim,
+            out_channels,
+            edge_dim,
+            layer_kernels,
+            bias,
+            num_heads,
+            qk_norm,
+            graph_attention_backend,
+            edge_pre_mlp,
+        ) = init_proc
+        block = block_module.GraphTransformerProcessorBlock(
+            in_channels=in_channels,
+            hidden_dim=hidden_dim,
+            out_channels=out_channels,
+            edge_dim=edge_dim,
+            layer_kernels=layer_kernels,
+            num_heads=num_heads,
+            bias=bias,
+            update_src_nodes=False,
+            qk_norm=qk_norm,
+            graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
+        )
+        assert isinstance(block.conv, GraphTransformerConv), "block.conv is not an instance of GraphTransformerConv"
+    finally:
+        monkeypatch.delenv("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", raising=False)
+        importlib.reload(anemoi.models.layers.block)
+
+
 def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge_mlp):
     (
         _in_channels,

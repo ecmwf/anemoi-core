@@ -70,8 +70,8 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"
-    attention_implementation: str = Field(example="triton_attention")
-    "Attention implementation to use. Default to 'triton_attention'."
+    attention_implementation: str = Field(example="triton")
+    "Attention implementation to use. Use 'triton' here because that is the runtime backend key."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
     softcap: NonNegativeFloat = Field(example=0.0)

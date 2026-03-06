@@ -15,27 +15,20 @@ from torch_geometric.typing import Adj
 from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr
 
+try:
+    import triton
+    import triton.language as tl
+except ImportError:
+    triton = None
+    tl = None
+
 
 def is_triton_available():
     """Checks if triton is available.
 
     Triton is supported if the triton library is installed and if Anemoi is running on GPU.
     """
-    try:
-        import triton  # noqa: F401
-    except ImportError:
-        triton_available = False
-    else:
-        triton_available = True
-
-    gpus_present = torch.cuda.is_available()
-
-    return triton_available and gpus_present
-
-
-if is_triton_available():
-    import triton
-    import triton.language as tl
+    return triton is not None and torch.cuda.is_available()
 
 
 def edge_index_to_csc(edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = None, reverse: bool = True):
@@ -74,8 +67,10 @@ def edge_index_to_csc(edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = No
 
 
 def torch_dtype_to_triton(dtype):
-    # Import inside the function for safety
-    # If triton is not installed this import will fail
+    # Fix: the old code only defined tl when a GPU was visible, so CPU-side validation paths crashed with
+    # NameError instead of raising a deliberate Triton-not-available error higher up the stack.
+    if tl is None:
+        raise ImportError("Triton is not installed")
     if dtype == torch.float16:
         return tl.float16
     elif dtype == torch.bfloat16:

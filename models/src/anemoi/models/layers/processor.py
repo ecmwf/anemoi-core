@@ -196,7 +196,9 @@ class TransformerProcessor(BaseProcessor):
         mlp_hidden_ratio: int,
         qk_norm=False,
         dropout_p: float = 0.0,
-        attention_implementation: str = "triton_attention",
+        # Fix: the runtime registry key is "triton"; the old "triton_attention" value
+        # tripped backend validation before the new backend could even be selected.
+        attention_implementation: str = "triton",
         softcap: float = 0,
         use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
@@ -224,7 +226,7 @@ class TransformerProcessor(BaseProcessor):
             Dropout probability used for multi-head self attention, default 0.1
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "triton_attention"
+            implementation, by default "triton"
         softcap : float, optional
             Anything > 0 activates softcapping attention, by default 0
         use_alibi_slopes : bool

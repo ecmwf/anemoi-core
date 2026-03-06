@@ -30,8 +30,15 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
-# Change attention implementation during inference runtime
-ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
+
+def _get_attention_backend_override() -> str:
+    # Fix: read the override at call time; caching it at import meant later env-var changes never took effect.
+    return os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
+
+
+def _normalise_attention_backend(backend: str) -> str:
+    # Fix: configs use "triton_attention" while the registry key is "triton"; normalize both spellings to one backend.
+    return {"triton_attention": "triton"}.get(backend, backend)
 
 
 class MultiHeadSelfAttention(nn.Module):
@@ -110,7 +117,8 @@ class MultiHeadSelfAttention(nn.Module):
             embed_dim % num_heads == 0
         ), f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
 
-        self.attention_implementation = attention_implementation
+        self._configured_attention_implementation = _normalise_attention_backend(attention_implementation)
+        self.attention_implementation = self._configured_attention_implementation
 
         self.use_alibi_slopes = use_alibi_slopes
 
@@ -150,17 +158,23 @@ class MultiHeadSelfAttention(nn.Module):
             "triton": TritonAttentionWrapper,
         }
 
-        # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
-        if ATTENTION_BACKEND:
-            if ATTENTION_BACKEND == self.attention_implementation:
-                # Attention backend has already been updated, return early
-                return
-            LOGGER.info(
-                "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
-                self.attention_implementation,
-                ATTENTION_BACKEND,
-            )
-            self.attention_implementation = ATTENTION_BACKEND
+        backend_override = _normalise_attention_backend(_get_attention_backend_override())
+        requested_backend = self._configured_attention_implementation
+        if backend_override:
+            if backend_override != self.attention_implementation:
+                LOGGER.info(
+                    "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
+                    self.attention_implementation,
+                    backend_override,
+                )
+            requested_backend = backend_override
+
+        # Fix: the first version returned early whenever the env override matched the name.
+        # During __init__ that skipped wrapper construction entirely, so only skip once the backend is already built.
+        if getattr(self, "_active_attention_backend", None) == requested_backend and hasattr(self, "attention"):
+            return
+
+        self.attention_implementation = requested_backend
 
         assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
@@ -172,6 +186,7 @@ class MultiHeadSelfAttention(nn.Module):
             )
         else:
             self.attention = attn_funcs[self.attention_implementation]()
+        self._active_attention_backend = self.attention_implementation
 
     def attention_computation(
         self,
@@ -233,8 +248,12 @@ class MultiHeadSelfAttention(nn.Module):
         key = self.lin_k(x)
         value = self.lin_v(x)
 
-        # Check at runtime if the Attention backend env var has been set, and update attention backend accordingly
-        if ATTENTION_BACKEND:
+        requested_backend = (
+            _normalise_attention_backend(_get_attention_backend_override()) or self._configured_attention_implementation
+        )
+        # Fix: we only need to rebuild the wrapper when the requested backend changes; calling the setup path on
+        # every forward added avoidable overhead to CPU tests and the inference hot path.
+        if getattr(self, "_active_attention_backend", None) != requested_backend:
             self.set_attention_function()
 
         return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
@@ -461,6 +480,11 @@ class TritonAttentionWrapper(nn.Module):
     ):
 
         self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
+
+        # Fix: the Triton kernel assumes one shared sequence length for q/k/v; unequal cross-attention lengths would
+        # index the wrong rows instead of just running slower, so reject them until a dedicated cross-attention kernel exists.
+        if query.shape[-2] != key.shape[-2] or key.shape[-2] != value.shape[-2]:
+            raise NotImplementedError("Triton-Attention currently only supports equal-length q, k and v tensors.")
 
         softmax_scale = 1 / math.sqrt(query.size(-1))
 

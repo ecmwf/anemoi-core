@@ -20,6 +20,7 @@ import math
 import os
 
 import torch
+from packaging import version
 
 from anemoi.models.triton.utils import is_blackwell
 from anemoi.models.triton.utils import is_hip
@@ -37,7 +38,9 @@ except ImportError:
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
 
-TENSOR_DESCRIPTOR_SUPPORTED = triton.__version__ >= "2.7"
+# Fix: string comparison treats versions like "2.10" as older than "2.7",
+# which would incorrectly disable tensor-descriptor support on newer Triton releases.
+TENSOR_DESCRIPTOR_SUPPORTED = version.parse(triton.__version__) >= version.parse("2.7")
 if TENSOR_DESCRIPTOR_SUPPORTED:
     from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -62,6 +65,16 @@ if TRITON_AVAILABLE:
     set_allocator()
 
 
+def _triton_test_mode_enabled():
+    # Fix: PYTEST_VERSION is not populated by normal pytest runs, so the reduced-autotune
+    # path was dead code and tests paid the full autotune cost. Use an explicit env var that
+    # the test harness can set intentionally, while still honouring the legacy flag if present.
+    test_mode = os.getenv("ANEMOI_TRITON_TEST_MODE")
+    if test_mode is not None:
+        return test_mode.lower() not in {"", "0", "false", "no", "off"}
+    return "PYTEST_VERSION" in os.environ
+
+
 @triton.jit
 def _attn_fwd_inner(
     acc,  # accumulator in smem for the output of this block, with shape [BLOCK_FIXED, HEAD_DIM]
@@ -80,7 +93,7 @@ def _attn_fwd_inner(
     offs_fixed: tl.constexpr,  # offset pointers for the block of Q and O which this kernel is responsible for, used for masking
     offs_iter: tl.constexpr,  # offset pointers for the block of K and V which this kernel is responsible for, used for masking
     N_CTX: tl.constexpr,  # the context length.
-    WINDOW: tl.constexpr,  # The sliding window size for attention. If 0, no sliding window masking is applied.
+    WINDOW: tl.constexpr,  # The sliding window size for attention. Negative values disable window masking.
     WARP_SPECIALIZE: tl.constexpr,  # Whether or not warp specialization should be used.
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
 ):
@@ -115,7 +128,8 @@ def _attn_fwd_inner(
         lo = tl.multiple_of(lo, BLOCK_ITER)
         if not UNEVEN_CTX:
             hi = tl.multiple_of(hi, BLOCK_ITER)
-    elif WINDOW > 0:
+    # Fix: WINDOW==0 is a real self-only window; only negative values mean "no window".
+    elif WINDOW >= 0:
         # Attends within the following range (Assuming W=1)
         # X X - - -
         # X X X - -
@@ -172,7 +186,8 @@ def _attn_fwd_inner(
             qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
 
         # apply Causal or Window masking if needed.
-        if WINDOW > 0:
+        # Fix: WINDOW==0 must still mask to the diagonal instead of falling back to global attention.
+        if WINDOW >= 0:
             fixed_pos = offs_fixed[:, None]
             iter_pos = (curr_iter + offs_iter)[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
@@ -291,7 +306,7 @@ def _generate_configs(try_warp_spec=True):
         for WS in ([True, False] if try_warp_spec else [False])
     ]
 
-    if "PYTEST_VERSION" in os.environ:
+    if _triton_test_mode_enabled():
         # Use a single config in testing for reproducibility
         configs = [
             triton.Config(
@@ -332,7 +347,7 @@ def _attn_fwd(
     o,
     N_CTX: tl.constexpr,  # context length
     HEAD_DIM: tl.constexpr,  # head dimension
-    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied. Only values within the window around the BLOCK_FIXED section of Q loaded by the kernel will be attended to.
+    WINDOW: tl.constexpr,  # sliding window size. Negative values disable window masking. Only values within the window around the BLOCK_FIXED section of Q loaded by the kernel will be attended to.
     BLOCK_FIXED: tl.constexpr,  # size of the block of Q loaded into shared memory
     BLOCK_ITER: tl.constexpr,  # size of the block of K and V iterated over
     CAUSAL: tl.constexpr,  # whether to apply causal masking
@@ -517,7 +532,6 @@ def _attn_bwd_dkdv(
     dk_ptr,
     dv_ptr,
     M,  # pointer to output maxes from forward pass
-    L,  # pointer to log-sum-exp values from forward pass
     D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
     sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
@@ -528,11 +542,11 @@ def _attn_bwd_dkdv(
     BLOCK_FIXED: tl.constexpr,  # size of the block of K and V loaded into shared memory
     HEAD_DIM: tl.constexpr,  # head dimension
     CAUSAL: tl.constexpr,  # whether to apply causal masking
-    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied
+    WINDOW: tl.constexpr,  # sliding window size. Negative values disable window masking.
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
-    n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for M/L/D indexing
+    n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for M/D indexing
 ):
     """Tiled backward pass for dK and dV.
 
@@ -613,9 +627,8 @@ def _attn_bwd_dkdv(
 
     # ***** 4) allocate shared memory buffers for gradients and load fixed subset of K and V into shared memory *****
 
-    # offset pointers for batch/head into M, L, D arrays
+    # offset pointers for batch/head into M and D arrays
     M += off_chz
-    L += off_chz
     D += off_chz
 
     tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
@@ -649,7 +662,8 @@ def _attn_bwd_dkdv(
     #   masked => apply MASK to block
 
     # Calculate the upper and lower bounds when using masking
-    if WINDOW > 0:
+    # Fix: WINDOW==0 is a real self-only window; only negative values mean "no window".
+    if WINDOW >= 0:
         # Rather then iterating across the whole context, we iterate
         # Over a window around the position of the K and V blocks
         lo = tl.maximum(0, start_fixed - WINDOW)
@@ -705,7 +719,8 @@ def _attn_bwd_dkdv(
             mask = curr_offs[None, :] >= offs_fixed[:, None]
             qkT = tl.where(mask, qkT, MINUS_INF)
 
-        if WINDOW > 0:
+        # Fix: WINDOW==0 must still mask to the diagonal instead of falling back to global attention.
+        if WINDOW >= 0:
             iter_pos = curr_offs[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
             mask = (kv_lower_bound <= iter_pos) & (kv_upper_bound >= iter_pos)
@@ -784,7 +799,7 @@ def _attn_bwd_dq(
     BLOCK_FIXED: tl.constexpr,  # size of the block of Q loaded into shared memory
     HEAD_DIM: tl.constexpr,  # head dimension
     CAUSAL: tl.constexpr,  # whether to apply causal masking
-    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied
+    WINDOW: tl.constexpr,  # sliding window size. Negative values disable window masking.
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
     n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for M/D indexing
@@ -831,7 +846,9 @@ def _attn_bwd_dq(
     # ***** 3) create tensor descriptors for the input and output tensors, with block sizes determined by autotuning *****
 
     # How many elements in the first 3 dimensions (use actual N_CTX for q,k,v,do layout)
-    y_dim = Z * H * n_ctx_rounded
+    # Fix: Q/K/V/DO/DQ are allocated with the true sequence length, not n_ctx_rounded.
+    # Using the padded shape here can make device-side descriptors read past the allocation.
+    y_dim = Z * H * N_CTX
     # Build tensor descriptors if they havent already been built in _system_specific_settings()
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
@@ -905,7 +922,8 @@ def _attn_bwd_dq(
     #   masked => apply MASK to block
 
     # Calculate the upper and lower bounds when using masking
-    if WINDOW > 0:
+    # Fix: WINDOW==0 is a real self-only window; only negative values mean "no window".
+    if WINDOW >= 0:
         lo = tl.maximum(0, start_fixed - WINDOW)
         hi = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
         q_lower_bound: tl.constexpr = offs_fixed[:, None] - WINDOW
@@ -959,7 +977,8 @@ def _attn_bwd_dq(
             mask = fixed_pos >= iter_pos
             qk = tl.where(mask, qk, MINUS_INF)
 
-        if WINDOW > 0:
+        # Fix: WINDOW==0 must still mask to the diagonal instead of falling back to global attention.
+        if WINDOW >= 0:
             iter_pos = (curr_iter + offs_iter)[None, :]
             mask = (iter_pos <= q_upper_bound) & (iter_pos >= q_lower_bound)
             qk = tl.where(mask, qk, MINUS_INF)
@@ -969,9 +988,9 @@ def _attn_bwd_dq(
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
-        ds = ds.to(dtype)
         # Compute dQ.
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
+        ds = ds.to(dtype)
         dq += tl.dot(ds, tl.trans(kT))
 
         # move to the next iter_block
@@ -1076,9 +1095,20 @@ class TritonAttention(torch.autograd.Function):
         assert HEAD_DIM_K in {16, 32, 64, 128, 256}
         o = torch.empty_like(q)
 
+        # Fix: use -1 as the "no window" sentinel so window=0 keeps flash-attn semantics
+        # of self-only attention instead of silently becoming global attention.
         if window is None:
-            window = 0
-        assert not (causal and window > 0), "causal and window not supported in combination"
+            window = -1
+        assert not (causal and window >= 0), "causal and window not supported in combination"
+
+        # Fix: the kernels index K/V/O with Q's batch/head/context sizes, so mismatched
+        # shapes or dtypes can misaddress memory instead of failing cleanly on the host.
+        assert q.ndim == k.ndim == v.ndim == 4, "TritonAttention expects [batch, head, sequence, dim] tensors"
+        assert (
+            q.shape[:3] == k.shape[:3] == v.shape[:3]
+        ), "TritonAttention requires q, k and v to share batch, head, and sequence dimensions"
+        assert q.dtype == k.dtype == v.dtype, "TritonAttention requires q, k and v to use the same dtype"
+        assert q.device == k.device == v.device, "TritonAttention requires q, k and v to be on the same device"
 
         n_ctx = q.shape[2]
         MAX_BLOCK_SIZE = 128  # not possible to infer BLOCK_SIZE determined by autotuning at this point, so we use the max possible block size to ensure we never read out of bounds.
@@ -1115,7 +1145,7 @@ class TritonAttention(torch.autograd.Function):
             o,  # raw output tensor (required for uneven ctx case to handle tail case where a smaller block size is needed to avoid overwriting neighbours data)
             N_CTX=n_ctx,  # context length,
             HEAD_DIM=HEAD_DIM_K,  # head dimension
-            WINDOW=window,  # window length for sliding window attention. If 0, no sliding window masking is applied
+            WINDOW=window,  # window length for sliding window attention. Negative values disable window masking.
             CAUSAL=causal,  # whether to apply causal masking
             dtype=torch_dtype_to_triton(q.dtype),
             n_ctx_rounded=n_ctx_rounded,  # rounded context length used for indexing in M and D tensors to avoid out-of-bounds when N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
@@ -1158,10 +1188,11 @@ class TritonAttention(torch.autograd.Function):
 
         # Pad tensors to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_ITER
         pre_grid = (triton.cdiv(n_ctx, PRE_BLOCK), BATCH * N_HEAD)
-        L = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
-        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
-        desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, True)
+        # Fix: backward autotuning never enables warp specialization, so asking for the
+        # forward-only Blackwell register cap here can constrain occupancy for no benefit.
+        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, False)
+        desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, False)
 
         # precompute 'delta' value needed for softmax computation
         _attn_bwd_preprocess[pre_grid](
@@ -1187,6 +1218,8 @@ class TritonAttention(torch.autograd.Function):
         if not supports_host_descriptor():
             set_allocator()
 
+        # Fix: the old backward path allocated and passed an unused L buffer here, which wasted an extra
+        # O(B*H*N) float32 tensor every call without contributing to the gradients.
         _attn_bwd_dkdv[grid_dkdv](
             desc_q,
             desc_k,
@@ -1198,7 +1231,6 @@ class TritonAttention(torch.autograd.Function):
             dk,
             dv,
             M,
-            L,
             delta,  #
             ctx.sm_scale,
             Z=BATCH,
@@ -1237,7 +1269,9 @@ class TritonAttention(torch.autograd.Function):
             **extra_kern_args,
         )
 
-        return dq, dk, dv, None, None, None, None
+        # Fix: autograd backward must return exactly one gradient per forward input; the extra trailing None used to
+        # raise "expected 6, got 7" as soon as this backward path executed.
+        return dq, dk, dv, None, None, None
 
 
 def _generate_varlen_configs():
@@ -1262,7 +1296,7 @@ def _generate_varlen_configs():
         for w in [4, 8]
     ]
 
-    if "PYTEST_VERSION" in os.environ:
+    if _triton_test_mode_enabled():
         configs = [
             triton.Config(
                 dict(BLOCK_M=32, BLOCK_N=16),
@@ -1283,7 +1317,7 @@ def _attn_varlen_fwd(
     Q,  # pointer to Q tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
     K,  # pointer to K tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
     V,  # pointer to V tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
-    O,  # pointer to output tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
+    Out,  # pointer to output tensor, shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
     sm_scale,  # softmax scaling factor
     seq_start_q,  # starting token offset for Q in the packed tensor (scalar)
     seq_start_k,  # starting token offset for K/V in the packed tensor (scalar)
@@ -1394,7 +1428,7 @@ def _attn_varlen_fwd(
 
     # ***** 6) Store output *****
     o_token_ids = seq_start_q + offs_m
-    o_ptrs = O + o_token_ids[:, None] * stride_ot + pid_h * stride_oh + offs_d[None, :]
+    o_ptrs = Out + o_token_ids[:, None] * stride_ot + pid_h * stride_oh + offs_d[None, :]
     o_mask = offs_m[:, None] < SEQLEN_Q
     tl.store(o_ptrs, acc.to(dtype), mask=o_mask)
 
@@ -1436,15 +1470,19 @@ class TritonAttentionVarlen(torch.autograd.Function):
             cu_seqlens_q: Cumulative sequence lengths for Q, shape [B+1], int32 on device
             cu_seqlens_k: Cumulative sequence lengths for K, shape [B+1], int32 on device
             causal: Whether to apply causal masking (not yet supported, must be False)
-            window: Sliding window size (-1 or 0 for no window, not yet supported)
+            window: Sliding window size (-1 for no window, not yet supported)
             sm_scale: Softmax scaling factor (typically 1/sqrt(HEAD_DIM))
             min_tokens_per_kernel: Reserved for future batching (default 2000)
 
         Returns:
             Output tensor of shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
         """
+        # Fix: keep the dense-kernel contract where -1 means "no window"; accepting 0 here
+        # would silently reinterpret a self-only request as unsupported global attention.
+        if window is None:
+            window = -1
         assert not causal, "Causal masking not yet supported for varlen attention"
-        assert window <= 0 or window == -1, "Window masking not yet supported for varlen attention"
+        assert window == -1, "Window masking not yet supported for varlen attention"
 
         assert q.is_contiguous() and k.is_contiguous() and v.is_contiguous(), "Input tensors must be contiguous"
         assert q.ndim == 3, f"Expected q to be 3D [TOTAL_TOKENS, N_HEAD, HEAD_DIM], got {q.ndim}D"

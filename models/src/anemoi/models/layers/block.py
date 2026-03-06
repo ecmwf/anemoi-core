@@ -46,8 +46,12 @@ LOGGER = logging.getLogger(__name__)
 # Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/66)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
-# Change attention implementation during inference runtime
-ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", "")
+
+
+def _get_graph_attention_backend_override() -> str:
+    # Fix: read the env var when we need it; caching it at import time made the
+    # advertised runtime override ignore changes made after module import.
+    return os.environ.get("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", "")
 
 
 class BaseBlock(nn.Module, ABC):
@@ -520,22 +524,28 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         else:
             self.edge_pre_mlp = nn.Identity()
 
+        self._configured_graph_attention_backend = graph_attention_backend
         self.graph_attention_backend = graph_attention_backend
         self.set_attention_function()
 
     def set_attention_function(self):
-        # Check if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set
-        if ATTENTION_BACKEND != "":
-            if ATTENTION_BACKEND == self.graph_attention_backend:
-                # Attention backend has already been updated, return early
-                return
+        backend_override = _get_graph_attention_backend_override()
+        requested_backend = self._configured_graph_attention_backend
+        if backend_override != "":
+            if backend_override != self.graph_attention_backend:
+                LOGGER.info(
+                    "'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
+                    self.graph_attention_backend,
+                    backend_override,
+                )
+            requested_backend = backend_override
 
-            LOGGER.info(
-                "'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
-                self.graph_attention_backend,
-                ATTENTION_BACKEND,
-            )
-            self.graph_attention_backend = ATTENTION_BACKEND
+        # Fix: the first version returned before self.conv existed when env==config.
+        # Only skip work once the backend has already been materialised for this block instance.
+        if getattr(self, "_active_graph_attention_backend", None) == requested_backend and hasattr(self, "conv"):
+            return
+
+        self.graph_attention_backend = requested_backend
 
         assert self.graph_attention_backend in [
             "triton",
@@ -553,6 +563,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             self.conv = GraphTransformerFunction.apply
         else:
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+        self._active_graph_attention_backend = self.graph_attention_backend
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
@@ -622,8 +633,10 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
 
-        # Check at runtime if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set and update backend if so
-        if ATTENTION_BACKEND != "":
+        requested_backend = _get_graph_attention_backend_override() or self._configured_graph_attention_backend
+        # Fix: only reconfigure the graph-attention backend when the requested backend changes; doing this work
+        # on every forward needlessly slowed the steady-state path after the env-override fix.
+        if getattr(self, "_active_graph_attention_backend", None) != requested_backend:
             self.set_attention_function()
 
         if self.graph_attention_backend == "triton":
