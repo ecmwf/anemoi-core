@@ -89,7 +89,9 @@ def test_benchmark_dataloader(
             LOGGER.info("First batch structure:")
             for dataset_name, data in batch.items():
                 size_mb = data.nelement() * data.element_size() / (1024 * 1024)
-                LOGGER.info("  Dataset '%s': shape %s, dtype %s, size %.2f MB", dataset_name, data.shape, data.dtype, size_mb)
+                LOGGER.info(
+                    "  Dataset '%s': shape %s, dtype %s, size %.2f MB", dataset_name, data.shape, data.dtype, size_mb,
+                )
 
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
