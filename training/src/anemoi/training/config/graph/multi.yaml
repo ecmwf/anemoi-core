@@ -7,12 +7,12 @@ nodes:
   era5:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.era5.dataset}
+      dataset: ${dataloader.training.datasets.era5.dataset_config}
     attributes: ${graph.attributes.nodes}
   cerra:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.cerra.dataset}
+      dataset: ${dataloader.training.datasets.cerra.dataset_config}
     attributes: ${graph.attributes.nodes}
   hidden:
     node_builder:
