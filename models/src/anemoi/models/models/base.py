@@ -69,7 +69,7 @@ class BaseGraphModel(nn.Module):
         self.n_step_input = model_config.training.multistep_input
         self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
-        self.latent_skip = model_config.model.latent_skip
+        self.latent_skip = model_config.model.model.latent_skip
 
         self.node_attributes = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
