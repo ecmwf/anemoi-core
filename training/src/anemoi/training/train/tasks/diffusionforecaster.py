@@ -21,8 +21,6 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
-
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
 
@@ -38,7 +36,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -48,7 +45,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         super().__init__(
             config=config,
-            graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
@@ -248,7 +244,6 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -257,7 +252,6 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     ) -> None:
         super().__init__(
             config=config,
-            graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,

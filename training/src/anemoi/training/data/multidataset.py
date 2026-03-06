@@ -153,6 +153,22 @@ class MultiDataset(IterableDataset):
         return self._collect("resolution")
 
     @cached_property
+    def grid_sizes(self) -> dict[str, int]:
+        """Return grid size for each dataset."""
+        return self._collect("grid_size")
+
+    @cached_property
+    def latlons(self) -> dict[str, "np.ndarray"]:
+        """Return lat/lon coordinates for each dataset.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Per-dataset arrays of shape (N, 2) with latitudes and longitudes in radians.
+        """
+        return self._collect("latlons")
+
+    @cached_property
     def frequency(self) -> datetime.timedelta:
         """Return combined frequency from all datasets."""
         freqs = self._collect("frequency")

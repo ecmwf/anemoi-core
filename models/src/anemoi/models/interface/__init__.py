@@ -7,7 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import uuid
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -19,6 +21,8 @@ from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -59,10 +63,11 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DotDict,
-        graph_data: HeteroData,
         statistics: dict,
         data_indices: dict,
         metadata: dict,
+        graph_data: HeteroData | None = None,
+        graph_config: object | None = None,
         statistics_tendencies: dict | None = None,
         supporting_arrays: dict | None = None,
     ) -> None:
@@ -70,14 +75,55 @@ class AnemoiModelInterface(torch.nn.Module):
         self.config = config
         self.id = str(uuid.uuid4())
         self.n_step_input = self.config.training.multistep_input
-        self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
+
+        # Resolve graph data: either passed directly or loaded from config
+        if graph_data is not None:
+            self.graph_data = graph_data
+        elif graph_config is not None:
+            self.graph_data = self._load_graph(graph_config)
+        else:
+            msg = "Either 'graph_data' or 'graph_config' must be provided."
+            raise ValueError(msg)
+
         self._build_model()
         self._update_metadata()
+
+    @staticmethod
+    def _load_graph(graph_config: object) -> HeteroData:
+        """Load or create graph data from a graph configuration.
+
+        Parameters
+        ----------
+        graph_config : object
+            Graph configuration object with optional ``filename`` and ``overwrite`` attributes.
+
+        Returns
+        -------
+        HeteroData
+            The loaded or created graph.
+        """
+        filename = getattr(graph_config, "filename", None)
+        overwrite = getattr(graph_config, "overwrite", False)
+
+        if filename is not None:
+            graph_filename = Path(filename)
+            if graph_filename.exists() and not overwrite:
+                LOGGER.info("Loading graph data from %s", graph_filename)
+                return torch.load(graph_filename, weights_only=False)
+        else:
+            graph_filename = None
+
+        from anemoi.graphs.create import GraphCreator
+
+        return GraphCreator(config=graph_config).create(
+            save_path=graph_filename,
+            overwrite=overwrite,
+        )
 
     def _build_processors_for_dataset(
         self,

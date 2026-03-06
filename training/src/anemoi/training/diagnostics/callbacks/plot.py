@@ -472,8 +472,7 @@ class LongRolloutPlots(BasePlotCallback):
         }
         if self.latlons is None:
             for dataset_name in self.dataset_names:
-                self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-                self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+                self.latlons[dataset_name] = pl_module.trainer.datamodule.latlons[dataset_name]
 
         assert batch.shape[1] >= self.max_rollout + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
@@ -1106,8 +1105,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+            self.latlons[dataset_name] = pl_module.trainer.datamodule.latlons[dataset_name]
 
         # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
         assert isinstance(

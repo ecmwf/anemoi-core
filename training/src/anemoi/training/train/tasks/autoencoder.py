@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
     import torch
     from omegaconf import DictConfig
-    from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
 
@@ -38,7 +37,6 @@ class GraphAutoEncoder(BaseGraphModule):
         self,
         *,
         config: DictConfig,
-        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -51,8 +49,6 @@ class GraphAutoEncoder(BaseGraphModule):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph object
         statistics : dict
             Statistics of the training data
         data_indices : IndexCollection
@@ -65,7 +61,6 @@ class GraphAutoEncoder(BaseGraphModule):
         """
         super().__init__(
             config=config,
-            graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,

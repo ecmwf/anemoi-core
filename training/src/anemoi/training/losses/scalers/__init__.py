@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .area_weight import AreaWeightScaler
+from .area_weight import ReweightedAreaWeightScaler
 from .base_scaler import TensorDim
 from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
@@ -26,6 +28,7 @@ from .variable_tendency import StdevTendencyScaler
 from .variable_tendency import VarTendencyScaler
 
 __all__ = [
+    "AreaWeightScaler",
     "GeneralVariableLossScaler",
     "GraphNodeAttributeScaler",
     "LeadTimeDecayScaler",
@@ -35,6 +38,7 @@ __all__ = [
     "NoVariableLevelScaler",
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
+    "ReweightedAreaWeightScaler",
     "ReweightedGraphNodeAttributeScaler",
     "StdevTendencyScaler",
     "TensorDim",

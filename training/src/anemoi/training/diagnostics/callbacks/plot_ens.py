@@ -96,8 +96,7 @@ class EnsemblePlotMixin:
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+            self.latlons[dataset_name] = pl_module.trainer.datamodule.latlons[dataset_name]
 
         total_targets = pl_module.plot_adapter.get_total_plot_targets()
 

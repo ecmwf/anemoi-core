@@ -9,6 +9,7 @@
 
 
 import logging
+import warnings
 
 import torch
 from torch_geometric.data import HeteroData
@@ -22,7 +23,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GraphNodeAttributeScaler(BaseScaler):
-    """Class for extracting scalers from node attributes."""
+    """Class for extracting scalers from node attributes.
+
+    .. deprecated::
+        This scaler reads node attributes directly from the graph data. Prefer
+        using scalers that source their data from the dataset/datamodule instead.
+    """
 
     scale_dims: TensorDim = TensorDim.GRID
 
@@ -53,6 +59,12 @@ class GraphNodeAttributeScaler(BaseScaler):
         """
         super().__init__(norm=norm)
         del kwargs
+        warnings.warn(
+            "GraphNodeAttributeScaler reads node attributes from the graph object. "
+            "Prefer scalers that source data from the dataset/datamodule (e.g., AreaWeightScaler).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.output_mask = output_mask if output_mask is not None else NoOutputMask()
         self.nodes = graph_data[nodes_name]
         self.nodes_attribute_name = nodes_attribute_name

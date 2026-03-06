@@ -22,10 +22,8 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -78,8 +76,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ----------
     config : BaseSchema
         Configuration object defining all parameters.
-    graph_data : dict[str, HeteroData]
-        Graph-structured input data containing node and edge features, keyed by dataset name.
     statistics : dict
         Dictionary of training statistics (mean, std, etc.) used for normalization.
     statistics_tendencies : dict
@@ -137,7 +133,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -150,8 +145,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
         data_indices : dict[str, IndexCollection]
@@ -164,22 +157,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         super().__init__()
 
-        assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
         # Handle dictionary of graph_data
-        graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
-
-        # Create output_mask dictionary for each dataset
-        self.output_mask = {
-            name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
-        }
-
-        # Handle supporting_arrays merge with all output masks
-        combined_supporting_arrays = supporting_arrays.copy()
-        for dataset_name, mask in self.output_mask.items():
-            combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
         if not hasattr(self.__class__, "task_type"):
             msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
@@ -193,8 +174,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
-            supporting_arrays=combined_supporting_arrays,
-            graph_data=graph_data,
+            supporting_arrays=supporting_arrays,
+            graph_config=config.graph,
             config=config,
         )
         self.config = config
@@ -203,76 +184,19 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.save_hyperparameters()
 
+        self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
+        self.supporting_arrays = supporting_arrays
 
-        # Initialize components for multi-dataset
-        self.target_dataset_names = []  # list of dataset names used for loss computation
-        self.scalers = {}  # dict of dict of tensors
-        self.updating_scalars = {}  # dict of dict of objects
-        self.val_metric_ranges = {}  # dict of dict of lists
-        self._scaling_values_log = {}  # dict of dict[str, float]
+        # Initialize components for multi-dataset — populated in setup()
+        self.target_dataset_names = []
+        self.scalers = {}
+        self.updating_scalars = {}
+        self.val_metric_ranges = {}
+        self._scaling_values_log = {}
         self.loss = torch.nn.ModuleDict()
         self.metrics = torch.nn.ModuleDict()
-
-        dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
-        loss_configs = get_multiple_datasets_config(config.training.training_loss)
-        scalers_configs = get_multiple_datasets_config(config.training.scalers)
-        val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
-        metrics_to_log = get_multiple_datasets_config(config.training.metrics)
-        for dataset_name in self.dataset_names:
-            if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
-                LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
-                continue
-
-            self.target_dataset_names.append(dataset_name)
-
-            # Create dataset-specific metadata extractor
-            metadata_extractor = ExtractVariableGroupAndLevel(
-                variable_groups=dataset_variable_groups[dataset_name],
-                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
-            )
-
-            dataset_scalers, dataset_updating_scalars = create_scalers(
-                scalers_configs[dataset_name],
-                data_indices=data_indices[dataset_name],
-                graph_data=graph_data,
-                statistics=statistics[dataset_name],
-                statistics_tendencies=(
-                    statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
-                ),
-                metadata_extractor=metadata_extractor,
-                nodes_name=dataset_name,
-                output_mask=self.output_mask[dataset_name],
-            )
-            self.scalers[dataset_name] = dataset_scalers
-            self.updating_scalars[dataset_name] = dataset_updating_scalars
-
-            self.val_metric_ranges[dataset_name] = get_metric_ranges(
-                metadata_extractor,
-                output_data_indices=data_indices[dataset_name].model.output,
-                metrics_to_log=metrics_to_log[dataset_name],
-            )
-
-            self.loss[dataset_name] = get_loss_function(
-                loss_configs[dataset_name],
-                dataset_scalers,
-                data_indices[dataset_name],
-            )
-
-            self.metrics[dataset_name] = self._build_metrics_for_dataset(
-                val_metrics_configs[dataset_name],
-                scalers=dataset_scalers,
-                data_indices=data_indices[dataset_name],
-            )
-            self._scaling_values_log[dataset_name] = print_variable_scaling(
-                self.loss[dataset_name],
-                data_indices[dataset_name],
-            )
-
-        if config.training.loss_gradient_scaling:
-            # Multi-dataset: register hook for each loss
-            for loss_fn in self.loss.values():
-                loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
+        self.output_mask = {}
 
         self.is_first_step = True
         self.n_step_input = config.training.multistep_input
@@ -294,15 +218,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.shard_shapes, self.grid_sizes = {}, {}
-        for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[
-                dataset_name
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
-            self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
-                self.grid_sizes[dataset_name],
-                reader_group_size,
-            )
+        # shard_shapes and grid_sizes are computed by the DDPStrategy from the datamodule
+        # and set externally before training starts. Initialize as empty dicts.
+        self.shard_shapes: dict = {}
+        self.grid_sizes: dict = {}
 
         self.grid_dim = -2
 
@@ -316,8 +235,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
             "`hardware.num_gpus_per_model`.",
         )
 
-        # set flag if loss and metrics support sharding
-        self._check_sharding_support()
+        # set flag if loss and metrics support sharding — deferred to setup()
+        self.loss_supports_sharding = False
+        self.metrics_support_sharding = False
 
         LOGGER.debug("n_step_input: %d", self.n_step_input)
 
@@ -336,6 +256,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # Concrete tasks set _plot_adapter in their __init__ (BasePlotAdapter is abstract).
         self._plot_adapter: Any = None
+
 
     @property
     def plot_adapter(self) -> Any:
@@ -1076,11 +997,117 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return {"scheduler": scheduler, "interval": "step"}
 
     def setup(self, stage: str) -> None:
-        """Lightning hook that is called after model is initialized but before training starts."""
-        # The conditions should be separate, but are combined due to pre-commit hook
+        """Lightning hook called after model init but before training starts.
+
+        Initializes output masks, loss scalers, loss functions, and metrics
+        using grid information from ``self.trainer.datamodule``.
+        """
+        if stage == "fit":
+            self._setup_loss_and_metrics()
+
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
             # Log hyperparameters on rank 0
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
-            # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)
+
+    def _setup_loss_and_metrics(self) -> None:
+        """Build output masks, scalers, losses and metrics using datamodule info.
+
+        Called from ``setup(stage='fit')``. Accesses ``self.trainer.datamodule``
+        for grid information (latlons, cutout_mask, etc.).
+        """
+        datamodule = self.trainer.datamodule
+        config = self.config
+        data_indices = self.data_indices
+        metadata = self.model.metadata
+        statistics = self.statistics
+        statistics_tendencies = self.statistics_tendencies
+
+        # --- Output masks (from datamodule grid info) ---
+        self.output_mask = {}
+        for name in self.dataset_names:
+            output_mask_cfg = config.model.output_mask
+            # If the mask config expects a mask tensor, try to get cutout info from the datamodule
+            try:
+                cutout_mask = torch.from_numpy(datamodule.ds_train.datasets[name].cutout_mask)
+                self.output_mask[name] = instantiate(output_mask_cfg, mask=cutout_mask)
+            except (ValueError, KeyError):
+                # No cutout grid or mask not configured — use NoOutputMask
+                self.output_mask[name] = instantiate(output_mask_cfg)
+
+        # Merge output mask supporting_arrays into model's supporting_arrays
+        for dataset_name, mask in self.output_mask.items():
+            if mask.supporting_arrays:
+                self.model.supporting_arrays.setdefault(dataset_name, {}).update(mask.supporting_arrays)
+
+        # --- Scalers, loss, and metrics ---
+        dataset_variable_groups = get_multiple_datasets_config(config.training.variable_groups)
+        loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        scalers_configs = get_multiple_datasets_config(config.training.scalers)
+        val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
+        metrics_to_log = get_multiple_datasets_config(config.training.metrics)
+
+        for dataset_name in self.dataset_names:
+            if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
+                LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
+                continue
+
+            self.target_dataset_names.append(dataset_name)
+
+            metadata_extractor = ExtractVariableGroupAndLevel(
+                variable_groups=dataset_variable_groups[dataset_name],
+                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
+            )
+
+            # Get latlons from the datamodule for this dataset
+            latlons = datamodule.latlons.get(dataset_name)
+
+            # Pass graph_data from the model for backward-compatible scalers
+            # (e.g., GraphNodeAttributeScaler). The graph is now owned by the model.
+            graph_data = self.model.model._graph_data.get(dataset_name)
+
+            dataset_scalers, dataset_updating_scalars = create_scalers(
+                scalers_configs[dataset_name],
+                data_indices=data_indices[dataset_name],
+                statistics=statistics[dataset_name],
+                statistics_tendencies=(
+                    statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
+                ),
+                metadata_extractor=metadata_extractor,
+                nodes_name=dataset_name,
+                output_mask=self.output_mask[dataset_name],
+                latlons=latlons,
+                graph_data=graph_data,
+            )
+            self.scalers[dataset_name] = dataset_scalers
+            self.updating_scalars[dataset_name] = dataset_updating_scalars
+
+            self.val_metric_ranges[dataset_name] = get_metric_ranges(
+                metadata_extractor,
+                output_data_indices=data_indices[dataset_name].model.output,
+                metrics_to_log=metrics_to_log[dataset_name],
+            )
+
+            self.loss[dataset_name] = get_loss_function(
+                loss_configs[dataset_name],
+                dataset_scalers,
+                data_indices[dataset_name],
+            )
+
+            self.metrics[dataset_name] = self._build_metrics_for_dataset(
+                val_metrics_configs[dataset_name],
+                scalers=dataset_scalers,
+                data_indices=data_indices[dataset_name],
+            )
+            self._scaling_values_log[dataset_name] = print_variable_scaling(
+                self.loss[dataset_name],
+                data_indices[dataset_name],
+            )
+
+        if config.training.loss_gradient_scaling:
+            for loss_fn in self.loss.values():
+                loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
+
+        # Now that loss and metrics are created, check sharding support
+        self._check_sharding_support()

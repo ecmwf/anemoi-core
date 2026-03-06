@@ -158,6 +158,17 @@ class BaseAnemoiReader:
         return self.data.resolution
 
     @cached_property
+    def latlons(self) -> np.ndarray:
+        """Return lat/lon coordinates of dataset grid points.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape (N, 2) with latitudes and longitudes in radians.
+        """
+        return np.stack([self.data.latitudes, self.data.longitudes], axis=-1)
+
+    @cached_property
     def cutout_mask(self) -> np.ndarray:
         """Return cutout mask."""
         cutout_mask = np.zeros(self.grid_size, dtype=bool)

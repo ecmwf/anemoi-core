@@ -16,6 +16,7 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning.strategies.ddp import DDPStrategy
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.training.distributed.groups import build_ensemble_layout
 from anemoi.training.distributed.groups import build_model_layout
 from anemoi.training.distributed.groups import build_reader_layout
@@ -128,7 +129,11 @@ class BaseDDPStrategy(DDPStrategy):
         super().configure_ddp()
 
     def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
-        """Set up shard shapes for the dataloader.
+        """Compute shard shapes from the datamodule grid sizes.
+
+        Computes balanced partition sizes for each dataset based on the grid size
+        and the read group size. Also sets shard_shapes and grid_sizes on the task
+        module so they are available for batch sharding.
 
         Parameters
         ----------
@@ -140,8 +145,16 @@ class BaseDDPStrategy(DDPStrategy):
         dict
             A dictionary containing the shard shapes for each dataset.
         """
-        shard_shapes = trainer.model.module.shard_shapes
-        assert shard_shapes is not None, "Shard shapes should be set after setup"
+        grid_sizes = trainer.datamodule.grid_sizes
+        shard_shapes = {}
+        for dataset_name, grid_size in grid_sizes.items():
+            shard_shapes[dataset_name] = get_balanced_partition_sizes(grid_size, self.read_group_size)
+
+        # Set on the task module so batch sharding and allgather work correctly
+        task_module = trainer.model.module if hasattr(trainer.model, "module") else trainer.model
+        task_module.shard_shapes = shard_shapes
+        task_module.grid_sizes = grid_sizes
+
         return shard_shapes
 
     def register_parameter_hooks(self) -> None:

@@ -8,11 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 
+import warnings
 from abc import abstractmethod
 
 import numpy as np
 import torch
-from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.data_indices.collection import IndexCollection
 
@@ -39,12 +39,41 @@ class BaseMask:
 
 
 class Boolean1DMask(torch.nn.Module, BaseMask):
-    """1D Boolean mask."""
+    """1D Boolean mask.
 
-    def __init__(self, nodes: NodeStorage, attribute_name: str) -> None:
+    Parameters
+    ----------
+    mask : torch.Tensor
+        A 1-D boolean tensor to use as the mask.
+    nodes : object, optional
+        **Deprecated.** A NodeStorage-like object. If provided together with
+        ``attribute_name``, the mask is extracted as ``nodes[attribute_name]``.
+    attribute_name : str, optional
+        **Deprecated.** Attribute key on *nodes*.
+    """
+
+    def __init__(
+        self,
+        mask: torch.Tensor | None = None,
+        nodes: object | None = None,
+        attribute_name: str | None = None,
+    ) -> None:
         super().__init__()
 
-        mask = nodes[attribute_name].bool().squeeze()
+        if mask is not None:
+            mask = mask.bool().squeeze()
+        elif nodes is not None and attribute_name is not None:
+            warnings.warn(
+                "Boolean1DMask(nodes, attribute_name) is deprecated. "
+                "Pass a raw torch.Tensor mask instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            mask = nodes[attribute_name].bool().squeeze()
+        else:
+            msg = "Either 'mask' or both 'nodes' and 'attribute_name' must be provided."
+            raise ValueError(msg)
+
         self.register_buffer("mask", mask)
 
     @property

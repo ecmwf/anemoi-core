@@ -17,8 +17,6 @@ import torch
 from omegaconf import DictConfig
 from omegaconf import open_dict
 from torch.utils.checkpoint import checkpoint
-from torch_geometric.data import HeteroData
-
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
@@ -27,7 +25,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from omegaconf import DictConfig
-    from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
 
@@ -44,7 +41,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         self,
         *,
         config: DictConfig,
-        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -57,8 +53,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : dict[str, HeteroData]
-            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
         data_indices : dict[str, IndexCollection]
@@ -73,7 +67,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             config.training.multistep_output = len(config.training.explicit_times.target)
         super().__init__(
             config=config,
-            graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,

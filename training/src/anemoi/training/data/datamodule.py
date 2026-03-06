@@ -90,6 +90,22 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.supporting_arrays
 
     @cached_property
+    def grid_sizes(self) -> dict[str, int]:
+        """Return grid size for each training dataset."""
+        return self.ds_train.grid_sizes
+
+    @cached_property
+    def latlons(self) -> dict:
+        """Return lat/lon coordinates for each training dataset.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Per-dataset arrays of shape (N, 2) with latitudes and longitudes in degrees.
+        """
+        return self.ds_train.latlons
+
+    @cached_property
     def data_indices(self) -> dict[str, IndexCollection]:
         """Return data indices for each dataset."""
         indices = {}
