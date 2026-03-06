@@ -12,64 +12,25 @@ import json
 import logging
 
 import matplotlib.pyplot as plt
-import numpy as np
 from matplotlib.collections import LineCollection
 
 from anemoi.training import diagnostics
+from anemoi.training.diagnostics.projections import Projection
 
 LOGGER = logging.getLogger(__name__)
-
-
-class EquirectangularProjection:
-    """Class to convert lat/lon coordinates to Equirectangular coordinates."""
-
-    def __init__(self) -> None:
-        """Initialize the projection with default zero offsets."""
-        self.x_offset = 0.0
-        self.y_offset = 0.0
-
-    def __call__(self, lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Project longitude and latitude coordinates to equirectangular x, y.
-
-        Parameters
-        ----------
-        lon : np.ndarray
-            Array of longitude values in degrees.
-        lat : np.ndarray
-            Array of latitude values in degrees.
-
-        """
-        lon_rad = np.radians(lon)
-        lat_rad = np.radians(lat)
-        x = np.array([v - 2 * np.pi if v > np.pi else v for v in lon_rad], dtype=lon_rad.dtype)
-        y = lat_rad
-        return x, y
-
-    @staticmethod
-    def inverse(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Convert equirectangular x, y coordinates back to degrees.
-
-        Parameters
-        ----------
-            x : np.ndarray
-                Radians-based x coordinate.
-            y : np.ndarray
-                Radians-based y coordinate.
-
-        """
-        return np.degrees(x), np.degrees(y)
 
 
 class Coastlines:
     """Class to plot coastlines from a GeoJSON file."""
 
-    def __init__(self, projection: EquirectangularProjection | None = None) -> None:
+    def __init__(self, projection: Projection | None = None) -> None:
         """Initialise the Coastlines object.
 
         Parameters
         ----------
-        projection : Any, optional
-            Projection Object, by default None
+        projection : Projection | None, optional
+            Projection (e.g. Projection.equirectangular() or Projection.lambert_conformal(latlon)).
+            By default None (uses equirectangular).
 
         Raises
         ------
@@ -91,7 +52,7 @@ class Coastlines:
         with self.continents_file.open("rt") as file:
             self.data = json.load(file)
 
-        self.projection = projection or EquirectangularProjection()
+        self.projection = projection or Projection.equirectangular()
         self.process_data()
 
     def process_data(self) -> None:
@@ -111,13 +72,14 @@ class Coastlines:
 class Borders:
     """Class to plot country borders from a local GeoJSON file."""
 
-    def __init__(self, projection: EquirectangularProjection | None = None) -> None:
+    def __init__(self, projection: Projection | None = None) -> None:
         """Initialize border data and projection.
 
         Parameters
         ----------
-        projection : EquirectangularProjection | None
-            Projection to use. Defaults to a new EquirectangularProjection instance.
+        projection : Projection | None
+            Projection (e.g. Projection.equirectangular() or Projection.lambert_conformal(latlon)).
+            Defaults to equirectangular.
         """
         try:
             # this requires python 3.9 or newer
@@ -134,7 +96,7 @@ class Borders:
         with self.borders_file.open("rt") as file:
             self.data = json.load(file)
 
-        self.projection = projection or EquirectangularProjection()
+        self.projection = projection or Projection.equirectangular()
         self.process_data()
 
     def process_data(self) -> None:
