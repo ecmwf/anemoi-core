@@ -10,6 +10,7 @@
 import gc
 import logging
 import os
+import resource
 from pathlib import Path
 
 import pytest
@@ -42,13 +43,6 @@ def test_benchmark_dataloader(
     cfg.graph.nodes.data.node_builder.dataset = cfg.system.input.dataset
     LOGGER.info("Benchmarking dataloader for configuration: %s", test_case)
 
-    # Reset memory logging and free all possible memory between runs
-    # this ensures we report the peak memory used during each run,
-    # and not the peak memory used by the run with the highest memory usage
-    reset_peak_memory_stats()
-    empty_cache()
-    gc.collect()
-
     # Initialize the forecaster to get graph data
     graph = GraphCreator(config=cfg.graph).create(overwrite=True)
 
@@ -57,6 +51,51 @@ def test_benchmark_dataloader(
 
     # Get training dataloader
     train_dataloader = datamodule.train_dataloader()
+
+    # Record current CPU memory (RSS) for the whole process tree before the benchmark
+    def _read_rss_kib(pid: int) -> int:
+        """Read VmRSS (in kB) from /proc/<pid>/status. Returns 0 on failure."""
+        try:
+            with open(f"/proc/{pid}/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1])
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            pass
+        return 0
+
+    def _get_descendant_pids(root_pid: int) -> list[int]:
+        """Return all descendant PIDs of root_pid by walking /proc/*/status."""
+        descendants = []
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/status") as f:
+                    for line in f:
+                        if line.startswith("PPid:"):
+                            ppid = int(line.split()[1])
+                            if ppid == root_pid:
+                                child_pid = int(entry)
+                                descendants.append(child_pid)
+                                descendants.extend(_get_descendant_pids(child_pid))
+                            break
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+        return descendants
+
+    def get_process_tree_rss_kib() -> tuple[int, int, int]:
+        """Return (master_rss, children_rss, total_rss) in kB for the whole process tree."""
+        my_pid = os.getpid()
+        master_rss = _read_rss_kib(my_pid)
+        children_rss = sum(_read_rss_kib(pid) for pid in _get_descendant_pids(my_pid))
+        return master_rss, children_rss, master_rss + children_rss
+
+    master_before, children_before, total_before = get_process_tree_rss_kib()
+    LOGGER.info(
+        "CPU RSS before benchmark: master %.2f MiB, children %.2f MiB, total %.2f MiB",
+        master_before / 1024, children_before / 1024, total_before / 1024,
+    )
 
     # Benchmark batch sampling speed
     num_batches_to_test = 100
@@ -74,7 +113,8 @@ def test_benchmark_dataloader(
         if batch_idx == 0:
             LOGGER.info("First batch structure:")
             for dataset_name, data in batch.items():
-                LOGGER.info("  Dataset '%s': shape %s, dtype %s", dataset_name, data.shape, data.dtype)
+                size_mb = data.nelement() * data.element_size() / (1024 * 1024)
+                LOGGER.info("  Dataset '%s': shape %s, dtype %s, size %.2f MB", dataset_name, data.shape, data.dtype, size_mb)
 
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
@@ -83,11 +123,23 @@ def test_benchmark_dataloader(
     batches_per_second = batch_count / elapsed_time
     time_per_batch_ms = (elapsed_time / batch_count) * 1000
 
+    # Record current CPU memory (RSS) for the whole process tree after the benchmark
+    master_after, children_after, total_after = get_process_tree_rss_kib()
+
     LOGGER.info("Dataloader Performance Results:")
     LOGGER.info("  Total batches: %d", batch_count)
     LOGGER.info("  Total time: %.2f seconds", elapsed_time)
     LOGGER.info("  Throughput: %.2f it/s", batches_per_second)
     LOGGER.info("  Time per batch: %.2f ms", time_per_batch_ms)
+    LOGGER.info("  Master RSS before:   %.2f MiB", master_before / 1024)
+    LOGGER.info("  Master RSS after:    %.2f MiB", master_after / 1024)
+    LOGGER.info("  Master RSS delta:    %.2f MiB", (master_after - master_before) / 1024)
+    LOGGER.info("  Children RSS before: %.2f MiB", children_before / 1024)
+    LOGGER.info("  Children RSS after:  %.2f MiB", children_after / 1024)
+    LOGGER.info("  Children RSS delta:  %.2f MiB", (children_after - children_before) / 1024)
+    LOGGER.info("  Total RSS before:    %.2f MiB", total_before / 1024)
+    LOGGER.info("  Total RSS after:     %.2f MiB", total_after / 1024)
+    LOGGER.info("  Total RSS delta:     %.2f MiB", (total_after - total_before) / 1024)
 
 
 @pytest.mark.multigpu
