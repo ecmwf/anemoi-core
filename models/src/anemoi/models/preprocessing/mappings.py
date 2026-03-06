@@ -9,7 +9,6 @@
 
 import torch
 
-
 def noop(x):
     """No operation."""
     return x
@@ -40,14 +39,14 @@ def log1p_converter(x):
     return torch.log1p(x)
 
 
-def boxcox_converter(x, lambd=0.5):
+def boxcox_converter(x, lambd=0.33):
     """Convert positive var in to boxcox(var)."""
-    pos_lam = (torch.pow(x, lambd) - 1) / lambd
-    null_lam = torch.log(x)
+     
     if lambd == 0:
-        return null_lam
-    else:
-        return pos_lam
+        assert x.gt(0.0).all(), f"input x must be strictly positive for parameter lambd == 0"
+        return torch.log(x)
+    assert x.ge(0.0).all(), f"input x must me greater or equal to 0 for parameter lambd {lambd} > 0"
+    return (torch.pow(x, lambd) - 1) / lambd
 
 
 def sqrt_converter(x):
