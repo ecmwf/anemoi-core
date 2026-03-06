@@ -14,6 +14,7 @@ from typing import Union
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import PositiveInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
@@ -34,6 +35,8 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
     "Edge attributes to consider in the encoder features."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
+    attn_dim: PositiveInt | None = Field(default=None)
+    "Optional attention dimension for q/k/v projections. Defaults to hidden_dim."
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:

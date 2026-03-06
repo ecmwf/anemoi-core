@@ -28,6 +28,7 @@ from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models.base import BaseGraphModel
+from anemoi.models.models.optional_refiner import OptionalRefinerMixin
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -35,7 +36,7 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
+class AnemoiDiffusionModelEncProcDec(OptionalRefinerMixin, BaseGraphModel):
     """Diffusion Model."""
 
     def __init__(
@@ -48,6 +49,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     ) -> None:
 
         model_config_local = DotDict(model_config)
+        self._configure_optional_refiner(model_config_local)
 
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
@@ -132,6 +134,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
+
+        self._build_optional_refiner_networks(model_config)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         base_input_dim = super()._calculate_input_dim(dataset_name)
@@ -407,26 +411,23 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
-            # Compute decoder edges using updated latent representation
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(
-                batch_size=bse,
-                model_comm_group=model_comm_group,
-            )
+            refiner_kwargs = {}
+            cond = bwd_mapper_kwargs[dataset_name].get("cond")
+            if self.refiner_enabled and cond is not None:
+                c_data = cond[1]
+                refiner_kwargs["cond"] = (c_data, c_data)
 
-            x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+            x_out = self._decode_with_optional_refiner(
+                dataset_name=dataset_name,
+                x_latent_proc=x_latent_proc,
+                x_data_latent=x_data_latent_dict[dataset_name],
                 batch_size=bse,
-                shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
-                edge_attr=decoder_edge_attr,
-                edge_index=decoder_edge_index,
+                shard_shapes_hidden=shard_shapes_hidden,
+                shard_shapes_data=shard_shapes_data_dict[dataset_name],
+                in_out_sharded=in_out_sharded[dataset_name],
                 model_comm_group=model_comm_group,
-                x_src_is_sharded=True,  # x_latent always comes sharded
-                x_dst_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
-                keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
-                edge_shard_shapes=dec_edge_shard_shapes,
-                **bwd_mapper_kwargs[dataset_name],
+                decoder_kwargs=bwd_mapper_kwargs[dataset_name],
+                refiner_kwargs=refiner_kwargs,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

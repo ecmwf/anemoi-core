@@ -100,6 +100,7 @@ decoder:
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
 
+refiner: null
 
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection

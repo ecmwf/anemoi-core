@@ -36,6 +36,7 @@ from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
+from .refiner import GraphTransformerRefinerSchema  # noqa: TC001
 from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -231,6 +232,8 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN decoder schema.",
+    refiner: GraphTransformerRefinerSchema | None = Field(default=None)
+    "Optional data-grid refiner configuration for supported encoder-processor-decoder models."
     residual: ResidualConnectionSchema = Field(
         ...,
         discriminator="target_",
@@ -238,6 +241,23 @@ class BaseModelSchema(PydanticBaseModel):
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
+
+    @model_validator(mode="after")
+    def validate_refiner_support(self) -> "BaseModelSchema":
+        supported_targets = {
+            DefinedModels.ANEMOI_MODEL_ENC_PROC_DEC.value,
+            DefinedModels.ANEMOI_MODEL_ENC_PROC_DEC_SHORT.value,
+            DefinedModels.ANEMOI_ENS_MODEL_ENC_PROC_DEC.value,
+            DefinedModels.ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT.value,
+            DefinedModels.ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC.value,
+            DefinedModels.ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC_SHORT.value,
+            DefinedModels.ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC.value,
+            DefinedModels.ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC_SHORT.value,
+        }
+        if self.refiner is not None and self.model.target_ not in supported_targets:
+            msg = f"Refiners are not supported for model target '{self.model.target_}'."
+            raise ValueError(msg)
+        return self
 
 
 class NoOpNoiseInjectorSchema(BaseModel):

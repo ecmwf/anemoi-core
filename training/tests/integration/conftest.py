@@ -302,6 +302,78 @@ def ensemble_config(
 
 
 @pytest.fixture
+def global_refiner_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    cfg, url_dataset, _ = build_global_config(
+        ["model=graphtransformer_refiner", "graph=multi_scale_refiner"],
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+    )
+
+    cfg.training.multistep_input = 3
+    cfg.training.multistep_output = 2
+    cfg.training.max_epochs = 1
+    cfg.model.num_channels = 32
+    cfg.model.processor.num_layers = 2
+    cfg.model.processor.num_chunks = 1
+    cfg.model.encoder.num_chunks = 1
+    cfg.model.decoder.num_chunks = 1
+    cfg.model.refiner.refiner_channels = 32
+    cfg.model.refiner.attn_dim = 32
+    cfg.model.refiner.num_chunks = 1
+    cfg.model.compile = []
+    cfg.diagnostics.plot.callbacks = []
+    cfg.diagnostics.callbacks = []
+    return cfg, url_dataset
+
+
+@pytest.fixture
+def ensemble_refiner_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, str]:
+    overrides = ["model=graphtransformer_ens_refiner", "graph=multi_scale_refiner"]
+
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_ensemble_refiner",
+    ):
+        template = compose(config_name="ensemble_crps", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+
+    cfg = handle_truncation_matrices(cfg, get_test_data)
+    assert isinstance(cfg, DictConfig)
+
+    cfg.training.multistep_input = 3
+    cfg.training.multistep_output = 2
+    cfg.training.max_epochs = 1
+    cfg.model.num_channels = 32
+    cfg.model.processor.num_layers = 2
+    cfg.model.processor.num_chunks = 1
+    cfg.model.encoder.num_chunks = 1
+    cfg.model.decoder.num_chunks = 1
+    cfg.model.refiner.refiner_channels = 32
+    cfg.model.refiner.attn_dim = 32
+    cfg.model.refiner.num_chunks = 1
+    cfg.model.compile = []
+    cfg.diagnostics.plot.callbacks = []
+    cfg.diagnostics.callbacks = []
+    return cfg, url_dataset
+
+
+@pytest.fixture
 def hierarchical_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
@@ -535,6 +607,92 @@ def diffusion_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
+    return cfg, url_dataset
+
+
+@pytest.fixture
+def diffusion_refiner_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    overrides = [
+        "model=graphtransformer_diffusion_refiner",
+        "graph=multi_scale_refiner",
+        "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
+    ]
+
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_diffusion_refiner",
+    ):
+        template = compose(config_name="diffusion", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+
+    cfg.training.max_epochs = 1
+    cfg.model.num_channels = 32
+    cfg.model.processor.num_layers = 2
+    cfg.model.processor.num_chunks = 1
+    cfg.model.encoder.num_chunks = 1
+    cfg.model.decoder.num_chunks = 1
+    cfg.model.refiner.refiner_channels = 32
+    cfg.model.refiner.attn_dim = 32
+    cfg.model.refiner.num_chunks = 1
+    cfg.model.compile = []
+    cfg.diagnostics.plot.callbacks = []
+    cfg.diagnostics.callbacks = []
+    return cfg, url_dataset
+
+
+@pytest.fixture
+def diffusiontend_refiner_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    overrides = [
+        "model=graphtransformer_diffusiontend_refiner",
+        "graph=multi_scale_refiner",
+        "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+    ]
+
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_diffusiontend_refiner",
+    ):
+        template = compose(config_name="diffusion", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+
+    cfg.training.max_epochs = 1
+    cfg.training.multistep_input = 3
+    cfg.training.multistep_output = 2
+    cfg.model.num_channels = 32
+    cfg.model.processor.num_layers = 2
+    cfg.model.processor.num_chunks = 1
+    cfg.model.encoder.num_chunks = 1
+    cfg.model.decoder.num_chunks = 1
+    cfg.model.refiner.refiner_channels = 32
+    cfg.model.refiner.attn_dim = 32
+    cfg.model.refiner.num_chunks = 1
+    cfg.model.compile = []
+    cfg.diagnostics.plot.callbacks = []
+    cfg.diagnostics.callbacks = []
     return cfg, url_dataset
 
 

@@ -150,6 +150,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         mlp_hidden_ratio: int,
         edge_dim: int,
         qk_norm: bool = False,
+        attn_dim: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
@@ -179,6 +180,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Edge feature dimension
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
+        attn_dim : int, optional
+            Attention model dimension used in q/k/v projections. Defaults to
+            hidden_dim.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict, optional
@@ -204,11 +208,13 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         self.num_chunks = num_chunks
 
         Linear = self.layer_factory.Linear
+        attn_dim = hidden_dim if attn_dim is None else attn_dim
 
         self.proc = GraphTransformerMapperBlock(
             in_channels=hidden_dim,
             hidden_dim=mlp_hidden_ratio * hidden_dim,
             out_channels=hidden_dim,
+            attn_dim=attn_dim,
             num_heads=num_heads,
             edge_dim=edge_dim,
             qk_norm=qk_norm,
@@ -503,6 +509,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         mlp_hidden_ratio: int,
         edge_dim: int,
         qk_norm: bool = False,
+        attn_dim: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
@@ -549,6 +556,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             qk_norm=qk_norm,
+            attn_dim=attn_dim,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
@@ -621,6 +629,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         mlp_hidden_ratio: int,
         edge_dim: int,
         qk_norm: bool = False,
+        attn_dim: Optional[int] = None,
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -673,6 +682,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             qk_norm=qk_norm,
+            attn_dim=attn_dim,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
@@ -708,6 +718,121 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             x_dst = gather_tensor(
                 x_dst, 0, change_channels_in_shape(shapes_dst, self.out_channels_dst), model_comm_group
             )
+        return x_dst
+
+
+class GraphTransformerRefinerMapper(GraphTransformerBaseMapper):
+    """Graph transformer mapper used as a data-grid refiner.
+
+    This mapper can run without source/destination embedding layers when the
+    input channels already match hidden_dim.
+    """
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        out_channels_dst: Optional[int] = None,
+        num_chunks: int,
+        num_heads: int,
+        mlp_hidden_ratio: int,
+        edge_dim: int,
+        qk_norm: bool = False,
+        attn_dim: Optional[int] = None,
+        use_src_embedding: bool = False,
+        use_dst_embedding: bool = False,
+        use_output_projection: Optional[bool] = None,
+        initialise_data_extractor_zero: bool = False,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict = None,
+        shard_strategy: str = "edges",
+        graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            qk_norm=qk_norm,
+            attn_dim=attn_dim,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            edge_dim=edge_dim,
+            layer_kernels=layer_kernels,
+            shard_strategy=shard_strategy,
+            graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
+        )
+
+        self.use_src_embedding = use_src_embedding
+        self.use_dst_embedding = use_dst_embedding
+        self.use_output_projection = (
+            out_channels_dst is not None if use_output_projection is None else use_output_projection
+        )
+
+        if self.use_src_embedding:
+            self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+        else:
+            assert self.in_channels_src == self.hidden_dim, (
+                "When use_src_embedding=False, in_channels_src must equal hidden_dim. "
+                f"Got in_channels_src={self.in_channels_src}, hidden_dim={self.hidden_dim}."
+            )
+            self.emb_nodes_src = nn.Identity()
+
+        if self.use_dst_embedding:
+            self.emb_nodes_dst = self.layer_factory.Linear(self.in_channels_dst, self.hidden_dim)
+        else:
+            assert self.in_channels_dst == self.hidden_dim, (
+                "When use_dst_embedding=False, in_channels_dst must equal hidden_dim. "
+                f"Got in_channels_dst={self.in_channels_dst}, hidden_dim={self.hidden_dim}."
+            )
+            self.emb_nodes_dst = nn.Identity()
+
+        if self.use_output_projection:
+            if self.out_channels_dst is None:
+                raise ValueError("out_channels_dst must be set when use_output_projection=True.")
+            self.node_data_extractor = nn.Sequential(
+                nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+            )
+            if initialise_data_extractor_zero:
+                for module in self.node_data_extractor.modules():
+                    if isinstance(module, nn.Linear):
+                        nn.init.constant_(module.weight, 0.0)
+                        if module.bias is not None:
+                            nn.init.constant_(module.bias, 0.0)
+        else:
+            if self.out_channels_dst is not None:
+                raise ValueError("out_channels_dst must be None when use_output_projection=False.")
+            if initialise_data_extractor_zero:
+                raise ValueError("initialise_data_extractor_zero requires use_output_projection=True.")
+            self.node_data_extractor = nn.Identity()
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        shapes_src, shapes_dst = shard_shapes
+        x_src, x_dst = x
+        if not x_src_is_sharded:
+            x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
+        if not x_dst_is_sharded:
+            x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
+
+        x_src = self.emb_nodes_src(x_src)
+        x_dst = self.emb_nodes_dst(x_dst)
+        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
+        shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
+        return x_src, x_dst, shapes_src, shapes_dst
+
+    def post_process(self, x_dst, shapes_dst, model_comm_group=None, keep_x_dst_sharded=False):
+        x_dst = self.node_data_extractor(x_dst)
+        out_channels = self.out_channels_dst if self.use_output_projection else self.hidden_dim
+        if not keep_x_dst_sharded:
+            x_dst = gather_tensor(x_dst, 0, change_channels_in_shape(shapes_dst, out_channels), model_comm_group)
         return x_dst
 
 

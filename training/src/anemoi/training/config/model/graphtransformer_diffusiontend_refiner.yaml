@@ -1,10 +1,11 @@
 num_channels: 1024
+condition_on_residual: False
 cpu_offload: False
 
 keep_batch_sharded: True
 
 model:
-  _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
+  _target_: anemoi.models.models.AnemoiDiffusionTendModelEncProcDec
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0
@@ -94,7 +95,25 @@ decoder:
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
-refiner: null
+refiner:
+  _target_: anemoi.models.layers.mapper.GraphTransformerRefinerMapper
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  refiner_channels: 256
+  num_refiners: 1
+  use_src_embedding: False
+  use_dst_embedding: False
+  num_chunks: 4
+  mlp_hidden_ratio: 4
+  num_heads: 4
+  attn_dim: 128
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"
+  edge_pre_mlp: False
 
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection

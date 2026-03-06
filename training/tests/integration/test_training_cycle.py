@@ -186,6 +186,52 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_global_refiner(
+    global_refiner_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = global_refiner_config
+    assert cfg.model.model._target_ == "anemoi.models.models.AnemoiModelEncProcDec"
+    assert cfg.model.refiner.num_refiners >= 1
+    assert cfg.model.refiner.refiner_channels > 0
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    graph_data = trainer.graph_data["data"]
+    assert ("data", "to", "data") in graph_data.edge_types
+    trainer.train()
+
+
+def test_config_validation_global_refiner(global_refiner_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = global_refiner_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_ensemble_refiner(
+    ensemble_refiner_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = ensemble_refiner_config
+    assert cfg.model.model._target_ == "anemoi.models.models.AnemoiEnsModelEncProcDec"
+    assert cfg.model.refiner.num_refiners >= 1
+    assert cfg.model.refiner.refiner_channels > 0
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    graph_data = trainer.graph_data["data"]
+    assert ("data", "to", "data") in graph_data.edge_types
+    trainer.train()
+
+
+def test_config_validation_ensemble_refiner(ensemble_refiner_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = ensemble_refiner_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_hierarchical(
     hierarchical_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
@@ -297,6 +343,52 @@ def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_
 
 def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
     cfg, _ = diffusion_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_diffusion_refiner(
+    diffusion_refiner_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    cfg, url = diffusion_refiner_config
+    assert cfg.model.model._target_ == "anemoi.models.models.AnemoiDiffusionModelEncProcDec"
+    assert cfg.model.refiner.num_refiners >= 1
+    assert cfg.model.refiner.refiner_channels > 0
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    graph_data = trainer.graph_data["data"]
+    assert ("data", "to", "data") in graph_data.edge_types
+    trainer.train()
+
+
+def test_config_validation_diffusion_refiner(diffusion_refiner_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = diffusion_refiner_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_diffusiontend_refiner(
+    diffusiontend_refiner_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    cfg, url = diffusiontend_refiner_config
+    assert cfg.model.model._target_ == "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec"
+    assert cfg.model.refiner.num_refiners >= 1
+    assert cfg.model.refiner.refiner_channels > 0
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    graph_data = trainer.graph_data["data"]
+    assert ("data", "to", "data") in graph_data.edge_types
+    trainer.train()
+
+
+def test_config_validation_diffusiontend_refiner(diffusiontend_refiner_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = diffusiontend_refiner_config
     BaseSchema(**cfg)
 
 

@@ -20,6 +20,7 @@ from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
+from anemoi.models.layers.mapper import GraphTransformerRefinerMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -51,6 +52,7 @@ class MapperConfig:
     graph_attention_backend: str = "pyg"
     edge_dim: int = None  # Will be set from graph_provider
     edge_pre_mlp: bool = False
+    attn_dim: int | None = None
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
@@ -356,3 +358,90 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4
         ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+
+
+class TestGraphTransformerRefinerMapper(TestGraphTransformerBaseMapper):
+    """Test the GraphTransformerRefinerMapper class."""
+
+    OUT_CHANNELS_DST = None
+    PROJECTED_CHANNELS = 5
+
+    @pytest.fixture
+    def mapper_init(self):
+        return MapperConfig(
+            in_channels_src=64,
+            in_channels_dst=64,
+            hidden_dim=64,
+            num_heads=8,
+            mlp_hidden_ratio=2,
+        )
+
+    @pytest.fixture
+    def mapper(self, mapper_init, graph_provider, device):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        return GraphTransformerRefinerMapper(
+            **config,
+            out_channels_dst=None,
+            use_src_embedding=False,
+            use_dst_embedding=False,
+        ).to(device)
+
+    def test_pre_process_without_embeddings(self, mapper, mapper_init, pair_tensor):
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        x_src, x_dst, shapes_src, shapes_dst = mapper.pre_process(pair_tensor, shard_shapes)
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim])
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+        assert shapes_src == [[self.NUM_SRC_NODES, mapper_init.hidden_dim]]
+        assert shapes_dst == [[self.NUM_DST_NODES, mapper_init.hidden_dim]]
+
+    def test_forward_without_projection(self, mapper, mapper_init, pair_tensor, graph_provider):
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=1)
+        result = mapper.forward(pair_tensor, 1, shard_shapes, edge_attr, edge_index)
+        assert result.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+
+    def test_forward_with_output_projection(self, mapper_init, graph_provider, pair_tensor, device):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        mapper = GraphTransformerRefinerMapper(
+            **config,
+            out_channels_dst=self.PROJECTED_CHANNELS,
+            use_src_embedding=False,
+            use_dst_embedding=False,
+            use_output_projection=True,
+        ).to(device)
+
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=1)
+        result = mapper.forward(pair_tensor, 1, shard_shapes, edge_attr, edge_index)
+        assert result.shape == torch.Size([self.NUM_DST_NODES, self.PROJECTED_CHANNELS])
+
+    def test_no_embedding_requires_matching_dimensions(self, mapper_init, graph_provider):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        config["in_channels_src"] = mapper_init.hidden_dim + 1
+
+        with pytest.raises(AssertionError):
+            GraphTransformerRefinerMapper(
+                **config,
+                out_channels_dst=None,
+                use_src_embedding=False,
+                use_dst_embedding=False,
+            )
+
+    def test_refiner_supports_decoupled_attn_dim(self, mapper_init, graph_provider, device):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        config["attn_dim"] = 32
+        mapper = GraphTransformerRefinerMapper(
+            **config,
+            out_channels_dst=None,
+            use_src_embedding=False,
+            use_dst_embedding=False,
+        ).to(device)
+
+        assert mapper.proc.attn_dim == 32
+        assert mapper.proc.projection.in_features == 32
+        assert mapper.proc.projection.out_features == mapper_init.hidden_dim
+        assert mapper.proc.node_dst_mlp[0].out_features == mapper_init.mlp_hidden_ratio * mapper_init.hidden_dim

@@ -14,6 +14,7 @@ from typing import Union
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import PositiveInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
@@ -36,6 +37,8 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Normalize the query and key vectors. Default to False."
     initialise_data_extractor_zero: bool = Field(example=False)
     "Initialise the data extractor with zeros. Default to False."
+    attn_dim: PositiveInt | None = Field(default=None)
+    "Optional attention dimension for q/k/v projections. Defaults to hidden_dim."
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:

@@ -518,3 +518,62 @@ def test_GraphTransformerMapperBlock_forward_backward(init_mapper, mapper_block)
         assert (
             param.grad.shape == param.shape
         ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+
+def test_GraphTransformerMapperBlock_reduced_attn_dim():
+    in_channels = 128
+    hidden_dim = 64
+    out_channels = 128
+    attn_dim = 64
+    edge_dim = 11
+    num_heads = 8
+    layer_kernels = load_layer_kernels()
+
+    block = GraphTransformerMapperBlock(
+        in_channels=in_channels,
+        hidden_dim=hidden_dim,
+        out_channels=out_channels,
+        attn_dim=attn_dim,
+        edge_dim=edge_dim,
+        layer_kernels=layer_kernels,
+        num_heads=num_heads,
+        bias=True,
+        update_src_nodes=False,
+        qk_norm=True,
+        graph_attention_backend="pyg",
+        edge_pre_mlp=False,
+    )
+
+    assert block.attn_dim == attn_dim
+    assert block.out_channels_conv == attn_dim // num_heads
+    assert block.projection.in_features == attn_dim
+    assert block.projection.out_features == out_channels
+
+    x = (torch.randn((10, in_channels)), torch.randn((10, in_channels)))
+    edge_attr = torch.randn((10, edge_dim))
+    edge_index = torch.randint(1, 10, (2, 10))
+    shapes = (10, 10, 10)
+    batch_size = 1
+    size = (10, 10)
+
+    output, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
+    assert output[0].shape == (10, out_channels)
+    assert output[1].shape == (10, out_channels)
+
+
+def test_GraphTransformerMapperBlock_invalid_attn_dim_raises():
+    with pytest.raises(ValueError, match="must be divisible by num_heads"):
+        GraphTransformerMapperBlock(
+            in_channels=128,
+            hidden_dim=64,
+            out_channels=128,
+            attn_dim=70,
+            edge_dim=11,
+            layer_kernels=load_layer_kernels(),
+            num_heads=8,
+            bias=True,
+            update_src_nodes=False,
+            qk_norm=False,
+            graph_attention_backend="pyg",
+            edge_pre_mlp=False,
+        )

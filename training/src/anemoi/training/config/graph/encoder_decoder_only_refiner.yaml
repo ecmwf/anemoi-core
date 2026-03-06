@@ -1,0 +1,68 @@
+---
+
+overwrite: True
+
+data: "data"
+hidden: "hidden"
+
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: "PLACEHOLDER_DATASET_WILL_BE_OVERRIDDEN"
+    attributes: ${graph.attributes.nodes}
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+      grid: o48
+
+edges:
+- source_name: ${graph.data}
+  target_name: ${graph.hidden}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges
+    cutoff_factor: 0.6
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: ${graph.hidden}
+  target_name: ${graph.data}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 4
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: ${graph.data}
+  target_name: ${graph.data}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 16
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+      norm: unit-max
+      fill_value: 0
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+    dir_harmonics:
+      _target_: anemoi.graphs.edges.attributes.DirectionalHarmonics
+      order: 3
+      norm: unit-std
+    rbf_features:
+      _target_: anemoi.graphs.edges.attributes.RadialBasisFeatures
+      r_scale: null
+      centers: [0.0, 0.25, 0.5, 0.75, 1.0]
+      sigma: 0.2
+
+post_processors: []

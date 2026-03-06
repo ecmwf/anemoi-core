@@ -442,6 +442,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         in_channels: int,
         hidden_dim: int,
         out_channels: int,
+        attn_dim: Optional[int] = None,
         num_heads: int,
         edge_dim: int,
         bias: bool = True,
@@ -460,6 +461,9 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Number of input channels.
         out_channels : int
             Number of output channels.
+        attn_dim : int, optional
+            Attention model dimension used for q/k/v and edge projections. If
+            None, defaults to out_channels.
         num_heads : int,
             Number of heads
         edge_dim : int,
@@ -482,7 +486,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.update_src_nodes = update_src_nodes
 
-        self.out_channels_conv = out_channels // num_heads
+        self.attn_dim = out_channels if attn_dim is None else attn_dim
+        if self.attn_dim <= 0:
+            raise ValueError(f"attn_dim must be > 0, got {self.attn_dim}")
+        if self.attn_dim % num_heads != 0:
+            raise ValueError(
+                f"attn_dim ({self.attn_dim}) must be divisible by num_heads ({num_heads}) in {self.__class__.__name__}."
+            )
+
+        self.out_channels_conv = self.attn_dim // num_heads
         self.num_heads = num_heads
         self.qk_norm = qk_norm
 
@@ -495,7 +507,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
 
-        self.projection = Linear(out_channels, out_channels)
+        self.projection = Linear(self.attn_dim, out_channels)
 
         if self.qk_norm:
             self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)

@@ -1,10 +1,11 @@
 num_channels: 1024
+condition_on_residual: False
 cpu_offload: False
 
 keep_batch_sharded: True
 
 model:
-  _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
+  _target_: anemoi.models.models.AnemoiDiffusionTendModelEncProcDec
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0
@@ -51,18 +52,21 @@ layer_kernels:
     bias: False
 
 processor:
-  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
-  trainable_size: ${model.trainable_parameters.hidden2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
+  _target_: anemoi.models.layers.processor.TransformerProcessor
   num_layers: 16
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: True
+  window_size: 512
+  dropout_p: 0.0 # GraphTransformer
+  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  qk_norm: True # Transformer and GraphTransformer only
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
+  use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -86,7 +90,7 @@ decoder:
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: False
+  initialise_data_extractor_zero: True
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
@@ -94,7 +98,25 @@ decoder:
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
-refiner: null
+refiner:
+  _target_: anemoi.models.layers.mapper.GraphTransformerRefinerMapper
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  refiner_channels: 256
+  num_refiners: 1
+  use_src_embedding: False
+  use_dst_embedding: False
+  num_chunks: 4
+  mlp_hidden_ratio: 4
+  num_heads: 4
+  attn_dim: 128
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"
+  edge_pre_mlp: False
 
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
@@ -108,8 +130,6 @@ trainable_parameters:
   hidden: 8
   data2hidden: 8
   hidden2data: 8
-  hidden2hidden: 8 # GNN and GraphTransformer Processor only
-
 
 attributes:
   edges:
