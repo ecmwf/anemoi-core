@@ -83,10 +83,11 @@ def _gather_with_padding(
 ) -> Tensor:
     input_format = get_memory_format(input_)
     input_ = input_.contiguous(memory_format=input_format)
+    dim = dim_ % input_.dim()
 
-    max_shape_dim = max(shape[dim_] for shape in shapes)
+    max_shape_dim = max(shape[dim] for shape in shapes)
     padded_shape = list(input_.shape)
-    padded_shape[dim_] = max_shape_dim
+    padded_shape[dim] = max_shape_dim
 
     tensor_list = [
         torch.empty(
@@ -96,18 +97,18 @@ def _gather_with_padding(
     ]
 
     # pad input_ to match max size in dim_
-    pad_size = max_shape_dim - input_.shape[dim_]
+    pad_size = max_shape_dim - input_.shape[dim]
     if pad_size > 0:
         # pad format: (left_pad, right_pad, left_pad, right_pad, ...) descending from last dim
-        pad = (0, 0) * (input_.dim() - dim_ - 1) + (0, pad_size)
+        pad = (0, 0) * (input_.dim() - dim - 1) + (0, pad_size)
         input_ = torch.nn.functional.pad(input_, pad, mode="constant", value=0)
 
     dist.all_gather(tensor_list, input_, group=group)
 
     # remove padding
-    tensor_list = [torch.narrow(t, dim_, 0, shape[dim_]) for t, shape in zip(tensor_list, shapes)]
+    tensor_list = [torch.narrow(t, dim, 0, shape[dim]) for t, shape in zip(tensor_list, shapes)]
 
-    return torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
+    return torch.cat(tensor_list, dim=dim).contiguous(memory_format=input_format)
 
 
 def _gather_default(
@@ -163,7 +164,9 @@ def _gather(
         return input_
 
     # sanity checks
-    assert dim_ < input_.dim(), f"Error, cannot gather along {dim_} for tensor with {input_.dim()} dimensions."
+    assert (
+        -input_.dim() <= dim_ < input_.dim()
+    ), f"Error, cannot gather along {dim_} for tensor with {input_.dim()} dimensions."
 
     all_shards_equal_shape = all(shape == shapes[0] for shape in shapes)
     if dim_ == 0 and all_shards_equal_shape:  # requirement for all_gather_into_tensor
