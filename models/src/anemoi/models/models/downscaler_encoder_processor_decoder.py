@@ -802,8 +802,9 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             dataset="input_lres",
             in_place=False,
         )
-        channel_indices = self.x_in_residual_indices.to(state_inp_denorm.device)
-        state_outp += state_inp_denorm[..., channel_indices]
+
+        state_outp = self.compute_direct_predictions(state_outp, state_inp_denorm)
+
         return state_outp
 
     def correction_bug_to_delete(self, out, y_pred_residuals, post_processors_state):
