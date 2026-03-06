@@ -223,6 +223,54 @@ def test_transfer_learning_loading_preserves_checkpoint_processors_when_disabled
     )
 
 
+def test_transfer_learning_loading_populates_ckpt_indices_from_dict(tmp_path: Path) -> None:
+    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
+    new_model = DummyModel(["6h", "12h"], offset=1.0)
+
+    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
+    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
+
+    checkpoint = {
+        "state_dict": old_module.state_dict(),
+        "hyper_parameters": {
+            "config": _make_minimal_ckpt_config(),
+            "data_indices": {
+                "era5": SimpleNamespace(name_to_index={"t2m": 0, "u10": 1}),
+                "cerra": SimpleNamespace(name_to_index={"t2m": 0, "tp": 1}),
+            },
+        },
+    }
+    ckpt_path = tmp_path / "checkpoint.pt"
+    torch.save(checkpoint, ckpt_path)
+
+    transfer_learning_loading(new_module, ckpt_path)
+
+    assert new_module._ckpt_model_name_to_index == {
+        "era5": {"t2m": 0, "u10": 1},
+        "cerra": {"t2m": 0, "tp": 1},
+    }
+
+
+def test_transfer_learning_loading_raises_on_old_checkpoint_data_indices_format(tmp_path: Path) -> None:
+    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
+    new_model = DummyModel(["6h", "12h"], offset=1.0)
+
+    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
+    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
+
+    checkpoint = {
+        "state_dict": old_module.state_dict(),
+        "hyper_parameters": {
+            "config": _make_minimal_ckpt_config(),
+            "data_indices": SimpleNamespace(name_to_index={"t2m": 0, "u10": 1}),
+        },
+    }
+    ckpt_path = tmp_path / "checkpoint.pt"
+    torch.save(checkpoint, ckpt_path)
+
+    with pytest.raises(TypeError, match="older version of anemoi-core"):
+        transfer_learning_loading(new_module, ckpt_path)
+
 def test_validate_transfer_learning_add_dataset() -> None:
     """Test adding a new dataset during transfer learning (Scenario A → A+B)."""
     # Setup: checkpoint has ERA5, config has ERA5 + CERRA
