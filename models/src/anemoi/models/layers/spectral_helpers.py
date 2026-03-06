@@ -156,7 +156,6 @@ class SphericalHarmonicTransform(Module):
         self.nlat = len(self.lons_per_lat)
         self.truncation = truncation
         assert 0 < self.truncation <= self.nlat, f"Truncation {self.truncation} must be between 1 and number of latitudes {self.nlat}"
-        #TODO(sara): check limits here
         self.n_grid_points = sum(self.lons_per_lat)
 
         # Set offsets to start of each latitude in flattened grid dimension
