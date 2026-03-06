@@ -69,7 +69,7 @@ class BaseGraphModel(nn.Module):
         self.n_step_input = model_config.training.multistep_input
         self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
-        self.latent_skip = model_config.model.get("latent_skip", True)
+        self.latent_skip = model_config.model.latent_skip
 
         self.node_attributes = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
@@ -83,6 +83,8 @@ class BaseGraphModel(nn.Module):
 
         # build networks
         self.has_processor = model_config.model.processor is not None
+        if not self.has_processor and self.latent_skip:
+            LOGGER.warning("model.latent_skip=True but no processor is defined. Using latent_skip=False.")
         self._build_networks(model_config)
 
         # build residual connection
@@ -101,6 +103,7 @@ class BaseGraphModel(nn.Module):
         self.num_input_channels_decoding_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
+        self._decoding_forcing_input_idx = {}
         self.input_dim = {}
         self.input_dim_latent = {}
         self.target_dim = {}
@@ -109,10 +112,11 @@ class BaseGraphModel(nn.Module):
         for dataset_name, dataset_indices in data_indices.items():
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
+            self._decoding_forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing]
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
-            self.num_input_channels_decoding_forcings[dataset_name] = 0
+            self.num_input_channels_decoding_forcings[dataset_name] = len(self._decoding_forcing_input_idx[dataset_name])
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
@@ -130,10 +134,9 @@ class BaseGraphModel(nn.Module):
         return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
-        return (
-            self.n_step_input * self.num_input_channels[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-        )
+        # Default behaviour is to pass the same input as to the encoder.
+        # TODO: abstract different options into the base class 
+        return self._calculate_input_dim(dataset_name)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         return self.n_step_output * self.num_output_channels[dataset_name]

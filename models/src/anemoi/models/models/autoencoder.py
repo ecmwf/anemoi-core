@@ -76,14 +76,6 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        super()._calculate_shapes_and_indices(data_indices)
-        self._forcing_input_idx = {}
-        for dataset_name, dataset_indices in data_indices.items():
-            forcing_names = dataset_indices.model._forcing
-            self._forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in forcing_names]
-            self.num_input_channels_decoding_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
-
     def _calculate_target_dim(self, dataset_name: str) -> int:
         return (
             self.n_step_output * self.num_input_channels_decoding_forcings[dataset_name]
@@ -149,7 +141,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         x_target_latent = torch.cat(
             (
                 einops.rearrange(
-                    x_forcing[..., self._forcing_input_idx[dataset_name]],
+                    x_forcing[..., self._decoding_forcing_input_idx[dataset_name]],
                     "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
                 ),
                 node_attributes_target,
