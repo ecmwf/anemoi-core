@@ -834,7 +834,6 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             x_in_interp = before_sampling_data[0]
         else:
             raise ValueError("Expected before_sampling_data to contain x_in_interp")
-        raise NotImplementedError
         # Convert tendency to state
         residuals = out.clone()
         out = self.add_interp_to_state(
