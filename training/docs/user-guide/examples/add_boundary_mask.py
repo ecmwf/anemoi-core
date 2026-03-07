@@ -55,7 +55,9 @@ def _parse_frequency_to_timedelta64(freq: str) -> np.timedelta64:
 def main():
     args = parse_args()
 
-    ds = xr.open_zarr(args.input, consolidated=False)
+    # Disable CF masking/scaling so valid zeros in stats arrays are not decoded as NaN
+    # when _FillValue happens to be 0 in upstream metadata.
+    ds = xr.open_zarr(args.input, consolidated=False, mask_and_scale=False)
     if "data" not in ds:
         raise SystemExit("Expected 'data' variable in the Zarr dataset.")
 
