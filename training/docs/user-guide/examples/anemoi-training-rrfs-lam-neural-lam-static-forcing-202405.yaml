@@ -1,0 +1,130 @@
+defaults:
+  - data: zarr
+  - diagnostics: evaluation_no_plot
+  - system: example
+  - graph: existing
+  - model: graphtransformer
+  - training: lam
+  - _self_
+
+config_validation: True
+
+data:
+  resolution: 3p0km
+  frequency: 1h
+  timestep: 1h
+  datasets:
+    data:
+      forcing:
+        - landcover
+        - orography
+        - swdown
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: "mean-std"
+            std: []
+            min-max: []
+            max: []
+            none:
+              - landcover
+              - orography
+
+system:
+  hardware:
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
+  input:
+    dataset: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/tmp/rrfs-monthly/rrfs-conus-3km-202405-bcmask-time-s.zarr
+    graph: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-20km.pt
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/
+
+dataloader:
+  prefetch_factor: 2
+  pin_memory: true
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  num_workers:
+    training: 4
+    validation: 4
+    test: 4
+  limit_batches:
+    training: null
+    validation: null
+    test: 20
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  validation_rollout: 1
+  training:
+    datasets:
+      data:
+        dataset: ${system.input.dataset}
+        start: "2024-05-05T00:00:00"
+        end: "2024-05-05T23:00:00"
+        frequency: ${data.frequency}
+        drop: [boundary_mask]
+  validation:
+    datasets:
+      data:
+        dataset: ${system.input.dataset}
+        start: "2024-05-05T00:00:00"
+        end: "2024-05-05T18:00:00"
+        frequency: ${data.frequency}
+        drop: [boundary_mask]
+  test:
+    datasets:
+      data:
+        dataset: ${system.input.dataset}
+        start: "2024-05-05T19:00:00"
+        end: "2024-05-05T23:00:00"
+        frequency: ${data.frequency}
+        drop: [boundary_mask]
+  grid_indices:
+    datasets:
+      data:
+        _target_: anemoi.training.data.grid_indices.MaskedGrid
+        nodes_name: ${graph.data}
+        node_attribute_name: indices_connected_nodes
+
+training:
+  max_epochs: 100
+  max_steps: 150000
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          # Override Anemoi LAM defaults (q,t,u,v,z,sp,...) with RRFS variable names
+          # used in this workflow (sphum,temp,ugrd,vgrd,height,pres_0g,...).
+          weights:
+            default: 1
+            sphum: 0.6      # q
+            temp: 6         # t
+            ugrd: 0.8       # u
+            vgrd: 0.5       # v
+            height: 12      # z
+            pres_0g: 10     # sp
+            # RRFS-specific fields not present in Anemoi defaults; keep at default unless tuned:
+            refc: 1
+            clmr: 1
+            icmr: 1
+            rwmr: 1
+            snmr: 1
+            grle: 1
+  metrics:
+    datasets:
+      data:
+        - height_500
+        - temp_850
+        - ugrd_850
+        - vgrd_850
+  variable_groups:
+    datasets:
+      data:
+        default: sfc
+        pl:
+          is_pressure_level: True
