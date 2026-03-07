@@ -245,7 +245,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
+    ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
         batch_size, ensemble_size = self._assert_sigma_shapes(sigma)
         dataset_names = list(x.keys())
         sigma_ref = sigma[dataset_names[0]]
@@ -254,7 +254,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         noise_cond_base = self._embed_noise_conditioning(sigma_base)
         cond_dim = noise_cond_base.shape[-1]
 
-        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = {}, {}, {}
+        fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
         for dataset_name in x:
             time_size = sigma[dataset_name].shape[1]
             noise_cond = noise_cond_base[:, None, :, None, :].expand(batch_size, time_size, ensemble_size, 1, cond_dim)
@@ -267,9 +267,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             c_hidden = shard_tensor(c_hidden, 0, c_hidden_shapes, model_comm_group)
 
             fwd_mapper_kwargs[dataset_name] = {"cond": (c_data, c_hidden)}
-            processor_kwargs[dataset_name] = {"cond": c_hidden}
             bwd_mapper_kwargs[dataset_name] = {"cond": (c_hidden, c_data)}
 
+        processor_kwargs = {"cond": c_hidden}
         return fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs
 
     def _processor_kwargs_equal(self, left, right) -> bool:
