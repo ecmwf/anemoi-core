@@ -39,7 +39,7 @@ export MPLBACKEND="${MPLBACKEND:-Agg}"
 # Debug: show the dataset dates as seen by anemoi.datasets (outside the training loader)
 python - <<PY
 from anemoi.datasets import open_dataset
-path = "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/test-20km-bcmask-time-ns.zarr"
+path = "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/test-20km-bcmask-time-s.zarr"
 ds = open_dataset(path, start="${START}", end="${END}", frequency="${FREQ}")
 print("DEBUG_DATASET_PATH:", path)
 print("DEBUG_DATASET_LEN:", len(ds.dates))

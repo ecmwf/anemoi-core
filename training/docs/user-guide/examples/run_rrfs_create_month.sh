@@ -14,7 +14,7 @@ set -euo pipefail
 # Optional overrides (environment variables):
 #   LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, BOUNDARY_KM, TIME_UNIT
 # Defaults:
-#   LAT_MIN=25, LAT_MAX=40, LON_MIN=-105, LON_MAX=-90, BOUNDARY_KM=20, TIME_UNIT=ns
+#   LAT_MIN=25, LAT_MAX=40, LON_MIN=-105, LON_MAX=-90, BOUNDARY_KM=20, TIME_UNIT=s
 
 if [[ $# -lt 1 || $# -gt 3 ]]; then
   echo "Usage: run_rrfs_create_month.sh <YYYYMM> [output_dir] [recipe_yaml]"
@@ -39,7 +39,7 @@ LAT_MAX="${LAT_MAX:-40}"
 LON_MIN="${LON_MIN:--105}"
 LON_MAX="${LON_MAX:--90}"
 BOUNDARY_KM="${BOUNDARY_KM:-20}"
-TIME_UNIT="${TIME_UNIT:-ns}"
+TIME_UNIT="${TIME_UNIT:-s}"
 
 NAME_TAG="$YYYYMM"
 
