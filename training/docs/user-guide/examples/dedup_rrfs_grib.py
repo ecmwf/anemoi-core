@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -98,15 +99,51 @@ def process_file(src: Path, dst: Path, overwrite: bool, dry_run: bool) -> tuple[
     if dry_run:
         return len(entries), dup_count
 
-    if dst.exists() and overwrite:
-        dst.unlink()
     dst.parent.mkdir(parents=True, exist_ok=True)
-
-    # Feed selected inventory lines to wgrib2 stdin (`-i` expects inventory format).
+    # Write inventory to a temp file and feed it via stdin handle.
+    # This avoids potential pipe/text issues for large inventories.
     inv_text = "\n".join(keep) + "\n"
-    out = run_cmd(["wgrib2", str(src), "-i", "-grib", str(dst)], stdin_text=inv_text)
-    if out.returncode != 0:
-        raise RuntimeError(f"wgrib2 -i -grib failed for {src} -> {dst}:\n{out.stderr}")
+    inv_tmp = None
+    out_tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", delete=False, encoding="utf-8", dir=str(dst.parent), suffix=".inv"
+        ) as f:
+            f.write(inv_text)
+            inv_tmp = Path(f.name)
+
+        with tempfile.NamedTemporaryFile(
+            mode="wb", delete=False, dir=str(dst.parent), suffix=".grib2.tmp"
+        ) as f:
+            out_tmp = Path(f.name)
+
+        with inv_tmp.open("rb") as inv_fh:
+            out = subprocess.run(
+                ["wgrib2", str(src), "-i", "-grib", str(out_tmp)],
+                stdin=inv_fh,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        if out.returncode != 0:
+            raise RuntimeError(f"wgrib2 -i -grib failed for {src} -> {dst}:\n{out.stderr}")
+
+        # Validate the output is a readable GRIB2 file before replacing destination.
+        chk = run_cmd(["wgrib2", str(out_tmp), "-s"])
+        if chk.returncode != 0:
+            raise RuntimeError(
+                f"Corrupt output detected for {src} -> {dst}:\n"
+                f"{chk.stderr or chk.stdout}"
+            )
+
+        if dst.exists() and overwrite:
+            dst.unlink()
+        out_tmp.replace(dst)
+    finally:
+        if inv_tmp and inv_tmp.exists():
+            inv_tmp.unlink(missing_ok=True)
+        if out_tmp and out_tmp.exists():
+            out_tmp.unlink(missing_ok=True)
 
     return len(entries), dup_count
 
