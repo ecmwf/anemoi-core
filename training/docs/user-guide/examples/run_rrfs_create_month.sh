@@ -86,4 +86,27 @@ python training/docs/user-guide/examples/add_boundary_mask.py \
   --frequency "$FREQ" \
   --time-unit "$TIME_UNIT"
 
+# Fix invalid stdev entries (NaN or <=0) to avoid normalization-time NaNs.
+python - "$FINAL_ZARR" <<'PY'
+import sys
+import numpy as np
+import zarr
+
+path = sys.argv[1]
+g = zarr.open_group(path, mode="a")
+if "stdev" not in g:
+    print("WARN: no stdev array found; skipping stdev fix")
+    raise SystemExit(0)
+
+st = g["stdev"][:]
+mask = (~np.isfinite(st)) | (st <= 0)
+count = int(mask.sum())
+if count > 0:
+    st[mask] = 1.0
+    g["stdev"][:] = st
+    print(f"Fixed invalid stdev entries: {count}")
+else:
+    print("No invalid stdev entries found.")
+PY
+
 echo "Done: $FINAL_ZARR"
