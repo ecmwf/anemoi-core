@@ -143,6 +143,17 @@ class CombinedLoss(BaseLoss):
         """Whether any wrapped loss requires explicit shard-layout metadata."""
         return any(getattr(loss, "needs_shard_layout_info", False) for loss in self.losses)
 
+    @staticmethod
+    def _forward_kwargs_for_loss(loss_fn: BaseLoss, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Filter shard-layout kwargs for child losses that do not require them."""
+        if getattr(loss_fn, "needs_shard_layout_info", False):
+            return kwargs
+
+        filtered_kwargs = dict(kwargs)
+        filtered_kwargs.pop("grid_dim", None)
+        filtered_kwargs.pop("grid_shard_shapes", None)
+        return filtered_kwargs
+
     def forward(
         self,
         pred: torch.Tensor,
@@ -168,10 +179,11 @@ class CombinedLoss(BaseLoss):
         """
         loss = None
         for i, loss_fn in enumerate(self.losses):
+            loss_kwargs = self._forward_kwargs_for_loss(loss_fn, kwargs)
             if loss is not None:
-                loss += self.loss_weights[i] * loss_fn(pred, target, **kwargs)
+                loss += self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
             else:
-                loss = self.loss_weights[i] * loss_fn(pred, target, **kwargs)
+                loss = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
         return loss
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
