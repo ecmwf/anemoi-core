@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+import zarr
 
 
 def parse_args():
@@ -186,6 +187,7 @@ def main():
 
     if (args.start is None) != (args.frequency is None):
         raise SystemExit("Use --start and --frequency together, or neither.")
+    dt64 = None
     if args.start is not None and args.frequency is not None:
         data_out = ds_out["data"]
         if "time" not in data_out.dims:
@@ -206,6 +208,16 @@ def main():
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     ds_out.to_zarr(args.output, mode="w")
+
+    # xarray may CF-encode datetime arrays to int64 + attrs on write. Anemoi expects
+    # raw datetime64 arrays for date slicing, so enforce datetime dtype at store level.
+    if dt64 is not None:
+        g = zarr.open_group(args.output, mode="a")
+        for key in ("dates", "time"):
+            if key in g:
+                del g[key]
+            g.create_dataset(key, data=dt64, overwrite=True)
+            g[key].attrs["_ARRAY_DIMENSIONS"] = ["time"]
 
     print(f"Wrote {args.output}")
 
