@@ -93,7 +93,7 @@ dataloader:
 
 training:
   max_epochs: 500
-  max_steps: -1 
+  max_steps: 9999999 
   scalers:
     datasets:
       data:

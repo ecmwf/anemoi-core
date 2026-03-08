@@ -17,6 +17,15 @@ set -euo pipefail
 set -x
 
 echo xx
+echo "node=$(hostname)"
+ls -l /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/python3.13
+file /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/python3.13
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/python3.13 -V
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/conda --version
+
+
+
+
 source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/etc/profile.d/conda.sh
 conda activate anemoi-training-env-python3.12
 echo "SHELL=$SHELL"
