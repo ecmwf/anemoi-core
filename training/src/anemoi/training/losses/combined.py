@@ -138,6 +138,11 @@ class CombinedLoss(BaseLoss):
         self.loss_weights = loss_weights
         del self.scaler  # Remove scaler property from parent class, as it is not used here
 
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Whether any wrapped loss requires explicit shard-layout metadata."""
+        return any(getattr(loss, "needs_shard_layout_info", False) for loss in self.losses)
+
     def forward(
         self,
         pred: torch.Tensor,

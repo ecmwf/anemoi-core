@@ -17,6 +17,7 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 
 
 def test_combined_loss() -> None:
@@ -103,3 +104,15 @@ def test_combined_loss_seperate_scalers() -> None:
     assert isinstance(loss.losses[1], MAELoss)
     assert "test" not in loss.losses[1].scaler
     assert "test2" in loss.losses[1].scaler
+
+
+def test_combined_loss_propagates_needs_shard_layout_info() -> None:
+    loss = CombinedLoss(
+        MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0],
+            keep_batch_sharded=True,
+        ),
+    )
+
+    assert loss.needs_shard_layout_info is True
