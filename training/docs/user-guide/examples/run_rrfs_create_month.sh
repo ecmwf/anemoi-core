@@ -86,7 +86,7 @@ python training/docs/user-guide/examples/add_boundary_mask.py \
   --frequency "$FREQ" \
   --time-unit "$TIME_UNIT"
 
-# Fix invalid stdev entries (NaN or <=0) to avoid normalization-time NaNs.
+# Fix invalid normalization statistics to avoid normalization-time NaNs.
 python - "$FINAL_ZARR" <<'PY'
 import sys
 import numpy as np
@@ -94,19 +94,38 @@ import zarr
 
 path = sys.argv[1]
 g = zarr.open_group(path, mode="a")
-if "stdev" not in g:
-    print("WARN: no stdev array found; skipping stdev fix")
+if "stdev" not in g or "mean" not in g or "count" not in g:
+    print("WARN: missing one of stdev/mean/count arrays; skipping stats fix")
     raise SystemExit(0)
 
 st = g["stdev"][:]
-mask = (~np.isfinite(st)) | (st <= 0)
-count = int(mask.sum())
-if count > 0:
-    st[mask] = 1.0
+mu = g["mean"][:]
+cnt = g["count"][:]
+
+# Reduce count to per-variable vector if needed.
+if cnt.ndim > 1:
+    cnt = cnt.reshape(cnt.shape[0], -1).sum(axis=1)
+
+# Broadcast count to stats shape if stats are multidimensional.
+cnt_b = cnt
+while cnt_b.ndim < st.ndim:
+    cnt_b = cnt_b[..., None]
+
+active = cnt_b > 0
+bad_st = active & ((~np.isfinite(st)) | (st <= 0))
+bad_mu = active & (~np.isfinite(mu))
+
+fixed_st = int(bad_st.sum())
+fixed_mu = int(bad_mu.sum())
+
+if fixed_st:
+    st[bad_st] = 1.0
     g["stdev"][:] = st
-    print(f"Fixed invalid stdev entries: {count}")
-else:
-    print("No invalid stdev entries found.")
+if fixed_mu:
+    mu[bad_mu] = 0.0
+    g["mean"][:] = mu
+
+print(f"Fixed stats: stdev={fixed_st}, mean={fixed_mu}")
 PY
 
 echo "Done: $FINAL_ZARR"
