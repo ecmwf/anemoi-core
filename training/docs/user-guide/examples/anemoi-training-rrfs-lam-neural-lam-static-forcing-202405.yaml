@@ -92,8 +92,8 @@ dataloader:
         node_attribute_name: indices_connected_nodes
 
 training:
-  max_epochs: 100
-  max_steps: 150000
+  max_epochs: 500
+  max_steps: -1 
   scalers:
     datasets:
       data:
