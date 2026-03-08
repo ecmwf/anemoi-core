@@ -119,9 +119,7 @@ training:
     datasets:
       data:
         - height_500
-        - temp_850
-        - ugrd_850
-        - vgrd_850
+        - refc 
   variable_groups:
     datasets:
       data:
