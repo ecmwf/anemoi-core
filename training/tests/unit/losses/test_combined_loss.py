@@ -148,3 +148,15 @@ def test_combined_loss_multiscale_graph_data() -> None:
     assert isinstance(loss, CombinedLoss)
     assert isinstance(loss.losses[0], MultiscaleLossWrapper)
     assert loss.losses[0].smoothing_matrices[-1] is None
+
+
+def test_combined_loss_propagates_needs_shard_layout_info() -> None:
+    loss = CombinedLoss(
+        MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0],
+            keep_batch_sharded=True,
+        ),
+    )
+
+    assert loss.needs_shard_layout_info is True

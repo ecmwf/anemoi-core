@@ -17,6 +17,45 @@ from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.utils.enums import TensorDim
+
+
+class TrackingLoss(BaseLoss):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[dict[str, object]] = []
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: object | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        del pred, target, squash
+        self.calls.append(
+            {
+                "scaler_indices": scaler_indices,
+                "without_scalers": without_scalers,
+                "grid_shard_slice": grid_shard_slice,
+                "group": group,
+                "kwargs": kwargs,
+            },
+        )
+        return torch.tensor(1.0)
+
+
+class FakeGroup:
+    def __init__(self, size: int) -> None:
+        self._size = size
+
+    def size(self) -> int:
+        return self._size
 
 
 @pytest.fixture
@@ -174,3 +213,118 @@ def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
 
     assert isinstance(loss, torch.Tensor)
     assert torch.allclose(loss, loss_kcrps), "Loss for single/original scale should be equal to the kcrps"
+
+
+def test_multiscale_loss_forwards_scaler_indices() -> None:
+    pred = torch.zeros((1, 1, 1, 2, 2))
+    pred[0, 0, 0, 0, 0] = 10.0
+    pred[0, 0, 0, 0, 1] = 1.0
+    target = torch.zeros((1, 1, 2, 2))
+
+    per_scale_loss = MSELoss()
+    per_scale_loss.add_scaler(TensorDim.GRID, torch.ones(2), name="grid_weights")
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=per_scale_loss,
+        weights=[1.0],
+        keep_batch_sharded=False,
+    )
+
+    scaler_indices = (..., [1])
+    loss = multiscale_loss(pred, target, scaler_indices=scaler_indices)
+    expected = per_scale_loss(pred, target, scaler_indices=scaler_indices)
+
+    assert torch.allclose(loss, expected)
+
+
+def test_multiscale_loss_forwards_group_and_without_scalers() -> None:
+    per_scale_loss = TrackingLoss()
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=per_scale_loss,
+        weights=[1.0],
+        keep_batch_sharded=False,
+    )
+
+    pred = torch.zeros((1, 1, 1, 2, 1))
+    target = torch.zeros((1, 1, 2, 1))
+    sentinel_group = FakeGroup(size=1)
+
+    multiscale_loss(
+        pred,
+        target,
+        scaler_indices=(..., [0]),
+        without_scalers=["node_weights"],
+        group=sentinel_group,
+    )
+
+    assert per_scale_loss.calls == [
+        {
+            "scaler_indices": (..., [0]),
+            "without_scalers": ["node_weights"],
+            "grid_shard_slice": None,
+            "group": sentinel_group,
+            "kwargs": {},
+        },
+    ]
+
+
+def test_multiscale_loss_uses_group_size_for_sharding(mocker: MockerFixture) -> None:
+    per_scale_loss = TrackingLoss()
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=per_scale_loss,
+        weights=[1.0],
+        keep_batch_sharded=True,
+    )
+    group = FakeGroup(size=2)
+    shard_shapes = [(1, 2, 1), (1, 2, 1)]
+    pred = torch.zeros((1, 1, 1, 2, 1))
+    target = torch.zeros((1, 1, 2, 1))
+
+    prepare = mocker.patch.object(
+        multiscale_loss,
+        "_prepare_for_smoothing",
+        return_value=(pred, target, shard_shapes, shard_shapes),
+    )
+    gather = mocker.patch(
+        "anemoi.training.losses.multiscale.gather_channels",
+        side_effect=lambda x, *_args: x,
+    )
+
+    multiscale_loss(
+        pred,
+        target,
+        group=group,
+        grid_dim=-2,
+        grid_shard_shapes=shard_shapes,
+    )
+
+    prepare.assert_called_once_with(pred, target, group, -2, shard_shapes)
+    assert gather.call_count == 2
+
+
+def test_multiscale_loss_forwards_extra_kwargs() -> None:
+    per_scale_loss = TrackingLoss()
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=per_scale_loss,
+        weights=[1.0],
+        keep_batch_sharded=False,
+    )
+
+    pred = torch.zeros((1, 1, 1, 2, 1))
+    target = torch.zeros((1, 1, 2, 1))
+    sentinel = object()
+
+    multiscale_loss(
+        pred,
+        target,
+        custom_kwarg=sentinel,
+    )
+
+    assert per_scale_loss.calls == [
+        {
+            "scaler_indices": None,
+            "without_scalers": None,
+            "grid_shard_slice": None,
+            "group": None,
+            "kwargs": {"custom_kwarg": sentinel},
+        },
+    ]
