@@ -14,8 +14,15 @@
 #SBATCH -e anemoi-gh200-train.%j.err
 
 set -euo pipefail
+set -x
 
-CONDA_EXE=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/conda
+# Re-exec once in a clean bash to avoid startup hook contamination (tcsh/login env).
+if [[ "${1:-}" != "--clean-run" ]]; then
+  exec /usr/bin/bash --noprofile --norc "$0" --clean-run
+fi
+
+PY=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/python
+ANEMOI=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training
 cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
 
 export ANEMOI_BASE_SEED=12345
@@ -25,11 +32,17 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}
 mkdir -p "$TRITON_CACHE_DIR"
 
-"$CONDA_EXE" --version
+echo "MARK-1 clean bash started"
+echo "SHELL=${SHELL:-unset}"
+echo "0=$0"
+echo "PATH=$PATH"
+env | grep -E '^(BASH_ENV|ENV|SHELL|CONDA)' || true
+"$PY" -V
+"$ANEMOI" --version
 
 srun --gpu-bind=closest \
   --export=ALL,TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}/${SLURM_PROCID} \
-  "$CONDA_EXE" run -n anemoi-training-env-python3.12 anemoi-training train \
+  "$ANEMOI" train \
     --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
     --config-name anemoi-training-rrfs-lam-neural-lam-static-forcing-202405 \
     system.hardware.num_gpus_per_node=1 \
