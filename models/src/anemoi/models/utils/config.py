@@ -26,3 +26,36 @@ def get_multiple_datasets_config(config: DictConfig, default_dataset_name: str =
         return config.datasets
 
     return OmegaConf.create({default_dataset_name: config})
+
+
+def broadcast_config_keys(dictionary: dict[str, int], **kwargs) -> dict[str, int]:
+    """Broadcasts values from the input dictionary to multiple keys based on the provided mapping.
+
+    Parameters
+    ----------
+    dictionary : dict[str, int]
+        Input dictionary containing values to be broadcasted
+    **kwargs : dict[str, list[str]]
+        Mapping of old keys to new keys for broadcasting. Each key in kwargs is an old key from the input dictionary, 
+        and its value is a list of new keys.
+    
+    Returns
+    -------
+    dict[str, int]
+        New dictionary with values broadcasted to the new keys based on the provided mapping.
+
+    Example
+    -------
+    >>> input_dict = {'num_params': 10}
+    >>> mapping = {'num_params': ['dataset1_num_params', 'dataset2_num_params']}
+    >>> broadcast_config_keys(input_dict, **mapping)
+    {'dataset1_num_params': 10, 'dataset2_num_params': 10}
+    """
+    new_num_params = {}
+    for old_key, new_keys in kwargs.items():
+        for new_key in new_keys:
+            if old_key in dictionary:
+                new_num_params[new_key] = dictionary[old_key]
+            else:
+                raise KeyError(f"Key '{old_key}' not found in the input dictionary for broadcasting.")
+    return new_num_params

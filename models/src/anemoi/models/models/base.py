@@ -25,6 +25,7 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -68,7 +69,12 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
 
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters, self._graph_data)
+        num_trainable_parameters = broadcast_config_keys(
+            model_config.model.trainable_parameters,
+            data=self.dataset_names,
+            hidden=self._graph_name_hidden,
+        )
+        self.node_attributes = NamedNodesAttributes(num_trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
