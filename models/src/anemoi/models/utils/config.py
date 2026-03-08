@@ -36,9 +36,9 @@ def broadcast_config_keys(dictionary: dict[str, int], **kwargs) -> dict[str, int
     dictionary : dict[str, int]
         Input dictionary containing values to be broadcasted
     **kwargs : dict[str, list[str]]
-        Mapping of old keys to new keys for broadcasting. Each key in kwargs is an old key from the input dictionary, 
+        Mapping of old keys to new keys for broadcasting. Each key in kwargs is an old key from the input dictionary,
         and its value is a list of new keys.
-    
+
     Returns
     -------
     dict[str, int]
