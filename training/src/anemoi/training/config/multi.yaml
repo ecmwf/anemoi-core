@@ -13,6 +13,11 @@ config_validation: True
 data:
   resolution: o96
 
+model:
+  trainable_parameters:
+    era5: 0
+    cerra: 0
+
 system:
   input:
     graph: graph_anemoi_new_${data.resolution}.pt
