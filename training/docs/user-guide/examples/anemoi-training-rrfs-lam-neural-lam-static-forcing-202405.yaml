@@ -47,8 +47,8 @@ dataloader:
   prefetch_factor: 2
   pin_memory: true
   batch_size:
-    training: 1
-    validation: 1
+    training: 16
+    validation: 16
     test: 1
   num_workers:
     training: 4
@@ -64,8 +64,8 @@ dataloader:
     datasets:
       data:
         dataset: ${system.input.dataset}
-        start: "2024-05-05T00:00:00"
-        end: "2024-05-05T23:00:00"
+        start: "2024-05-02T09:00:00"
+        end: "2024-05-31T20:00:00"
         frequency: ${data.frequency}
         drop: [boundary_mask]
   validation:
