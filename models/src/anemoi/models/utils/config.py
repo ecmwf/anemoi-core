@@ -59,9 +59,9 @@ def broadcast_config_keys(dictionary: dict[str, int], **kwargs) -> dict[str, int
             new_keys = [new_keys]
 
         for new_key in new_keys:
-            if not old_key in dictionary:
+            if old_key not in dictionary:
                 raise KeyError(f"Key '{old_key}' not found in the input dictionary for broadcasting.")
-            
+
             new_num_params[new_key] = dictionary[old_key]
 
     return new_num_params
