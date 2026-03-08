@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/activate anemoi-training-env-python3.12
+CONDA_EXE=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/conda
 cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
 
 export ANEMOI_BASE_SEED=12345
@@ -25,12 +25,13 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}
 mkdir -p "$TRITON_CACHE_DIR"
 
+"$CONDA_EXE" --version
+
 srun --gpu-bind=closest \
   --export=ALL,TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}/${SLURM_PROCID} \
-  anemoi-training train \
+  "$CONDA_EXE" run -n anemoi-training-env-python3.12 anemoi-training train \
     --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
     --config-name anemoi-training-rrfs-lam-neural-lam-static-forcing \
     system.hardware.num_gpus_per_node=1 \
     system.hardware.num_nodes=2 \
     system.hardware.num_gpus_per_model=2
-
