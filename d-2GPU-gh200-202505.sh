@@ -16,13 +16,17 @@
 set -euo pipefail
 set -x
 
-# Re-exec once in a clean bash to avoid startup hook contamination (tcsh/login env).
-if [[ "${1:-}" != "--clean-run" ]]; then
-  exec /usr/bin/bash --noprofile --norc "$0" --clean-run
-fi
+echo xx
+source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/etc/profile.d/conda.sh
+conda activate anemoi-training-env-python3.12
+echo "SHELL=$SHELL"
+echo "0=$0"
+which bash
+which conda
+conda --version
+python -V
 
-PY=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/python
-ANEMOI=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training
+
 cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
 
 export ANEMOI_BASE_SEED=12345
