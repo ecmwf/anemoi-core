@@ -176,22 +176,45 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
     assert x.grad.shape == x.shape
 
 
-def test_multi_head_self_attention_forward_sdpa_rejects_window_size(layer_kernels):
+def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
+    """Test that SDPA with window_size produces valid output and attends only within the window."""
     num_heads = 4
     embed_dim = 32
-    batch_size = 2
+    batch_size = 1
+    grid = 16
+    window_size = 4
+
     mhsa = MultiHeadSelfAttention(
         num_heads,
         embed_dim,
         layer_kernels,
         attention_implementation="scaled_dot_product_attention",
-        window_size=8,
+        window_size=window_size,
     )
 
-    x = torch.randn(batch_size * 2, embed_dim)
+    x = torch.randn(batch_size * grid, embed_dim)
     shapes = [list(x.shape)]
-    with pytest.raises(NotImplementedError, match="Sliding window attention is not supported"):
-        mhsa.forward(x, shapes, batch_size)
+    output = mhsa.forward(x, shapes, batch_size)
+
+    # Output shape must match input shape
+    assert output.shape == x.shape
+
+    # Compare against global attention (no window) to verify the window changes the result
+    mhsa_global = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+        window_size=None,
+    )
+    # Copy weights so the only difference is the window mask
+    mhsa_global.load_state_dict(mhsa.state_dict())
+    output_global = mhsa_global.forward(x, shapes, batch_size)
+
+    # With a small window on a 16-token sequence, outputs should differ
+    assert not torch.allclose(output, output_global, atol=1e-5), (
+        "Sliding window output should differ from global attention output"
+    )
 
 
 def test_multi_head_self_attention_forward_sdpa_rejects_softcap(layer_kernels):
