@@ -293,7 +293,8 @@ class SDPAAttentionWrapper(nn.Module):
                 "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
             )
         if window_size is not None and self.attn_mask is None:
-            # build the attention mask for sliding window attention. We build the mask once and reuse it, since it is the same for every forward pass (assuming the sequence length does not change).
+            # build the attention mask for sliding window attention. We build the mask once and reuse it,
+            # since it is the same for every forward pass (assuming the sequence length does not change).
 
             if isinstance(window_size, int):
                 window_size = (window_size, window_size)
