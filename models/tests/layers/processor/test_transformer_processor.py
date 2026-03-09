@@ -10,6 +10,7 @@
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
+from typing import Optional
 
 import pytest
 import torch
@@ -29,9 +30,9 @@ class TransformerProcessorConfig:
     mlp_hidden_ratio: int = 4
     dropout_p: float = 0.1
     attention_implementation: str = "scaled_dot_product_attention"
-    softcap: float = 0
+    softcap: Optional[float] = None
     use_alibi_slopes: bool = False
-    window_size: int = 10
+    window_size: Optional[int] = None
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
