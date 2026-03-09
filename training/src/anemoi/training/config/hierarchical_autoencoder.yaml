@@ -12,7 +12,7 @@ defaults:
 model:
   model:
     _target_: anemoi.models.models.AnemoiModelHierarchicalAutoEncoder
-    hidden_nodes_name: ["hidden1", "hidden2"]
+    hidden_nodes_name: ["hidden_1", "hidden_2"]
   enable_hierarchical_level_processing: False
   keep_batch_sharded: True
 
