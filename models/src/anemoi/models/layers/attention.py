@@ -430,9 +430,11 @@ class FlashAttentionWrapper(nn.Module):
                 causal=False,
                 window_size=(window_size, window_size) if window_size is not None else (-1, -1),
                 softcap=softcap,
-            )[
-                0
-            ]  # fav3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
+            )
+            if isinstance(out, tuple):
+                out = out[
+                    0
+                ]  # early versions of flash attention v3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
         else:
             out = self.attention(
                 query,
