@@ -409,8 +409,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 )
 @pytest.mark.parametrize("HEAD_DIM", [64])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("min_tokens_per_kernel", [100, 10000])
-def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype, min_tokens_per_kernel):
+def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype):
     """Tests varlen flash attention forward pass against the reference implementation.
 
     Packs multiple variable-length sequences into a single tensor and compares
@@ -443,7 +442,7 @@ def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype, min_tokens_per
     ref_out = attention_varlen_ref(q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale, causal=False, window_size=-1)
 
     # Compute triton output
-    tri_out = TritonAttentionVarlen.apply(q, k, v, cu_seqlens_q, cu_seqlens_k, False, -1, sm_scale, min_tokens_per_kernel)
+    tri_out = TritonAttentionVarlen.apply(q, k, v, cu_seqlens_q, cu_seqlens_k, False, -1, sm_scale)
 
     # Set tolerances
     if dtype == torch.bfloat16:
@@ -474,4 +473,155 @@ def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype, min_tokens_per
                 print(f"[varlen-attn debug] seq {b} (len={s_end - s_start}) max error: {float(seq_diff.cpu())}")
         raise
 
-    print(f"[varlen-attn fwd] PASSED: H={H}, seqlens={seqlens}, HEAD_DIM={HEAD_DIM}, dtype={dtype}, min_tokens_per_kernel={min_tokens_per_kernel}")
+    print(f"[varlen-attn fwd] PASSED: H={H}, seqlens={seqlens}, HEAD_DIM={HEAD_DIM}, dtype={dtype}")
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+@pytest.mark.parametrize("H", [4, 9])
+@pytest.mark.parametrize(
+    "seqlens",
+    [
+        [128],                    # single sequence, even
+        [97],                     # single sequence, uneven
+        [128, 128],               # two equal sequences
+        [64, 128, 256],           # three sequences, different lengths
+        [97, 200, 57],            # three sequences, all uneven
+        [512],                    # larger single sequence
+        [33, 65, 129, 17],        # four sequences, mix of sizes
+    ],
+)
+@pytest.mark.parametrize("HEAD_DIM", [64])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_triton_attention_varlen_bwd(H, seqlens, HEAD_DIM, dtype):
+    """Tests varlen flash attention backward pass against the reference implementation.
+
+    Packs multiple variable-length sequences into a single tensor and compares
+    the triton varlen kernel gradients against the naive PyTorch reference.
+    """
+    if not is_triton_available():
+        pytest.skip("Triton not available")
+
+    try:
+        DEVICE = triton.runtime.driver.active.get_active_torch_device()
+    except RuntimeError:
+        pytest.skip("No GPU detected")
+
+    sm_scale = 1.0 / math.sqrt(HEAD_DIM)
+
+    # Build cumulative sequence lengths
+    cu_seqlens = [0]
+    for s in seqlens:
+        cu_seqlens.append(cu_seqlens[-1] + s)
+    total_tokens = cu_seqlens[-1]
+    cu_seqlens_q = torch.tensor(cu_seqlens, dtype=torch.int32, device=DEVICE)
+    cu_seqlens_k = cu_seqlens_q.clone()
+
+    # Create packed input tensors: [TOTAL_TOKENS, H, HEAD_DIM]
+    torch.manual_seed(42)
+    q = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+    k = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+    v = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+    dout = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+
+    # --- Reference backward using the naive PyTorch implementation ---
+    q_ref = q.clone().detach().requires_grad_()
+    k_ref = k.clone().detach().requires_grad_()
+    v_ref = v.clone().detach().requires_grad_()
+
+    ref_out = attention_varlen_ref(q_ref, k_ref, v_ref, cu_seqlens_q, cu_seqlens_k, sm_scale, causal=False, window_size=-1)
+    ref_out.backward(dout)
+    ref_dq = q_ref.grad.clone()
+    ref_dk = k_ref.grad.clone()
+    ref_dv = v_ref.grad.clone()
+
+    # --- Triton backward ---
+    q_tri = q.clone().detach().requires_grad_()
+    k_tri = k.clone().detach().requires_grad_()
+    v_tri = v.clone().detach().requires_grad_()
+
+    tri_out = TritonAttentionVarlen.apply(q_tri, k_tri, v_tri, cu_seqlens_q, cu_seqlens_k, False, -1, sm_scale)
+    tri_out.backward(dout)
+    tri_dq = q_tri.grad.clone()
+    tri_dk = k_tri.grad.clone()
+    tri_dv = v_tri.grad.clone()
+
+    # Set tolerances
+    if dtype == torch.bfloat16:
+        atol = 5e-3
+        rtol = 1e-2
+    else:
+        atol = 1e-3
+        rtol = 0.0
+
+    # First verify forward pass matches
+    try:
+        torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=rtol)
+    except AssertionError:
+        with torch.no_grad():
+            diff = (tri_out - ref_out).abs()
+            max_err = diff.max()
+            print(f"[varlen-attn bwd debug] forward max error: {float(max_err.cpu())}")
+        raise
+
+    # Check dQ
+    try:
+        torch.testing.assert_close(tri_dq, ref_dq, atol=atol, rtol=rtol)
+    except AssertionError:
+        with torch.no_grad():
+            diff = (tri_dq - ref_dq).abs()
+            max_err = diff.max()
+            max_idx = (diff == max_err).nonzero(as_tuple=False)[0]
+            t, h, d = [int(x) for x in max_idx]
+            print(
+                f"[varlen-attn bwd debug] dQ global max abs error: {float(max_err.cpu())}"
+                f" at (token, head, dim)=({t}, {h}, {d})"
+            )
+            print(f"[varlen-attn bwd debug] tri_dq[t, h, :8] = {tri_dq[t, h, :8].cpu()}")
+            print(f"[varlen-attn bwd debug] ref_dq[t, h, :8] = {ref_dq[t, h, :8].cpu()}")
+            for b, (s_start, s_end) in enumerate(zip(cu_seqlens[:-1], cu_seqlens[1:])):
+                seq_diff = diff[s_start:s_end].max()
+                print(f"[varlen-attn bwd debug] dQ seq {b} (len={s_end - s_start}) max error: {float(seq_diff.cpu())}")
+        raise
+
+    # Check dK
+    try:
+        torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=rtol)
+    except AssertionError:
+        with torch.no_grad():
+            diff = (tri_dk - ref_dk).abs()
+            max_err = diff.max()
+            max_idx = (diff == max_err).nonzero(as_tuple=False)[0]
+            t, h, d = [int(x) for x in max_idx]
+            print(
+                f"[varlen-attn bwd debug] dK global max abs error: {float(max_err.cpu())}"
+                f" at (token, head, dim)=({t}, {h}, {d})"
+            )
+            print(f"[varlen-attn bwd debug] tri_dk[t, h, :8] = {tri_dk[t, h, :8].cpu()}")
+            print(f"[varlen-attn bwd debug] ref_dk[t, h, :8] = {ref_dk[t, h, :8].cpu()}")
+            for b, (s_start, s_end) in enumerate(zip(cu_seqlens[:-1], cu_seqlens[1:])):
+                seq_diff = diff[s_start:s_end].max()
+                print(f"[varlen-attn bwd debug] dK seq {b} (len={s_end - s_start}) max error: {float(seq_diff.cpu())}")
+        raise
+
+    # Check dV
+    try:
+        torch.testing.assert_close(tri_dv, ref_dv, atol=atol, rtol=rtol)
+    except AssertionError:
+        with torch.no_grad():
+            diff = (tri_dv - ref_dv).abs()
+            max_err = diff.max()
+            max_idx = (diff == max_err).nonzero(as_tuple=False)[0]
+            t, h, d = [int(x) for x in max_idx]
+            print(
+                f"[varlen-attn bwd debug] dV global max abs error: {float(max_err.cpu())}"
+                f" at (token, head, dim)=({t}, {h}, {d})"
+            )
+            print(f"[varlen-attn bwd debug] tri_dv[t, h, :8] = {tri_dv[t, h, :8].cpu()}")
+            print(f"[varlen-attn bwd debug] ref_dv[t, h, :8] = {ref_dv[t, h, :8].cpu()}")
+            for b, (s_start, s_end) in enumerate(zip(cu_seqlens[:-1], cu_seqlens[1:])):
+                seq_diff = diff[s_start:s_end].max()
+                print(f"[varlen-attn bwd debug] dV seq {b} (len={s_end - s_start}) max error: {float(seq_diff.cpu())}")
+        raise
+
+    print(f"[varlen-attn bwd] PASSED: H={H}, seqlens={seqlens}, HEAD_DIM={HEAD_DIM}, dtype={dtype}")

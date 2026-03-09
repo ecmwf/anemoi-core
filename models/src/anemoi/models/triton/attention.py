@@ -1293,6 +1293,8 @@ def _attn_varlen_fwd(
     stride_vh,
     stride_ot,
     stride_oh,
+    M,  # pointer to LSE (log-sum-exp) output tensor, shape [TOTAL_TOKENS, N_HEAD], for backward pass
+    N_HEAD,  # number of attention heads, used for M indexing
     SEQLEN_Q: tl.constexpr,  # sequence length for Q in this sequence
     SEQLEN_K: tl.constexpr,  # sequence length for K/V in this sequence
     HEAD_DIM: tl.constexpr,  # head dimension
@@ -1396,11 +1398,287 @@ def _attn_varlen_fwd(
     o_mask = offs_m[:, None] < SEQLEN_Q
     tl.store(o_ptrs, acc.to(dtype), mask=o_mask)
 
+    # ***** 7) Store LSE (log-sum-exp) values for backward pass *****
+    lse = m_i + tl.math.log2(l_i)
+    m_token_ids = seq_start_q + offs_m
+    tl.store(M + m_token_ids * N_HEAD + pid_h, lse, mask=offs_m < SEQLEN_Q)
+
+
+@triton.jit
+def _attn_varlen_bwd_preprocess(
+    Out, DO, Delta,
+    seq_start,  # starting token offset for this sequence in the packed tensor
+    stride_ot, stride_oh,
+    stride_dot, stride_doh,
+    N_HEAD,  # number of attention heads
+    SEQLEN: tl.constexpr,  # sequence length
+    HEAD_DIM: tl.constexpr,  # head dimension
+    PRE_BLOCK: tl.constexpr,  # block size for preprocessing
+):
+    """Computes per-token Delta = sum(O * dO, axis=-1) needed for backward softmax.
+
+    Grid: (cdiv(SEQLEN, PRE_BLOCK), N_HEAD)
+    """
+    pid_m = tl.program_id(0)
+    pid_h = tl.program_id(1)
+
+    offs_m = pid_m * PRE_BLOCK + tl.arange(0, PRE_BLOCK)
+    offs_d = tl.arange(0, HEAD_DIM)
+    mask = offs_m < SEQLEN
+
+    # Global token indices
+    token_ids = seq_start + offs_m
+
+    # Load O and dO
+    o = tl.load(
+        Out + token_ids[:, None] * stride_ot + pid_h * stride_oh + offs_d[None, :],
+        mask=mask[:, None], other=0.0,
+    ).to(tl.float32)
+    do = tl.load(
+        DO + token_ids[:, None] * stride_dot + pid_h * stride_doh + offs_d[None, :],
+        mask=mask[:, None], other=0.0,
+    ).to(tl.float32)
+
+    # Delta = row-wise dot product of O and dO
+    delta = tl.sum(o * do, axis=1)
+
+    # Store delta: layout [TOTAL_TOKENS, N_HEAD]
+    tl.store(Delta + token_ids * N_HEAD + pid_h, delta, mask=mask)
+
+
+@triton.autotune(
+    configs=_generate_varlen_configs(),
+    key=["SEQLEN_Q", "SEQLEN_K", "HEAD_DIM"],
+    cache_results=False,
+)
+@triton.jit
+def _attn_varlen_bwd_dkdv(
+    Q, K, V, DO,
+    DK, DV,
+    M,  # LSE values from forward, layout [TOTAL_TOKENS, N_HEAD]
+    D,  # Delta values from preprocess, layout [TOTAL_TOKENS, N_HEAD]
+    sm_scale,
+    seq_start_q,
+    seq_start_k,
+    stride_qt, stride_qh,
+    stride_kt, stride_kh,
+    stride_vt, stride_vh,
+    stride_dot, stride_doh,
+    stride_dkt, stride_dkh,
+    stride_dvt, stride_dvh,
+    N_HEAD,  # number of attention heads, used for M/D indexing
+    SEQLEN_Q: tl.constexpr,
+    SEQLEN_K: tl.constexpr,
+    HEAD_DIM: tl.constexpr,
+    BLOCK_M: tl.constexpr,  # block size for Q (iterating)
+    BLOCK_N: tl.constexpr,  # block size for K/V (fixed)
+    dtype: tl.constexpr,
+):
+    """Varlen backward pass for dK and dV for a single sequence.
+
+    Each program loads a BLOCK_N-sized block of K and V into shared memory,
+    and iterates over Q and dO in BLOCK_M-sized blocks, accumulating gradients dK and dV.
+
+    Grid: (cdiv(SEQLEN_K, BLOCK_N), N_HEAD)
+    """
+    RCP_LN2: tl.constexpr = 1.44269504
+
+    pid_n = tl.program_id(0)  # K/V block index
+    pid_h = tl.program_id(1)  # head index
+
+    start_n = pid_n * BLOCK_N
+
+    offs_n = start_n + tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, HEAD_DIM)
+    n_mask = offs_n < SEQLEN_K
+
+    # Global token indices for K/V
+    kv_token_ids = seq_start_k + offs_n
+
+    # Load K and V blocks: [BLOCK_N, HEAD_DIM]
+    k_ptrs = K + kv_token_ids[:, None] * stride_kt + pid_h * stride_kh + offs_d[None, :]
+    v_ptrs = V + kv_token_ids[:, None] * stride_vt + pid_h * stride_vh + offs_d[None, :]
+
+    k = tl.load(k_ptrs, mask=n_mask[:, None], other=0.0)
+    v = tl.load(v_ptrs, mask=n_mask[:, None], other=0.0)
+
+    k_scaled = (k * (sm_scale * RCP_LN2)).to(dtype)
+
+    # Initialize gradient accumulators
+    dk = tl.zeros([BLOCK_N, HEAD_DIM], dtype=tl.float32)
+    dv = tl.zeros([BLOCK_N, HEAD_DIM], dtype=tl.float32)
+
+    MINUS_INF: tl.constexpr = float(-1.0e8)
+
+    offs_m = tl.arange(0, BLOCK_M)
+
+    # Iterate over Q blocks
+    for start_m in range(0, SEQLEN_Q, BLOCK_M):
+        curr_offs_m = start_m + offs_m
+        m_mask = curr_offs_m < SEQLEN_Q
+
+        q_token_ids = seq_start_q + curr_offs_m
+
+        # Load Q transposed: [HEAD_DIM, BLOCK_M]
+        q_ptrs = Q + q_token_ids[None, :] * stride_qt + pid_h * stride_qh + offs_d[:, None]
+        qT = tl.load(q_ptrs, mask=m_mask[None, :], other=0.0)
+
+        # Load M (LSE values): [BLOCK_M]
+        m = tl.load(M + q_token_ids * N_HEAD + pid_h, mask=m_mask, other=0.0)
+
+        # Compute qkT: [BLOCK_N, HEAD_DIM] @ [HEAD_DIM, BLOCK_M] -> [BLOCK_N, BLOCK_M]
+        qkT = tl.dot(k_scaled, qT)
+
+        # Mask out-of-bounds positions
+        qkT = tl.where(m_mask[None, :], qkT, MINUS_INF)
+        qkT = tl.where(n_mask[:, None], qkT, MINUS_INF)
+
+        # Compute attention weights
+        pT = tl.math.exp2(qkT - m[None, :])
+
+        # Load dO: [BLOCK_M, HEAD_DIM]
+        do_ptrs = DO + q_token_ids[:, None] * stride_dot + pid_h * stride_doh + offs_d[None, :]
+        do = tl.load(do_ptrs, mask=m_mask[:, None], other=0.0)
+
+        # Compute dV: [BLOCK_N, BLOCK_M] @ [BLOCK_M, HEAD_DIM] -> [BLOCK_N, HEAD_DIM]
+        ppT = pT.to(dtype)
+        dv += tl.dot(ppT, do)
+
+        # Load D (delta values): [BLOCK_M]
+        Di = tl.load(D + q_token_ids * N_HEAD + pid_h, mask=m_mask, other=0.0)
+
+        # Compute dP: [BLOCK_N, HEAD_DIM] @ [HEAD_DIM, BLOCK_M] -> [BLOCK_N, BLOCK_M]
+        dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
+
+        # Compute dS
+        dsT = pT * (dpT - Di[None, :])
+        dsT = dsT.to(dtype)
+
+        # Compute dK: [BLOCK_N, BLOCK_M] @ [BLOCK_M, HEAD_DIM] -> [BLOCK_N, HEAD_DIM]
+        dk += tl.dot(dsT, tl.trans(qT))
+
+    # Store dK and dV
+    dk *= sm_scale
+    dk_ptrs = DK + kv_token_ids[:, None] * stride_dkt + pid_h * stride_dkh + offs_d[None, :]
+    dv_ptrs = DV + kv_token_ids[:, None] * stride_dvt + pid_h * stride_dvh + offs_d[None, :]
+    tl.store(dk_ptrs, dk.to(dtype), mask=n_mask[:, None])
+    tl.store(dv_ptrs, dv.to(dtype), mask=n_mask[:, None])
+
+
+@triton.autotune(
+    configs=_generate_varlen_configs(),
+    key=["SEQLEN_Q", "SEQLEN_K", "HEAD_DIM"],
+    cache_results=False,
+)
+@triton.jit
+def _attn_varlen_bwd_dq(
+    Q, K, V, DO,
+    DQ,
+    M,  # LSE values from forward, layout [TOTAL_TOKENS, N_HEAD]
+    D,  # Delta values from preprocess, layout [TOTAL_TOKENS, N_HEAD]
+    sm_scale,
+    seq_start_q,
+    seq_start_k,
+    stride_qt, stride_qh,
+    stride_kt, stride_kh,
+    stride_vt, stride_vh,
+    stride_dot, stride_doh,
+    stride_dqt, stride_dqh,
+    N_HEAD,  # number of attention heads, used for M/D indexing
+    SEQLEN_Q: tl.constexpr,
+    SEQLEN_K: tl.constexpr,
+    HEAD_DIM: tl.constexpr,
+    BLOCK_M: tl.constexpr,  # block size for Q (fixed)
+    BLOCK_N: tl.constexpr,  # block size for K/V (iterating)
+    dtype: tl.constexpr,
+):
+    """Varlen backward pass for dQ for a single sequence.
+
+    Each program loads a BLOCK_M-sized block of Q and dO into shared memory,
+    and iterates over K and V in BLOCK_N-sized blocks, accumulating gradients dQ.
+
+    Grid: (cdiv(SEQLEN_Q, BLOCK_M), N_HEAD)
+    """
+    LN2: tl.constexpr = 0.6931471805599453
+    RCP_LN2: tl.constexpr = 1.4426950408889634
+
+    pid_m = tl.program_id(0)  # Q block index
+    pid_h = tl.program_id(1)  # head index
+
+    start_m = pid_m * BLOCK_M
+
+    offs_m = start_m + tl.arange(0, BLOCK_M)
+    offs_d = tl.arange(0, HEAD_DIM)
+    m_mask = offs_m < SEQLEN_Q
+
+    q_token_ids = seq_start_q + offs_m
+
+    # Load Q block: [BLOCK_M, HEAD_DIM]
+    q_ptrs = Q + q_token_ids[:, None] * stride_qt + pid_h * stride_qh + offs_d[None, :]
+    q = tl.load(q_ptrs, mask=m_mask[:, None], other=0.0)
+
+    # Load dO block: [BLOCK_M, HEAD_DIM]
+    do_ptrs = DO + q_token_ids[:, None] * stride_dot + pid_h * stride_doh + offs_d[None, :]
+    do = tl.load(do_ptrs, mask=m_mask[:, None], other=0.0)
+
+    # Load M and D: [BLOCK_M]
+    m = tl.load(M + q_token_ids * N_HEAD + pid_h, mask=m_mask, other=0.0)
+    Di = tl.load(D + q_token_ids * N_HEAD + pid_h, mask=m_mask, other=0.0)
+    m = m[:, None]
+
+    dq = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
+
+    MINUS_INF: tl.constexpr = float(-1.0e8)
+
+    offs_n = tl.arange(0, BLOCK_N)
+
+    # Iterate over K/V blocks
+    for start_n in range(0, SEQLEN_K, BLOCK_N):
+        curr_offs_n = start_n + offs_n
+        n_mask = curr_offs_n < SEQLEN_K
+
+        kv_token_ids = seq_start_k + curr_offs_n
+
+        # Load K transposed: [HEAD_DIM, BLOCK_N]
+        k_ptrs = K + kv_token_ids[None, :] * stride_kt + pid_h * stride_kh + offs_d[:, None]
+        kT = tl.load(k_ptrs, mask=n_mask[None, :], other=0.0)
+        kT_scaled = (kT * (sm_scale * RCP_LN2)).to(dtype)
+
+        # Load V transposed: [HEAD_DIM, BLOCK_N]
+        v_ptrs = V + kv_token_ids[None, :] * stride_vt + pid_h * stride_vh + offs_d[:, None]
+        vT = tl.load(v_ptrs, mask=n_mask[None, :], other=0.0)
+
+        # Compute QK: [BLOCK_M, HEAD_DIM] @ [HEAD_DIM, BLOCK_N] -> [BLOCK_M, BLOCK_N]
+        qk = tl.dot(q, kT_scaled)
+
+        # Mask out-of-bounds positions
+        qk = tl.where(n_mask[None, :], qk, MINUS_INF)
+
+        # Compute attention weights
+        p = tl.math.exp2(qk - m)
+
+        # Compute dP: [BLOCK_M, HEAD_DIM] @ [HEAD_DIM, BLOCK_N] -> [BLOCK_M, BLOCK_N]
+        dp = tl.dot(do, vT).to(tl.float32)
+
+        # Compute dS
+        ds = p * (dp - Di[:, None])
+        ds = ds.to(dtype)
+
+        # Compute dQ: [BLOCK_M, BLOCK_N] @ [BLOCK_N, HEAD_DIM] -> [BLOCK_M, HEAD_DIM]
+        dq += tl.dot(ds, tl.trans(kT_scaled))
+
+    # De-scale (since kT was pre-scaled by sm_scale * RCP_LN2)
+    dq *= LN2
+
+    # Store dQ
+    dq_ptrs = DQ + q_token_ids[:, None] * stride_dqt + pid_h * stride_dqh + offs_d[None, :]
+    tl.store(dq_ptrs, dq.to(dtype), mask=m_mask[:, None])
+
 
 class TritonAttentionVarlen(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cu_seqlens_q: torch.Tensor, cu_seqlens_k: torch.Tensor, causal: bool, window: int, sm_scale: float, min_tokens_per_kernel: int = 2000):
+    def forward(ctx, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cu_seqlens_q: torch.Tensor, cu_seqlens_k: torch.Tensor, causal: bool, window: int, sm_scale: float):
         """Varlen flash attention forward pass.
 
         Computes attention over variable-length sequences packed into a single tensor.
@@ -1409,9 +1687,6 @@ class TritonAttentionVarlen(torch.autograd.Function):
         optimal code per sequence length.
 
         All per-sequence parameters are pre-computed on the CPU and kernel launches
-        are issued in a tight loop to minimise host-side enqueue overhead.
-        ``min_tokens_per_kernel`` is reserved for future batching optimisations
-        (e.g. CUDA graph capture/replay per group).
 
         Currently supports global attention (no causal, no window masking).
         Currently the following Head dimensions are supported: 16, 32, 64, 128, 256.
@@ -1425,7 +1700,6 @@ class TritonAttentionVarlen(torch.autograd.Function):
             causal: Whether to apply causal masking (not yet supported, must be False)
             window: Sliding window size (-1 or 0 for no window, not yet supported)
             sm_scale: Softmax scaling factor (typically 1/sqrt(HEAD_DIM))
-            min_tokens_per_kernel: Reserved for future batching (default 2000)
 
         Returns:
             Output tensor of shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
@@ -1443,6 +1717,9 @@ class TritonAttentionVarlen(torch.autograd.Function):
 
         o = torch.empty_like(q)
 
+        # Allocate LSE tensor for backward pass: [TOTAL_TOKENS, N_HEAD]
+        M = torch.empty((TOTAL_TOKENS, N_HEAD), device=q.device, dtype=torch.float32)
+
         # Read cu_seqlens to CPU *once* to avoid per-iteration device syncs
         batch_size = cu_seqlens_q.shape[0] - 1
         cu_seqlens_q_cpu = cu_seqlens_q.cpu().tolist()
@@ -1456,7 +1733,7 @@ class TritonAttentionVarlen(torch.autograd.Function):
         stride_vt, stride_vh = v.stride(0), v.stride(1)
         stride_ot, stride_oh = o.stride(0), o.stride(1)
 
-        # Launch one kernel per sequence in a tight loop
+        # Launch one kernel per sequence 
         for b in range(batch_size):
             seq_start_q = cu_seqlens_q_cpu[b]
             seq_start_k = cu_seqlens_k_cpu[b]
@@ -1478,10 +1755,132 @@ class TritonAttentionVarlen(torch.autograd.Function):
                 stride_kt, stride_kh,
                 stride_vt, stride_vh,
                 stride_ot, stride_oh,
+                M,
+                N_HEAD,
                 SEQLEN_Q=seqlen_q,
                 SEQLEN_K=seqlen_k,
                 HEAD_DIM=HEAD_DIM,
                 dtype=dtype_triton,
             )
 
+        # Save tensors for backward
+        ctx.save_for_backward(q, k, v, o, M)
+        ctx.cu_seqlens_q = cu_seqlens_q
+        ctx.cu_seqlens_k = cu_seqlens_k
+        ctx.sm_scale = sm_scale
+
         return o
+
+    @staticmethod
+    def backward(ctx, do):
+        """Varlen flash attention backward pass.
+
+        Computes gradients dQ, dK, dV for variable-length sequences packed into a single tensor.
+        Launches separate kernels per sequence for preprocess, dK/dV, and dQ computation,
+        following the same structure as the non-varlen backward pass.
+        """
+        q, k, v, o, M = ctx.saved_tensors
+
+        do = do.contiguous()
+
+        TOTAL_TOKENS, N_HEAD, HEAD_DIM = q.shape
+
+        dq = torch.empty_like(q)
+        dk = torch.empty_like(k)
+        dv = torch.empty_like(v)
+
+        # Allocate Delta tensor: [TOTAL_TOKENS, N_HEAD]
+        Delta = torch.empty((TOTAL_TOKENS, N_HEAD), device=q.device, dtype=torch.float32)
+
+        cu_seqlens_q = ctx.cu_seqlens_q
+        cu_seqlens_k = ctx.cu_seqlens_k
+        sm_scale = ctx.sm_scale
+
+        batch_size = cu_seqlens_q.shape[0] - 1
+        cu_seqlens_q_cpu = cu_seqlens_q.cpu().tolist()
+        cu_seqlens_k_cpu = cu_seqlens_k.cpu().tolist()
+
+        dtype_triton = torch_dtype_to_triton(q.dtype)
+
+        # Strides
+        stride_qt, stride_qh = q.stride(0), q.stride(1)
+        stride_kt, stride_kh = k.stride(0), k.stride(1)
+        stride_vt, stride_vh = v.stride(0), v.stride(1)
+        stride_ot, stride_oh = o.stride(0), o.stride(1)
+        stride_dot, stride_doh = do.stride(0), do.stride(1)
+        stride_dqt, stride_dqh = dq.stride(0), dq.stride(1)
+        stride_dkt, stride_dkh = dk.stride(0), dk.stride(1)
+        stride_dvt, stride_dvh = dv.stride(0), dv.stride(1)
+
+        PRE_BLOCK = 16
+
+        for b in range(batch_size):
+            seq_start_q = cu_seqlens_q_cpu[b]
+            seq_start_k = cu_seqlens_k_cpu[b]
+            seqlen_q = cu_seqlens_q_cpu[b + 1] - seq_start_q
+            seqlen_k = cu_seqlens_k_cpu[b + 1] - seq_start_k
+
+            if seqlen_q == 0:
+                continue
+
+            # 1. Preprocess: compute Delta = sum(O * dO, axis=-1)
+            pre_grid = (triton.cdiv(seqlen_q, PRE_BLOCK), N_HEAD)
+            _attn_varlen_bwd_preprocess[pre_grid](
+                o, do, Delta,
+                seq_start_q,
+                stride_ot, stride_oh,
+                stride_dot, stride_doh,
+                N_HEAD,
+                SEQLEN=seqlen_q,
+                HEAD_DIM=HEAD_DIM,
+                PRE_BLOCK=PRE_BLOCK,
+            )
+
+            # 2. Compute dK and dV
+            def grid_dkdv(META, _seqlen_k=seqlen_k):
+                return (triton.cdiv(_seqlen_k, META["BLOCK_N"]), N_HEAD)
+
+            _attn_varlen_bwd_dkdv[grid_dkdv](
+                q, k, v, do,
+                dk, dv,
+                M, Delta,
+                sm_scale,
+                seq_start_q,
+                seq_start_k,
+                stride_qt, stride_qh,
+                stride_kt, stride_kh,
+                stride_vt, stride_vh,
+                stride_dot, stride_doh,
+                stride_dkt, stride_dkh,
+                stride_dvt, stride_dvh,
+                N_HEAD,
+                SEQLEN_Q=seqlen_q,
+                SEQLEN_K=seqlen_k,
+                HEAD_DIM=HEAD_DIM,
+                dtype=dtype_triton,
+            )
+
+            # 3. Compute dQ
+            def grid_dq(META, _seqlen_q=seqlen_q):
+                return (triton.cdiv(_seqlen_q, META["BLOCK_M"]), N_HEAD)
+
+            _attn_varlen_bwd_dq[grid_dq](
+                q, k, v, do,
+                dq,
+                M, Delta,
+                sm_scale,
+                seq_start_q,
+                seq_start_k,
+                stride_qt, stride_qh,
+                stride_kt, stride_kh,
+                stride_vt, stride_vh,
+                stride_dot, stride_doh,
+                stride_dqt, stride_dqh,
+                N_HEAD,
+                SEQLEN_Q=seqlen_q,
+                SEQLEN_K=seqlen_k,
+                HEAD_DIM=HEAD_DIM,
+                dtype=dtype_triton,
+            )
+
+        return dq, dk, dv, None, None, None, None, None
