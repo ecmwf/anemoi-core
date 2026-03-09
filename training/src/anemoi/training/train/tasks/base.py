@@ -22,7 +22,6 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from torch.distributed.distributed_c10d import ProcessGroup
+    from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
