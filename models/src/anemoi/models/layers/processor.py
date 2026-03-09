@@ -196,7 +196,7 @@ class TransformerProcessor(BaseProcessor):
         mlp_hidden_ratio: int,
         qk_norm=False,
         dropout_p: float = 0.0,
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "triton_attention",
         softcap: float = 0,
         use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
@@ -224,9 +224,9 @@ class TransformerProcessor(BaseProcessor):
             Dropout probability used for multi-head self attention, default 0.1
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "triton_attention"
         softcap : float, optional
-            Anything > 0 activates softcapping flash attention, by default 0
+            Anything > 0 activates softcapping attention, by default 0
         use_alibi_slopes : bool
             Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
