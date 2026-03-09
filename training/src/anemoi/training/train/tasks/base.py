@@ -22,6 +22,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
@@ -45,7 +46,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
@@ -295,9 +295,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.shard_shapes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[dataset_name][
-                "data"
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
+            self.grid_sizes[dataset_name] = graph_data[dataset_name].num_nodes
             self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
                 reader_group_size,
@@ -456,12 +454,29 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if scaler is None:  # If scalar is None, no update to be applied
             return
 
-        if name in loss_obj.scaler:  # If scalar in loss, update it
+        if self._can_update_scaler(loss_obj, name):
             loss_obj.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
         for metric in metrics_dict.values():  # If scalar in metrics, update it
-            if name in metric.scaler:
+            if self._can_update_scaler(metric, name):
                 metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+
+    @staticmethod
+    def _can_update_scaler(loss_or_metric: torch.nn.Module, scaler_name: str) -> bool:
+        """Whether a module can update a scaler with this name.
+
+        Standard losses/metrics expose a ``scaler`` container, while composite losses
+        (e.g., ``CombinedLoss``) intentionally remove this attribute and route updates
+        through their ``update_scaler`` implementation.
+        """
+        if not hasattr(loss_or_metric, "update_scaler"):
+            return False
+
+        scaler = getattr(loss_or_metric, "scaler", None)
+        if scaler is None:
+            return True
+
+        return scaler_name in scaler
 
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
@@ -929,9 +944,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     scaler_indices=(..., indices),
                     grid_shard_slice=grid_shard_slice,
                     group=self.model_comm_group,
-                    model_comm_group_size=self.model_comm_group_size,
-                    grid_dim=self.grid_dim,
-                    grid_shard_shapes=self.grid_shard_shapes,
                 )
 
         return metrics
