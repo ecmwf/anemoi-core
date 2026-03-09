@@ -203,29 +203,30 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
         x_latent = sum(dataset_latents.values())
 
         # Processor
-        shard_shapes_hidden = shard_shapes_hidden_dict[dataset_names[0]]
-        assert all(
-            shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
-        ), "All datasets must have the same shard shapes for the hidden graph."
+        if self.has_processor:
+            shard_shapes_hidden = shard_shapes_hidden_dict[dataset_names[0]]
+            assert all(
+                shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
+            ), "All datasets must have the same shard shapes for the hidden graph."
 
-        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
-            batch_size=batch_size,
-            model_comm_group=model_comm_group,
-        )
+            processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
 
-        x_latent_proc = self.processor(
-            x_latent,
-            batch_size=batch_size,
-            shard_shapes=shard_shapes_hidden,
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
-            model_comm_group=model_comm_group,
-            edge_shard_shapes=proc_edge_shard_shapes,
-        )
+            x_latent_proc = self.processor(
+                x_latent,
+                batch_size=batch_size,
+                shard_shapes=shard_shapes_hidden,
+                edge_attr=processor_edge_attr,
+                edge_index=processor_edge_index,
+                model_comm_group=model_comm_group,
+                edge_shard_shapes=proc_edge_shard_shapes,
+            )
 
-        # add skip connection (hidden -> hidden)
-        if self.latent_skip:
-            x_latent_proc = x_latent_proc + x_latent
+            # add skip connection (hidden -> hidden)
+            if self.latent_skip:
+                x_latent = x_latent_proc + x_latent
 
         # Decode
         x_out_dict = {}
@@ -239,7 +240,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
                 edge_attr=decoder_edge_attr,
