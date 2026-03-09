@@ -407,7 +407,8 @@ class BaseTrainingSchema(BaseModel):
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
-    "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
+    "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
+    " reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
