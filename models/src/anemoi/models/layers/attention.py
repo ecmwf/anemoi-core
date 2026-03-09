@@ -254,11 +254,11 @@ class SDPAAttentionWrapper(nn.Module):
         alibi_slopes=None,
     ):
         if softcap is not None:
-            NotImplementedError(
+            raise NotImplementedError(
                 "Softcap not supported by Pytorchs SDPA. please switch to flash attention or disable softcap."
             )
         if alibi_slopes is not None:
-            NotImplementedError(
+            raise NotImplementedError(
                 "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
             )
 
@@ -292,12 +292,11 @@ class FlashAttentionWrapper(nn.Module):
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
 
-        flash_attn, self.use_flash_attn_v3 = self._import_flash_attn()
+        flash_attn_func, flash_attn_version = self._import_flash_attn()
 
-        flash_attn_version = version.parse(flash_attn.__version__)
         self._init_rotary_embeddings(use_rotary_embeddings, head_dim, flash_attn_version)
 
-        self.attention = flash_attn.flash_attn_func
+        self.attention = flash_attn_func
 
     def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int, flash_attn_version) -> None:
         """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
@@ -313,38 +312,69 @@ class FlashAttentionWrapper(nn.Module):
             self.use_rotary_embeddings = True
             self.rotary_emb = RotaryEmbedding(dim=head_dim)
 
-    def _import_flash_attn(self) -> (Any, bool):
-        """imports either flash attention v2 or v3.
+    def _import_flash_attn(self) -> tuple:
+        """imports either flash attention v2, v3 or v4, based on what is installed. prioritising v4, then v3, then v2. if none are installed, raises an error.
 
         returns:
-            flash attention module
-            use_flash_attention_v3 (bool)
+            tuple of (flash attention function, parsed version)
         """
-        use_flash_attn_v3 = False
+        flash_attn_version = -1 # will be set to a valid version if either flash attention v2, v3 or v4 is successfully imported
+        flash_attn_func = None
 
-        # to detect which flash-attn interface we're using we try import them
-        # Since each import is semantically different we use this to
-        # distringuish flash attention versions
+
+        # Try import all the flash attention versions
+        HAS_FLASH_V2=False
+        HAS_FLASH_V3=False
+        HAS_FLASH_V4 = False
+        e_v2 = None; e_v3 = None; e_v4 = None
         try:
-            # first try import flash attn v2
-            import flash_attn
+            from flash_attn import flash_attn_func as flash_attn_func_v2
 
+            HAS_FLASH_V2 = True
         except ImportError as e_v2:
+            pass
 
-            # failed importing flash attn v2,
-            # try import flash attn v3
-            try:
-                import flash_attn_interface as flash_attn
+        try:
+            from flash_attn_interface import flash_attn_func as flash_attn_func_v3
 
-            except ImportError as e_v3:
-                # print both errors if both fail
-                raise ImportError(f"Error importing flash-attn v2: {e_v2}\nError importing flash-attn v2: {e_v3}")
-            else:
-                LOGGER.info("Using flash attention v3")
-                use_flash_attn_v3 = True
+            HAS_FLASH_V3 = True
+        except ImportError as e_v3:
+            pass
+
+        try:
+            from flash_attn.cute import flash_attn_func as flash_attn_func_v4
+
+            HAS_FLASH_V4 = True
+        except ImportError as e_v4:
+            pass
+
+        if not (HAS_FLASH_V2 or HAS_FLASH_V3 or HAS_FLASH_V4):
+            raise ImportError(f"Flash attention backend selected but no working flash attention installation found. Errors: \nFlash attn v2: {e_v2}\nFlash attn v3: {e_v3}\nFlash attn v4: {e_v4}")
+
+
+        # Select which flash attention version to use, prioritising v4, then v3, then v2
+        if HAS_FLASH_V4:
+            LOGGER.info("Using flash attention v4")
+            flash_attn_func = flash_attn_func_v4
+            self.use_flash_attn_v3 = False
+            self.use_flash_attn_v4 = True
+        elif HAS_FLASH_V3:
+            LOGGER.info("Using flash attention v3")
+            flash_attn_func = flash_attn_func_v3
+            self.use_flash_attn_v3 = True
+            self.use_flash_attn_v4 = False
         else:
+            #using flash attn v2
             LOGGER.info("Using flash attention v2")
-        return flash_attn, use_flash_attn_v3
+            flash_attn_func = flash_attn_func_v2
+            self.use_flash_attn_v3 = False
+            self.use_flash_attn_v4 = False
+
+        # Get version from the package, not from the function
+        import flash_attn
+        flash_attn_version = version.parse(flash_attn.__version__)
+
+        return flash_attn_func, flash_attn_version
 
     def forward(
         self,
@@ -363,7 +393,7 @@ class FlashAttentionWrapper(nn.Module):
         )
 
         if alibi_slopes is not None and self.use_flash_attn_v3:
-            NotImplementedError(
+            raise NotImplementedError(
                 "Alibi slopes is currently not supported by flash attention v3. please switch to flash attention v2 or disable alibi slopes."
             )
 
@@ -379,7 +409,16 @@ class FlashAttentionWrapper(nn.Module):
             key = keyvalue[:, :, 0, ...]
             value = keyvalue[:, :, 1, ...]
 
-        if self.use_flash_attn_v3:
+        if self.use_flash_attn_v4:
+            out = self.attention(
+                query,
+                key,
+                value,
+                softmax_scale=1.0 / math.sqrt(query.shape[-1]),
+                causal=False,
+                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+            )[0]
+        elif self.use_flash_attn_v3:
             out = self.attention(
                 query,
                 key,
