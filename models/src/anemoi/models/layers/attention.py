@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any
 from typing import Optional
 
 import einops
@@ -318,39 +317,43 @@ class FlashAttentionWrapper(nn.Module):
         returns:
             tuple of (flash attention function, parsed version)
         """
-        flash_attn_version = -1 # will be set to a valid version if either flash attention v2, v3 or v4 is successfully imported
+        flash_attn_version = (
+            -1
+        )  # will be set to a valid version if either flash attention v2, v3 or v4 is successfully imported
         flash_attn_func = None
 
-
         # Try import all the flash attention versions
-        HAS_FLASH_V2=False
-        HAS_FLASH_V3=False
+        HAS_FLASH_V2 = False
+        HAS_FLASH_V3 = False
         HAS_FLASH_V4 = False
-        e_v2 = None; e_v3 = None; e_v4 = None
+        e_v2 = None
+        e_v3 = None
+        e_v4 = None
         try:
             from flash_attn import flash_attn_func as flash_attn_func_v2
 
             HAS_FLASH_V2 = True
-        except ImportError as e_v2:
+        except ImportError:
             pass
 
         try:
             from flash_attn_interface import flash_attn_func as flash_attn_func_v3
 
             HAS_FLASH_V3 = True
-        except ImportError as e_v3:
+        except ImportError:
             pass
 
         try:
             from flash_attn.cute import flash_attn_func as flash_attn_func_v4
 
             HAS_FLASH_V4 = True
-        except ImportError as e_v4:
+        except ImportError:
             pass
 
         if not (HAS_FLASH_V2 or HAS_FLASH_V3 or HAS_FLASH_V4):
-            raise ImportError(f"Flash attention backend selected but no working flash attention installation found. Errors: \nFlash attn v2: {e_v2}\nFlash attn v3: {e_v3}\nFlash attn v4: {e_v4}")
-
+            raise ImportError(
+                f"Flash attention backend selected but no working flash attention installation found. Errors: \nFlash attn v2: {e_v2}\nFlash attn v3: {e_v3}\nFlash attn v4: {e_v4}"
+            )
 
         # Select which flash attention version to use, prioritising v4, then v3, then v2
         if HAS_FLASH_V4:
@@ -364,7 +367,7 @@ class FlashAttentionWrapper(nn.Module):
             self.use_flash_attn_v3 = True
             self.use_flash_attn_v4 = False
         else:
-            #using flash attn v2
+            # using flash attn v2
             LOGGER.info("Using flash attention v2")
             flash_attn_func = flash_attn_func_v2
             self.use_flash_attn_v3 = False
@@ -372,6 +375,7 @@ class FlashAttentionWrapper(nn.Module):
 
         # Get version from the package, not from the function
         import flash_attn
+
         flash_attn_version = version.parse(flash_attn.__version__)
 
         return flash_attn_func, flash_attn_version
