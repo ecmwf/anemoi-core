@@ -80,6 +80,34 @@ To set up experiment tracking:
 #. Start the experiment tracking server and monitor your training runs
    in real-time.
 
+****************************
+ Reproducibility and Seeding
+****************************
+
+Anemoi Training seeds the random number generators used during training
+to control stochastic parts of a run. This helps repeat experiments, but
+it does not guarantee exact reproducibility across hardware, software
+versions, or distributed executions because floating-point numerics and
+parallel reductions can still differ slightly.
+
+-  Set ``ANEMOI_BASE_SEED`` explicitly if you want a fixed base seed for
+   a run.
+-  If ``ANEMOI_BASE_SEED`` is not set, Anemoi Training uses
+   ``SLURM_JOB_ID`` when running inside a SLURM job.
+-  If neither value is available, Anemoi Training falls back to ``42``.
+
+When restarting from a checkpoint, avoid reusing the same manual base
+seed. Checkpoints restore model and optimizer state, but not the
+random-number streams used during training and data loading, so the same
+seed can replay the same sequence of random choices after restart. This
+is usually not a concern when the seed comes from ``SLURM_JOB_ID``,
+because a new SLURM job normally gets a new job ID.
+
+Seeds below ``1000`` are multiplied by ``1000`` before use, so a
+fallback seed of ``42`` appears in logs as an effective seed of
+``42000``. This normalized base seed is logged during training and
+stored in checkpoint metadata.
+
 Step 5: Execute Training
 ========================
 
