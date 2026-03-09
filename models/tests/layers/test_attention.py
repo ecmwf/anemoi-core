@@ -16,7 +16,6 @@ import torch.nn as nn
 from hypothesis import given
 from hypothesis import settings
 
-import anemoi.models.layers.attention as attention_layers
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.utils import load_layer_kernels
@@ -255,4 +254,3 @@ def test_multi_head_self_attention_forward_sdpa_rejects_softcap(layer_kernels):
     shapes = [list(x.shape)]
     with pytest.raises(NotImplementedError, match="Softcap not supported"):
         mhsa.forward(x, shapes, batch_size)
-
