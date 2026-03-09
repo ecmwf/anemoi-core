@@ -35,7 +35,7 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "anemoi-transform>=0.1.2",
+  
   # Fix certain dependencies during development
   "anemoi-utils>=0.1.9",
   "einops>=0.6.1",
