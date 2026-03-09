@@ -1300,12 +1300,16 @@ def _attn_varlen_fwd(
     HEAD_DIM: tl.constexpr,  # head dimension
     BLOCK_M: tl.constexpr,  # block size for Q (fixed block)
     BLOCK_N: tl.constexpr,  # block size for K/V (iter block)
+    CAUSAL: tl.constexpr,  # whether to apply causal masking
+    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied.
     dtype: tl.constexpr,  # output dtype
 ):
     """Varlen forward flash attention kernel for a single sequence.
 
     One kernel launch handles one sequence. Each program computes one BLOCK_M-sized
     chunk of the output for one head.
+
+    Supports causal masking and sliding window attention.
 
     Grid: (cdiv(SEQLEN_Q, BLOCK_M), N_HEAD)
     program_id(0) indexes the Q block within this sequence.
@@ -1348,7 +1352,21 @@ def _attn_varlen_fwd(
     # ***** 4) Main loop: iterate over K/V blocks *****
     offs_n = tl.arange(0, BLOCK_N)  # [BLOCK_N]
 
-    for start_n in range(0, SEQLEN_K, BLOCK_N):
+    # Compute loop bounds based on masking
+    if CAUSAL:
+        lo = 0
+        hi = tl.minimum((start_m + 1) * BLOCK_M, SEQLEN_K)
+    elif WINDOW > 0:
+        lo = tl.maximum(0, start_m - WINDOW)
+        hi = tl.minimum(SEQLEN_K, (start_m + BLOCK_M) + WINDOW)
+        # Align to block boundaries
+        lo = (lo // BLOCK_N) * BLOCK_N
+        hi = ((hi + BLOCK_N - 1) // BLOCK_N) * BLOCK_N
+    else:
+        lo = 0
+        hi = SEQLEN_K
+
+    for start_n in range(lo, hi, BLOCK_N):
         curr_offs_n = start_n + offs_n  # [BLOCK_N] - local token positions in K/V
 
         # Global token indices for K/V
@@ -1364,8 +1382,16 @@ def _attn_varlen_fwd(
 
         # Mask out-of-bounds K positions
         qk = tl.where(kv_mask[None, :], qk, MINUS_INF)
-        # Also mask out-of-bounds Q positions
-        #qk = tl.where(q_mask[:, 1], qk, MINUS_INF)
+
+        # Apply causal masking
+        if CAUSAL:
+            causal_mask = offs_m[:, None] >= curr_offs_n[None, :]
+            qk = tl.where(causal_mask, qk, MINUS_INF)
+
+        # Apply sliding window masking
+        if WINDOW > 0:
+            window_mask = (curr_offs_n[None, :] <= offs_m[:, None] + WINDOW) & (curr_offs_n[None, :] >= offs_m[:, None] - WINDOW)
+            qk = tl.where(window_mask, qk, MINUS_INF)
 
         # Online softmax update
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -1472,12 +1498,15 @@ def _attn_varlen_bwd_dkdv(
     HEAD_DIM: tl.constexpr,
     BLOCK_M: tl.constexpr,  # block size for Q (iterating)
     BLOCK_N: tl.constexpr,  # block size for K/V (fixed)
+    CAUSAL: tl.constexpr,  # whether to apply causal masking
+    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied.
     dtype: tl.constexpr,
 ):
     """Varlen backward pass for dK and dV for a single sequence.
 
     Each program loads a BLOCK_N-sized block of K and V into shared memory,
     and iterates over Q and dO in BLOCK_M-sized blocks, accumulating gradients dK and dV.
+    Supports causal masking and sliding window attention.
 
     Grid: (cdiv(SEQLEN_K, BLOCK_N), N_HEAD)
     """
@@ -1512,8 +1541,21 @@ def _attn_varlen_bwd_dkdv(
 
     offs_m = tl.arange(0, BLOCK_M)
 
+    # Compute loop bounds based on masking
+    if CAUSAL:
+        lo = (start_n // BLOCK_M) * BLOCK_M
+        hi = SEQLEN_Q
+    elif WINDOW > 0:
+        lo = tl.maximum(0, start_n - WINDOW)
+        hi = tl.minimum(SEQLEN_Q, (start_n + BLOCK_N) + WINDOW)
+        lo = (lo // BLOCK_M) * BLOCK_M
+        hi = ((hi + BLOCK_M - 1) // BLOCK_M) * BLOCK_M
+    else:
+        lo = 0
+        hi = SEQLEN_Q
+
     # Iterate over Q blocks
-    for start_m in range(0, SEQLEN_Q, BLOCK_M):
+    for start_m in range(lo, hi, BLOCK_M):
         curr_offs_m = start_m + offs_m
         m_mask = curr_offs_m < SEQLEN_Q
 
@@ -1532,6 +1574,16 @@ def _attn_varlen_bwd_dkdv(
         # Mask out-of-bounds positions
         qkT = tl.where(m_mask[None, :], qkT, MINUS_INF)
         qkT = tl.where(n_mask[:, None], qkT, MINUS_INF)
+
+        # Apply causal masking
+        if CAUSAL:
+            causal_mask = curr_offs_m[None, :] >= offs_n[:, None]
+            qkT = tl.where(causal_mask, qkT, MINUS_INF)
+
+        # Apply sliding window masking
+        if WINDOW > 0:
+            window_mask = (offs_n[:, None] <= curr_offs_m[None, :] + WINDOW) & (offs_n[:, None] >= curr_offs_m[None, :] - WINDOW)
+            qkT = tl.where(window_mask, qkT, MINUS_INF)
 
         # Compute attention weights
         pT = tl.math.exp2(qkT - m[None, :])
@@ -1590,12 +1642,15 @@ def _attn_varlen_bwd_dq(
     HEAD_DIM: tl.constexpr,
     BLOCK_M: tl.constexpr,  # block size for Q (fixed)
     BLOCK_N: tl.constexpr,  # block size for K/V (iterating)
+    CAUSAL: tl.constexpr,  # whether to apply causal masking
+    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied.
     dtype: tl.constexpr,
 ):
     """Varlen backward pass for dQ for a single sequence.
 
     Each program loads a BLOCK_M-sized block of Q and dO into shared memory,
     and iterates over K and V in BLOCK_N-sized blocks, accumulating gradients dQ.
+    Supports causal masking and sliding window attention.
 
     Grid: (cdiv(SEQLEN_Q, BLOCK_M), N_HEAD)
     """
@@ -1632,8 +1687,22 @@ def _attn_varlen_bwd_dq(
 
     offs_n = tl.arange(0, BLOCK_N)
 
+    # Compute loop bounds based on masking
+    if CAUSAL:
+        lo = 0
+        hi = start_m + BLOCK_M
+        hi = ((hi + BLOCK_N - 1) // BLOCK_N) * BLOCK_N
+    elif WINDOW > 0:
+        lo = tl.maximum(0, start_m - WINDOW)
+        hi = tl.minimum(SEQLEN_K, (start_m + BLOCK_M) + WINDOW)
+        lo = (lo // BLOCK_N) * BLOCK_N
+        hi = ((hi + BLOCK_N - 1) // BLOCK_N) * BLOCK_N
+    else:
+        lo = 0
+        hi = SEQLEN_K
+
     # Iterate over K/V blocks
-    for start_n in range(0, SEQLEN_K, BLOCK_N):
+    for start_n in range(lo, hi, BLOCK_N):
         curr_offs_n = start_n + offs_n
         n_mask = curr_offs_n < SEQLEN_K
 
@@ -1653,6 +1722,16 @@ def _attn_varlen_bwd_dq(
 
         # Mask out-of-bounds positions
         qk = tl.where(n_mask[None, :], qk, MINUS_INF)
+
+        # Apply causal masking
+        if CAUSAL:
+            causal_mask = offs_m[:, None] >= curr_offs_n[None, :]
+            qk = tl.where(causal_mask, qk, MINUS_INF)
+
+        # Apply sliding window masking
+        if WINDOW > 0:
+            window_mask = (curr_offs_n[None, :] <= offs_m[:, None] + WINDOW) & (curr_offs_n[None, :] >= offs_m[:, None] - WINDOW)
+            qk = tl.where(window_mask, qk, MINUS_INF)
 
         # Compute attention weights
         p = tl.math.exp2(qk - m)
@@ -1688,7 +1767,7 @@ class TritonAttentionVarlen(torch.autograd.Function):
 
         All per-sequence parameters are pre-computed on the CPU and kernel launches
 
-        Currently supports global attention (no causal, no window masking).
+        Supports global attention, causal masking, and sliding window attention.
         Currently the following Head dimensions are supported: 16, 32, 64, 128, 256.
 
         Args:
@@ -1697,15 +1776,13 @@ class TritonAttentionVarlen(torch.autograd.Function):
             v: Value tensor of shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
             cu_seqlens_q: Cumulative sequence lengths for Q, shape [B+1], int32 on device
             cu_seqlens_k: Cumulative sequence lengths for K, shape [B+1], int32 on device
-            causal: Whether to apply causal masking (not yet supported, must be False)
-            window: Sliding window size (-1 or 0 for no window, not yet supported)
+            causal: Whether to apply causal masking
+            window: Sliding window size (-1 or 0 for no window)
             sm_scale: Softmax scaling factor (typically 1/sqrt(HEAD_DIM))
 
         Returns:
             Output tensor of shape [TOTAL_TOKENS, N_HEAD, HEAD_DIM]
         """
-        assert not causal, "Causal masking not yet supported for varlen attention"
-        assert window <= 0 or window == -1, "Window masking not yet supported for varlen attention"
 
         assert q.is_contiguous() and k.is_contiguous() and v.is_contiguous(), \
             "Input tensors must be contiguous"
@@ -1760,6 +1837,8 @@ class TritonAttentionVarlen(torch.autograd.Function):
                 SEQLEN_Q=seqlen_q,
                 SEQLEN_K=seqlen_k,
                 HEAD_DIM=HEAD_DIM,
+                CAUSAL=causal,
+                WINDOW=max(window, 0),
                 dtype=dtype_triton,
             )
 
@@ -1768,6 +1847,8 @@ class TritonAttentionVarlen(torch.autograd.Function):
         ctx.cu_seqlens_q = cu_seqlens_q
         ctx.cu_seqlens_k = cu_seqlens_k
         ctx.sm_scale = sm_scale
+        ctx.causal = causal
+        ctx.window = max(window, 0)
 
         return o
 
@@ -1795,6 +1876,8 @@ class TritonAttentionVarlen(torch.autograd.Function):
         cu_seqlens_q = ctx.cu_seqlens_q
         cu_seqlens_k = ctx.cu_seqlens_k
         sm_scale = ctx.sm_scale
+        causal = ctx.causal
+        window = ctx.window
 
         batch_size = cu_seqlens_q.shape[0] - 1
         cu_seqlens_q_cpu = cu_seqlens_q.cpu().tolist()
@@ -1857,6 +1940,8 @@ class TritonAttentionVarlen(torch.autograd.Function):
                 SEQLEN_Q=seqlen_q,
                 SEQLEN_K=seqlen_k,
                 HEAD_DIM=HEAD_DIM,
+                CAUSAL=causal,
+                WINDOW=window,
                 dtype=dtype_triton,
             )
 
@@ -1880,6 +1965,8 @@ class TritonAttentionVarlen(torch.autograd.Function):
                 SEQLEN_Q=seqlen_q,
                 SEQLEN_K=seqlen_k,
                 HEAD_DIM=HEAD_DIM,
+                CAUSAL=causal,
+                WINDOW=window,
                 dtype=dtype_triton,
             )
 
