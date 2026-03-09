@@ -16,10 +16,10 @@ from omegaconf import DictConfig
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
-from anemoi.training.losses import WeightedMSELoss
-from anemoi.training.losses import get_loss_function
 from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import SpectralL2Loss
+from anemoi.training.losses import WeightedMSELoss
+from anemoi.training.losses import get_loss_function
 
 
 def test_combined_loss() -> None:
@@ -153,12 +153,13 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
     expected_points = _octahedral_expected_points(nlat)
     # Match the typical tensor layout used by Anemoi losses:
     pred = torch.zeros((2, 1, 1, expected_points, nvars), requires_grad=True)
-    target = torch.zeros_like(pred)    
-
+    target = torch.zeros_like(pred)
 
     mse = WeightedMSELoss()
-    spectral = SpectralL2Loss(transform="octahedral_sht",
-                nlat=nlat,)
+    spectral = SpectralL2Loss(
+        transform="octahedral_sht",
+        nlat=nlat,
+    )
 
     loss = CombinedLoss(
         losses=[mse, spectral],

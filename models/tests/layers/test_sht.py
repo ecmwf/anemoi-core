@@ -82,9 +82,7 @@ def sht_setup(request):
     lons_per_lat = _lons_per_lat(nlat=nlat, grid_kind=request.param)
 
     direct = SphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation).to(device)
-    inverse = InverseSphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation).to(
-        device
-    )
+    inverse = InverseSphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation).to(device)
 
     return {
         "grid_kind": request.param,

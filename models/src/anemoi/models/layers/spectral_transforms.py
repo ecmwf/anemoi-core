@@ -222,7 +222,7 @@ class RegularSHT(SpectralTransform):
         **kwargs,
     ) -> None:
         """SHT on a regular lon-lat grid.
-        
+
         Parameters
         ----------
         nlat : int
@@ -234,7 +234,9 @@ class RegularSHT(SpectralTransform):
         self.nlat = nlat
         self.nlon = 2 * self.nlat
         self.lons_per_lat = [self.nlon] * self.nlat
-        self._sht = SphericalHarmonicTransform(lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1)
+        self._sht = SphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+        )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
@@ -275,7 +277,9 @@ class ReducedSHT(SpectralTransform):
         try:
             from anemoi.transform.grids.named import lookup
         except ImportError:
-            raise ImportError("anemoi.transform is required for ReducedSHT transform. Install optional dependencies: pip install anemoi-models[spectra]")
+            raise ImportError(
+                "anemoi.transform is required for ReducedSHT transform. Install optional dependencies: pip install anemoi-models[spectra]"
+            )
 
         # To generate a grid
         # anemoi-transform get-grid --source mars grid=n320,levtype=sfc,param=2t grid-n320.npz
@@ -288,7 +292,9 @@ class ReducedSHT(SpectralTransform):
         # Calculate longitudes per latitude
         self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
 
-        self._sht = SphericalHarmonicTransform(lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1)
+        self._sht = SphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+        )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
@@ -322,7 +328,9 @@ class OctahedralSHT(SpectralTransform):
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
-        self._sht = SphericalHarmonicTransform(lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1)
+        self._sht = SphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+        )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
