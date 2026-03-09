@@ -19,6 +19,7 @@ import torch
 from packaging import version
 from torch import Tensor
 from torch import nn
+from torch import where
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
@@ -227,18 +228,48 @@ class SDPAAttentionWrapper(nn.Module):
         from torch.nn.functional import scaled_dot_product_attention
 
         self.attention = scaled_dot_product_attention
-        self.mask = None
-        self.window_size = None
         LOGGER.info("Using scaled_dot_product_attention.")
 
-    def update_mask(self, seq_len, window_size: int, device: str):
+        self.attn_mask = None
+        from torch.nn.attention.flex_attention import create_mask
 
-        self.mask = (
-            torch.abs(
-                torch.arange(seq_len, device=device).unsqueeze(0) - torch.arange(seq_len, device=device).unsqueeze(1)
-            )
-            <= window_size
-        )
+        self.create_mask = create_mask
+
+    def create_sliding_window_mask(self, B, H, Q_LEN, KV_LEN, window_size, device="cpu") -> Tensor:
+        """Create a mask for sliding window attention compatible with SDPA.
+
+        Parameters
+        ----------
+        B : int
+            Batch size
+        H : int
+            Number of heads
+        Q_LEN : int
+            Query sequence length
+        KV_LEN : int
+            Key/value sequence length
+        window_size : tuple
+            Tuple of (left_window, right_window). Use -1 for unlimited.
+        device : str
+            Device for the mask tensor
+
+        Returns
+        -------
+        Tensor
+            2D attention mask
+        """
+        window_size_l = KV_LEN if window_size[0] == -1 else window_size[0]
+        window_size_r = KV_LEN if window_size[1] == -1 else window_size[1]
+
+        def sliding_window_mask(b, h, q_idx, kv_idx):
+            l_mask = where(kv_idx <= q_idx, abs(q_idx - kv_idx) <= window_size_l, False)
+            r_mask = where(q_idx <= kv_idx, abs(q_idx - kv_idx) <= window_size_r, False)
+            return l_mask | r_mask
+
+        # a mask for use with SDPA: tensor type, < 4D
+        mask = self.create_mask(sliding_window_mask, B, H, Q_LEN, KV_LEN, device=device)
+        mask = mask[0, 0, :, :]
+        return mask
 
     def forward(
         self,
@@ -252,7 +283,7 @@ class SDPAAttentionWrapper(nn.Module):
         softcap=None,
         alibi_slopes=None,
     ):
-        if softcap is not None or softcap > 0:
+        if softcap is not None and softcap > 0:
             raise NotImplementedError(
                 "Softcap not supported by Pytorchs SDPA. please switch to flash attention or disable softcap."
             )
@@ -260,18 +291,23 @@ class SDPAAttentionWrapper(nn.Module):
             raise NotImplementedError(
                 "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
             )
+        if window_size is not None and self.attn_mask is None:
+            # build the attention mask for sliding window attention. We build the mask once and reuse it,
+            # since it is the same for every forward pass (assuming the sequence length does not change).
 
-        sequence_len = query.shape[-2]
-
-        if window_size is not None and (self.mask is None or tuple(self.mask.shape) != (sequence_len, sequence_len)):
-            self.update_mask(sequence_len, window_size=window_size, device=query.device)
+            if isinstance(window_size, int):
+                window_size = (window_size, window_size)
+            self.attn_mask = self.create_sliding_window_mask(
+                1, query.shape[1], query.shape[2], key.shape[2], window_size, device=query.device
+            )
 
         out = self.attention(
             query,
             key,
             value,
-            attn_mask=self.mask,
-            is_causal=causal,
+            # self.attn_mask is None if global or causal attention is used, since SDPA will automatically apply a causal mask if causal=True. If window_size is used, we use the precomputed attn_mask.
+            attn_mask=self.attn_mask,
+            is_causal=False,
             dropout_p=dropout_p,
         )
 
@@ -387,7 +423,7 @@ class FlashAttentionWrapper(nn.Module):
         value,
         batch_size: int,
         causal: bool = False,
-        window_size: int = None,
+        window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         softcap: Optional[float] = None,
         alibi_slopes: torch.Tensor = None,
