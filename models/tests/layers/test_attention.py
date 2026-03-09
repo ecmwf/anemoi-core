@@ -9,8 +9,8 @@
 
 
 import hypothesis.strategies as st
-import pytest
 import psutil
+import pytest
 import torch
 import torch.nn as nn
 from hypothesis import given
@@ -176,6 +176,7 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
     assert x.grad is not None
     assert x.grad.shape == x.shape
 
+
 def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     """Test that SDPA with window_size produces valid output and attends only within the window."""
     num_heads = 4
@@ -184,7 +185,7 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     grid = 16
     window_size = 4
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.set_default_device(device)
 
     mhsa = MultiHeadSelfAttention(
@@ -198,7 +199,7 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     x = torch.randn(batch_size * grid, embed_dim, device=device)
     shapes = [list(x.shape)]
     output = mhsa.forward(x, shapes, batch_size)
-    if device == 'cuda':
+    if device == "cuda":
         peak_alloc_memory_after_sliding_window_mb = torch.cuda.max_memory_allocated() / (1024**2)
     else:
         peak_alloc_memory_after_sliding_window_mb = psutil.Process().memory_info().rss / (1024**2)  # RSS size in MB
@@ -219,23 +220,24 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     mhsa_global.load_state_dict(mhsa.state_dict())
     output_global = mhsa_global.forward(x, shapes, batch_size)
 
-    if device == 'cuda':
+    if device == "cuda":
         peak_alloc_memory_after_global_mb = torch.cuda.max_memory_allocated() / (1024**2)
     else:
         peak_alloc_memory_after_global_mb = psutil.Process().memory_info().rss / (1024**2)  # RSS size in MB
     print(f"Peak memory allocated during global attention: {peak_alloc_memory_after_global_mb:.2f} MB")
 
     # With a small window on a 16-token sequence, outputs should differ
-    assert not torch.allclose(output, output_global, atol=1e-5), (
-        "Sliding window output should differ from global attention output"
-    )
+    assert not torch.allclose(
+        output, output_global, atol=1e-5
+    ), "Sliding window output should differ from global attention output"
 
     # Memory usage using sliding window should not be greater then using global attention
-    # Since flex_attentions block mask funciton is used to handle the sliding window, 
+    # Since flex_attentions block mask funciton is used to handle the sliding window,
     # masking naively with a seq_len^2 array
-    assert peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb, (
-        "Sliding window attention should not use more memory than global attention"
-    )
+    assert (
+        peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb
+    ), "Sliding window attention should not use more memory than global attention"
+
 
 def test_multi_head_self_attention_forward_sdpa_rejects_softcap(layer_kernels):
     num_heads = 4

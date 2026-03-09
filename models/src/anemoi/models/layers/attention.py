@@ -218,9 +218,6 @@ class MultiHeadSelfAttention(nn.Module):
         return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
 
 
-
-
-
 class SDPAAttentionWrapper(nn.Module):
     """Wrapper for Pytorch scaled dot product attention
     To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
@@ -236,9 +233,10 @@ class SDPAAttentionWrapper(nn.Module):
 
         self.attn_mask = None
         from torch.nn.attention.flex_attention import create_mask
+
         self.create_mask = create_mask
 
-    def create_sliding_window_mask(self,B, H, Q_LEN, KV_LEN, window_size, device="cpu") -> Tensor:
+    def create_sliding_window_mask(self, B, H, Q_LEN, KV_LEN, window_size, device="cpu") -> Tensor:
         """Create a mask for sliding window attention compatible with SDPA.
 
         Parameters
@@ -312,7 +310,7 @@ class SDPAAttentionWrapper(nn.Module):
             is_causal=False,
             dropout_p=dropout_p,
         )
-        
+
         return out
 
 
