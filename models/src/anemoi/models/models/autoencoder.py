@@ -99,7 +99,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -143,7 +143,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
     def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_target = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
+        node_attributes_target = self.node_attributes(dataset_name, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(

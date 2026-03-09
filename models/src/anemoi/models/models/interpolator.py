@@ -64,7 +64,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return (
             len(self.input_times) * self.num_input_channels[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+            + self.node_attributes.attr_ndims[dataset_name]
         )
 
     def _assemble_input(
