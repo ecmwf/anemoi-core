@@ -12,6 +12,7 @@ import functools
 import logging
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Iterator
 
 import torch
 from torch import nn
@@ -198,6 +199,13 @@ class BaseLoss(nn.Module, ABC):
         ).squeeze()
 
         return out if group is None else reduce_tensor(out, group)
+
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """Yield all leaf loss modules.
+        For simple losses, yields self. For composite losses (e.g. CombinedLoss),
+        recursively yields the underlying leaf losses.
+        """
+        yield self
 
     @property
     def name(self) -> str:
