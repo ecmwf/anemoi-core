@@ -391,3 +391,94 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         # Re-raise so the test still fails, but with extra context.
         raise
     torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=bwd_rtol)
+<<<<<<< HEAD
+=======
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("H", [4, 9])
+@pytest.mark.parametrize(
+    "seqlens",
+    [
+        [128],  # single sequence, even
+        [97],  # single sequence, uneven
+        [128, 128],  # two equal sequences
+        [64, 128, 256],  # three sequences, different lengths
+        [97, 200, 57],  # three sequences, all uneven
+        [512],  # larger single sequence
+        [33, 65, 129, 17],  # four sequences, mix of sizes
+    ],
+)
+@pytest.mark.parametrize("HEAD_DIM", [64])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("min_tokens_per_kernel", [100, 10000])
+def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype, min_tokens_per_kernel):
+    """Tests varlen flash attention forward pass against the reference implementation.
+
+    Packs multiple variable-length sequences into a single tensor and compares
+    the triton varlen kernel output against the naive PyTorch reference.
+    """
+    if not is_triton_available():
+        pytest.skip("Triton not available")
+
+    try:
+        DEVICE = triton.runtime.driver.active.get_active_torch_device()
+    except RuntimeError:
+        pytest.skip("No GPU detected")
+
+    sm_scale = 1.0 / math.sqrt(HEAD_DIM)
+
+    # Build cumulative sequence lengths
+    cu_seqlens = [0]
+    for s in seqlens:
+        cu_seqlens.append(cu_seqlens[-1] + s)
+    total_tokens = cu_seqlens[-1]
+    cu_seqlens_q = torch.tensor(cu_seqlens, dtype=torch.int32, device=DEVICE)
+    cu_seqlens_k = cu_seqlens_q.clone()  # Q and K have the same sequence lengths
+
+    # Create packed input tensors: [TOTAL_TOKENS, H, HEAD_DIM]
+    q = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+    k = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+    v = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
+
+    # Compute reference output using the naive implementation
+    ref_out = attention_varlen_ref(q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale, causal=False, window_size=-1)
+
+    # Compute triton output
+    tri_out = TritonAttentionVarlen.apply(
+        q, k, v, cu_seqlens_q, cu_seqlens_k, False, -1, sm_scale, min_tokens_per_kernel
+    )
+
+    # Set tolerances
+    if dtype == torch.bfloat16:
+        atol = 5e-3
+        rtol = 1e-2
+    else:
+        atol = 1e-3
+        rtol = 0.0
+
+    try:
+        torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=rtol)
+    except AssertionError:
+        with torch.no_grad():
+            diff = (tri_out - ref_out).abs()
+            max_err = diff.max()
+            max_idx = (diff == max_err).nonzero(as_tuple=False)[0]
+            t, h, d = [int(x) for x in max_idx]
+            print(
+                f"[varlen-attn debug] global max abs error: {float(max_err.cpu())}"
+                f" at (token, head, dim)=({t}, {h}, {d})"
+            )
+            print(f"[varlen-attn debug] tri_out[t, h, :8] = {tri_out[t, h, :8].cpu()}")
+            print(f"[varlen-attn debug] ref_out[t, h, :8] = {ref_out[t, h, :8].cpu()}")
+
+            # Check per-sequence errors
+            for b, (s_start, s_end) in enumerate(zip(cu_seqlens[:-1], cu_seqlens[1:])):
+                seq_diff = diff[s_start:s_end].max()
+                print(f"[varlen-attn debug] seq {b} (len={s_end - s_start}) max error: {float(seq_diff.cpu())}")
+        raise
+
+    print(
+        f"[varlen-attn fwd] PASSED: H={H}, seqlens={seqlens}, HEAD_DIM={HEAD_DIM}, dtype={dtype}, min_tokens_per_kernel={min_tokens_per_kernel}"
+    )
+>>>>>>> 4e4460e781a195d483ba7bdd178409808b935d0c
