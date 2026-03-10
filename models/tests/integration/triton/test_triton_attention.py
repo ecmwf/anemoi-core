@@ -23,7 +23,6 @@ from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
     from anemoi.models.triton.attention import TritonAttention
-    from anemoi.models.triton.attention import TritonAttentionVarlen
     from anemoi.models.triton.attention import is_hip
 
 try:
@@ -33,89 +32,34 @@ try:
 except BaseException:
     HAS_FLASH = False
 
-
-def attention_varlen_ref(
+def attention_ref(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    cu_seqlens_q: torch.Tensor,
-    cu_seqlens_k: torch.Tensor,
     sm_scale: float,
     causal: bool = False,
     window_size: int = -1,
 ) -> torch.Tensor:
-    """Reference implementation for global attention with variable-length sequences.
+    """Reference implementation for fixed-length attention using fp32 GEMMs and softmax."""
+    output_dtype = q.dtype
+    q_fp32 = q.float()
+    k_fp32 = k.float()
+    v_fp32 = v.float()
 
-    Args:
-        q: Query tensor of shape [Total_Q_tokens, H, D]
-        k: Key tensor of shape [Total_K_tokens, H, D]
-        v: Value tensor of shape [Total_K_tokens, H, D]
-        cu_seqlens_q: Cumulative sequence lengths for queries, shape [B+1]
-        cu_seqlens_k: Cumulative sequence lengths for keys/values, shape [B+1]
-        sm_scale: Softmax scale (typically 1/sqrt(d))
-        causal: Whether to apply causal masking
-        window_size: Sliding window size (-1 for no window)
+    scores = torch.matmul(q_fp32, k_fp32.transpose(-1, -2)) * sm_scale
 
-    Returns:
-        Output tensor of shape [Total_Q_tokens, H, D]
-    """
-    device = q.device
-    dtype = q.dtype
-    batch_size = len(cu_seqlens_q) - 1
+    if causal:
+        causal_mask = torch.triu(torch.ones(scores.shape[-2:], device=q.device), diagonal=1).bool()
+        scores = scores.masked_fill(causal_mask, float("-inf"))
 
-    # Collect outputs for each sequence
-    outputs = []
+    if window_size != -1:
+        q_positions = torch.arange(scores.shape[-2], device=q.device)
+        k_positions = torch.arange(scores.shape[-1], device=q.device)
+        window_mask = torch.abs(q_positions[:, None] - k_positions[None, :]) > window_size
+        scores = scores.masked_fill(window_mask, float("-inf"))
 
-    for b in range(batch_size):
-        # Extract the current sequence
-        q_start, q_end = cu_seqlens_q[b].item(), cu_seqlens_q[b + 1].item()
-        k_start, k_end = cu_seqlens_k[b].item(), cu_seqlens_k[b + 1].item()
-
-        q_seq = q[q_start:q_end]  # [seq_len_q, H, D]
-        k_seq = k[k_start:k_end]  # [seq_len_k, H, D]
-        v_seq = v[k_start:k_end]  # [seq_len_k, H, D]
-
-        seq_len_q = q_end - q_start
-        seq_len_k = k_end - k_start
-
-        # Reshape for batch matrix multiplication
-        # [seq_len, H, D] -> [H, seq_len, D]
-        q_seq = q_seq.transpose(0, 1)
-        k_seq = k_seq.transpose(0, 1)
-        v_seq = v_seq.transpose(0, 1)
-
-        # Compute attention scores: [H, seq_len_q, D] @ [H, D, seq_len_k] -> [H, seq_len_q, seq_len_k]
-        scores = torch.matmul(q_seq, k_seq.transpose(1, 2)) * sm_scale
-
-        # Apply masks
-        if causal:
-            # Causal mask: each query position can only attend to positions <= its own position
-            causal_mask = torch.triu(torch.ones(seq_len_q, seq_len_k, device=device), diagonal=1).bool()
-            scores = scores.masked_fill(causal_mask.unsqueeze(0), float("-inf"))
-
-        if window_size != -1:
-            # Sliding window mask
-            positions_q = torch.arange(seq_len_q, device=device)
-            positions_k = torch.arange(seq_len_k, device=device)
-            window_mask = torch.abs(positions_q[:, None] - positions_k[None, :]) > window_size
-            scores = scores.masked_fill(window_mask.unsqueeze(0), float("-inf"))
-
-        # Apply softmax
-        attn_weights = torch.softmax(scores.float(), dim=-1).to(dtype)
-
-        # Compute output: [H, seq_len_q, seq_len_k] @ [H, seq_len_k, D] -> [H, seq_len_q, D]
-        out_seq = torch.matmul(attn_weights, v_seq)
-
-        # Reshape back: [H, seq_len_q, D] -> [seq_len_q, H, D]
-        out_seq = out_seq.transpose(0, 1)
-
-        outputs.append(out_seq)
-
-    # Concatenate all sequences
-    output = torch.cat(outputs, dim=0)  # [Total_Q_tokens, H, D]
-
-    return output
-
+    attn_weights = torch.softmax(scores, dim=-1)
+    return torch.matmul(attn_weights, v_fp32).to(output_dtype)
 
 @pytest.mark.gpu
 def test_triton_attention_deterministic():
@@ -243,22 +187,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 
     # Compute reference values
     if not HAS_FLASH:
-        p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
-
-        # Optionally mask values
-        if causal:
-            # Create causal mask
-            M = torch.tril(torch.ones((N_CTX, N_CTX), device=DEVICE))
-            p[:, :, M == 0] = float("-inf")
-        if window_size != -1:
-            # Create sliding window mask
-            positions = torch.arange(N_CTX, device="cuda")
-            mask = abs(positions[:, None] - positions[None, :]) <= window_size
-            p[:, :, ~mask] = float("-inf")
-
-        p = torch.softmax(p.float(), dim=-1)
-        p = p.to(ref_dtype)
-        ref_out = torch.matmul(p, v).to(dtype)
+        ref_out = attention_ref(q, k, v, sm_scale, causal=causal, window_size=window_size).to(dtype)
 
         if mode == "bwd":
             dout = torch.randn_like(q)
@@ -391,94 +320,3 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         # Re-raise so the test still fails, but with extra context.
         raise
     torch.testing.assert_close(tri_dk, ref_dk, atol=atol, rtol=bwd_rtol)
-<<<<<<< HEAD
-=======
-
-
-@pytest.mark.gpu
-@pytest.mark.parametrize("H", [4, 9])
-@pytest.mark.parametrize(
-    "seqlens",
-    [
-        [128],  # single sequence, even
-        [97],  # single sequence, uneven
-        [128, 128],  # two equal sequences
-        [64, 128, 256],  # three sequences, different lengths
-        [97, 200, 57],  # three sequences, all uneven
-        [512],  # larger single sequence
-        [33, 65, 129, 17],  # four sequences, mix of sizes
-    ],
-)
-@pytest.mark.parametrize("HEAD_DIM", [64])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("min_tokens_per_kernel", [100, 10000])
-def test_triton_attention_varlen_fwd(H, seqlens, HEAD_DIM, dtype, min_tokens_per_kernel):
-    """Tests varlen flash attention forward pass against the reference implementation.
-
-    Packs multiple variable-length sequences into a single tensor and compares
-    the triton varlen kernel output against the naive PyTorch reference.
-    """
-    if not is_triton_available():
-        pytest.skip("Triton not available")
-
-    try:
-        DEVICE = triton.runtime.driver.active.get_active_torch_device()
-    except RuntimeError:
-        pytest.skip("No GPU detected")
-
-    sm_scale = 1.0 / math.sqrt(HEAD_DIM)
-
-    # Build cumulative sequence lengths
-    cu_seqlens = [0]
-    for s in seqlens:
-        cu_seqlens.append(cu_seqlens[-1] + s)
-    total_tokens = cu_seqlens[-1]
-    cu_seqlens_q = torch.tensor(cu_seqlens, dtype=torch.int32, device=DEVICE)
-    cu_seqlens_k = cu_seqlens_q.clone()  # Q and K have the same sequence lengths
-
-    # Create packed input tensors: [TOTAL_TOKENS, H, HEAD_DIM]
-    q = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
-    k = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
-    v = torch.randn((total_tokens, H, HEAD_DIM), dtype=dtype, device=DEVICE)
-
-    # Compute reference output using the naive implementation
-    ref_out = attention_varlen_ref(q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale, causal=False, window_size=-1)
-
-    # Compute triton output
-    tri_out = TritonAttentionVarlen.apply(
-        q, k, v, cu_seqlens_q, cu_seqlens_k, False, -1, sm_scale, min_tokens_per_kernel
-    )
-
-    # Set tolerances
-    if dtype == torch.bfloat16:
-        atol = 5e-3
-        rtol = 1e-2
-    else:
-        atol = 1e-3
-        rtol = 0.0
-
-    try:
-        torch.testing.assert_close(tri_out, ref_out, atol=atol, rtol=rtol)
-    except AssertionError:
-        with torch.no_grad():
-            diff = (tri_out - ref_out).abs()
-            max_err = diff.max()
-            max_idx = (diff == max_err).nonzero(as_tuple=False)[0]
-            t, h, d = [int(x) for x in max_idx]
-            print(
-                f"[varlen-attn debug] global max abs error: {float(max_err.cpu())}"
-                f" at (token, head, dim)=({t}, {h}, {d})"
-            )
-            print(f"[varlen-attn debug] tri_out[t, h, :8] = {tri_out[t, h, :8].cpu()}")
-            print(f"[varlen-attn debug] ref_out[t, h, :8] = {ref_out[t, h, :8].cpu()}")
-
-            # Check per-sequence errors
-            for b, (s_start, s_end) in enumerate(zip(cu_seqlens[:-1], cu_seqlens[1:])):
-                seq_diff = diff[s_start:s_end].max()
-                print(f"[varlen-attn debug] seq {b} (len={s_end - s_start}) max error: {float(seq_diff.cpu())}")
-        raise
-
-    print(
-        f"[varlen-attn fwd] PASSED: H={H}, seqlens={seqlens}, HEAD_DIM={HEAD_DIM}, dtype={dtype}, min_tokens_per_kernel={min_tokens_per_kernel}"
-    )
->>>>>>> 4e4460e781a195d483ba7bdd178409808b935d0c

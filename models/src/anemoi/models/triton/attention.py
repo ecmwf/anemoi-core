@@ -20,6 +20,7 @@ import math
 import os
 
 import torch
+from packaging import version
 
 from anemoi.models.triton.utils import is_blackwell
 from anemoi.models.triton.utils import is_hip
@@ -37,7 +38,7 @@ except ImportError:
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
 
-TENSOR_DESCRIPTOR_SUPPORTED = triton.__version__ >= "2.7"
+TENSOR_DESCRIPTOR_SUPPORTED = version.parse(triton.__version__) >= version.parse("2.7")
 if TENSOR_DESCRIPTOR_SUPPORTED:
     from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -115,7 +116,7 @@ def _attn_fwd_inner(
         lo = tl.multiple_of(lo, BLOCK_ITER)
         if not UNEVEN_CTX:
             hi = tl.multiple_of(hi, BLOCK_ITER)
-    elif WINDOW > 0:
+    elif WINDOW >= 0:
         # Attends within the following range (Assuming W=1)
         # X X - - -
         # X X X - -
@@ -172,7 +173,7 @@ def _attn_fwd_inner(
             qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
 
         # apply Causal or Window masking if needed.
-        if WINDOW > 0:
+        if WINDOW >= 0:
             fixed_pos = offs_fixed[:, None]
             iter_pos = (curr_iter + offs_iter)[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
@@ -332,7 +333,7 @@ def _attn_fwd(
     o,
     N_CTX: tl.constexpr,  # context length
     HEAD_DIM: tl.constexpr,  # head dimension
-    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied. Only values within the window around the BLOCK_FIXED section of Q loaded by the kernel will be attended to.
+    WINDOW: tl.constexpr,  # sliding window size. If negative, no sliding window masking is applied. Only values within the window around the BLOCK_FIXED section of Q loaded by the kernel will be attended to.
     BLOCK_FIXED: tl.constexpr,  # size of the block of Q loaded into shared memory
     BLOCK_ITER: tl.constexpr,  # size of the block of K and V iterated over
     CAUSAL: tl.constexpr,  # whether to apply causal masking
@@ -517,7 +518,6 @@ def _attn_bwd_dkdv(
     dk_ptr,
     dv_ptr,
     M,  # pointer to output maxes from forward pass
-    L,  # pointer to log-sum-exp values from forward pass
     D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
     sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
@@ -528,7 +528,7 @@ def _attn_bwd_dkdv(
     BLOCK_FIXED: tl.constexpr,  # size of the block of K and V loaded into shared memory
     HEAD_DIM: tl.constexpr,  # head dimension
     CAUSAL: tl.constexpr,  # whether to apply causal masking
-    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied
+    WINDOW: tl.constexpr,  # sliding window size. If negative, no sliding window masking is applied
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
@@ -613,9 +613,8 @@ def _attn_bwd_dkdv(
 
     # ***** 4) allocate shared memory buffers for gradients and load fixed subset of K and V into shared memory *****
 
-    # offset pointers for batch/head into M, L, D arrays
+    # offset pointers for batch/head into M, and D arrays
     M += off_chz
-    L += off_chz
     D += off_chz
 
     tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
@@ -649,7 +648,7 @@ def _attn_bwd_dkdv(
     #   masked => apply MASK to block
 
     # Calculate the upper and lower bounds when using masking
-    if WINDOW > 0:
+    if WINDOW >= 0:
         # Rather then iterating across the whole context, we iterate
         # Over a window around the position of the K and V blocks
         lo = tl.maximum(0, start_fixed - WINDOW)
@@ -705,7 +704,7 @@ def _attn_bwd_dkdv(
             mask = curr_offs[None, :] >= offs_fixed[:, None]
             qkT = tl.where(mask, qkT, MINUS_INF)
 
-        if WINDOW > 0:
+        if WINDOW >= 0:
             iter_pos = curr_offs[None, :]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
             mask = (kv_lower_bound <= iter_pos) & (kv_upper_bound >= iter_pos)
@@ -784,7 +783,7 @@ def _attn_bwd_dq(
     BLOCK_FIXED: tl.constexpr,  # size of the block of Q loaded into shared memory
     HEAD_DIM: tl.constexpr,  # head dimension
     CAUSAL: tl.constexpr,  # whether to apply causal masking
-    WINDOW: tl.constexpr,  # sliding window size. If 0, no sliding window masking is applied
+    WINDOW: tl.constexpr,  # sliding window size. If negative, no sliding window masking is applied
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
     n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for M/D indexing
@@ -905,7 +904,7 @@ def _attn_bwd_dq(
     #   masked => apply MASK to block
 
     # Calculate the upper and lower bounds when using masking
-    if WINDOW > 0:
+    if WINDOW >= 0:
         lo = tl.maximum(0, start_fixed - WINDOW)
         hi = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
         q_lower_bound: tl.constexpr = offs_fixed[:, None] - WINDOW
@@ -959,7 +958,7 @@ def _attn_bwd_dq(
             mask = fixed_pos >= iter_pos
             qk = tl.where(mask, qk, MINUS_INF)
 
-        if WINDOW > 0:
+        if WINDOW >= 0:
             iter_pos = (curr_iter + offs_iter)[None, :]
             mask = (iter_pos <= q_upper_bound) & (iter_pos >= q_lower_bound)
             qk = tl.where(mask, qk, MINUS_INF)
@@ -969,9 +968,9 @@ def _attn_bwd_dq(
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
-        ds = ds.to(dtype)
         # Compute dQ.
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
+        ds = ds.to(dtype)
         dq += tl.dot(ds, tl.trans(kT))
 
         # move to the next iter_block
@@ -1077,8 +1076,14 @@ class TritonAttention(torch.autograd.Function):
         o = torch.empty_like(q)
 
         if window is None:
-            window = 0
-        assert not (causal and window > 0), "causal and window not supported in combination"
+            window = -1  # If window is not specified, set to -1 to indicate no window masking
+        assert not (causal and window >= 0), "causal and window not supported in combination"
+        assert q.ndim == k.ndim == v.ndim == 4, "TritonAttention expects [batch, head, sequence, dim] tensors"
+        assert (
+            q.shape[:3] == k.shape[:3] == v.shape[:3]
+        ), "TritonAttention requires q, k and v to share batch, head, and sequence dimensions"
+        assert q.dtype == k.dtype == v.dtype, "TritonAttention requires q, k and v to use the same dtype"
+        assert q.device == k.device == v.device, "TritonAttention requires q, k and v to be on the same device"
 
         n_ctx = q.shape[2]
         MAX_BLOCK_SIZE = 128  # not possible to infer BLOCK_SIZE determined by autotuning at this point, so we use the max possible block size to ensure we never read out of bounds.
@@ -1115,7 +1120,7 @@ class TritonAttention(torch.autograd.Function):
             o,  # raw output tensor (required for uneven ctx case to handle tail case where a smaller block size is needed to avoid overwriting neighbours data)
             N_CTX=n_ctx,  # context length,
             HEAD_DIM=HEAD_DIM_K,  # head dimension
-            WINDOW=window,  # window length for sliding window attention. If 0, no sliding window masking is applied
+            WINDOW=window,  # window length for sliding window attention. If negative, no sliding window masking is applied
             CAUSAL=causal,  # whether to apply causal masking
             dtype=torch_dtype_to_triton(q.dtype),
             n_ctx_rounded=n_ctx_rounded,  # rounded context length used for indexing in M and D tensors to avoid out-of-bounds when N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
@@ -1158,10 +1163,9 @@ class TritonAttention(torch.autograd.Function):
 
         # Pad tensors to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_ITER
         pre_grid = (triton.cdiv(n_ctx, PRE_BLOCK), BATCH * N_HEAD)
-        L = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
-        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
-        desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, True)
+        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, False)
+        desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, False)
 
         # precompute 'delta' value needed for softmax computation
         _attn_bwd_preprocess[pre_grid](
@@ -1198,7 +1202,6 @@ class TritonAttention(torch.autograd.Function):
             dk,
             dv,
             M,
-            L,
             delta,  #
             ctx.sm_scale,
             Z=BATCH,
@@ -1237,4 +1240,4 @@ class TritonAttention(torch.autograd.Function):
             **extra_kern_args,
         )
 
-        return dq, dk, dv, None, None, None, None
+        return dq, dk, dv, None, None, None
