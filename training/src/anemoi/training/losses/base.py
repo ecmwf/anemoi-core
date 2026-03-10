@@ -202,10 +202,10 @@ class BaseLoss(nn.Module, ABC):
 
     def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
         """Yield all leaf loss modules.
+
         For simple losses, yields self. For composite losses (e.g. CombinedLoss),
         recursively yields the underlying leaf losses.
         """
-        
         yield self
 
     @property
