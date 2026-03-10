@@ -20,6 +20,7 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
+from anemoi.models.distributed.shapes import ShardShapes
 from anemoi.training.data.dataset import create_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
@@ -242,6 +243,7 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
+        shard_shapes: dict[str, ShardShapes],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -259,6 +261,8 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
+        shard_shapes : dict[str, ShardShapes]
+            Shard shapes for all datasets
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
