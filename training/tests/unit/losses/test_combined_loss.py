@@ -108,6 +108,18 @@ def test_combined_loss_seperate_scalers() -> None:
     assert "test2" in loss.losses[1].scaler
 
 
+def test_iter_leaf_losses_combined() -> None:
+    """Test that iter_leaf_losses on a CombinedLoss yields the sub-losses."""
+    mse = MSELoss()
+    mae = MAELoss()
+    combined = CombinedLoss(losses=[mse, mae], loss_weights=[1.0, 1.0])
+
+    leaves = list(combined.iter_leaf_losses())
+    assert len(leaves) == 2
+    assert leaves[0] is mse
+    assert leaves[1] is mae
+
+
 def test_combined_loss_with_spectral_crps_backward() -> None:
     # Use a tiny regular 2D field so we can use FFT2D-based spectral loss without extra assets.
     batch = 2
