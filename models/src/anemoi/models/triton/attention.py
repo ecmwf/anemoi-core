@@ -830,7 +830,7 @@ def _attn_bwd_dq(
     # ***** 3) create tensor descriptors for the input and output tensors, with block sizes determined by autotuning *****
 
     # How many elements in the first 3 dimensions (use actual N_CTX for q,k,v,do layout)
-    y_dim = Z * H * n_ctx_rounded
+    y_dim = Z * H * N_CTX
     # Build tensor descriptors if they havent already been built in _system_specific_settings()
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
