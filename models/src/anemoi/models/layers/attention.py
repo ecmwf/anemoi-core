@@ -338,8 +338,14 @@ class FlashAttentionWrapper(nn.Module):
         self.use_rotary_embeddings = False
         if use_rotary_embeddings:
             if self.use_flash_attn_v4 or self.use_flash_attn_v3:
-                raise RuntimeError("Rotary Embeddings not supported with flash attention v3 and v4. Please switch to flash attention v2 to use rotary embeddings.")
-            elif flash_attn.__version__ <= version.parse("2.6"):
+                raise RuntimeError(
+                    "Rotary Embeddings not supported with flash attention v3 and v4. Please switch to flash attention v2 to use rotary embeddings."
+                )
+
+            # import flash attn v2 to check the version
+            import flash_attn
+
+            if flash_attn.__version__ <= version.parse("2.6"):
                 raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
 
             from flash_attn.layers.rotary import RotaryEmbedding
@@ -359,10 +365,13 @@ class FlashAttentionWrapper(nn.Module):
         self.use_flash_attn_v3 = False
         self.use_flash_attn_v4 = False
 
-        e_v4 = None; e_v3 = None; e_v2 = None
+        e_v4 = None
+        e_v3 = None
+        e_v2 = None
 
         try:
-            from flash_attn.cute import flash_attn_func 
+            from flash_attn.cute import flash_attn_func
+
             LOGGER.info("Using flash attention v4")
             self.use_flash_attn_v4 = True
             return flash_attn_func
@@ -372,6 +381,7 @@ class FlashAttentionWrapper(nn.Module):
 
         try:
             from flash_attn_interface import flash_attn_func
+
             LOGGER.info("Using flash attention v3")
             self.use_flash_attn_v3 = True
             return flash_attn_func
@@ -379,7 +389,8 @@ class FlashAttentionWrapper(nn.Module):
             e_v3 = e
             LOGGER.debug(f"Flash attention v3 not available: {e_v3}")
         try:
-            from flash_attn import flash_attn_func 
+            from flash_attn import flash_attn_func
+
             LOGGER.info("Using flash attention v2")
             return flash_attn_func
         except ImportError as e:
@@ -387,11 +398,11 @@ class FlashAttentionWrapper(nn.Module):
             LOGGER.debug(f"Flash attention v2 not available: {e_v2}")
 
         raise ImportError(
-            "Flash attention is not installed. Please install flash attention v4, v3 or v2 to use this attention implementation. \n"
-            f"Attempted imports resulted in the following errors: \n"
-            f"v4 import error: {e_v4} \n"
-            f"v3 import error: {e_v3} \n"
-            f"v2 import error: {e_v2} \n"
+            "Flash attention is not installed. Please install flash attention v4, v3 or v2 to use this attention implementation. "
+            f"Attempted imports resulted in the following errors: "
+            f"v4 import error: {e_v4} "
+            f"v3 import error: {e_v3} "
+            f"v2 import error: {e_v2} "
         )
 
     def forward(
