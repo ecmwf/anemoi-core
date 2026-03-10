@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -81,6 +82,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout window length: %d", self.rollout)
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
+
+        self._plot_adapter = ForecasterPlotAdapter(self)
 
     def _advance_dataset_input(
         self,

@@ -7,7 +7,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from enum import Enum
+from enum import StrEnum
 from functools import partial
 from typing import Annotated
 from typing import Any
@@ -143,7 +143,7 @@ class NaNMaskScalerSchema(BaseModel):
     "Flag to include processors for tendencies when building the loss mask."
 
 
-class TendencyScalerTargets(str, Enum):
+class TendencyScalerTargets(StrEnum):
     stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
     var = "anemoi.training.losses.scalers.VarTendencyScaler"
 
@@ -157,7 +157,7 @@ class TendencyScalerSchema(BaseModel):
     "Timestep key used to select tendency statistics for scalers."
 
 
-class VariableLevelScalerTargets(str, Enum):
+class VariableLevelScalerTargets(StrEnum):
     relu_scaler = "anemoi.training.losses.scalers.ReluVariableLevelScaler"
     linear_scaler = "anemoi.training.losses.scalers.LinearVariableLevelScaler"
     polynomial_sclaer = "anemoi.training.losses.scalers.PolynomialVariableLevelScaler"
@@ -249,7 +249,7 @@ ScalerSchema = (
 )
 
 
-class ImplementedLossesUsingBaseLossSchema(str, Enum):
+class ImplementedLossesUsingBaseLossSchema(StrEnum):
     kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
     afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
     rmse = "anemoi.training.losses.RMSELoss"
@@ -358,7 +358,7 @@ LossSchemas = (
 )
 
 
-class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
+class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):
     ddp_ens = "anemoi.training.distributed.strategy.DDPEnsGroupStrategy"
     ddp = "anemoi.training.distributed.strategy.DDPGroupStrategy"
 
@@ -411,7 +411,8 @@ class BaseTrainingSchema(BaseModel):
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
-    "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
+    "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
+    " reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
@@ -485,15 +486,6 @@ class DiffusionTendForecasterSchema(ForecasterSchema):
     "Training objective."
 
 
-class InterpolationSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
-    "Training objective."
-    explicit_times: ExplicitTimes
-    "Time indices for input and output."
-    target_forcing: DatasetDict[TargetForcing]
-    "Forcing parameters for target output times."
-
-
 class AutoencoderSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
     "Training objective."
@@ -504,14 +496,15 @@ class InterpolationMultiSchema(BaseTrainingSchema):
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
-    target_forcing: None
-    "Forcing parameters not applied for multi-outputs."
+
+    # Needed to allow to override default training configuration
+    # Forced to be None (null)
+    rollout: Literal[None] = None
 
 
 TrainingSchema = Annotated[
     ForecasterSchema
     | ForecasterEnsSchema
-    | InterpolationSchema
     | InterpolationMultiSchema
     | DiffusionForecasterSchema
     | DiffusionTendForecasterSchema
