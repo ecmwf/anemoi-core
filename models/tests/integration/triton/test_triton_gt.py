@@ -48,7 +48,7 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
 
 
 class _GraphTransformerConvQKnorm(GraphTransformerConv):
-    """Wrapper class around GraphTransformer which incorporates an RMSNorm.
+    """Wrapper class around GraphTransformer which incorporates an optional QKNorm.
 
     Intended for correctness testing purposes only.
     """
@@ -323,7 +323,6 @@ def test_graph_transformer_deterministic():
             first_dv = v_run.grad.detach().clone()
             first_de = e_run.grad.detach().clone()
         else:
-            # Compare with first run - outputs should be bit-exact
             try:
                 torch.testing.assert_close(out, first_out, atol=tolerance, rtol=0.0)
                 torch.testing.assert_close(q_run.grad, first_dq, atol=tolerance, rtol=0.0)
