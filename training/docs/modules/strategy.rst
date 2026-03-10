@@ -6,7 +6,9 @@
 
 This module defines the strategy for parallelising model training
 across GPUs. It also seeds the random number generators for each rank
-to keep runs reproducible. The implementation builds on the PyTorch Lightning
+to control stochastic parts of a run. This improves repeatability, but
+does not guarantee exact reproducibility because floating-point numerics
+and distributed reductions can vary across environments. The implementation builds on the PyTorch Lightning
 `DDP Strategy <https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.strategies.DDPStrategy.html>`__
 but layers several communication groups on top of vanilla DDP so that
 models, readers, and ensemble members can coordinate work explicitly.
@@ -30,7 +32,7 @@ strategies:
 * configures DDP and injects per-parameter gradient scaling hooks
 * exposes the ``shard_shapes`` that dataloaders need to produce correctly
    partitioned batches
-* seeds ``torch``, ``numpy`` and PyTorch Lightning RNGs deterministically
+* seeds ``torch``, ``numpy`` and PyTorch Lightning RNGs in a controlled way
 
 To implement a new strategy inherit from :class:`BaseDDPStrategy` and
 override two methods:

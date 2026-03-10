@@ -242,7 +242,10 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer = AnemoiTrainer(cfg)
     trainer.train()
 
-    assert trainer.model.trainer.global_step == 6
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
