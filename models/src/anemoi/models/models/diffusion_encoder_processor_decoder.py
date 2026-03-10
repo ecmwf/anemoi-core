@@ -318,10 +318,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         ensemble_size = self._get_consistent_dim(x, 2)
 
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
-        in_out_sharded = grid_shard_shapes is not None and all(
-            [grid_shard_shapes[dataset_name] is not None for dataset_name in dataset_names]
+        in_out_sharded = self._resolve_in_out_sharded(
+            dataset_names=dataset_names,
+            grid_shard_shapes=grid_shard_shapes,
         )
-        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
+        for dataset_name in dataset_names:
+            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         # prepare noise conditionings
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
@@ -365,7 +367,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 edge_attr=encoder_edge_attr,
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
-                keep_x_dst_sharded=True,
+                keep_x_dst_sharded=in_out_sharded[dataset_name],  # always keep x_latent sharded for the processor
                 **fwd_mapper_kwargs[dataset_name],
             )
             x_data_latent_dict[dataset_name] = x_data_latent
@@ -421,7 +423,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
-                keep_x_dst_sharded=in_out_sharded,
+                keep_x_dst_sharded=in_out_sharded[dataset_name],
                 **bwd_mapper_kwargs[dataset_name],
             )
 
@@ -437,7 +439,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: Optional[dict[str, list]] = None,
     ) -> dict[str, torch.Tensor]:
         """Forward pass with pre-conditioning of EDM diffusion model."""
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)

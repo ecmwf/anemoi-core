@@ -147,7 +147,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         *,
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: dict[str, list] | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """Forward operator.
@@ -177,10 +177,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ensemble_size = self._get_consistent_dim(x, 2)
 
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
-        in_out_sharded = grid_shard_shapes is not None and all(
-            [grid_shard_shapes[dataset_name] is not None for dataset_name in dataset_names]
+        in_out_sharded = self._resolve_in_out_sharded(
+            dataset_names=dataset_names,
+            grid_shard_shapes=grid_shard_shapes,
         )
-        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
+        for dataset_name in dataset_names:
+            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder
@@ -291,7 +293,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
-                keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+                keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
