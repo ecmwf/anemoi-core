@@ -10,8 +10,8 @@
 
 import functools
 from collections.abc import Callable
-from typing import Any
 from collections.abc import Iterator
+from typing import Any
 
 import torch
 from omegaconf import DictConfig
