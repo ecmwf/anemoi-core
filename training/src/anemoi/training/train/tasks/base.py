@@ -279,7 +279,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.is_first_step = True
         self.n_step_input = config.training.multistep_input
         self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
-        LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
+        LOGGER.info(
+            "GraphModule with n_step_input=%s and n_step_output=%s",
+            self.n_step_input,
+            self.n_step_output,
+        )
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -336,13 +340,19 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
+        # Concrete tasks set _plot_adapter in their __init__ (BasePlotAdapter is abstract).
+        self._plot_adapter: Any = None
+
         self.dataset_context_static = self._build_dataset_context_static()
 
     @property
     def output_times(self) -> int | None:
         """Number of outer steps for plotting/validation (e.g. rollout steps or interp times).
-        # Concrete tasks set _plot_adapter in their __init__ (BasePlotAdapter is abstract).
-        self._plot_adapter: Any = None
+
+        Subclasses that support plot callbacks override this. Used as the length of the
+        outer loop in plot code (e.g. for rollout_step in range(output_times)).
+        """
+        return None
 
     @property
     def plot_adapter(self) -> Any:
@@ -412,28 +422,41 @@ class BaseGraphModule(pl.LightningModule, ABC):
             for dataset_name in self.dataset_names
         }
 
-    def _build_dataset_context_static(self) -> dict[str, DatasetContextStatic]:
+    def _get_dataset_pre_processor_tendencies(self, dataset_name: str) -> Any | None:
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
-        post_processors_tendencies = getattr(self.model, "post_processors_tendencies", None)
+        if pre_processors_tendencies is not None and dataset_name in pre_processors_tendencies:
+            return pre_processors_tendencies[dataset_name]
+        return None
 
+    def _get_dataset_post_processor_tendencies(self, dataset_name: str) -> Any | None:
+        post_processors_tendencies = getattr(self.model, "post_processors_tendencies", None)
+        if post_processors_tendencies is not None and dataset_name in post_processors_tendencies:
+            return post_processors_tendencies[dataset_name]
+        return None
+
+    def _get_dataset_loss(self, dataset_name: str) -> BaseLoss | torch.nn.Module | None:
+        try:
+            return self.loss[dataset_name]
+        except KeyError:
+            return None
+
+    def _get_dataset_metrics(self, dataset_name: str) -> Any:
+        try:
+            return self.metrics[dataset_name]
+        except KeyError:
+            return {}
+
+    def _build_dataset_context_static(self) -> dict[str, DatasetContextStatic]:
         return {
             dataset_name: DatasetContextStatic(
                 name=dataset_name,
-                loss=self.loss.get(dataset_name, None),
-                metrics=self.metrics.get(dataset_name, {}),
+                loss=self._get_dataset_loss(dataset_name),
+                metrics=self._get_dataset_metrics(dataset_name),
                 val_metric_ranges=self.val_metric_ranges.get(dataset_name, {}),
                 pre_processor=self.model.pre_processors[dataset_name],
-                pre_processor_tendencies=(
-                    pre_processors_tendencies[dataset_name]
-                    if pre_processors_tendencies and dataset_name in pre_processors_tendencies
-                    else None
-                ),
+                pre_processor_tendencies=self._get_dataset_pre_processor_tendencies(dataset_name),
                 post_processor=self.model.post_processors[dataset_name],
-                post_processor_tendencies=(
-                    post_processors_tendencies[dataset_name]
-                    if post_processors_tendencies and dataset_name in post_processors_tendencies
-                    else None
-                ),
+                post_processor_tendencies=self._get_dataset_post_processor_tendencies(dataset_name),
                 data_indices=self.data_indices[dataset_name],
                 output_mask=self.output_mask[dataset_name],
             )
@@ -478,7 +501,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if update_states:
             processor_prefixes += ("model.pre_processors.", "model.post_processors.")
         if update_tendencies:
-            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+            processor_prefixes += (
+                "model.pre_processors_tendencies.",
+                "model.post_processors_tendencies.",
+            )
 
         if not processor_prefixes:
             return
@@ -1119,7 +1145,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+    def configure_optimizers(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
         scheduler = self._create_scheduler(optimizer)
