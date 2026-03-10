@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
+import einops
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -370,7 +370,6 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
             "scalers": ["*", "!test"],
         }
     )
-    # TODO(@all): not all spectral loss functions need x_dim/y_dim as args
     loss = get_loss_function(
         DictConfig(loss_dic),
         scalers={"test": (-1, torch.ones(2))},
@@ -380,8 +379,6 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
 
 
 def test_logfft2dist_loss() -> None:
-    import einops
-
     """Test that LogFFT2Distance can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
@@ -417,8 +414,6 @@ def test_logfft2dist_loss() -> None:
 
 
 def test_fcl_loss() -> None:
-    import einops
-
     """Test that FourierCorrelationLoss can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
