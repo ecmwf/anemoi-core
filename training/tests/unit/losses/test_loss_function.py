@@ -448,12 +448,14 @@ def test_fcl_loss() -> None:
     with pytest.raises(einops.EinopsError):
         _ = loss(*wrong, squash=True)
 
+
 def test_iter_leaf_losses_flat() -> None:
     """Test that iter_leaf_losses on a simple loss yields itself."""
     loss = MSELoss()
     leaves = list(loss.iter_leaf_losses())
     assert len(leaves) == 1
     assert leaves[0] is loss
+
 
 def test_octahedral_sht_loss() -> None:
     def _octahedral_expected_points(nlat: int) -> int:
