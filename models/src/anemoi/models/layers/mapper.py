@@ -236,30 +236,26 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         cond: Optional[tuple[Tensor, Tensor]] = None,
     ):
         x_src, x_dst = x
-        shard_sizes_src, shard_sizes_dst, shard_sizes_edges = (
-            shard_info.src_nodes,
-            shard_info.dst_nodes,
-            shard_info.edges,
-        )
+        shapes_src, shapes_dst, shapes_edges = shard_info.src_nodes, shard_info.dst_nodes, shard_info.edges
 
         # gather x_src if sharded, always reduce in bwds for correct gradient propagation on halo nodes
-        x_src = sync_tensor(x_src, 0, shard_sizes_src, model_comm_group, gather_in_fwd=shard_info.src_is_sharded())
+        x_src = sync_tensor(x_src, 0, shapes_src, model_comm_group, gather_in_fwd=shard_info.src_is_sharded())
 
         # ensure dst is sharded to match 1hop edge sharding
-        x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
+        x_dst, shapes_dst = ensure_sharded(x_dst, 0, shapes_dst, model_comm_group)
 
         # 1hop sorting + edge sharding
         if not shard_info.edges_are_sharded():
             src_size = x_src.size(0)
-            dst_size = sum(shard_sizes_dst)
-            edge_attr, edge_index, shard_sizes_edges = shard_edges_1hop(
+            dst_size = sum(shapes_dst)
+            edge_attr, edge_index, shapes_edges = shard_edges_1hop(
                 edge_attr, edge_index, src_size, dst_size, model_comm_group
             )
 
         # relabel destination indices from global to local
         if model_comm_group is not None and model_comm_group.size() > 1:
             rank = model_comm_group.rank()
-            dst_offset = sum(shard_sizes_dst[:rank])
+            dst_offset = sum(shapes_dst[:rank])
             edge_index = edge_index.clone()  # no in-place modification of pre-sharded tensor
             edge_index[1] -= dst_offset
 
@@ -269,19 +265,13 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         if cond is not None:  # sync cond_src to match x_src:
             cond_src, cond_dst = cond
-            cond_src_full = sync_tensor(
-                cond_src,
-                0,
-                shard_sizes_src,
-                model_comm_group,
-                gather_in_fwd=shard_info.src_is_sharded(),
-            )
+            cond_src_full = sync_tensor(cond_src, 0, shapes_src, model_comm_group, gather_in_fwd=True)
             cond = (cond_src_full[nodes_src], cond_dst)
 
         shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_sizes_src,
-            dst_nodes=shard_sizes_dst,
-            edges=shard_sizes_edges,
+            src_nodes=shapes_src,
+            dst_nodes=shapes_dst,
+            edges=shapes_edges,
         )
 
         return x_src, x_dst, edge_attr, edge_index, shard_info, cond
@@ -402,27 +392,23 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst = x
-        shard_sizes_src, shard_sizes_dst, shard_sizes_edges = (
-            shard_info.src_nodes,
-            shard_info.dst_nodes,
-            shard_info.edges,
-        )
+        shapes_src, shapes_dst, shapes_edges = shard_info.src_nodes, shard_info.dst_nodes, shard_info.edges
 
         if shard_info.edges_are_sharded():
             # Heads sharding needs full edge_index — gather it
-            edge_index = gather_tensor(edge_index, 1, shard_sizes_edges, model_comm_group)
+            edge_index = gather_tensor(edge_index, 1, shapes_edges, model_comm_group)
 
         # ensure everything is sharded for all-all later
-        x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_sizes_src, model_comm_group)
-        x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
-        edge_attr, shard_sizes_edges = ensure_sharded(edge_attr, 0, shard_sizes_edges, model_comm_group)
-        size = (sum(shard_sizes_src), sum(shard_sizes_dst))
+        x_src, shapes_src = ensure_sharded(x_src, 0, shapes_src, model_comm_group)
+        x_dst, shapes_dst = ensure_sharded(x_dst, 0, shapes_dst, model_comm_group)
+        edge_attr, shapes_edges = ensure_sharded(edge_attr, 0, shapes_edges, model_comm_group)
+        size = (sum(shapes_src), sum(shapes_dst))
 
         # update ShardInfo
         shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_sizes_src,
-            dst_nodes=shard_sizes_dst,
-            edges=shard_sizes_edges,
+            src_nodes=shapes_src,
+            dst_nodes=shapes_dst,
+            edges=shapes_edges,
         )
 
         x_src, x_dst = self.pre_process((x_src, x_dst))
@@ -769,27 +755,23 @@ class GNNBaseMapper(BaseMapper, ABC):
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst = x
-        shard_sizes_src, shard_sizes_dst, shard_sizes_edges = (
-            shard_info.src_nodes,
-            shard_info.dst_nodes,
-            shard_info.edges,
-        )
+        shapes_src, shapes_dst, shapes_edges = shard_info.src_nodes, shard_info.dst_nodes, shard_info.edges
 
         # Ensure src and dst are sharded
-        x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_sizes_src, model_comm_group)
-        x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
-        size = (sum(shard_sizes_src), sum(shard_sizes_dst))
+        x_src, shapes_src = ensure_sharded(x_src, 0, shapes_src, model_comm_group)
+        x_dst, shapes_dst = ensure_sharded(x_dst, 0, shapes_dst, model_comm_group)
+        size = (sum(shapes_src), sum(shapes_dst))
 
         if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
-            edge_attr, edge_index, shard_sizes_edges = shard_edges_1hop(
+            edge_attr, edge_index, shapes_edges = shard_edges_1hop(
                 edge_attr, edge_index, size[0], size[1], model_comm_group
             )
 
         shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_sizes_src,
-            dst_nodes=shard_sizes_dst,
-            edges=shard_sizes_edges,
+            src_nodes=shapes_src,
+            dst_nodes=shapes_dst,
+            edges=shapes_edges,
         )
 
         edge_attr = self.emb_edges(edge_attr)
@@ -1307,15 +1289,15 @@ class TransformerBaseMapper(BaseMapper, ABC):
         cond: Optional[tuple[Tensor, Tensor]] = None,
     ) -> PairTensor:
         x_src, x_dst = x
-        shard_sizes_src, shard_sizes_dst = shard_info.src_nodes, shard_info.dst_nodes
+        shapes_src, shapes_dst = shard_info.src_nodes, shard_info.dst_nodes
 
         # Ensure src and dst are sharded
-        x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_sizes_src, model_comm_group)
-        x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
+        x_src, shapes_src = ensure_sharded(x_src, 0, shapes_src, model_comm_group)
+        x_dst, shapes_dst = ensure_sharded(x_dst, 0, shapes_dst, model_comm_group)
 
         shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_sizes_src,
-            dst_nodes=shard_sizes_dst,
+            src_nodes=shapes_src,
+            dst_nodes=shapes_dst,
             edges=shard_info.edges,
         )
 

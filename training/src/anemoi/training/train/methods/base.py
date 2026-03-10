@@ -574,8 +574,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
-            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_sizes, self.model_comm_group)
-            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_sizes, self.model_comm_group)
+            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_shapes, self.model_comm_group)
+            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_shapes, self.model_comm_group)
             final_grid_shard_slice = None
         else:
             y_pred_full, y_full = y_pred, y
@@ -917,7 +917,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return gather_tensor(
             batch,
             self.grid_dim,
-            grid_shard_sizes,
+            grid_shard_shapes,
             self.reader_groups[self.reader_group_id],
         )
 

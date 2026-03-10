@@ -16,18 +16,18 @@ from anemoi.models.distributed.primitives import _alltoall_transpose
 from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import ShardShapes
+from anemoi.models.distributed.shapes import get_shard_shapes
 
 
 def ensure_sharded(
-    x: Tensor, dim: int, shard_sizes: ShardSizes, model_comm_group: ProcessGroup | None = None
-) -> tuple[Tensor, ShardSizes]:
+    x: Tensor, dim: int, shard_shapes: ShardShapes, model_comm_group: ProcessGroup | None = None
+) -> tuple[Tensor, ShardShapes]:
     """Ensure that the input tensor is sharded along the specified dimension.
 
-    If ``shard_sizes`` is not None the tensor is assumed to already be
+    If ``shard_shapes`` is not None the tensor is assumed to already be
     sharded and a consistency check is performed.  Otherwise the tensor
-    is sharded using balanced partitioning and the resulting sizes are
+    is sharded using balanced partitioning and the resulting shapes are
     returned.
 
     Parameters
@@ -36,31 +36,31 @@ def ensure_sharded(
         Input tensor.
     dim : int
         Dimension along which to shard.
-    shard_sizes : ShardSizes
+    shard_shapes : ShardShapes
         Per-rank partition sizes, or ``None`` if the tensor is replicated.
     model_comm_group : ProcessGroup, optional
         Model communication group.
 
     Returns
     -------
-    tuple[Tensor, ShardSizes]
-        The (possibly sharded) tensor and the shard sizes.
+    tuple[Tensor, ShardShapes]
+        The (possibly sharded) tensor and the shard shapes.
     """
-    if shard_sizes is not None:
+    if shard_shapes is not None:
         my_rank = model_comm_group.rank() if model_comm_group is not None else 0
-        assert shard_sizes[my_rank] == x.shape[dim], (
-            f"Error, expected shard size {shard_sizes[my_rank]} along dimension {dim} "
+        assert shard_shapes[my_rank] == x.shape[dim], (
+            f"Error, expected shard shape {shard_shapes[my_rank]} along dimension {dim} "
             f"for rank {my_rank}, but got {x.shape[dim]}"
         )
-        return x, shard_sizes
+        return x, shard_shapes
 
-    # x not sharded: get sizes and shard tensor accordingly
-    shard_sizes = get_shard_sizes(x, dim, model_comm_group)
-    return shard_tensor(x, dim, shard_sizes, model_comm_group), shard_sizes
+    # x not sharded: get shapes and shard tensor accordingly
+    shard_shapes = get_shard_shapes(x, dim, model_comm_group)
+    return shard_tensor(x, dim, shard_shapes, model_comm_group), shard_shapes
 
 
 def shard_tensor(
-    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup, gather_in_backward: bool = True
+    input_: Tensor, dim: int, shapes: ShardShapes, mgroup: ProcessGroup, gather_in_backward: bool = True
 ) -> Tensor:
     """Shard tensor.
 
@@ -72,8 +72,8 @@ def shard_tensor(
         Input
     dim : int
         dimension along which to shard
-    sizes : ShardSizes
-        Per-rank shard sizes
+    shapes : ShardShapes
+        Shapes of sharded Tensors
     mgroup : ProcessGroup
         model communication group
     gather_in_backward : bool
@@ -87,7 +87,7 @@ def shard_tensor(
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
 
-def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def gather_tensor(input_: Tensor, dim: int, shapes: ShardShapes, mgroup: ProcessGroup) -> Tensor:
     """Gather tensor.
 
     Gathers tensor shards from ranks.
@@ -98,8 +98,8 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
         Input
     dim : int
         dimension along which to gather
-    sizes : ShardSizes
-        Per-rank shard sizes
+    shapes : ShardShapes
+        Shapes of sharded Tensors
     mgroup : ProcessGroup
         model communication group
 
@@ -148,8 +148,8 @@ def sync_tensor(
         Input
     dim : int
         dimension along which to gather
-    sizes : ShardSizes
-        Per-rank shard sizes
+    shapes : ShardShapes
+        Shapes of sharded Tensors
     mgroup : ProcessGroup
         model communication group
 
@@ -161,7 +161,7 @@ def sync_tensor(
     return _SyncParallelSection.apply(input_, dim, sizes, mgroup, gather_in_fwd)
 
 
-def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def reduce_shard_tensor(input_: Tensor, dim: int, shapes: ShardShapes, mgroup: ProcessGroup) -> Tensor:
     """Reduces and then shards tensor.
 
     Perform an allreduce followed by a split in the forward pass and a gather in the backward pass.
@@ -172,8 +172,8 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
         Input
     dim : int
         dimension along which to gather
-    sizes : ShardSizes
-        Per-rank shard sizes
+    shapes : ShardShapes
+        Shapes of sharded Tensors
     mgroup : ProcessGroup
         model communication group
 
@@ -188,9 +188,9 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
 def all_to_all_transpose(
     input_: Tensor,
     dim_split: int,
-    split_sizes: ShardSizes,
+    split_sizes: ShardShapes,
     dim_concat: int,
-    concat_sizes: ShardSizes,
+    concat_sizes: ShardShapes,
     mgroup: ProcessGroup,
 ) -> Tensor:
     """All-to-all transpose.
@@ -203,11 +203,11 @@ def all_to_all_transpose(
         Input tensor to be transposed.
     dim_split : int
         Dimension along which to split the input tensor.
-    split_sizes : ShardSizes
+    split_sizes : ShardShapes
         Shapes of the split tensors.
     dim_concat : int
         Dimension along which to concatenate the transposed tensors.
-    concat_sizes : ShardSizes
+    concat_sizes : ShardShapes
         Shapes of the concatenated tensors.
     mgroup : ProcessGroup
         Model communication group.
@@ -238,7 +238,7 @@ class _SyncParallelSection(torch.autograd.Function):
     def backward(ctx, grad_output):
         if ctx.comm_group:
             grad_output = _reduce(grad_output, group=ctx.comm_group)
-            if ctx.did_gather:  # only split if we gathered in forward
+            if ctx.gather_in_fwd:  # only split if we gathered in forward
                 return (
                     _split(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
                     None,
