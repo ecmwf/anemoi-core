@@ -205,7 +205,6 @@ class BaseLoss(nn.Module, ABC):
         For simple losses, yields self. For composite losses (e.g. CombinedLoss),
         recursively yields the underlying leaf losses.
         """
-        
         yield self
 
     @property
