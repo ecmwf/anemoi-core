@@ -16,6 +16,9 @@ from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
@@ -222,7 +225,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
 
-        in_out_sharded = grid_shard_shapes is not None
+        in_out_sharded = grid_shard_shapes is not None and all(
+            [grid_shard_shapes[dataset_name] is not None for dataset_name in dataset_names]
+        )
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
@@ -230,10 +235,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         for hidden in self._graph_name_hidden:
             x_hidden_latents[hidden] = self.node_attributes[dataset_names[0]](hidden, batch_size=batch_size)
 
-        # Get data and hidden shapes for sharding
+        # Get data and hidden shapes for sharding, and pre-shard hidden latents
         shard_shapes_hidden_dict = {}
         for hidden, x_latent in x_hidden_latents.items():
             shard_shapes_hidden_dict[hidden] = get_shard_shapes(x_latent, 0, model_comm_group=model_comm_group)
+            x_hidden_latents[hidden] = shard_tensor(x_latent, 0, shard_shapes_hidden_dict[hidden], model_comm_group)
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
@@ -261,21 +267,21 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
             )
 
+            enc_shard_info = BipartiteGraphShardInfo(
+                src_nodes=shard_shapes_data_dict[dataset_name],  # None if not sharded
+                dst_nodes=shard_shapes_hidden_dict[self._graph_name_hidden[0]],
+                edges=enc_edge_shard_shapes,
+            )
+
             # Encoder for this dataset
             x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latents[self._graph_name_hidden[0]]),
                 batch_size=batch_size,
-                shard_shapes=(
-                    shard_shapes_data_dict[dataset_name],
-                    shard_shapes_hidden_dict[self._graph_name_hidden[0]],
-                ),
+                shard_info=enc_shard_info,
                 edge_attr=encoder_edge_attr,
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
-                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                edge_shard_shapes=enc_edge_shard_shapes,
             )
             x_data_latent_dict[dataset_name] = x_data_latent
 
@@ -301,11 +307,13 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     x_latent = self.down_level_processor[src_hidden_name](
                         x_latent,
                         batch_size=batch_size,
-                        shard_shapes=shard_shapes_hidden_dict[src_hidden_name],
+                        shard_info=GraphShardInfo(
+                            nodes=shard_shapes_hidden_dict[src_hidden_name],
+                            edges=down_edge_shard_shapes,
+                        ),
                         edge_attr=down_level_edge_attr,
                         edge_index=down_level_edge_index,
                         model_comm_group=model_comm_group,
-                        edge_shard_shapes=down_edge_shard_shapes,
                     )
 
                 # store latents for skip connections
@@ -319,18 +327,21 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     model_comm_group=model_comm_group,
                 )
 
+                ds_shard_info = BipartiteGraphShardInfo(
+                    src_nodes=shard_shapes_hidden_dict[src_hidden_name],
+                    dst_nodes=shard_shapes_hidden_dict[dst_hidden_name],
+                    edges=ds_edge_shard_shapes,
+                )
+
                 # Encode to next hidden level
                 x_encoded_latents_dict[dataset_name][src_hidden_name], x_latent = self.downscale[src_hidden_name](
                     (x_latent, x_hidden_latents[dst_hidden_name]),
                     batch_size=batch_size,
-                    shard_shapes=(shard_shapes_hidden_dict[src_hidden_name], shard_shapes_hidden_dict[dst_hidden_name]),
+                    shard_info=ds_shard_info,
                     edge_attr=downscale_edge_attr,
                     edge_index=downscale_edge_index,
                     model_comm_group=model_comm_group,
-                    x_src_is_sharded=True,
-                    x_dst_is_sharded=False,  # x_latent does not come sharded
                     keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                    edge_shard_shapes=ds_edge_shard_shapes,
                 )
 
             dataset_latents[dataset_name] = x_latent
@@ -348,11 +359,13 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         x_latent = self.processor(
             x_latent,
             batch_size=batch_size,
-            shard_shapes=shard_shapes_hidden_dict[dst_hidden_name],
+            shard_info=GraphShardInfo(
+                nodes=shard_shapes_hidden_dict[self._graph_name_hidden[self.num_hidden - 1]],
+                edges=proc_edge_shard_shapes,
+            ),
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
-            edge_shard_shapes=proc_edge_shard_shapes,
         )
 
         # Decoder
@@ -371,18 +384,21 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     model_comm_group=model_comm_group,
                 )
 
+                us_shard_info = BipartiteGraphShardInfo(
+                    src_nodes=shard_shapes_hidden_dict[src_hidden_name],
+                    dst_nodes=shard_shapes_hidden_dict[dst_hidden_name],
+                    edges=us_edge_shard_shapes,
+                )
+
                 # Decode to next level
                 x_latent = self.upscale[src_hidden_name](
                     (x_latent, x_encoded_latents_dict[dataset_name][dst_hidden_name]),
                     batch_size=batch_size,
-                    shard_shapes=(shard_shapes_hidden_dict[src_hidden_name], shard_shapes_hidden_dict[dst_hidden_name]),
+                    shard_info=us_shard_info,
                     edge_attr=upscale_edge_attr,
                     edge_index=upscale_edge_index,
                     model_comm_group=model_comm_group,
-                    x_src_is_sharded=in_out_sharded,
-                    x_dst_is_sharded=in_out_sharded,
                     keep_x_dst_sharded=in_out_sharded,
-                    edge_shard_shapes=us_edge_shard_shapes,
                 )
 
                 # Add skip connections
@@ -405,9 +421,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                         edge_attr=up_level_edge_attr,
                         edge_index=up_level_edge_index,
                         batch_size=batch_size,
-                        shard_shapes=shard_shapes_hidden_dict[dst_hidden_name],
+                        shard_info=GraphShardInfo(
+                            nodes=shard_shapes_hidden_dict[dst_hidden_name],
+                            edges=up_edge_shard_shapes,
+                        ),
                         model_comm_group=model_comm_group,
-                        edge_shard_shapes=up_edge_shard_shapes,
                     )
             # Compute decoder edges
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
@@ -417,20 +435,20 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
             )
 
+            dec_shard_info = BipartiteGraphShardInfo(
+                src_nodes=shard_shapes_hidden_dict[self._graph_name_hidden[0]],
+                dst_nodes=shard_shapes_data_dict[dataset_name],  # None if not sharded
+                edges=dec_edge_shard_shapes,
+            )
+
             x_out = self.decoder[dataset_name](
                 (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
-                shard_shapes=(
-                    shard_shapes_hidden_dict[self._graph_name_hidden[0]],
-                    shard_shapes_data_dict[dataset_name],
-                ),
+                shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
-                x_src_is_sharded=True,  # x_latent always comes sharded
-                x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
                 keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
-                edge_shard_shapes=dec_edge_shard_shapes,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

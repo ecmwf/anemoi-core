@@ -21,7 +21,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.shapes import ShardShapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
@@ -229,7 +229,7 @@ class BaseGraphModel(nn.Module):
         x: Tensor,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_shapes: ShardShapes = None,
         **kwargs,
     ) -> Tensor:
         """Forward pass of the model.
@@ -240,7 +240,7 @@ class BaseGraphModel(nn.Module):
             Input data
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
-        grid_shard_shapes : list, optional
+        grid_shard_shapes : ShardShapes, optional
             Shard shapes of the grid, by default None
 
         Returns
@@ -307,9 +307,12 @@ class BaseGraphModel(nn.Module):
             if model_comm_group is not None:
                 grid_shard_shapes = {}
                 for dataset_name in dataset_names:
-                    shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
-                    grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
-                    x[dataset_name] = shard_tensor(x[dataset_name], -2, shard_shapes, model_comm_group)
+                    grid_shard_shapes[dataset_name] = get_shard_shapes(
+                        x[dataset_name], -2, model_comm_group=model_comm_group
+                    )
+                    x[dataset_name] = shard_tensor(
+                        x[dataset_name], -2, grid_shard_shapes[dataset_name], model_comm_group
+                    )
 
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
@@ -324,8 +327,9 @@ class BaseGraphModel(nn.Module):
             # Gather output if needed
             if gather_out and model_comm_group is not None:
                 for dataset_name in dataset_names:
-                    y_hat_shard_shapes = apply_shard_shapes(y_hat[dataset_name], -2, grid_shard_shapes[dataset_name])
-                    y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
+                    y_hat[dataset_name] = gather_tensor(
+                        y_hat[dataset_name], -2, grid_shard_shapes[dataset_name], model_comm_group
+                    )
 
         return y_hat
 
