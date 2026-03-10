@@ -327,19 +327,19 @@ class FlashAttentionWrapper(nn.Module):
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
 
-        flash_attn_func, flash_attn_version = self._import_flash_attn()
+        flash_attn_func = self._import_flash_attn()
 
-        self._init_rotary_embeddings(use_rotary_embeddings, head_dim, flash_attn_version)
+        self._init_rotary_embeddings(use_rotary_embeddings, head_dim)
 
         self.attention = flash_attn_func
 
-    def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int, flash_attn_version) -> None:
+    def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int) -> None:
         """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
         self.use_rotary_embeddings = False
         if use_rotary_embeddings:
-            if flash_attn_version >= version.parse("3"):
-                raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
-            elif flash_attn_version <= version.parse("2.6"):
+            if self.use_flash_attn_v4 or self.use_flash_attn_v3:
+                raise RuntimeError("Rotary Embeddings not supported with flash attention v3 and v4. Please switch to flash attention v2 to use rotary embeddings.")
+            elif flash_attn.__version__ <= version.parse("2.6"):
                 raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
 
             from flash_attn.layers.rotary import RotaryEmbedding
@@ -351,70 +351,48 @@ class FlashAttentionWrapper(nn.Module):
         """imports either flash attention v2, v3 or v4, based on what is installed. prioritising v4, then v3, then v2. if none are installed, raises an error.
 
         returns:
-            tuple of (flash attention function, parsed version)
+            flash attention function
         """
-        flash_attn_version = (
-            -1
-        )  # will be set to a valid version if either flash attention v2, v3 or v4 is successfully imported
+        # will be set to a valid version if either flash attention v2, v3 or v4 is successfully imported
         flash_attn_func = None
 
-        # Try import all the flash attention versions
-        HAS_FLASH_V2 = False
-        HAS_FLASH_V3 = False
-        HAS_FLASH_V4 = False
-        e_v2 = None
-        e_v3 = None
-        e_v4 = None
-        try:
-            from flash_attn import flash_attn_func as flash_attn_func_v2
+        self.use_flash_attn_v3 = False
+        self.use_flash_attn_v4 = False
 
-            HAS_FLASH_V2 = True
-        except ImportError:
-            pass
+        e_v4 = None; e_v3 = None; e_v2 = None
 
         try:
-            from flash_attn_interface import flash_attn_func as flash_attn_func_v3
-
-            HAS_FLASH_V3 = True
-        except ImportError:
-            pass
-
-        try:
-            from flash_attn.cute import flash_attn_func as flash_attn_func_v4
-
-            HAS_FLASH_V4 = True
-        except ImportError:
-            pass
-
-        if not (HAS_FLASH_V2 or HAS_FLASH_V3 or HAS_FLASH_V4):
-            raise ImportError(
-                f"Flash attention backend selected but no working flash attention installation found. Errors: \nFlash attn v2: {e_v2}\nFlash attn v3: {e_v3}\nFlash attn v4: {e_v4}"
-            )
-
-        # Select which flash attention version to use, prioritising v4, then v3, then v2
-        if HAS_FLASH_V4:
+            from flash_attn.cute import flash_attn_func 
             LOGGER.info("Using flash attention v4")
-            flash_attn_func = flash_attn_func_v4
-            self.use_flash_attn_v3 = False
             self.use_flash_attn_v4 = True
-        elif HAS_FLASH_V3:
+            return flash_attn_func
+        except ImportError as e:
+            e_v4 = e
+            LOGGER.debug(f"Flash attention v4 not available: {e_v4}")
+
+        try:
+            from flash_attn_interface import flash_attn_func
             LOGGER.info("Using flash attention v3")
-            flash_attn_func = flash_attn_func_v3
             self.use_flash_attn_v3 = True
-            self.use_flash_attn_v4 = False
-        else:
-            # using flash attn v2
+            return flash_attn_func
+        except ImportError as e:
+            e_v3 = e
+            LOGGER.debug(f"Flash attention v3 not available: {e_v3}")
+        try:
+            from flash_attn import flash_attn_func 
             LOGGER.info("Using flash attention v2")
-            flash_attn_func = flash_attn_func_v2
-            self.use_flash_attn_v3 = False
-            self.use_flash_attn_v4 = False
+            return flash_attn_func
+        except ImportError as e:
+            e_v2 = e
+            LOGGER.debug(f"Flash attention v2 not available: {e_v2}")
 
-        # Get version from the package, not from the function
-        import flash_attn
-
-        flash_attn_version = version.parse(flash_attn.__version__)
-
-        return flash_attn_func, flash_attn_version
+        raise ImportError(
+            "Flash attention is not installed. Please install flash attention v4, v3 or v2 to use this attention implementation. \n"
+            f"Attempted imports resulted in the following errors: \n"
+            f"v4 import error: {e_v4} \n"
+            f"v3 import error: {e_v3} \n"
+            f"v2 import error: {e_v2} \n"
+        )
 
     def forward(
         self,
