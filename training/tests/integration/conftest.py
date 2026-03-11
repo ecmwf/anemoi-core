@@ -530,36 +530,22 @@ def migrator() -> Migrator:
     return Migrator()
 
 
-@pytest.fixture(
-    params=[
-        ["model=gnn"],
-        ["model=graphtransformer"],
-    ],
-    ids=["gnn", "graphtransformer"],
-)
+@pytest.fixture
 def global_config_with_checkpoint(
     migrator: Migrator,
-    request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    global_config: tuple[DictConfig, str, str],
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
-    # Reuse the same overrides that global_config gets
-    overrides = request.param
 
-    cfg, dataset_url, model_architecture = build_global_config(
-        overrides,
-        testing_modifications_with_temp_dir,
-        get_tmp_path,
-    )
-    # rest of your logic...
+    cfg, dataset_url, model_architecture = global_config
+
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-23.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-03-06.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-01-23.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-03-06.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"
