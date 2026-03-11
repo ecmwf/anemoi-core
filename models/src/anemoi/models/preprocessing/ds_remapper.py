@@ -16,8 +16,10 @@ from torch import nn
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
 from anemoi.models.preprocessing.mappings import boxcox_converter
+from anemoi.models.preprocessing.mappings import boxcox_rescaled_converter
 from anemoi.models.preprocessing.mappings import expm1_converter
 from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
+from anemoi.models.preprocessing.mappings import inverse_boxcox_rescaled_converter
 from anemoi.models.preprocessing.mappings import log1p_converter
 from anemoi.models.preprocessing.mappings import noop
 from anemoi.models.preprocessing.mappings import sqrt_converter
@@ -45,7 +47,7 @@ class TopRemapper(BasePreprocessor):
         data_indices : dict
         """
         super().__init__(config, statistics, data_indices)
-
+        
         self.remappers = {}
         # this two-step process is done to allow for casting to the correct device
         # alternative is to install tensordict, or use ModuleList
@@ -58,6 +60,7 @@ class TopRemapper(BasePreprocessor):
             default=self.default,
             remap=self.remap,
             normalizer=self.normalizer,
+            method_kwargs = self.method_kwargs,
         )
         self.remappers["input_lres"] = self.remapper_input 
 
@@ -70,6 +73,7 @@ class TopRemapper(BasePreprocessor):
             default=self.default,
             remap=self.remap,
             normalizer=self.normalizer,
+            method_kwargs = self.method_kwargs,
         )
         self.remappers["input_hres"] = self.remapper_input_hres
         self.remapper_output = FieldRemapper(
@@ -81,6 +85,7 @@ class TopRemapper(BasePreprocessor):
             default=self.default,
             remap=self.remap,
             normalizer=self.normalizer,
+            method_kwargs = self.method_kwargs,
         )
         self.remappers["output"] = self.remapper_output
 
@@ -123,9 +128,9 @@ class FieldRemapper(nn.Module):
     supported_methods = {
         method: [f, inv]
         for method, f, inv in zip(
-            ["log1p", "sqrt", "boxcox", "none"],
-            [log1p_converter, sqrt_converter, boxcox_converter, noop],
-            [expm1_converter, square_converter, inverse_boxcox_converter, noop],
+            ["log1p", "sqrt", "boxcox", "boxcox-rescaled", "none"],
+            [log1p_converter, sqrt_converter, boxcox_converter, boxcox_rescaled_converter, noop],
+            [expm1_converter, square_converter, inverse_boxcox_converter, inverse_boxcox_rescaled_converter, noop],
         )
     }
 
@@ -136,7 +141,7 @@ class FieldRemapper(nn.Module):
         dataset: str = None,
         statistics: Optional[dict] = None,
         methods: str = "none",
-        method_kwargs: Optional[dict] = None,
+        method_kwargs: Optional[dict] = {},
         default: str = "none",
         remap: dict = {},
         normalizer: str = "none",
@@ -146,6 +151,7 @@ class FieldRemapper(nn.Module):
         self.dataset = dataset
         self.default = default
         self.remap = remap
+        self.method_kwargs = method_kwargs
         self.normalizer = normalizer
         self._create_remapping_indices(data_indices_ds, statistics)
         self._validate_indices()
@@ -185,7 +191,9 @@ class FieldRemapper(nn.Module):
             self.index_training_out,
             self.index_inference_input,
             self.index_inference_output,
+            self.remapper_kwargs,
         ) = (
+            [],
             [],
             [],
             [],
@@ -216,6 +224,10 @@ class FieldRemapper(nn.Module):
                     self.index_inference_output.append(None)
             else:
                 raise KeyError(f"Unknown remapping method for {name}: {method}")
+            if method in self.method_kwargs:
+                self.remapper_kwargs.append(self.method_kwargs[method])
+            else:
+                self.remapper_kwargs.append({})
         self.register_buffer(
             f"_{self.dataset}_idx", data_indices_ds.full, persistent=True
         )
@@ -234,7 +246,7 @@ class FieldRemapper(nn.Module):
             )
         for i, remapper in zip(idx, self.remappers):
             if i is not None:
-                x[..., i] = remapper(x[..., i])
+                x[..., i] = remapper(x[..., i], **self.remapper_kwargs[i])
         return x
 
     def inverse_transform(self, x, in_place: bool = True) -> torch.Tensor:
@@ -251,5 +263,5 @@ class FieldRemapper(nn.Module):
             )
         for i, backmapper in zip(idx, self.backmappers):
             if i is not None:
-                x[..., i] = backmapper(x[..., i])
+                x[..., i] = backmapper(x[..., i], **self.remapper_kwargs[i])
         return x
