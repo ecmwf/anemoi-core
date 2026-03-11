@@ -64,9 +64,9 @@ class BaseGraphModel(nn.Module):
 
         model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
-        assert self._graph_name_hidden in graph_data.node_types, (
-            f"Hidden nodes name '{self._graph_name_hidden}' must be one of the node types in the graph data: {graph_data.node_types}"
-        )
+        assert (
+            self._graph_name_hidden in graph_data.node_types
+        ), f"Hidden nodes name '{self._graph_name_hidden}' must be one of the node types in the graph data: {graph_data.node_types}"
 
         self.n_step_input = model_config.training.multistep_input
         self.n_step_output = model_config.training.multistep_output
