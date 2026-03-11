@@ -6,6 +6,7 @@ keep_batch_sharded: True
 
 model:
   _target_: anemoi.models.models.AnemoiDiffusionTendModelEncProcDec
+  hidden_nodes_name: "hidden"
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0
