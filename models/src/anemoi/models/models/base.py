@@ -82,9 +82,6 @@ class BaseGraphModel(nn.Module):
         self._assert_consistent_hidden_graphs()
 
         # build networks
-        self.has_processor = model_config.model.processor is not None
-        if not self.has_processor and self.latent_skip:
-            LOGGER.warning("model.latent_skip=True but no processor is defined. Using latent_skip=False.")
         self._build_networks(model_config)
 
         # build residual connection

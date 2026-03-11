@@ -244,34 +244,34 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
         ), "All datasets must have the same shard shapes for the hidden graph."
 
-        if self.has_processor:
-            x_latent_proc, latent_noise = self.noise_injector(
-                x=x_latent,
-                batch_size=batch_size,
-                ensemble_size=ensemble_size,
-                grid_size=self.node_attributes[dataset_names[0]].num_nodes[self._graph_name_hidden],
-                shard_shapes_ref=shard_shapes_hidden,
-                model_comm_group=model_comm_group,
-            )
+        x_latent_proc, latent_noise = self.noise_injector(
+            x=x_latent,
+            batch_size=batch_size,
+            ensemble_size=ensemble_size,
+            grid_size=self.node_attributes[dataset_names[0]].num_nodes[self._graph_name_hidden],
+            shard_shapes_ref=shard_shapes_hidden,
+            model_comm_group=model_comm_group,
+        )
 
-            processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
-                batch_size=batch_ens_size,
-                model_comm_group=model_comm_group,
-            )
-            processor_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=batch_ens_size,
+            model_comm_group=model_comm_group,
+        )
+        processor_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
 
-            # Processor
-            x_latent_proc = self.processor(
-                x=x_latent_proc,
-                batch_size=batch_ens_size,
-                shard_shapes=shard_shapes_hidden,
-                edge_attr=processor_edge_attr,
-                edge_index=processor_edge_index,
-                model_comm_group=model_comm_group,
-                edge_shard_shapes=proc_edge_shard_shapes,
-                **processor_kwargs,
-            )
+        # Processor
+        x_latent_proc = self.processor(
+            x=x_latent_proc,
+            batch_size=batch_ens_size,
+            shard_shapes=shard_shapes_hidden,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
+            model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
+            **processor_kwargs,
+        )
 
+        if self.latent_skip:
             x_latent = x_latent_proc + x_latent
 
         x_out_dict = {}

@@ -379,32 +379,31 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_latent = sum(dataset_latents.values())
 
         # Processor
-        if self.has_processor:
-            shard_shapes_hidden = shard_shapes_hidden_dict[dataset_names[0]]
-            assert all(
-                shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
-            ), "All datasets must have the same shard shapes for the hidden graph."
-            proc_kwargs = self._assert_same_processor_kwargs(processor_kwargs)
+        shard_shapes_hidden = shard_shapes_hidden_dict[dataset_names[0]]
+        assert all(
+            shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
+        ), "All datasets must have the same shard shapes for the hidden graph."
+        proc_kwargs = self._assert_same_processor_kwargs(processor_kwargs)
 
-            processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
-                batch_size=bse,
-                model_comm_group=model_comm_group,
-            )
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=bse,
+            model_comm_group=model_comm_group,
+        )
 
-            x_latent_proc = self.processor(
-                x=x_latent,
-                batch_size=bse,
-                shard_shapes=shard_shapes_hidden,
-                edge_attr=processor_edge_attr,
-                edge_index=processor_edge_index,
-                model_comm_group=model_comm_group,
-                edge_shard_shapes=proc_edge_shard_shapes,
-                **proc_kwargs,
-            )
+        x_latent_proc = self.processor(
+            x=x_latent,
+            batch_size=bse,
+            shard_shapes=shard_shapes_hidden,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
+            model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
+            **proc_kwargs,
+        )
 
-            if self.latent_skip:
-                # Processor skip connection
-                x_latent = x_latent_proc + x_latent
+        if self.latent_skip:
+            # Processor skip connection
+            x_latent = x_latent_proc + x_latent
 
         # Decoder
         x_out_dict = {}

@@ -31,6 +31,14 @@ from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
 
 
+
+class NoOpProcessor(nn.Module):
+    """No-op processor, used for ablations."""
+
+    def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
+        return x
+
+
 class BaseProcessor(nn.Module, ABC):
     """Base Processor."""
 
