@@ -17,7 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
-
+from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -59,9 +59,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
         )
 
         self.rho = config.model.model.diffusion.rho
-
-        from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
-
         self._plot_adapter = DiffusionPlotAdapter(self)
 
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:

@@ -21,6 +21,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
+from anemoi.training.tasks.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: BaseSchema, task: "BaseTask") -> None:
+    def __init__(self, config: BaseSchema, task: BaseTask) -> None:
         """Initialize Multi-dataset data module.
 
         Parameters
@@ -135,13 +136,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
-        relative_date_indices = {
-            dataset_name: self.task.get_relative_time_indices(ds.frequency) for dataset_name, ds in datasets.items()
-        }
-
         return MultiDataset(
             data_readers=datasets,
-            relative_date_indices=relative_date_indices,
+            task=self.task,
             timestep=self.config.data.timestep,
             shuffle=shuffle,
             label=label,

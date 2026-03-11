@@ -26,6 +26,7 @@ from anemoi.training.data.dataset import create_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
+from anemoi.training.tasks.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,8 +36,8 @@ class MultiDataset(IterableDataset):
 
     def __init__(
         self,
+        task: BaseTask,
         data_readers: dict[str, dict],
-        relative_date_indices: dict[str, list[int]],
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
@@ -45,7 +46,7 @@ class MultiDataset(IterableDataset):
 
         Parameters
         ----------
-        datasets_config : dict
+        data_readers : dict
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices: dict[str, list[int]]
@@ -60,10 +61,14 @@ class MultiDataset(IterableDataset):
         self.label = label
         self.shuffle = shuffle
         self.timestep = timestep
-        self.relative_date_indices = relative_date_indices
         self.dataset_names = list(data_readers.keys())
-        self.datasets = {name: create_dataset(data_reader) for name, data_reader in data_readers.items()}
 
+        # Create each dataset. It will correspond to one key of the batch
+        self.datasets = {name: create_dataset(data_reader, task=task) for name, data_reader in data_readers.items()}
+
+        self.relative_date_indices = {
+            dataset_name: task.get_relative_time_indices(ds.frequency) for dataset_name, ds in self.datasets.items()
+        }
         self._lazy_init_model_and_reader_group_info()
 
     def _lazy_init_model_and_reader_group_info(self) -> None:

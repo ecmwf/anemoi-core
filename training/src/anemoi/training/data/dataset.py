@@ -316,7 +316,7 @@ class TrajectoryDataset(BaseAnemoiReader):
         return tree
 
 
-def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
+def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = dataset_config.pop("trajectory", {})
