@@ -1,7 +1,7 @@
 ---
 overwrite: True
 
-nodes:  
+nodes:
   # Hidden nodes
   hidden:
     node_builder:
