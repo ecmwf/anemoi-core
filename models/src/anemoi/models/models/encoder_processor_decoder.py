@@ -56,9 +56,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor hidden -> hidden (shared across all datasets)
         first_dataset_name = next(iter(self._graph_data.keys()))
-        processor_graph = self._graph_data[first_dataset_name][
-            (self._graph_name_hidden, "to", self._graph_name_hidden)
-        ]
+        processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
         processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
 
         # Processor hidden -> hidden
@@ -282,7 +280,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
         ), "All datasets must have the same shard shapes for the hidden graph."
 
-        
         processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,

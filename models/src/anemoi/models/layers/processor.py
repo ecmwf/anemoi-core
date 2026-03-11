@@ -31,7 +31,6 @@ from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
 
 
-
 class NoOpProcessor(nn.Module):
     """No-op processor, used for ablations."""
 
