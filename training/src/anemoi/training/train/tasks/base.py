@@ -347,16 +347,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return "multi_dataset"
 
     def _check_sharding_support(self) -> None:
-        self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())
+        self.loss_supports_sharding = all(
+            getattr(leaf, "supports_sharding", False) for loss in self.loss.values() for leaf in loss.iter_leaf_losses()
+        )
         self.metrics_support_sharding = all(
             getattr(metric, "supports_sharding", False)
             for dataset_metrics in self.metrics.values()
             for metric in dataset_metrics.values()
         )
-
         if not self.loss_supports_sharding and self.keep_batch_sharded:
             unsupported_losses = [
-                loss.name for loss in self.loss.values() if not getattr(loss, "supports_sharding", False)
+                type(leaf).__name__
+                for loss in self.loss.values()
+                for leaf in loss.iter_leaf_losses()
+                if not getattr(leaf, "supports_sharding", False)
             ]
             LOGGER.warning(
                 "Some loss functions do not support sharding: %s. "
