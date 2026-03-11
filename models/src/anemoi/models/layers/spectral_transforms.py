@@ -16,7 +16,6 @@ import torch.fft
 import torch.nn.functional as F
 
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
-from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
@@ -143,7 +142,7 @@ class FFT2D(SpectralTransform):
         data: torch.Tensor,
     ) -> torch.Tensor:
         data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
+            data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device)
         )
 
         var = data.shape[-1]
