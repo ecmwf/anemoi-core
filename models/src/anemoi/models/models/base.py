@@ -123,9 +123,9 @@ class BaseGraphModel(nn.Module):
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
         if isinstance(hidden_nodes_name, str):
-            assert hidden_nodes_name in self._graph_data.node_types, (
-                f"Hidden nodes name '{hidden_nodes_name}' not found in graph data node types {self._graph_data.node_types}"
-            )
+            assert (
+                hidden_nodes_name in self._graph_data.node_types
+            ), f"Hidden nodes name '{hidden_nodes_name}' not found in graph data node types {self._graph_data.node_types}"
         elif isinstance(hidden_nodes_name, list):
             for hidden_name in hidden_nodes_name:
                 self._assert_hidden_nodes_name(hidden_name)
