@@ -315,7 +315,6 @@ class FunctionalLoss(BaseLoss):
         torch.Tensor
             Weighted loss
         """
-        del kwargs  # not used in this base implementation, but may be used in child classes
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
