@@ -514,12 +514,12 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         """
 
         lres_grid_shard_shapes = None
+        hres_grid_shard_shapes = None
         if model_comm_group is not None:
             lres_shard_shapes = get_shard_shapes(x_in, -2, model_comm_group)
             x = shard_tensor(x, -2, lres_shard_shapes, model_comm_group)
             lres_grid_shard_shapes = [shape[-2] for shape in lres_shard_shapes]
-        hres_grid_shard_shapes = None
-        if model_comm_group is not None:
+
             hres_shard_shapes = get_shard_shapes(x_in_hres, -2, model_comm_group)
             x_in_hres = shard_tensor(x_in_hres, -2, hres_shard_shapes, model_comm_group)
             hres_grid_shard_shapes = [shape[-2] for shape in hres_shard_shapes]
