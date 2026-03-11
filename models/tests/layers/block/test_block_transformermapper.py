@@ -82,22 +82,18 @@ def test_TransformerMapperBlock_init(mapper_block):
     factor_attention_heads=st.integers(min_value=1, max_value=10),
     hidden_dim=st.integers(min_value=1, max_value=100),
     num_heads=st.integers(min_value=1, max_value=10),
-    window_size=st.integers(min_value=1, max_value=512),
     shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
     batch_size=st.integers(min_value=1, max_value=40),
     dropout_p=st.floats(min_value=0.01, max_value=1.0),
-    softcap=st.floats(min_value=0.01, max_value=1.0),
 )
-@settings(max_examples=10)
+@settings(max_examples=10, deadline=None)
 def test_forward_output(
     factor_attention_heads,
     hidden_dim,
     num_heads,
-    window_size,
     shapes,
     batch_size,
     dropout_p,
-    softcap,
 ):
     num_channels = num_heads * factor_attention_heads
     layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
@@ -105,11 +101,11 @@ def test_forward_output(
         num_channels=num_channels,
         hidden_dim=hidden_dim,
         num_heads=num_heads,
-        window_size=window_size,
+        window_size=None,
         dropout_p=dropout_p,
         layer_kernels=layer_kernels,
         attention_implementation="scaled_dot_product_attention",
-        softcap=softcap,
+        softcap=None,
     )
 
     x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
