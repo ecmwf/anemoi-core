@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
+
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:

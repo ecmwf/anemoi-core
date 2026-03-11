@@ -24,9 +24,9 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.dataset import create_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
-from anemoi.training.tasks.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
 
