@@ -27,7 +27,6 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
@@ -558,9 +557,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
-            shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, grid_shard_shapes)
-            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
-            y_full = gather_tensor(torch.clone(y), self.grid_dim, shard_shapes, self.model_comm_group)
+            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_shapes, self.model_comm_group)
+            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_shapes, self.model_comm_group)
             final_grid_shard_slice = None
         else:
             y_pred_full, y_full = y_pred, y
@@ -874,16 +872,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
-        shard_shapes = apply_shard_shapes(batch, self.grid_dim, grid_shard_shapes)
-        tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
-
-        torch.distributed.all_gather(
-            tensor_list,
-            batch.contiguous(),
-            group=self.reader_groups[self.reader_group_id],
+        return gather_tensor(
+            batch,
+            self.grid_dim,
+            grid_shard_shapes,
+            self.reader_groups[self.reader_group_id],
         )
-
-        return torch.cat(tensor_list, dim=self.grid_dim)
 
     def calculate_val_metrics(
         self,

@@ -137,7 +137,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=TensorDim.ENSEMBLE_DIM,
-            shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
+            shapes=[y_pred.size(TensorDim.ENSEMBLE_DIM)] * self.ens_comm_subgroup_size,
             mgroup=self.ens_comm_subgroup,
         )
 

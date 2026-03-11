@@ -15,10 +15,12 @@ import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.shapes import ShardShapes
+from anemoi.models.distributed.shapes import expand_shard_shapes
 from anemoi.models.distributed.utils import get_memory_format
 
 
-def _split(input_: Tensor, dim_: int, shapes_: tuple, group: Optional[ProcessGroup] = None) -> Tensor:
+def _split(input_: Tensor, dim_: int, shapes_: ShardShapes, group: Optional[ProcessGroup] = None) -> Tensor:
     """Split the tensor along dim and keep the relevant slice."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -46,7 +48,7 @@ def _split(input_: Tensor, dim_: int, shapes_: tuple, group: Optional[ProcessGro
     # sanity checks
     assert dim_ < input_.dim(), f"Error, cannot split along {dim_} for tensor with {input_.dim()} dimensions."
 
-    input_list = torch.split(input_, [x[dim_] for x in shapes_], dim=dim_)
+    input_list = torch.split(input_, shapes_, dim=dim_)
 
     rank = dist.get_rank(group=group)
     output = input_list[rank].contiguous(memory_format=input_format)
@@ -57,14 +59,14 @@ def _split(input_: Tensor, dim_: int, shapes_: tuple, group: Optional[ProcessGro
 def _gather_into_tensor(
     input_: Tensor,
     dim_: int,
-    shapes: tuple,
+    shapes: ShardShapes,
     group: ProcessGroup,
 ) -> Tensor:
     input_format = get_memory_format(input_)
     input_ = input_.contiguous(memory_format=input_format)
 
     out_shape = list(input_.shape)
-    out_shape[dim_] = sum(shape[dim_] for shape in shapes)
+    out_shape[dim_] = sum(shapes)  # expand shapes in dim_ to summed shape
 
     output = torch.empty(
         out_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
@@ -78,14 +80,14 @@ def _gather_into_tensor(
 def _gather_with_padding(
     input_: Tensor,
     dim_: int,
-    shapes: tuple,
+    shapes: ShardShapes,
     group: ProcessGroup,
 ) -> Tensor:
     input_format = get_memory_format(input_)
     input_ = input_.contiguous(memory_format=input_format)
     dim = dim_ % input_.dim()
 
-    max_shape_dim = max(shape[dim] for shape in shapes)
+    max_shape_dim = max(shapes)
     padded_shape = list(input_.shape)
     padded_shape[dim] = max_shape_dim
 
@@ -106,7 +108,7 @@ def _gather_with_padding(
     dist.all_gather(tensor_list, input_, group=group)
 
     # remove padding
-    tensor_list = [torch.narrow(t, dim, 0, shape[dim]) for t, shape in zip(tensor_list, shapes)]
+    tensor_list = [torch.narrow(t, dim, 0, shape) for t, shape in zip(tensor_list, shapes)]
 
     return torch.cat(tensor_list, dim=dim).contiguous(memory_format=input_format)
 
@@ -114,22 +116,23 @@ def _gather_with_padding(
 def _gather_default(
     input_: Tensor,
     dim_: int,
-    shapes: tuple,
+    shapes: ShardShapes,
     group: ProcessGroup,
 ) -> Tensor:
     """Gather using all_gather with pre-allocated buffers."""
     input_format = get_memory_format(input_)
     input_ = input_.contiguous(memory_format=input_format)
+    full_shard_shapes = expand_shard_shapes(input_, dim_, shapes)
 
     tensor_list = [
         torch.empty(
-            shapes[rank],
+            shape,
             dtype=input_.dtype,
             layout=input_.layout,
             device=input_.device,
             memory_format=input_format,
         )
-        for rank in range(len(shapes))
+        for shape in full_shard_shapes
     ]
 
     dist.all_gather(tensor_list, input_, group=group)
@@ -140,7 +143,7 @@ def _gather_default(
 def _gather(
     input_: Tensor,
     dim_: int,
-    shapes: tuple,
+    shapes: ShardShapes,
     group: Optional[ProcessGroup] = None,
 ) -> Tensor:
     """Gather tensors and concatenate along the last dimension."""
@@ -213,74 +216,109 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup]
     return input_
 
 
-def _gather_channels_alltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
-    """Apply all_to_all to go from channel-parallel to sequence-parallel.
+def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
+    """Wrapper function for all_to_all across NCCL, MPI and Gloo backends.
+    There is no all_to_all primitive for the Gloo backend. In that case each
+    process broadcasts its tensor asynchronously.
 
-    Split input along sequence dimension and join after all_to_all along channel dimension.
-    Input: each GPU has full sequence, different channel parts
-    Output: each GPU has different sequence parts, all channels
+    Retuns nothing but modifies output_list in-place
+
     """
     comm_size = dist.get_world_size(group=group)
-    # Bypass the function if we are using only 1 GPU.
-    if comm_size == 1:
-        return input_
-    myrank = dist.get_rank(group=group)
 
-    # get input format
-    input_format = get_memory_format(input_)
+    if dist.get_backend(group) == "gloo":
 
-    # Split along sequence dimension
-    input_list = [x.contiguous() for x in torch.tensor_split(input_, comm_size, dim=-2)]
+        # Need to check torch version here bc the syntax for dist.send/recv changed in torch v2.6
+        torch_version = torch.__version__.split(".")
+        torch_major_version = int(torch_version[0])
+        torch_minor_version = int(torch_version[1])
+        if torch_major_version <= 2 and torch_minor_version < 6:
+            raise NotImplementedError("Gloo all_to_all not implemented for torch < v2.6")
 
-    # Get total channels from shapes (original shape before channel splitting)
-    channels = [x.shape[-1] for x in torch.tensor_split(torch.empty(shapes[myrank][-1], device="meta"), comm_size)]
-    seq_per_rank = [x.shape[-2] for x in input_list]
-
-    output_list = [
-        torch.empty(
-            (*input_list[0].shape[:-2], seq_per_rank[myrank], channels[rank]),
-            dtype=input_.dtype,
-            layout=input_.layout,
-            device=input_.device,
-            memory_format=input_format,
-        )
-        for rank in range(comm_size)
-    ]
-    dist.all_to_all(output_list, input_list, group=group)
-
-    return torch.cat(output_list, dim=-1).contiguous(memory_format=input_format)
+        reqs = []
+        rank = dist.get_rank(group=group)
+        # Here we implement the linear shift algorithm from Hofmann and Ruenger, 2013
+        for i in range(0, comm_size):
+            j = (i - rank + comm_size) % comm_size
+            if j != rank:
+                # exchange data with rank j
+                reqs.append(dist.isend(input_list[j], group_dst=j, group=group))
+                reqs.append(dist.irecv(output_list[j], group_src=j, group=group))
+            else:
+                output_list[rank] = input_list[rank]
+        for req in reqs:
+            req.wait()
+    else:
+        dist.all_to_all(output_list, input_list, group=group)
 
 
-def _split_channels_alltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
-    """Apply all_to_all along the head dimension.
+def _alltoall_transpose(
+    input_: Tensor,
+    dim_split: int,
+    split_sizes: list[int],
+    dim_concat: int,
+    concat_sizes: list[int],
+    group: Optional[ProcessGroup] = None,
+) -> Tensor:
+    """Unified all-to-all distributed transpose along arbitrary dimensions.
 
-    Split input along dimension dim_split and join after all_to_all along last dimesion.
+    Given a tensor that's distributed across ranks according to `concat_sizes`, reshard
+    it to be distributed along `dim_split` using `split_sizes`. Done by splitting the tensor
+    along `dim_split` using `split_sizes`, performing an all-to-all exchange, and concatenating
+    the received tensors along `dim_concat`.
+
+    Parameters
+    ----------
+    input_ : Tensor
+        Input tensor
+    dim_split : int
+        Dimension along which to split the input (can be negative)
+    split_sizes : ShardShapes
+        Size of each chunk along `dim_split`, one per rank
+    dim_concat : int
+        Dimension along which to concatenate the received chunks (can be negative)
+    concat_sizes : ShardShapes
+        Size of each received chunk along `dim_concat`, one per rank
+    group : ProcessGroup, optional
+        Process group
+
+    Returns
+    -------
+    Tensor
+        Result of the all-to-all exchange
     """
     comm_size = dist.get_world_size(group=group)
-    # Bypass the function if we are using only 1 GPU.
     if comm_size == 1:
         return input_
-    myrank = dist.get_rank(group=group)
 
-    # get input format
+    myrank = dist.get_rank(group=group)
     input_format = get_memory_format(input_)
 
-    input_list = [x.contiguous() for x in torch.tensor_split(input_, comm_size, dim=-1)]
+    # normalise negative dims
+    ndim = input_.dim()
+    dim_split = dim_split % ndim
+    dim_concat = dim_concat % ndim
 
-    input_shape = [x.shape for x in input_list]  # (... n c)
-    channels_per_rank = [x.shape[-1] for x in input_list]
+    # split input along dim_split
+    input_list = [x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)]
 
-    output_list = [
-        torch.empty(
-            (*input_shape[rank][:-2], shapes[rank][-2], channels_per_rank[myrank]),
-            dtype=input_.dtype,
-            layout=input_.layout,
-            device=input_.device,
-            memory_format=input_format,
+    # build output tensors: each has the shape of input_ but with
+    # dim_split size = split_sizes[myrank] and dim_concat size = concat_sizes[rank]
+    output_list = []
+    for rank in range(comm_size):
+        out_shape = list(input_.shape)
+        out_shape[dim_split] = split_sizes[myrank]
+        out_shape[dim_concat] = concat_sizes[rank]
+        output_list.append(
+            torch.empty(
+                out_shape,
+                dtype=input_.dtype,
+                layout=input_.layout,
+                device=input_.device,
+                memory_format=input_format,
+            )
         )
-        for rank in range(comm_size)
-    ]
 
-    dist.all_to_all(output_list, input_list, group=group)
+    _alltoallwrapper(output_list, input_list, group=group)
 
-    return torch.cat(output_list, dim=-2).contiguous(memory_format=input_format)
+    return torch.cat(output_list, dim=dim_concat).contiguous(memory_format=input_format)
