@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+import torch.nn.functional as F
 
 def noop(x):
     """No operation."""
@@ -49,6 +50,16 @@ def boxcox_converter(x, lambd=0.33):
     return (torch.pow(x, lambd) - 1) / lambd
 
 
+
+def boxcox_rescaled_converter(x, lambd=0.33, symmetrical_bound=1.0):
+    """Convert positive var in to boxcox(var). 
+       and rescales it to a symetrical range [-y,y], assuming that the input is ranges in [0,1]
+       and 1 > lambd > 0.
+    """
+    assert lambd > 0 and lambd < 1, f"Parameter lambd {lambd} must satisfy 1 > lambd > 0."
+    assert x.ge(0.0).all() and x.le(1.0).all(), f"input x must satisfy 1 > x > 0."
+    return (2 * torch.pow(x, lambd) - 1) * symmetrical_bound
+
 def sqrt_converter(x):
     """Convert positive var in to sqrt(var)."""
     return torch.sqrt(x)
@@ -64,11 +75,16 @@ def square_converter(x):
     return x**2
 
 
-def inverse_boxcox_converter(x, lambd=0.5):
+def inverse_boxcox_converter(x, lambd=0.33):
     """Convert back boxcox(var) to var."""
-    pos_lam = torch.pow(x * lambd + 1, 1 / lambd)
-    null_lam = torch.exp(x)
     if lambd == 0:
-        return null_lam
-    else:
-        return pos_lam
+        return torch.exp(x)
+    return torch.pow(x * lambd + 1, 1 / lambd)
+
+def inverse_boxcox_rescaled_converter(x, lambd=0.33, symmetrical_bound=1.0):
+    """Convert positive var in to boxcox(var). 
+       and rescales it to a symetrical range [-y,y], assuming that the input is ranges in [0,1]
+       and 1 > lambd > 0.
+    """
+    assert lambd > 0 and lambd < 1, f"Parameter lambd {lambd} must satisfy 1 > lambd > 0."
+    return torch.pow(F.relu((x / symmetrical_bound + 1) / 2) , 1 / lambd)
