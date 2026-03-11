@@ -7,17 +7,20 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
+from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionTendForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
 from anemoi.training.utils.masks import NoOutputMask
+
+_RAW_DATA_INDICES_LOOKUP_ERROR = "raw data_indices lookup should not be used here"
 
 
 class DummyLoss(torch.nn.Module):
@@ -28,10 +31,15 @@ class DummyLoss(torch.nn.Module):
 
 
 class DummyModel:
-    def __init__(self, num_output_variables: int | None = None, output_times: int = 1, add_skip: bool = False) -> None:
+    def __init__(
+        self,
+        num_output_variables: int | None = None,
+        output_times: int = 1,
+        add_skip: bool = False,
+    ) -> None:
         self.called_with: dict[str, Any] | None = None
-        self.pre_processors = Processors([])
-        self.post_processors = Processors([], inverse=True)
+        self.pre_processors = {"data": lambda x: x}
+        self.post_processors = {"data": lambda x, **_kwargs: x}
         self.output_times = output_times
         self.num_output_variables = num_output_variables
         self.add_skip = add_skip
@@ -135,6 +143,12 @@ def _data_indices_single() -> dict[str, IndexCollection]:
     return {"data": _make_minimal_index_collection(_NAME_TO_INDEX)}
 
 
+class _ExplodingDataIndices:
+    @property
+    def data(self) -> Any:
+        raise AssertionError(_RAW_DATA_INDICES_LOOKUP_ERROR)
+
+
 def _assert_step_return_format(
     loss: torch.Tensor,
     y_preds: list,
@@ -183,6 +197,42 @@ def _set_base_task_attrs(
     obj.model_comm_group_size = 1
     obj.grid_shard_shapes = {"data": None}
     obj.grid_shard_slice = {"data": None}
+    obj.output_mask = {"data": NoOutputMask()}
+    obj.loss = {"data": DummyLoss()}
+    obj.metrics = {"data": {}}
+    obj.val_metric_ranges = {"data": {}}
+
+
+def test_refresh_dataset_context_static_supports_non_target_datasets() -> None:
+    """Datasets without a training loss should still get a static context."""
+    data_indices = {
+        "data": _make_minimal_index_collection(_NAME_TO_INDEX),
+        "aux": _make_minimal_index_collection(_NAME_TO_INDEX),
+    }
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    forecaster.dataset_names = list(data_indices.keys())
+    forecaster.data_indices = data_indices
+    forecaster.output_mask = {"data": NoOutputMask(), "aux": NoOutputMask()}
+    forecaster.loss = {"data": DummyLoss()}  # "aux" intentionally excluded from target datasets
+    forecaster.metrics = {"data": {}}
+    forecaster.val_metric_ranges = {"data": {}}
+
+    model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
+    model.pre_processors = {"data": lambda x: x, "aux": lambda x: x}
+    model.post_processors = {
+        "data": lambda x, **_kwargs: x,
+        "aux": lambda x, **_kwargs: x,
+    }
+    forecaster.model = model
+
+    forecaster.refresh_dataset_context_static()
+
+    assert set(forecaster.dataset_context_static.keys()) == {"data", "aux"}
+    assert forecaster.dataset_context_static["data"].loss is not None
+    assert forecaster.dataset_context_static["aux"].loss is None
+    assert forecaster.dataset_context_static["aux"].metrics == {}
+    assert forecaster.dataset_context_static["aux"].val_metric_ranges == {}
 
 
 def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,6 +251,7 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     forecaster.loss = {"data": DummyLoss()}
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
+    forecaster.refresh_dataset_context_static()
     forecaster._plot_adapter = ForecasterPlotAdapter(forecaster)
 
     assert forecaster.plot_adapter.output_times == 1
@@ -210,7 +261,10 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         assert forecaster.plot_adapter.output_times == i
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
-    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    monkeypatch.setattr(
+        "torch.utils.checkpoint.checkpoint",
+        lambda fn, *args, **kwargs: fn(*args, **kwargs),
+    )
     monkeypatch.setattr(
         forecaster,
         "_advance_input",
@@ -253,6 +307,8 @@ def test_graphdiffusionforecaster() -> None:
     class DummyDiffusion:
         def __init__(self, model: DummyDiffusionModel) -> None:
             self.model = model
+            self.pre_processors = model.pre_processors
+            self.post_processors = model.post_processors
 
     data_indices = _data_indices_single()
     forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
@@ -268,6 +324,7 @@ def test_graphdiffusionforecaster() -> None:
     forecaster.loss = {"data": DummyLoss()}
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
+    forecaster.refresh_dataset_context_static()
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     t = _CFG_DIFFUSION.training.multistep_input
@@ -281,25 +338,22 @@ def test_graphdiffusionforecaster() -> None:
     assert y_pred.shape == (b, 1, e, g, v)
 
 
-def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_graphensforecaster_rollout_with_time_dim_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Rollout step works when model returns (B, T, E, G, V); _advance_input uses last time step."""
     data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
 
     forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
     pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices={"data": data_indices}, config=_CFG_FORECASTER)
     forecaster.n_step_input = 1
     forecaster.n_step_output = 1
     forecaster.rollout = 1
     forecaster.nens_per_device = 2
     forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
-    forecaster.model_comm_group = None
-    forecaster.model_comm_group_size = 1
-    forecaster.grid_shard_shapes = {"data": None}
-    forecaster.grid_shard_slice = {"data": None}
-    forecaster.output_mask = {"data": NoOutputMask()}
-    forecaster.data_indices = {"data": data_indices}
-    forecaster.dataset_names = ["data"]
-    forecaster.grid_dim = -2
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.refresh_dataset_context_static()
 
     def _compute_loss_metrics(
         y_pred: dict[str, torch.Tensor],
@@ -313,7 +367,12 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics)
     b, g, v = 2, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn((b, forecaster.n_step_input + forecaster.rollout, 1, g, v), dtype=torch.float32)}
+    batch = {
+        "data": torch.randn(
+            (b, forecaster.n_step_input + forecaster.rollout, 1, g, v),
+            dtype=torch.float32,
+        ),
+    }
 
     loss, metrics, preds = next(forecaster._rollout_step(batch=batch, rollout=1, validation_mode=False))
     assert isinstance(loss, torch.Tensor)
@@ -340,11 +399,13 @@ def test_rollout_advance_input_keeps_latest_steps(
 
     forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
     pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices={"data": data_indices}, config=_CFG_FORECASTER)
     forecaster.n_step_input = n_step_input
     forecaster.n_step_output = n_step_output
-    forecaster.output_mask = {"data": NoOutputMask()}
-    forecaster.data_indices = {"data": data_indices}
-    forecaster.grid_shard_slice = {"data": None}
+    forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.refresh_dataset_context_static()
+    dataset_ctx = forecaster._build_dataset_contexts()["data"]
 
     b, e, g, v = 1, 1, 2, len(_NAME_TO_INDEX)
     x = torch.zeros((b, forecaster.n_step_input, e, g, v), dtype=torch.float32)
@@ -357,14 +418,17 @@ def test_rollout_advance_input_keeps_latest_steps(
         ],
         dim=1,
     )
-    batch = torch.zeros((b, forecaster.n_step_input + forecaster.n_step_output, e, g, v), dtype=torch.float32)
+    batch = torch.zeros(
+        (b, forecaster.n_step_input + forecaster.n_step_output, e, g, v),
+        dtype=torch.float32,
+    )
 
     updated = forecaster._advance_dataset_input(
         x,
         y_pred,
         batch,
+        dataset_ctx=dataset_ctx,
         rollout_step=0,
-        dataset_name="data",
     )
     kept_steps = updated[0, :, 0, 0, 0].tolist()
     expected_next_input = expected
@@ -463,25 +527,21 @@ def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> 
     """GraphAutoEncoder _step returns (loss, metrics, [y_pred]) for consistent task contract."""
     from anemoi.training.train.tasks.autoencoder import GraphAutoEncoder
 
-    def dummy_forward(x: dict) -> dict:
-        b = next(iter(x.values())).shape[0]
-        t = next(iter(x.values())).shape[1]
-        e = next(iter(x.values())).shape[2]
-        g = next(iter(x.values())).shape[3]
-        v = next(iter(x.values())).shape[4]
-        return {dn: torch.randn(b, t, e, g, v, dtype=torch.float32) for dn in x}
-
     data_indices = _data_indices_single()
     ae = GraphAutoEncoder.__new__(GraphAutoEncoder)
     pl.LightningModule.__init__(ae)
     _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE)
-    ae.model = type(
-        "M",
-        (),
-        {"__call__": lambda _self, x, **_kwargs: dummy_forward(x)},
-    )()
+    ae.model = DummyModel(
+        num_output_variables=len(next(iter(data_indices.values())).model.output),
+        output_times=1,
+    )
+    ae.refresh_dataset_context_static()
+    ae.data_indices = {"data": _ExplodingDataIndices()}
 
-    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    monkeypatch.setattr(
+        "torch.utils.checkpoint.checkpoint",
+        lambda fn, *args, **kwargs: fn(*args, **kwargs),
+    )
     monkeypatch.setattr(
         ae,
         "compute_loss_metrics",
@@ -495,16 +555,10 @@ def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> 
     _assert_step_return_format(loss, y_preds, expected_len=1)
 
 
-def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_graphmultioutinterpolator_step_returns_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """GraphMultiOutInterpolator _step returns (loss, metrics, [y_pred]) for plot callback contract."""
-
-    def dummy_forward(x_bound: dict) -> dict:
-        b = next(iter(x_bound.values())).shape[0]
-        e = next(iter(x_bound.values())).shape[2]
-        g = next(iter(x_bound.values())).shape[3]
-        v = next(iter(x_bound.values())).shape[4]
-        return {"data": torch.randn(b, 2, e, g, v, dtype=torch.float32)}
-
     data_indices = _data_indices_single()
     task = GraphMultiOutInterpolator.__new__(GraphMultiOutInterpolator)
     pl.LightningModule.__init__(task)
@@ -518,14 +572,18 @@ def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyP
     task.interp_times = _CFG_INTERP_STEP.training.explicit_times.target
     sorted_indices = sorted(set(task.boundary_times + task.interp_times))
     task.imap = {idx: i for i, idx in enumerate(sorted_indices)}
-    task.model = type(
-        "M",
-        (),
-        {"__call__": lambda _self, x, **_kwargs: dummy_forward(x)},
-    )()
+    task.model = DummyModel(
+        num_output_variables=len(next(iter(data_indices.values())).model.output),
+        output_times=len(task.interp_times),
+    )
     task.loss = {"data": DummyLoss()}
+    task.refresh_dataset_context_static()
+    task.data_indices = {"data": _ExplodingDataIndices()}
 
-    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    monkeypatch.setattr(
+        "torch.utils.checkpoint.checkpoint",
+        lambda fn, *args, **kwargs: fn(*args, **kwargs),
+    )
     monkeypatch.setattr(
         task,
         "compute_loss_metrics",
@@ -537,3 +595,138 @@ def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyP
     loss, _, y_preds = task._step(batch, validation_mode=False)
 
     _assert_step_return_format(loss, y_preds, expected_len=1)
+
+
+def test_graphdiffusionforecaster_step_uses_dataset_context_data_indices() -> None:
+    class DummyDiffusion:
+        def __init__(self, model: DummyDiffusionModel) -> None:
+            self.model = model
+            self.pre_processors = model.pre_processors
+            self.post_processors = model.post_processors
+
+    data_indices = _data_indices_single()
+    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyDiffusion(
+        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    )
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+    forecaster.refresh_dataset_context_static()
+    forecaster.data_indices = {"data": _ExplodingDataIndices()}
+
+    b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
+    t = _CFG_DIFFUSION.training.multistep_input
+    batch = torch.randn((b, t + 1, e, g, v), dtype=torch.float32)
+
+    loss, _, y_preds = forecaster._step(batch={"data": batch}, validation_mode=False)
+
+    _assert_step_return_format(loss, y_preds, expected_len=1)
+
+
+def test_diffusion_tendency_context_uses_wrapped_tendency_processors() -> None:
+    class DummyTendencyCore:
+        def __init__(self) -> None:
+            self.compute_tendency_calls: list[tuple[Any, Any, Any, Any]] = []
+            self.add_tendency_calls: list[tuple[Any, Any, Any, Any]] = []
+
+        def compute_tendency(
+            self,
+            y: dict[str, Any],
+            x_ref: dict[str, Any],
+            input_pre_processor: dict[str, Any],
+            tendency_pre_processor: dict[str, Any],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.compute_tendency_calls.append(
+                (
+                    input_pre_processor["data"],
+                    tendency_pre_processor["data"],
+                    kwargs["input_post_processor"]["data"],
+                    x_ref["data"].shape,
+                ),
+            )
+            return {"data": y["data"]}
+
+        def add_tendency_to_state(
+            self,
+            _x_ref: dict[str, Any],
+            tendency: dict[str, Any],
+            output_post_processor: dict[str, Any],
+            tendency_post_processor: dict[str, Any],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.add_tendency_calls.append(
+                (
+                    output_post_processor["data"],
+                    tendency_post_processor["data"],
+                    kwargs["output_pre_processor"]["data"],
+                    tendency["data"].shape,
+                ),
+            )
+            return {"data": tendency["data"]}
+
+        def _apply_imputer_inverse(
+            self,
+            post_processors: dict[str, Any],
+            dataset_name: str,
+            x: dict[str, Any],
+        ) -> dict[str, Any]:
+            assert dataset_name == "data"
+            assert "data" in post_processors
+            return x
+
+    class DummyTendencyWrapper:
+        def __init__(self) -> None:
+            self.model = DummyTendencyCore()
+            self.pre_processors = {"data": torch.nn.Identity()}
+            self.post_processors = {"data": torch.nn.Identity()}
+            self.pre_processors_tendencies = {"data": torch.nn.Identity()}
+            self.post_processors_tendencies = {"data": torch.nn.Identity()}
+
+    data_indices = _data_indices_single()
+    forecaster = GraphDiffusionTendForecaster.__new__(GraphDiffusionTendForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    forecaster.model = DummyTendencyWrapper()
+    forecaster.statistics_tendencies = {"data": {"lead_times": ["6h"], "6h": {}}}
+    forecaster._tendency_pre_processors = {}
+    forecaster._tendency_post_processors = {}
+    forecaster.refresh_dataset_context_static()
+    forecaster._validate_tendency_processors()
+    forecaster.refresh_dataset_context_static()
+
+    dataset_ctx = forecaster._build_dataset_contexts()["data"]
+    assert isinstance(dataset_ctx.static.pre_processor_tendencies, StepwiseProcessors)
+    assert isinstance(dataset_ctx.static.post_processor_tendencies, StepwiseProcessors)
+
+    cached_pre = dataset_ctx.static.pre_processor
+    cached_post = dataset_ctx.static.post_processor
+    cached_pre_tend = dataset_ctx.static.pre_processor_tendencies
+    cached_post_tend = dataset_ctx.static.post_processor_tendencies
+
+    forecaster.model.pre_processors = {"data": object()}
+    forecaster.model.post_processors = {"data": object()}
+    forecaster._tendency_pre_processors = {"data": object()}
+    forecaster._tendency_post_processors = {"data": object()}
+
+    y = {"data": torch.ones((2, 1, 1, 3, len(_NAME_TO_INDEX)), dtype=torch.float32)}
+    x_ref = {"data": torch.ones((2, 1, 3, 1), dtype=torch.float32)}
+
+    tendency = forecaster._compute_tendency_target(y, x_ref, {"data": dataset_ctx})
+    states = forecaster._reconstruct_state(x_ref, tendency, {"data": dataset_ctx})
+
+    assert tendency["data"].shape == y["data"].shape
+    assert states["data"].shape == y["data"].shape
+    assert forecaster.model.model.compute_tendency_calls[0][0] is cached_pre
+    assert forecaster.model.model.compute_tendency_calls[0][1] is cached_pre_tend[0]
+    assert forecaster.model.model.compute_tendency_calls[0][2] is cached_post
+    assert forecaster.model.model.add_tendency_calls[0][0] is cached_post
+    assert forecaster.model.model.add_tendency_calls[0][1] is cached_post_tend[0]
+    assert forecaster.model.model.add_tendency_calls[0][2] is cached_pre

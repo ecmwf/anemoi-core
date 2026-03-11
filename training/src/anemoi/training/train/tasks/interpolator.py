@@ -96,17 +96,20 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+        dataset_contexts = self._build_dataset_contexts()
         x_bound = {}
         y = {}
-        for dataset_name, dataset_batch in batch.items():
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
+            dataset_batch = batch[dataset_name]
             x_bound[dataset_name] = dataset_batch[:, itemgetter(*self.boundary_times)(self.imap)][
                 ...,
-                self.data_indices[dataset_name].data.input.full,
+                dataset_ctx.static.data_indices.data.input.full,
             ]  # (bs, time, ens, latlon, nvar)
 
             y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)][
                 ...,
-                self.data_indices[dataset_name].data.output.full,
+                dataset_ctx.static.data_indices.data.output.full,
             ]
 
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
