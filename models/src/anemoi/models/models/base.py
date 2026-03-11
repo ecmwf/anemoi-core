@@ -69,12 +69,12 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
 
-        num_trainable_parameters = broadcast_config_keys(
+        trainable_parameters = broadcast_config_keys(
             model_config.model.trainable_parameters,
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
-        self.node_attributes = NamedNodesAttributes(num_trainable_parameters, self._graph_data)
+        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
