@@ -453,15 +453,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         kwargs = {"model": self.model, "dataset_name": dataset_name}
 
         scaler = scaler_builder.update_scaling_values(callback, **kwargs)
-        if scaler is None:
+        if scaler is None:  # If scaler is None, no update to be applied
             return
 
         if self._can_update_scaler(loss_obj, name):
-            loss_obj.update_scaler(scaler=scaler[1], name=name)
+            loss_obj.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
-        for metric in metrics_dict.values():
+        for metric in metrics_dict.values():  # If scalar in metrics, update it
             if self._can_update_scaler(metric, name):
-                metric.update_scaler(scaler=scaler[1], name=name)
+                metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
     @staticmethod
     def _can_update_scaler(loss_or_metric: torch.nn.Module, scaler_name: str) -> bool:
