@@ -141,9 +141,7 @@ class FFT2D(SpectralTransform):
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = torch.index_select(
-            data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device)
-        )
+        data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
 
         var = data.shape[-1]
         try:
