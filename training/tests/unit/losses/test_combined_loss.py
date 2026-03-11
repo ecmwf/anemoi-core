@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from unittest.mock import MagicMock
+
 import pytest
 import torch
 from hydra.errors import InstantiationException
@@ -17,6 +19,16 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.weighted_mse import WeightedMSELoss
+
+
+class FakeGroup:
+    def __init__(self, size: int) -> None:
+        self._size = size
+
+    def size(self) -> int:
+        return self._size
 
 
 def test_combined_loss() -> None:
@@ -103,3 +115,50 @@ def test_combined_loss_seperate_scalers() -> None:
     assert isinstance(loss.losses[1], MAELoss)
     assert "test" not in loss.losses[1].scaler
     assert "test2" in loss.losses[1].scaler
+
+
+def test_combined_loss_propagates_needs_shard_layout_info() -> None:
+    loss = CombinedLoss(
+        MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0],
+            keep_batch_sharded=True,
+        ),
+    )
+
+    assert loss.needs_shard_layout_info is True
+
+
+def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
+    pred = torch.zeros((1, 1, 1, 2, 1))
+    target = torch.zeros((1, 1, 2, 1))
+    grid_shard_shapes = [(1, 2, 1), (1, 2, 1)]
+    weights = torch.ones((1, 1, 1, 1, 1))
+    group = FakeGroup(size=2)
+
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=MSELoss(),
+        weights=[1.0],
+        keep_batch_sharded=True,
+    )
+    prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_shapes, grid_shard_shapes))
+    monkeypatch.setattr(multiscale_loss, "_prepare_for_smoothing", prepare_for_smoothing)
+    monkeypatch.setattr("anemoi.training.losses.multiscale.gather_channels", lambda x, *_args: x)
+    monkeypatch.setattr("anemoi.training.losses.base.reduce_tensor", lambda x, *_args: x)
+
+    loss = CombinedLoss(
+        multiscale_loss,
+        WeightedMSELoss(),
+    )
+
+    result = loss(
+        pred,
+        target,
+        weights=weights,
+        group=group,
+        grid_dim=-2,
+        grid_shard_shapes=grid_shard_shapes,
+    )
+
+    assert result.shape == (1,)
+    prepare_for_smoothing.assert_called_once_with(pred, target, group, -2, grid_shard_shapes)
