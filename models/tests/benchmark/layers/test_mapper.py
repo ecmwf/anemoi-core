@@ -29,6 +29,21 @@ from anemoi.utils.config import DotDict
 
 from anemoi.models.utils.compile import mark_for_compilation
 
+
+class CUDAGraphMapperWrapper(torch.nn.Module):
+    """Wrapper that captures non-tensor args so make_graphed_callables sees only Tensors."""
+
+    def __init__(self, mapper, batch_size, shard_shapes):
+        super().__init__()
+        self.mapper = mapper
+        self.batch_size = batch_size
+        self.shard_shapes = shard_shapes
+
+    def forward(self, x_src, x_dst, edge_attr, edge_index):
+        with torch.no_grad():
+            return self.mapper.forward((x_src, x_dst), self.batch_size, self.shard_shapes, edge_attr, edge_index)
+
+
 # Import the benchmark profiling function
 import sys
 from pathlib import Path
@@ -75,7 +90,8 @@ class MapperBenchmarkConfig:
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
-    shard_strategy: str = "edges"
+    #shard_strategy: str = "edges"
+    shard_strategy: str = "heads"
     graph_attention_backend: str = "pyg" # TODO pick triton by default if running on GPU
     edge_dim: int = None
     edge_pre_mlp: bool = False
@@ -135,8 +151,6 @@ def benchmark_graph(graph_config, device) -> HeteroData:
 def benchmark_graph_provider(graph_config, mapper_benchmark_config, device):
     """Create graph provider for benchmarking."""
     
-    mapper_benchmark_config
-    
     graph = benchmark_graph(graph_config, device)
     provider = create_graph_provider(
         graph=graph[("nodes", "to", "nodes")],
@@ -151,8 +165,9 @@ def benchmark_graph_provider(graph_config, mapper_benchmark_config, device):
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("graph_config", [GraphConfig_n320_to_o96()])
-@pytest.mark.parametrize("mode", ["both"])
-def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device):
+@pytest.mark.parametrize("mode", ["fwd"])
+@pytest.mark.parametrize("use_cuda_graphs", [False, True])
+def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device, use_cuda_graphs):
     """Benchmark the GraphTransformerForwardMapper."""
     config = mapper_benchmark_config
     
@@ -169,19 +184,26 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchma
     mapper_config = asdict(config)
     mapper_config["edge_dim"] = benchmark_graph_provider.edge_dim
     mapper = GraphTransformerForwardMapper(**mapper_config).to(device)
+
     mapper = mark_for_compilation(mapper, compile_config().compile)
     
     # Create input tensors
-    x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
-    x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
+    x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=False)
+    x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=False)
     x = (x_src, x_dst)
     
     shard_shapes = ([list(x_src.shape)], [list(x_dst.shape)])
     edge_attr, edge_index, _ = benchmark_graph_provider.get_edges(batch_size=config.batch_size)
-    
-    # Define forward function for benchmarking
-    def forward_fn():
-        return mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
+
+    if use_cuda_graphs:
+        wrapper = CUDAGraphMapperWrapper(mapper, config.batch_size, shard_shapes).to(device) # avoid passing non tensor inputs to forward
+        wrapper = torch.cuda.make_graphed_callables(wrapper, (x_src, x_dst, edge_attr, edge_index))
+
+        def forward_fn():
+            return wrapper(x_src, x_dst, edge_attr, edge_index)
+    else:
+        def forward_fn():
+            return mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
     
     # Run benchmark
     LOGGER.debug(f"Running {mode} benchmark...")
@@ -251,26 +273,28 @@ def test_benchmark_backward_mapper(mapper_benchmark_config, graph_config, benchm
     assert run_time > 0, "Benchmark did not run successfully"
     assert peak_memory > 0, "Benchmark did not measure memory usage"
     
-@pytest.mark.gpu
-@pytest.mark.slow
-@pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
-@pytest.mark.parametrize("mode", ['both'])
-@pytest.mark.parametrize("backend", ['pyg', 'triton'])
-def test_benchmark_forward_mapper_different_backends(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, backend, device):
-    """Benchmark the GraphTransformerForwardMapper with different attention backends."""
-    LOGGER.debug(f"Benchmarking with {backend} backend...")
-    if (not device.startswith("cuda")) and backend == "triton":
-        pytest.skip("Triton backend is not supported on CPU.")
-    mapper_benchmark_config.graph_attention_backend = backend
-    test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device)
+#@pytest.mark.gpu
+#@pytest.mark.slow
+#@pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
+#@pytest.mark.parametrize("mode", ['both'])
+#@pytest.mark.parametrize("backend", ['pyg', 'triton'])
+#def test_benchmark_forward_mapper_different_backends(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, backend, device):
+#    """Benchmark the GraphTransformerForwardMapper with different attention backends."""
+#    LOGGER.debug(f"Benchmarking with {backend} backend...")
+#    if (not device.startswith("cuda")) and backend == "triton":
+#        pytest.skip("Triton backend is not supported on CPU.")
+#    mapper_benchmark_config.graph_attention_backend = backend
+#    use_cuda_graphs = backend == False
+#    test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device, use_cuda_graphs)
     
-@pytest.mark.gpu
-@pytest.mark.slow
-@pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
-@pytest.mark.parametrize("mode", ['both'])
-@pytest.mark.parametrize("num_chunks", [1,2,4,8])
-def test_benchmark_forward_mapper_different_num_chunks(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, num_chunks, device):
-    """Benchmark the GraphTransformerForwardMapper with different num_chunks."""
-    LOGGER.debug(f"Benchmarking with num_chunks={num_chunks}...")
-    mapper_benchmark_config.num_chunks = num_chunks
-    test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device)
+#@pytest.mark.gpu
+#@pytest.mark.slow
+#@pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
+#@pytest.mark.parametrize("mode", ['both'])
+#@pytest.mark.parametrize("num_chunks", [1,2,4,8])
+#def test_benchmark_forward_mapper_different_num_chunks(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, num_chunks, device):
+#    """Benchmark the GraphTransformerForwardMapper with different num_chunks."""
+#    LOGGER.debug(f"Benchmarking with num_chunks={num_chunks}...")
+#    mapper_benchmark_config.num_chunks = num_chunks
+#    use_cuda_graphs = False
+#    test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device, use_cuda_graphs)
