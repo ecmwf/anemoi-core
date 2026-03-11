@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from numpy import roll
+
 import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -169,19 +171,40 @@ class GraphForecaster(BaseGraphModule):
         assert batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
+            print(f"{rollout_step=}")
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, metrics_next = checkpoint(
-                self.compute_loss_metrics,
-                y_pred,
-                y,
-                rollout_step,
-                validation_mode,
-                use_reentrant=False,
-            )
+
+            if rollout_step >= 1:
+                # single out only pressure variables if rollout >= 1
+                # get pressure Indices
+                p_indices_model = [v for  k, v in self.data_indices.model.output.name_to_index.items() if k.startswith("P")]
+                mask = torch.zeros_like(y_pred)  # same shape
+                mask[..., p_indices_model] = 1.0  # 1 where you want to train
+                y_pred_p = y_pred * mask  
+                y_p = y * mask  
+
+                loss, metrics_next = checkpoint(
+                    self.compute_loss_metrics,
+                    y_pred_p,
+                    y_p,
+                    rollout_step,
+                    validation_mode,
+                    use_reentrant=False,
+                )
+            else:
+                loss, metrics_next = checkpoint(
+                    self.compute_loss_metrics,
+                    y_pred,
+                    y,
+                    rollout_step,
+                    validation_mode,
+                    use_reentrant=False,
+                )
+
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
