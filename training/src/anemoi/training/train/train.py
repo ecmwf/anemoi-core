@@ -30,6 +30,8 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.models.utils.config import get_multiple_datasets_config
+
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -165,6 +167,35 @@ class AnemoiTrainer(ABC):
             # TODO(): We could add some functionality to load partial graphs here, and compute the rest from the config.
         else:
             graph_filename = None
+
+        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
+        for dataset_name, dataset_config in dataset_configs.items():
+            if dataset_name not in self.config.graph.nodes.keys():
+                LOGGER.info("Creating graph node entry for dataset '%s'", dataset_name)
+                dataset_reader_config = dataset_config.dataset_config
+                if isinstance(dataset_reader_config, (DictConfig, dict)):
+                    if "dataset" not in dataset_reader_config:
+                        msg = f"Dataset '{dataset_name}' is missing 'dataset' key."
+                        raise ValueError(msg)
+                    dataset_source = dataset_reader_config["dataset"]
+                else:
+                    dataset_source = dataset_reader_config
+
+                if dataset_source is None:
+                    msg = f"Dataset source is None for dataset '{dataset_name}'. Check dataloader.dataset_config.dataset."
+                    raise ValueError(msg)
+                
+                # dataset: ${dataloader.training.datasets.cerra.dataset_config}
+
+                # Modify config to include new dataset nodes
+                self.config.graph.nodes[dataset_name] = {
+                    "node_builder": {
+                        "_target_": "anemoi.graphs.nodes.AnemoiDatasetNodes",
+                        "dataset": dataset_source
+                    }
+                }
+            else:
+                LOGGER.info("Graph node entry for dataset '%s' was already specified in the config.", dataset_name)
 
         # Create new graph
         from anemoi.graphs.create import GraphCreator
