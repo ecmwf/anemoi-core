@@ -39,8 +39,8 @@ def test_instantiation_with_filtering() -> None:
     )
     assert isinstance(loss, LossVariableMapper)
     assert isinstance(loss.loss, BaseLoss)
-    assert hasattr(loss.loss, "y_dim")
-    assert hasattr(loss.loss, "x_dim")
+    assert hasattr(loss.loss.transform, "y_dim")
+    assert hasattr(loss.loss.transform, "x_dim")
 
     assert IndexSpace.MODEL_OUTPUT in loss.predicted_indices_by_layout
 

@@ -348,16 +348,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return "multi_dataset"
 
     def _check_sharding_support(self) -> None:
-        self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())
+        self.loss_supports_sharding = all(
+            getattr(leaf, "supports_sharding", False) for loss in self.loss.values() for leaf in loss.iter_leaf_losses()
+        )
         self.metrics_support_sharding = all(
             getattr(metric, "supports_sharding", False)
             for dataset_metrics in self.metrics.values()
             for metric in dataset_metrics.values()
         )
-
         if not self.loss_supports_sharding and self.keep_batch_sharded:
             unsupported_losses = [
-                loss.name for loss in self.loss.values() if not getattr(loss, "supports_sharding", False)
+                type(leaf).__name__
+                for loss in self.loss.values()
+                for leaf in loss.iter_leaf_losses()
+                if not getattr(leaf, "supports_sharding", False)
             ]
             LOGGER.warning(
                 "Some loss functions do not support sharding: %s. "
@@ -489,15 +493,32 @@ class BaseGraphModule(pl.LightningModule, ABC):
         kwargs = {"model": self.model, "dataset_name": dataset_name}
 
         scaler = scaler_builder.update_scaling_values(callback, **kwargs)
-        if scaler is None:  # If scalar is None, no update to be applied
+        if scaler is None:  # If scaler is None, no update to be applied
             return
 
-        if name in loss_obj.scaler:  # If scalar in loss, update it
+        if self._can_update_scaler(loss_obj, name):
             loss_obj.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
         for metric in metrics_dict.values():  # If scalar in metrics, update it
-            if name in metric.scaler:
+            if self._can_update_scaler(metric, name):
                 metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+
+    @staticmethod
+    def _can_update_scaler(loss_or_metric: torch.nn.Module, scaler_name: str) -> bool:
+        """Whether a module can update a scaler with this name.
+
+        Standard losses/metrics expose a ``scaler`` container, while composite losses
+        (e.g., ``CombinedLoss``) intentionally remove this attribute and route updates
+        through their ``update_scaler`` implementation.
+        """
+        if not hasattr(loss_or_metric, "update_scaler"):
+            return False
+
+        scaler = getattr(loss_or_metric, "scaler", None)
+        if scaler is None:
+            return True
+
+        return scaler_name in scaler
 
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
@@ -568,7 +589,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         is_sharded = grid_shard_slice is not None
 
-        sharding_supported = (self.loss_supports_sharding or validation_mode) and (
+        sharding_supported = (self.loss_supports_sharding) and (  # loss calculated in training and validation mode
             self.metrics_support_sharding or not validation_mode
         )
 

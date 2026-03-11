@@ -10,6 +10,7 @@
 
 import functools
 from collections.abc import Callable
+from collections.abc import Iterator
 from typing import Any
 
 import torch
@@ -153,6 +154,11 @@ class CombinedLoss(BaseLoss):
             self.add_module(str(i), self.losses[-1])  # (self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
         del self.scaler  # Remove scaler property from parent class, as it is not used here
+
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """Recursively yield leaf losses from all sub-losses."""
+        for sub_loss in self.losses:
+            yield from sub_loss.iter_leaf_losses()
 
     def forward(
         self,
