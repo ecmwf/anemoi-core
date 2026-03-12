@@ -346,7 +346,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
         )
 
-        x_latent = self.processor(
+        x_latent_proc = self.processor(
             x_latent,
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden_dict[dst_hidden_name],
@@ -355,6 +355,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
             edge_shard_shapes=proc_edge_shard_shapes,
         )
+
+        if self.latent_skip:
+            x_latent = x_latent_proc + x_latent
 
         # Decoder
         x_out_dict = {}

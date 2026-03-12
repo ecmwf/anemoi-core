@@ -96,27 +96,36 @@ class BaseGraphModel(nn.Module):
         self.num_input_channels = {}
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
+        self.num_input_channels_decoding_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
+        self._decoding_forcing_input_idx = {}
         self.input_dim = {}
-        self.output_dim = {}
         self.input_dim_latent = {}
+        self.target_dim = {}
+        self.output_dim = {}
 
         for dataset_name, dataset_indices in data_indices.items():
-            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
-            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
-            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
+            self._decoding_forcing_input_idx[dataset_name] = [
+                dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing
+            ]
+
+            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
+            self.num_input_channels_decoding_forcings[dataset_name] = len(
+                self._decoding_forcing_input_idx[dataset_name]
+            )
+            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
+
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
+            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
+            self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
-            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(self._graph_name_hidden)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
-
-    def _calculate_output_dim(self, dataset_name: str) -> int:
-        return self.n_step_output * self.num_output_channels[dataset_name]
 
     def _calculate_input_dim_latent(self, dataset_name: str) -> int:
         return self.node_attributes.attr_ndims[dataset_name]
@@ -131,6 +140,14 @@ class BaseGraphModel(nn.Module):
                 self._assert_hidden_nodes_name(hidden_name)
         else:
             raise TypeError(f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}")
+
+    def _calculate_target_dim(self, dataset_name: str) -> int:
+        # Default behaviour is to pass the same input as to the encoder.
+        # TODO: abstract different options into the base class
+        return self._calculate_input_dim(dataset_name)
+
+    def _calculate_output_dim(self, dataset_name: str) -> int:
+        return self.n_step_output * self.num_output_channels[dataset_name]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
