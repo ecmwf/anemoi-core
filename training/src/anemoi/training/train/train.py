@@ -29,6 +29,7 @@ from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.utils.config import integrate_data_nodes_in_config
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
@@ -165,6 +166,9 @@ class AnemoiTrainer(ABC):
             # TODO(): We could add some functionality to load partial graphs here, and compute the rest from the config.
         else:
             graph_filename = None
+
+        # Introduce Data Nodes in graph config
+        self.config = integrate_data_nodes_in_config(self.config)
 
         # Create new graph
         from anemoi.graphs.create import GraphCreator
