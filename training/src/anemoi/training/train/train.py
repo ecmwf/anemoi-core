@@ -171,7 +171,7 @@ class AnemoiTrainer(ABC):
         dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
 
         for dataset_name, dataset_config in dataset_configs.items():
-            if dataset_name not in self.config.graph.nodes.keys():
+            if dataset_name not in self.config.graph.nodes:
                 LOGGER.info("Creating graph node entry for dataset '%s'", dataset_name)
                 dataset_reader_config = dataset_config.dataset_config
                 if isinstance(dataset_reader_config, (DictConfig, dict)):
