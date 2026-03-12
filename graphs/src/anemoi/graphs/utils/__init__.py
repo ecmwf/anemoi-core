@@ -6,13 +6,13 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from .compile import get_distributed_device
-from .compile import get_nearest_neighbour
-from .compile import get_grid_reference_distance
-from .compile import concat_edges
-from .compile import haversine_distance
 from .compile import NodesAxis
+from .compile import concat_edges
+from .compile import get_distributed_device
 from .compile import get_edge_attributes
+from .compile import get_grid_reference_distance
+from .compile import get_nearest_neighbour
+from .compile import haversine_distance
 
 __all__ = [
     "get_distributed_device",
@@ -21,5 +21,5 @@ __all__ = [
     "concat_edges",
     "haversine_distance",
     "NodesAxis",
-    "get_edge_attributes"
+    "get_edge_attributes",
 ]

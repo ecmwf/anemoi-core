@@ -8,12 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_DATASET_NAME = "data"
+
 
 def get_multiple_datasets_config(config: DictConfig, default_dataset_name: str = DEFAULT_DATASET_NAME) -> dict:
     """Get multiple datasets configuration for old configs.
@@ -26,8 +28,9 @@ def get_multiple_datasets_config(config: DictConfig, default_dataset_name: str =
 
     return OmegaConf.create({default_dataset_name: config})
 
+
 def integrate_data_nodes_in_config(config: DictConfig):
-        
+
     # Introduce Data Nodes in graph config
     train_configs = get_multiple_datasets_config(config.dataloader.training)
 
@@ -58,9 +61,7 @@ def integrate_data_nodes_in_config(config: DictConfig):
                 dataset_source = dataset_reader_config
 
             if dataset_source is None:
-                msg = (
-                    f"Dataset source is None for dataset '{dataset_name}'. Check dataloader.dataset_config.dataset."
-                )
+                msg = f"Dataset source is None for dataset '{dataset_name}'. Check dataloader.dataset_config.dataset."
                 raise ValueError(msg)
 
             # Add dataset nodes from dataloader into graph recepe
@@ -70,5 +71,5 @@ def integrate_data_nodes_in_config(config: DictConfig):
             }
         else:
             LOGGER.info("Graph node entry for dataset '%s' is already specified in the config.", dataset_name)
-    
+
     return config
