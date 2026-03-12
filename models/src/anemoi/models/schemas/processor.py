@@ -11,19 +11,18 @@ from typing import Any
 from typing import Literal
 from typing import Union
 
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import model_validator
-
-from anemoi.utils.schemas import BaseModel
 
 from .common_components import GNNModelComponent
 from .common_components import PointWiseModelComponent
 from .common_components import TransformerModelComponent
 
 
-class NoOpProcessorSchema(BaseModel):
+class NoOpProcessorSchema(PydanticBaseModel):
     target_: Literal["anemoi.models.layers.processor.NoOpProcessor"] = Field(..., alias="_target_")
     "No-op processor, used for ablations."
 
