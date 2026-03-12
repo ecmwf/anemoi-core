@@ -65,7 +65,6 @@ class GNNModelComponent(BaseModel):
     "Name of the model"
 
 
-
 class PointWiseModelComponent(BaseModel):
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."

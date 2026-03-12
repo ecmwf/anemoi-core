@@ -303,7 +303,7 @@ class GNNProcessor(BaseProcessor):
     def __init__(
         self,
         *,
-        name : str,
+        name: str,
         num_channels: int,
         num_layers: int,
         num_chunks: int,
@@ -449,7 +449,7 @@ class GraphTransformerProcessor(BaseProcessor):
             Allow for edge feature mixing
         """
         super().__init__(
-            name=name, 
+            name=name,
             num_channels=num_channels,
             num_layers=num_layers,
             num_chunks=num_chunks,
