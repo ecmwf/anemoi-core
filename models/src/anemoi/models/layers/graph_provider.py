@@ -27,6 +27,7 @@ from torch_geometric.typing import Adj
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.triton.utils import sort_edge_index_by_dst
 
 LOGGER = logging.getLogger(__name__)
 
@@ -159,10 +160,12 @@ class StaticGraphProvider(BaseGraphProvider):
         assert graph, "StaticGraphProvider needs a valid graph to register edges."
         assert edge_attributes is not None, "Edge attributes must be provided"
 
-        edge_attr_tensor = torch.cat([graph[attr] for attr in edge_attributes], axis=1)
+        # sort all edge indices by dst at this stage to avoid expensive reordering operations later:
+        edge_index, perm = sort_edge_index_by_dst(graph.edge_index, max_value=dst_size)
+        edge_attr_tensor = torch.cat([graph[attr][perm] for attr in edge_attributes], axis=1)
 
         self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
-        self.register_buffer("edge_index_base", graph.edge_index, persistent=False)
+        self.register_buffer("edge_index_base", edge_index, persistent=False)
         self.register_buffer(
             "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=False
         )
