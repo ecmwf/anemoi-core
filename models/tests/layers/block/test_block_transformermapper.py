@@ -17,6 +17,7 @@ from hypothesis import settings
 from hypothesis import strategies as st
 
 from anemoi.models.layers.attention import MultiHeadCrossAttention
+from anemoi.models.layers.block import MLP
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.utils import load_layer_kernels
 
@@ -74,7 +75,7 @@ def test_TransformerMapperBlock_init(mapper_block):
     assert isinstance(block.layer_norm_attention_src, nn.LayerNorm)
     assert isinstance(block.layer_norm_attention_dst, nn.LayerNorm)
     assert isinstance(block.layer_norm_mlp, nn.LayerNorm)
-    assert isinstance(block.mlp, nn.Sequential)
+    assert isinstance(block.mlp, MLP)
     assert isinstance(block.attention, MultiHeadCrossAttention)
 
 

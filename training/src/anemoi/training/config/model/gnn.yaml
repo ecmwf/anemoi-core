@@ -24,6 +24,7 @@ processor:
   num_layers: 16
   num_chunks: 2
   mlp_extra_layers: 0
+  mlp_implementation: mlp
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
@@ -34,6 +35,7 @@ encoder:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 1
   mlp_extra_layers: 0
+  mlp_implementation: mlp
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
@@ -44,6 +46,7 @@ decoder:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 1
   mlp_extra_layers: 0
+  mlp_implementation: mlp
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
