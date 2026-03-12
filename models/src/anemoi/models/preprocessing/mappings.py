@@ -7,8 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import torch
 import math
+
+import torch
 
 
 def noop(x):
@@ -22,6 +23,7 @@ def boxcox_converter(x, lambd=0.5):
     if lambd == 0:
         return torch.log(x)
     return (torch.pow(x, lambd) - 1) / lambd
+
 
 def inverse_boxcox_converter(x, lambd=0.5):
     """Convert back boxcox(var) to var."""
@@ -39,13 +41,11 @@ def _check_atanh_params(k, rho, a):
     if a <= 0:
         raise ValueError(f"a must be > 0, got {a}")
     if a > k:
-        raise ValueError(
-            f"a must satisfy a <= k so the interior fits inside the endpoint buckets, got a={a}, k={k}"
-        )
+        raise ValueError(f"a must satisfy a <= k so the interior fits inside the endpoint buckets, got a={a}, k={k}")
+
 
 def atanh_converter(x, rho=0.9, a=0.75, k=1.0):
-    """
-    Encode x in [0, 1] to a single scalar with explicit endpoint buckets.
+    """Encode x in [0, 1] to a single scalar with explicit endpoint buckets.
 
     Mapping:
         x == 0   -> -k
@@ -63,31 +63,28 @@ def atanh_converter(x, rho=0.9, a=0.75, k=1.0):
 
 
 def inverse_atanh_converter(y, rho=0.9, a=0.75):
-    interior = 0.5 * (1.0 + torch.tanh((y / a) * math.atanh(rho) ) / rho)
+    interior = 0.5 * (1.0 + torch.tanh((y / a) * math.atanh(rho)) / rho)
     x = torch.where(y <= -a, torch.zeros_like(y), torch.where(y >= a, torch.ones_like(y), interior))
     return torch.clamp(x, 0.0, 1.0)
-
-
 
 
 # sqrt/ sqr
 def sqrt_converter(x):
     """Convert positive var in to sqrt(var)."""
     return torch.sqrt(x)
-    
+
+
 def square_converter(x):
     """Convert back sqrt(var) to var."""
     return x**2
+
 
 ## log1p and back
 def log1p_converter(x):
     """Convert positive var in to log(1+var)."""
     return torch.log1p(x)
 
+
 def expm1_converter(x):
     """Convert back log(1+var) to var."""
     return torch.expm1(x)
-
-
-
-
