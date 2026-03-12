@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from typing import Optional
 
@@ -30,9 +31,18 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
 
+LOGGER = logging.getLogger(__name__)
+
 
 class NoOpProcessor(nn.Module):
     """No-op processor, used for ablations."""
+
+    def __init__(self, **kwargs) -> None:
+        if len(kwargs) > 0:
+            LOGGER.warning(
+                f"{self.__class__.__name__} does not use any of the following provided kwargs: {list(kwargs.keys())}"
+            )
+        super().__init__()
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         return x
