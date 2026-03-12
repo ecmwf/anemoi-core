@@ -1,0 +1,10 @@
+---
+defaults:
+  - 4scale
+  - override /graph/projections@smoothers.smooth_1x: smooth_knn16_o96
+  - override /graph/projections@smoothers.smooth_2x: smooth_knn32_o96
+  - override /graph/projections@smoothers.smooth_4x: smooth_knn64_o96
+  - override /graph/projections@smoothers.smooth_8x: smooth_knn128_o96
+  - _self_
+
+# 4-scale multiscale smoothing for o96 (~100 km) using KNN=16/32/64/128.

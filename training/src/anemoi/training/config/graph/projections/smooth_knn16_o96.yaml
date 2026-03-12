@@ -1,0 +1,9 @@
+---
+# Self-smoothing projection parameters for o96 (~100 km), KNN=16.
+
+node_name: smooth
+reference_node_name: ${graph.data}
+edge_weight_attribute: gauss_weight
+gaussian_norm: l1
+num_nearest_neighbours: 16
+sigma: 0.01570

@@ -15,12 +15,14 @@ training:
   training_loss:
     datasets:
       data:
+        loss_matrices_graph: null
         loss_matrices: [ null]
         weights: [1.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
+          loss_matrices_graph: null
           loss_matrices: [null]
           weights: [1.0]
 

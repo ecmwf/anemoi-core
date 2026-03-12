@@ -22,8 +22,23 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
+NESTED_LOSS_CLASS_NAMES = {
+    "MultiscaleLossWrapper",
+}
+GRAPH_DATA_WRAPPER_CLASS_NAMES = {
+    "MultiscaleLossWrapper",
+    "CombinedLoss",
+    "FilteringLossWrapper",
+}
 LOGGER = logging.getLogger(__name__)
+
+
+def _target_class_name(loss_config: dict) -> str | None:
+    """Return the class name from Hydra's `_target_` field."""
+    target = loss_config.get("_target_")
+    if isinstance(target, str):
+        return target.rsplit(".", maxsplit=1)[-1]
+    return None
 
 
 # Future import breaks other type hints TODO Harrison Cook
@@ -31,6 +46,7 @@ def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: dict | None = None,
+    graph_data: object | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -66,9 +82,18 @@ def get_loss_function(
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
 
-    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
+    target_class_name = _target_class_name(loss_config)
+
+    if target_class_name in NESTED_LOSS_CLASS_NAMES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
-        per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
+        per_scale_loss = get_loss_function(
+            OmegaConf.create(per_scale_loss_config),
+            scalers,
+            data_indices,
+            graph_data=graph_data,
+        )
+        if graph_data is not None:
+            return instantiate(loss_config, per_scale_loss=per_scale_loss, graph_data=graph_data, **kwargs)
         return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
 
     if scalers is None:
@@ -77,7 +102,10 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
+    if graph_data is not None and target_class_name in GRAPH_DATA_WRAPPER_CLASS_NAMES:
+        loss_function = instantiate(loss_config, graph_data=graph_data, **kwargs, _recursive_=False)
+    else:
+        loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"

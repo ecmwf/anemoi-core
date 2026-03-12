@@ -62,6 +62,18 @@ def test_forward_with_src_node_weight(graph_data):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
+def test_forward_with_edges_name(graph_data):
+    mapper = TruncatedConnection(
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        edge_weight_attribute="edge_length",
+    )
+    x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
+    x_truncated = mapper.forward(x)
+    assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
+
+
 def test_skipconnection(flat_data):
     mapper = SkipConnection()
     out = mapper.forward(flat_data)

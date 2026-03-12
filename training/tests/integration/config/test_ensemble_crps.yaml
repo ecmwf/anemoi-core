@@ -8,12 +8,14 @@ training:
   training_loss:
     datasets:
       data:
+        loss_matrices_graph: null
         loss_matrices: [ "o96_smoothing_o96.npz", null]
         weights: [1.0, 1.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
+          loss_matrices_graph: null
           loss_matrices: ["o96_smoothing_o96.npz", null]
           weights: [1.0, 1.0]
 

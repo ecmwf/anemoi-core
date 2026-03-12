@@ -47,6 +47,14 @@ class TruncatedConnectionSchema(BaseModel):
         None,
         description="Optional file path (.npz) to load the down-projection matrix from. Required if not using graph-based projection.",
     )
+    truncation_up_edges_name: tuple[str, str, str] | None = Field(
+        None,
+        description="Optional edge type identifier (src, relation, dst) for the up-projection matrix when using graph-based projection.",
+    )
+    truncation_down_edges_name: tuple[str, str, str] | None = Field(
+        None,
+        description="Optional edge type identifier (src, relation, dst) for the down-projection matrix when using graph-based projection.",
+    )
     autocast: bool = Field(
         False, description="Whether to enable mixed precision autocasting during projection operations."
     )
@@ -58,7 +66,9 @@ class TruncatedConnectionSchema(BaseModel):
     def check_instantiation_method(self) -> Any:
         # Check that only one method is used: either file paths or graph-based
         file_based = self.truncation_up_file_path is not None and self.truncation_down_file_path is not None
-        graph_based = self.data_nodes is not None and self.truncation_nodes is not None
+        graph_based_nodes = self.data_nodes is not None and self.truncation_nodes is not None
+        graph_based_edges = self.truncation_up_edges_name is not None and self.truncation_down_edges_name is not None
+        graph_based = graph_based_nodes or graph_based_edges
 
         if file_based and graph_based:
             raise ValueError(
@@ -67,7 +77,8 @@ class TruncatedConnectionSchema(BaseModel):
 
         if not file_based and not graph_based:
             raise ValueError(
-                "You must specify either both file paths (truncation_up_file_path and truncation_down_file_path) or both data_nodes and truncation_nodes for graph-based projection."
+                "You must specify either both file paths (truncation_up_file_path and truncation_down_file_path) "
+                "or graph-based projection with data_nodes/truncation_nodes or truncation_*_edges_name."
             )
 
         if file_based:
@@ -77,9 +88,12 @@ class TruncatedConnectionSchema(BaseModel):
                 or self.truncation_nodes is not None
                 or self.edge_weight_attribute is not None
                 or self.src_node_weight_attribute is not None
+                or self.truncation_up_edges_name is not None
+                or self.truncation_down_edges_name is not None
             ):
                 raise ValueError(
-                    "When using file-based projection, do not specify data_nodes, truncation_nodes, edge_weight_attribute, or src_node_weight_attribute."
+                    "When using file-based projection, do not specify data_nodes, truncation_nodes, edge_weight_attribute, "
+                    "src_node_weight_attribute, or truncation_*_edges_name."
                 )
 
         if graph_based:
@@ -87,6 +101,10 @@ class TruncatedConnectionSchema(BaseModel):
             if self.truncation_up_file_path is not None or self.truncation_down_file_path is not None:
                 raise ValueError(
                     "When using graph-based projection, do not specify truncation_up_file_path or truncation_down_file_path."
+                )
+            if graph_based_nodes and graph_based_edges:
+                raise ValueError(
+                    "Specify either data_nodes/truncation_nodes or truncation_*_edges_name for graph-based projection, but not both."
                 )
 
         return self

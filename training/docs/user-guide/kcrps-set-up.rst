@@ -55,6 +55,27 @@ the input to the model.
    :start-after: truncation_inv:
    :end-before: # Changes in datamodule
 
+Alternatively, you can configure truncation via graph-based projections
+and reference them from the residual configuration:
+
+.. code:: yaml
+
+   graph:
+     projections:
+       residual:
+         down_edges_name: [${graph.data}, "to", truncation]
+         up_edges_name: [truncation, "to", ${graph.data}]
+         edge_weight_attribute: gauss_weight
+         nodes: ...
+         edges: ...
+
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       truncation_down_edges_name: ${graph.projections.residual.down_edges_name}
+       truncation_up_edges_name: ${graph.projections.residual.up_edges_name}
+       edge_weight_attribute: ${graph.projections.residual.edge_weight_attribute}
+
 The CRPS training uses a different DDP strategy which requires to
 specify the number of GPUs per ensemble.
 
