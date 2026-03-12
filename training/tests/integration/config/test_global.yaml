@@ -3,6 +3,14 @@ system:
   input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
 
+graph:
+  attributes:
+    nodes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights # options: Area, Uniform
+        norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
+        fill_value: 0
+
 dataloader:
   training:
     datasets:
