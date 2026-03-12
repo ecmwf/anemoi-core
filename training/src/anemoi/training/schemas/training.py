@@ -179,8 +179,6 @@ class VariableLevelScalerSchema(BaseModel):
 
 class GraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.GraphNodeAttributeScaler"] = Field(..., alias="_target_")
-    nodes_name: str = Field(example="data")
-    "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
     "Name of the node attribute to return."
     norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
@@ -222,8 +220,6 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
         ...,
         alias="_target_",
     )
-    nodes_name: str = Field(example="data")
-    "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
     "Name of the node attribute to return."
     scaling_mask_attribute_name: str = Field(example="cutout_mask")
