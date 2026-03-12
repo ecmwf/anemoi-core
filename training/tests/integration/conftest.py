@@ -163,7 +163,6 @@ def global_config(
         "output_steps",
     ]
 
-    print(cfg)
     return cfg, url, model_architecture
 
 

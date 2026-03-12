@@ -67,7 +67,7 @@ def integrate_data_nodes_in_config(config: DictConfig):
             # Add dataset nodes from dataloader into graph recepe
             config.graph.nodes[dataset_name] = {
                 "node_builder": {"_target_": "anemoi.graphs.nodes.AnemoiDatasetNodes", "dataset": dataset_source},
-                "attributes": config.graph.attributes.nodes,
+                "attributes": config.graph.attributes.nodes if hasattr(config.graph, "attributes") else None,
             }
         else:
             LOGGER.info("Graph node entry for dataset '%s' is already specified in the config.", dataset_name)
