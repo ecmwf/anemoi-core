@@ -46,8 +46,17 @@ from .utils import validate_checkpoint
 try:
     from .validation import validate_pipeline_health
 except ImportError:
-    # Validation module not available
-    validate_pipeline_health = None
+    from typing import NoReturn
+
+    def validate_pipeline_health(*_args: object, **_kwargs: object) -> NoReturn:  # type: ignore[misc]
+        """Sentinel: raise when the validation module is unavailable."""
+        msg = (
+            "validate_pipeline_health is not available because the "
+            "validation module could not be imported. Ensure that "
+            "anemoi.training.checkpoint.validation is installed."
+        )
+        raise ImportError(msg)
+
 
 __all__ = [
     # Exceptions
