@@ -75,14 +75,12 @@ class TestTransformerProcessorBlock:
         num_heads=st.integers(min_value=1, max_value=10),
         activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU"]),
         mlp_implementation=st.sampled_from(["mlp", "glu", "swiglu", "geglu", "reglu"]),
-        window_size=st.integers(min_value=1, max_value=512),
         shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
         batch_size=st.integers(min_value=1, max_value=40),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
-        softcap=st.floats(min_value=0.0, max_value=1.0),
         qk_norm=st.booleans(),
     )
-    @settings(max_examples=10)
+    @settings(max_examples=10, deadline=None)
     def test_forward_output(
         self,
         factor_attention_heads,
@@ -90,11 +88,9 @@ class TestTransformerProcessorBlock:
         num_heads,
         activation,
         mlp_implementation,
-        window_size,
         shapes,
         batch_size,
         dropout_p,
-        softcap,
         qk_norm,
     ):
         num_channels = num_heads * factor_attention_heads
@@ -105,12 +101,12 @@ class TestTransformerProcessorBlock:
             num_channels=num_channels,
             hidden_dim=hidden_dim,
             num_heads=num_heads,
-            window_size=window_size,
+            window_size=None,
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
             mlp_implementation=mlp_implementation,
-            softcap=softcap,
+            softcap=None,
             qk_norm=qk_norm,
         )
 

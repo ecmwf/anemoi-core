@@ -271,6 +271,30 @@ class AnemoiTrainer(ABC):
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
+
+        def _uses_glu_layer_activation(component: Any) -> bool:
+            if component is None:
+                return False
+
+            target = str(component.get("_target_", ""))
+            if "Transformer" not in target:
+                return False
+
+            activation_target = str(component.get("layer_kernels", {}).get("Activation", {}).get("_target_", ""))
+            return "GLU" in activation_target.upper()
+
+        assert not any(
+            _uses_glu_layer_activation(component)
+            for component in (
+                self.config.model.get("processor"),
+                self.config.model.get("encoder"),
+                self.config.model.get("decoder"),
+            )
+        ), (
+            "GLU-based activations are not supported via layer_kernels.Activation in Transformer models. "
+            "Use `mlp_implementation` with one of: 'glu', 'swiglu', 'geglu', 'reglu'."
+        )
+
         kwargs = {
             "config": self.config,
             "data_indices": self.data_indices,
