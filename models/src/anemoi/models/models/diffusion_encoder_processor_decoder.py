@@ -108,7 +108,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         self.processor = instantiate(
             model_config.model.processor,
-            name=f"processor",
+            name="processor",
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,

@@ -197,7 +197,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Allow for edge feature mixing
         """
         super().__init__(
-            name=name, 
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -551,7 +551,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Allow for edge feature mixing
         """
         super().__init__(
-            name=name, 
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -1151,7 +1151,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
-            name=name, 
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
