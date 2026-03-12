@@ -15,15 +15,13 @@ from omegaconf import OmegaConf
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_DATASET_NAME = "data"
-DEFAULT_NODE_ATTR = (
-    {
-        "area_weight": {
-            "_target_": "anemoi.graphs.nodes.attributes.SphericalAreaWeights",
-            "norm": "unit-max",
-            "fill_value": 0,
-        }
-    },
-)
+DEFAULT_NODE_ATTR = {
+    "area_weight": {
+        "_target_": "anemoi.graphs.nodes.attributes.SphericalAreaWeights",
+        "norm": "unit-max",
+        "fill_value": 0,
+    }
+}
 
 
 def get_multiple_datasets_config(config: DictConfig, default_dataset_name: str = DEFAULT_DATASET_NAME) -> dict:
