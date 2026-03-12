@@ -187,7 +187,7 @@ class AnemoiTrainer(ABC):
                         f"Dataset source is None for dataset '{dataset_name}'. Check dataloader.dataset_config.dataset."
                     )
                     raise ValueError(msg)
-                
+
                 # Add dataset nodes from dataloader into graph recepe
                 self.config.graph.nodes[dataset_name] = {
                     "node_builder": {"_target_": "anemoi.graphs.nodes.AnemoiDatasetNodes", "dataset": dataset_source},
