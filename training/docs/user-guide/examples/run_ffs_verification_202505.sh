@@ -41,7 +41,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_PATH="$SCRIPT_DIR"
-CONFIG_NAME="anemoi-training-rrfs-lam-neural-lam-verify"
+CONFIG_NAME="anemoi-training-rrfs-lam-neural-lam-verify-202405"
 
 VERIFY_ROOT="${VERIFY_ROOT:-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify}"
 START_TAG="$(echo "$START" | sed 's/[^0-9]//g')"
