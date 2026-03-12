@@ -271,7 +271,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             **processor_kwargs,
         )
 
-        x_latent_proc = x_latent_proc + x_latent
+        if self.latent_skip:
+            x_latent = x_latent_proc + x_latent
 
         x_out_dict = {}
         for dataset_name in dataset_names:
@@ -284,7 +285,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=batch_ens_size,
                 shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
                 edge_attr=decoder_edge_attr,
