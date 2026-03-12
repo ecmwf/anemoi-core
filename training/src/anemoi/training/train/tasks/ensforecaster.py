@@ -39,7 +39,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         *,
         config: DictConfig,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
