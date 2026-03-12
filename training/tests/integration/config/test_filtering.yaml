@@ -1,0 +1,84 @@
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+
+data:
+  datasets:
+    data:
+      forcing: []
+      diagnostic: []
+      target: [imerg]
+      processors:
+        normalizer:
+          config:
+            std: ["tp", "imerg"]
+            max: []
+            min-max: []
+            mean-std: []
+            none: []
+
+diagnostics:
+  log:
+    mlflow:
+      enabled: False
+  plot:
+    parameters: [tp]
+    callbacks:
+      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+      #   parameters: [tp]
+      #   output_steps: 1
+      #   dataset_names: ${diagnostics.plot.datasets_to_plot} #TODO can make this a default in pydantic and remove here
+      #   sample_idx: ${diagnostics.plot.sample_idx}
+      #   every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+        dataset_names: ${diagnostics.plot.datasets_to_plot} #TODO can make this a default in pydantic and remove here
+        sample_idx: ${diagnostics.plot.sample_idx}
+        output_steps: 1
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+        parameters: [tp]
+
+training:
+  max_epochs: 1
+  max_steps: 2
+
+  training_loss:
+    datasets:
+      data:
+        _target_: anemoi.training.losses.combined.CombinedLoss
+        losses:
+          # Prognostic term: tp -> tp
+          - _target_: anemoi.training.losses.WeightedMSELoss
+            predicted_variables: [tp]
+            target_variables: [tp]
+
+          # Target-only term: model predicts tp, but loss compares to imerg
+          - _target_: anemoi.training.losses.WeightedMSELoss
+            predicted_variables: [tp]
+            target_variables: [imerg]
+        loss_weights: [1.0, 1.0]  # add a 3rd value if you enable the spectral term
+
+dataloader:
+  dataset:
+  - dataset: ${system.input.dataset}   # dataset A
+    select: [tp]
+  - dataset: ${system.input.dataset}   # dataset B (same file)
+    select: [tp]
+    rename:
+      tp: imerg
+  batch_size:
+    training: 1
+    validation: 1
+  limit_batches:
+    training: 1
+    validation: 1
+  training:
+    datasets:
+      data:
+        start: null
+        end: 2017-01-08 12:00:00
+  validation:
+    datasets:
+      data:
+        start: null
+        end: 2017-01-08 12:00:00

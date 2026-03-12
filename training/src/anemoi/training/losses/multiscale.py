@@ -119,7 +119,7 @@ class MultiscaleLossWrapper(BaseLoss):
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
-        model_comm_group: ProcessGroup,
+        group: ProcessGroup,
         grid_dim: int,
         grid_shard_shapes: list,
     ) -> tuple[torch.Tensor, torch.Tensor, tuple | None]:
@@ -130,7 +130,7 @@ class MultiscaleLossWrapper(BaseLoss):
                 Ensemble predictions
             y: torch.Tensor
                 Ground truth
-            model_comm_group: ProcessGroup
+            group: ProcessGroup
                 Model communication group
 
         Returns
@@ -145,7 +145,7 @@ class MultiscaleLossWrapper(BaseLoss):
         batch_size, out_times, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1], y_pred_ens.shape[2]
         y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) g (c t)")
         shard_shapes = apply_shard_shapes(y_pred_ens_interp, grid_dim, grid_shard_shapes)
-        y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, model_comm_group)
+        y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, group)
         y_pred_ens_interp = einops.rearrange(
             y_pred_ens_interp,
             "(b e) g (c t) -> b t e g c",
@@ -155,7 +155,7 @@ class MultiscaleLossWrapper(BaseLoss):
         )
 
         shard_shapes_y = apply_shard_shapes(y, grid_dim, grid_shard_shapes)
-        y_interp = shard_channels(y, shard_shapes_y, model_comm_group)
+        y_interp = shard_channels(y, shard_shapes_y, group)
 
         return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
 
@@ -180,20 +180,19 @@ class MultiscaleLossWrapper(BaseLoss):
         y: torch.Tensor,
         squash: bool = True,
         grid_shard_slice: tuple | None = None,
-        model_comm_group: ProcessGroup | None = None,
+        group: ProcessGroup | None = None,
         model_comm_group_size: int | None = None,
         grid_dim: int | None = None,
         grid_shard_shapes: list | None = None,
-        **_kwargs,
+        **kwargs,
     ) -> list[torch.Tensor]:
-
         shard_shapes, shard_shapes_y = None, None
         if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
             # go to full sequence dimension for smoothing
             y_pred_ens_for_smooth, y_for_smooth, shard_shapes, shard_shapes_y = self._prepare_for_smoothing(
                 y_pred_ens,
                 y,
-                model_comm_group,
+                group,
                 grid_dim,
                 grid_shard_shapes,
             )
@@ -215,8 +214,8 @@ class MultiscaleLossWrapper(BaseLoss):
             y_pred_ens_tmp, y_tmp = self._smooth_for_loss(y_pred_ens_for_smooth, y_for_smooth, i)
 
             if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
-                y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, model_comm_group)
-                y_tmp = gather_channels(y_tmp, shard_shapes_y, model_comm_group)
+                y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, group)
+                y_tmp = gather_channels(y_tmp, shard_shapes_y, group)
 
             # save for next loss scale
             y_preds_ens.append(y_pred_ens_tmp)
@@ -233,7 +232,8 @@ class MultiscaleLossWrapper(BaseLoss):
                     y_tmp,
                     squash=squash,
                     grid_shard_slice=grid_shard_slice,
-                    group=model_comm_group,
+                    group=group,
+                    **kwargs,
                 ),
             )
 

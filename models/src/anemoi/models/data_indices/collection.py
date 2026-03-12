@@ -27,12 +27,28 @@ LOGGER = logging.getLogger(__name__)
 class IndexCollection:
     """Collection of data and model indices."""
 
+    @staticmethod
+    def _contiguous_span(indices: list[int]) -> tuple[bool, int, int]:
+        if not indices:
+            return True, 0, 0
+        start = indices[0]
+        for offset, index in enumerate(indices):
+            if index != start + offset:
+                return False, 0, 0
+        return True, start, len(indices)
+
     def __init__(self, data_config, name_to_index) -> None:
         self.config = OmegaConf.to_container(data_config, resolve=True)
         self.name_to_index = dict(sorted(name_to_index.items(), key=operator.itemgetter(1)))
-        self.forcing = [] if data_config.forcing is None else OmegaConf.to_container(data_config.forcing, resolve=True)
+        self.forcing = (
+            []
+            if data_config.get("forcing", None) is None
+            else OmegaConf.to_container(data_config.forcing, resolve=True)
+        )
         self.diagnostic = (
-            [] if data_config.diagnostic is None else OmegaConf.to_container(data_config.diagnostic, resolve=True)
+            []
+            if data_config.get("diagnostic", None) is None
+            else OmegaConf.to_container(data_config.diagnostic, resolve=True)
         )
         self.target = (
             [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
@@ -68,6 +84,28 @@ class IndexCollection:
             name_to_index_model_input=name_to_index_model_input,
             name_to_index_model_output=name_to_index_model_output,
         )
+        self.data_full_ordered_names = [
+            name for name, _ in sorted(self.name_to_index.items(), key=operator.itemgetter(1))
+        ]
+        self.data_full_name_to_position = {name: position for position, name in enumerate(self.data_full_ordered_names)}
+        self.data_output_positions_in_data_full = [
+            self.data_full_name_to_position[name] for name in self.data.output.ordered_names
+        ]
+        self.model_output_positions_in_data_full = [
+            self.data_full_name_to_position[name] for name in self.model.output.ordered_names
+        ]
+        self.model_output_positions_in_data_output = self.data.output.positions_for_names(
+            self.model.output.ordered_names
+        )
+        data_output_size = len(self.data.output.ordered_names)
+        self.model_output_in_data_output_is_identity = len(
+            self.model_output_positions_in_data_output
+        ) == data_output_size and self.model_output_positions_in_data_output == list(range(data_output_size))
+        (
+            self.model_output_in_data_output_is_contiguous,
+            self.model_output_in_data_output_contiguous_start,
+            self.model_output_in_data_output_contiguous_length,
+        ) = self._contiguous_span(self.model_output_positions_in_data_output)
 
     def __repr__(self) -> str:
         return f"IndexCollection(data_config={self.config}, name_to_index={self.name_to_index})"

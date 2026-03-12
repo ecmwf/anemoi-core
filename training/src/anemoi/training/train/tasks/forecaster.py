@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
@@ -72,12 +73,11 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         for rollout_step in range(rollout_steps):
             y_pred = self(x)
-            y = {}
-            for dataset_name, dataset_batch in batch.items():
-                start = self.n_step_input + rollout_step * self.n_step_output
-                y_time = dataset_batch.narrow(1, start, self.n_step_output)
-                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-                y[dataset_name] = y_time.index_select(-1, var_idx)
+            start = self.n_step_input + rollout_step * self.n_step_output
+            y = self.get_target(
+                batch,
+                start=start,
+            )
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
             loss, metrics_next, y_pred = checkpoint(
@@ -86,6 +86,8 @@ class GraphForecaster(BaseRolloutGraphModule):
                 y,
                 step=rollout_step,
                 validation_mode=validation_mode,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 

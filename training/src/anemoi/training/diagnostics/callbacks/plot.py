@@ -16,6 +16,7 @@ import time
 import traceback
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from pathlib import Path
@@ -44,6 +45,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.index_space import IndexSpace
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
 
@@ -861,6 +863,17 @@ class PlotLoss(BasePerBatchPlotCallback):
         if self.parameter_groups is None:
             self.parameter_groups = {}
 
+    @classmethod
+    def _iter_scalers(cls, loss_obj: BaseLoss) -> Iterator[object]:
+        if hasattr(loss_obj, "scaler"):
+            yield loss_obj.scaler
+        if hasattr(loss_obj, "losses"):
+            for sub_loss in loss_obj.losses:
+                yield from cls._iter_scalers(sub_loss)
+        inner_loss = getattr(loss_obj, "loss", None)
+        if isinstance(inner_loss, BaseLoss):
+            yield from cls._iter_scalers(inner_loss)
+
     def sort_and_color_by_parameter_group(
         self,
         parameter_names: list[str],
@@ -1001,10 +1014,19 @@ class PlotLoss(BasePerBatchPlotCallback):
             for rollout_step in range(adapter.loss_plot_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 start = adapter.get_loss_plot_batch_start(rollout_step)
-                y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
-                var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
-                y_true = y_time.index_select(-1, var_idx)
-                loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
+                y_true = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
+                loss = reduce_to_last_dim(
+                    self.loss[dataset_name](
+                        y_hat,
+                        y_true,
+                        squash=False,
+                        pred_layout=IndexSpace.MODEL_OUTPUT,
+                        target_layout=IndexSpace.DATA_FULL,
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy(),
+                )
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
                     parameter_names,

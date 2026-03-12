@@ -18,7 +18,6 @@ import torch
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
@@ -31,7 +30,10 @@ class BaseLoss(nn.Module, ABC):
 
     scaler: ScaleTensor
 
-    def __init__(self, ignore_nans: bool = False) -> None:
+    def __init__(
+        self,
+        ignore_nans: bool = False,
+    ) -> None:
         """Node- and feature_weighted Loss.
 
         Exposes:
@@ -72,8 +74,9 @@ class BaseLoss(nn.Module, ABC):
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         self.scaler.update_scaler(name=name, scaler=scaler, override=override)
 
-    def set_data_indices(self, data_indices: IndexCollection) -> None:
-        """Hook to set the data indices for the loss."""
+    @functools.wraps(ScaleTensor.has_scaler_for_dim)
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        return self.scaler.has_scaler_for_dim(dim=dim)
 
     def scale(
         self,
@@ -312,9 +315,8 @@ class FunctionalLoss(BaseLoss):
         torch.Tensor
             Weighted loss
         """
-        del kwargs  # not used in this base implementation, but may be used in child classes
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
-        return self.reduce(out, squash, group=group if is_sharded else None)
+        squash_mode = kwargs.get("squash_mode", "avg")
+        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

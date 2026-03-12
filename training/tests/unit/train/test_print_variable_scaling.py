@@ -12,6 +12,8 @@
 # Apache 2.0 license…
 
 
+import logging
+
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -236,3 +238,33 @@ def test_variable_scaling_combined_loss(
     loss = get_loss_function(config.training.training_loss, scalers=scalers)
 
     print_variable_scaling(loss, data_indices)
+
+
+def test_print_variable_scaling_logs_total_once(
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    graph_with_nodes: HeteroData,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config, data_indices, statistics, statistics_tendencies = fake_data
+
+    metadata_extractor = ExtractVariableGroupAndLevel(
+        config.training.variable_groups,
+    )
+
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        graph_data=graph_with_nodes,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        metadata_extractor=metadata_extractor,
+        output_mask=NoOutputMask(),
+    )
+    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+
+    with caplog.at_level(logging.DEBUG, logger="anemoi.training.losses.utils"):
+        print_variable_scaling(loss, data_indices)
+
+    log_records = [record.message for record in caplog.records if "Final Variable Scaling" in record.message]
+    assert len(log_records) == 1
+    assert log_records[0].count("Total scaling sum:") == 1
