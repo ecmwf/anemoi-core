@@ -68,6 +68,8 @@ class DefinedModels(str, Enum):
 class Model(BaseModel):
     target_: DefinedModels = Field(..., alias="_target_")
     "Model object defined in anemoi.models.model."
+    hidden_nodes_name: str | list[str] = Field(examples=["hidden", ["hidden1", "hidden2"]])
+    "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
     latent_skip: bool = Field(default=True)
     "Add skip connection in latent space before/after processor."
     convert_: str = Field("all", alias="_convert_")
@@ -176,7 +178,6 @@ class NoOutputMaskSchema(BaseModel):
 
 class Boolean1DSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.Boolean1DMask"] = Field(..., alias="_target_")
-    nodes_name: str = Field(examples="data")
     attribute_name: str = Field(example="cutout_mask")
 
 
