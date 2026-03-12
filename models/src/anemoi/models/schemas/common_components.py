@@ -40,6 +40,8 @@ class TransformerModelComponent(PydanticBaseModel):
     "Number of attention heads. Default to 16."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+    name: str = Field(example="Encoder/Decoder/Processor")
+    "Name of the model"
 
 
 class GNNModelComponent(BaseModel):
@@ -59,6 +61,9 @@ class GNNModelComponent(BaseModel):
     "The number of extra hidden layers in MLP. Default to 0."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+    name: str = Field(example="Encoder/Decoder/Processor")
+    "Name of the model"
+
 
 
 class PointWiseModelComponent(BaseModel):
@@ -72,3 +77,5 @@ class PointWiseModelComponent(BaseModel):
     "Enable gradient checkpointing to reduce memory usage. Default to True."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+    name: str = Field(example="Encoder/Decoder/Processor")
+    "Name of the model"
