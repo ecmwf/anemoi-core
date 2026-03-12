@@ -37,7 +37,7 @@ class BaseProcessor(nn.Module, ABC):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         num_layers: int,
         num_channels: int,
         num_chunks: int,
@@ -139,7 +139,7 @@ class PointWiseMLPProcessor(BaseProcessor):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         num_layers: int,
         num_channels: int,
         num_chunks: int,
@@ -195,7 +195,7 @@ class TransformerProcessor(BaseProcessor):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         num_layers: int,
         num_channels: int,
         num_chunks: int,
@@ -303,7 +303,7 @@ class GNNProcessor(BaseProcessor):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         num_channels: int,
         num_layers: int,
         num_chunks: int,
@@ -404,7 +404,7 @@ class GraphTransformerProcessor(BaseProcessor):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         num_layers: int,
         num_channels: int,
         num_chunks: int,

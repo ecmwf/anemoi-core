@@ -55,7 +55,7 @@ class BaseMapper(nn.Module, ABC):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -143,7 +143,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -501,7 +501,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -622,7 +622,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -731,7 +731,7 @@ class GNNBaseMapper(BaseMapper, ABC):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -872,7 +872,7 @@ class GNNForwardMapper(GNNBaseMapper):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -973,7 +973,7 @@ class GNNBackwardMapper(GNNBaseMapper):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -1097,7 +1097,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -1245,7 +1245,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -1373,7 +1373,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
     def __init__(
         self,
         *,
-        name: str,
+        name: str | None = None,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
