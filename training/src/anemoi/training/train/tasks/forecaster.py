@@ -171,13 +171,15 @@ class GraphForecaster(BaseGraphModule):
         assert batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
-            print(f"{rollout_step=}")
+            # print(f"{rollout_step=}, {rollout=},  {self.rollout=}" )
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 
+            # print(f"{y_pred.shape=}")
+            # print(f"{y.shape=}")
             if rollout_step >= 1:
                 # single out only pressure variables if rollout >= 1
                 # get pressure Indices
