@@ -148,25 +148,102 @@ File-based configuration (still supported):
                alpha: 1.0
 
 ************************
- Spatial Loss Functions
+Spectral loss functions
 ************************
 
-The following spatial loss functions are available (**to be used only
-with regular 2D fields, i.e. fields that can be written as [`n_lat`,
-`n_lon`]**):
+Some loss functions operate in spectral space rather than directly in grid-point space.
+This is useful when the error characteristics are better expressed by scale (wavenumber)
+than by location, or when the loss should emphasise/regularise specific ranges of scales.
 
--  ``LogFFT2Distance``: log spectral distance from the 2D fast Fourier
-   transform.
+In Anemoi, spectral losses follow the same API as other losses (scalers/node weights, reduction,
+etc.), but they additionally require a *spectral transform* configuration.
 
--  ``FourierCorrelationLoss``: Fourier correlation loss, also computed
-   from the 2D fast Fourier transform see `Yan et al. (2024)
-   <https://arxiv.org/pdf/2410.23159.pdf>`_.
+Spectral transforms
+-------------------
 
-Both of these loss functions are defined in the
-``anemoi.training.losses.spatial`` module, and can be configured in the
-config file at ``config.training.training_loss`` in the same way as the
-deterministic loss functions with additional kwargs `x_dim` and `y_dim`
-specifying the field shape of the input tensors.
+Spectral losses rely on a transform that maps grid-point fields to spectral coefficients.
+
+Supported transforms include:
+
+* ``FFT2D``: 2D FFT for regular latitude/longitude grids (or any regular 2D field) with
+  known ``x_dim`` and ``y_dim``.
+* ``DCT2D``: 2D Discrete Cosine Transform for regular 2D fields. This transform requires
+  the optional dependency ``torch-dct``.
+* ``ReducedSHT``: Spherical harmonic transform (SHT) on ECMWF's traditional reduced Gaussian grid. This can handle the
+  native grid of ERA5 such as N320.
+* ``OctahedralSHT``: Spherical harmonic transform (SHT) on the octahedral reduced Gaussian grid.
+
+.. note::
+
+   SHT-based transforms expect a flattened reduced-grid ordering:
+   ``[batch, ensemble, grid_points, variables]`` and return spectral coefficients with
+   shape ``[batch, ensemble, l, m, variables]`` where ``l = truncation + 1``.
+
+Spectral kernel CRPS
+--------------------
+
+``SpectralCRPSLoss`` computes a CRPS-style probabilistic loss in spectral space.
+Conceptually, it applies a spectral transform to both forecast ensemble and target,
+then evaluates a kernel-CRPS over the resulting spectral representation (typically
+interpreted as scale-dependent coefficients).
+
+This loss is intended for *ensemble* training (``ensemble > 1``). For deterministic
+training, consider spectral distance losses instead.
+
+Example configuration (FFT2D)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use this for limited-area or other regular 2D fields that can be reshaped to
+``[y_dim, x_dim]``:
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
+         # Transform selection / geometry
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+
+Example configuration (reduced Gaussian grid SHT)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use this for global models on the reduced Gaussian grid (only N320 supported so far):
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.SpectralCRPSLoss
+         transform: reduced_sht
+         grid: n320
+
+Truncation is by default set to 319 for n320 grids, but can be set to a higher or lower value in the config file.
+This truncation parameter defines how many wave numbers are included in the spectral representation.
+
+Combining spectral and grid-point losses
+----------------------------------------
+
+Spectral losses can be combined with standard grid-point losses through
+``CombinedLoss``:
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.combined.CombinedLoss
+         losses:
+           - _target_: anemoi.training.losses.mse.WeightedMSELoss
+           - _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
+             transform: fft2d
+             x_dim: 256
+             y_dim: 128
+         loss_weights: [1.0, 0.1]
+
 
 *********
  Scalers
@@ -323,10 +400,10 @@ If multiple groups are defined for a variable, the first group in the
 `variable_groups` is used. If the variable is not in any group, it is
 assigned to the default group.
 
-Custom Scalars
+Custom Scalers
 ==============
 
-To create a custom scalar, subclass the ``BaseScaler`` and implement the
+To create a custom scaler, subclass the ``BaseScaler`` and implement the
 ``get_scaling_values`` method. This method should return an array of the
 scaling values. Set ``scale_dims`` to the dimensions that the scaling
 values should be applied to.
@@ -342,16 +419,16 @@ values should be applied to.
          # Custom scaling logic here
          return scaling_values
 
-This scalar will only be instantiated once at the start of training, and
+This scaler will only be instantiated once at the start of training, and
 thus cannot adapt throughout batches and epochs.
 
-Custom Updating Scalars
+Custom Updating Scalers
 -----------------------
 
-If you want a scalar that adapts throughout the training process, you
+If you want a scaler that adapts throughout the training process, you
 can subclass the ``BaseUpdatingScaler``.
 
-As with the ``BaseScaler``, set the initial scalar values at the start
+As with the ``BaseScaler``, set the initial scaler values at the start
 of training by implementing the ``get_scaling_values`` method.
 Currently, two callbacks to update at are available, at the start of
 training, and at the start of every batch.
@@ -445,18 +522,17 @@ losses above.
                - __target__: anemoi.training.losses.mae.WeightedMAELoss
             scalers: ['variable']
             loss_weights: [1.0,0.5]
-            scalars: ['variable']
 
 All extra kwargs passed to ``CombinedLoss`` are passed to each of the
 loss functions, and the loss weights are used to scale the individual
 losses before combining them.
 
-If ``scalars`` is not given in the underlying loss functions, all the
-scalars given to the ``CombinedLoss`` are used.
+If ``scalers`` is not given in the underlying loss functions, all the
+scalers given to the ``CombinedLoss`` are used.
 
-If different scalars are required for each loss, the root level scalars
-of the ``CombinedLoss`` should contain all the scalars required by the
-individual losses. Then the scalars for each loss can be set in the
+If different scalers are required for each loss, the root level scalers
+of the ``CombinedLoss`` should contain all the scalers required by the
+individual losses. Then the scalers for each loss can be set in the
 individual loss config.
 
 .. code:: yaml
@@ -467,11 +543,11 @@ individual loss config.
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
                   - _target_: anemoi.training.losses.mse.WeightedMSELoss
-                  scalars: ['variable']
+                  scalers: ['variable']
                   - _target_: anemoi.training.losses.mae.WeightedMAELoss
-                  scalars: ['loss_weights_mask']
+                  scalers: ['loss_weights_mask']
             loss_weights: [1.0, 1.0]
-            scalars: ['*']
+            scalers: ['*']
 
 .. automodule:: anemoi.training.losses.combined
    :members:

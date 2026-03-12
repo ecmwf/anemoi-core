@@ -275,7 +275,8 @@ class AnemoiTrainer(ABC):
         """Provide the model instance."""
         assert (
             not (
-                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
+                "layer_kernels" in self.config.model.processor
+                and "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
                 and ".Transformer" in self.config.model.processor.target_
             )
             and not (

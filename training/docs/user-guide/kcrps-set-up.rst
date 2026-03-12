@@ -167,7 +167,7 @@ members per device needs to be specified.
 .. note::
 
    The total number of ensemble members is the product of the
-   `ensemble_size_per_device` and the `num_gpus_per_ensemble`.
+   `ensemble_size_per_device` and the ratio of `num_gpus_per_ensemble` to `num_gpus_per_model` .
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml

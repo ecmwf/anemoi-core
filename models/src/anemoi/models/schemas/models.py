@@ -34,6 +34,7 @@ from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
 from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
+from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 from .residual import ResidualConnectionSchema
@@ -67,6 +68,8 @@ class DefinedModels(str, Enum):
 class Model(BaseModel):
     target_: DefinedModels = Field(..., alias="_target_")
     "Model object defined in anemoi.models.model."
+    latent_skip: bool = Field(default=True)
+    "Add skip connection in latent space before/after processor."
     convert_: str = Field("all", alias="_convert_")
     "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
 
@@ -215,7 +218,11 @@ class BaseModelSchema(PydanticBaseModel):
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
     processor: Union[
-        GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema, PointWiseMLPProcessorSchema
+        NoOpProcessorSchema,
+        GNNProcessorSchema,
+        GraphTransformerProcessorSchema,
+        TransformerProcessorSchema,
+        PointWiseMLPProcessorSchema,
     ] = Field(
         ...,
         discriminator="target_",

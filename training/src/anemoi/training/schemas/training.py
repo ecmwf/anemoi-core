@@ -261,6 +261,9 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     combined = "anemoi.training.losses.combined.CombinedLoss"
     fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
+    logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
+    spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
+    spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
 
 
 class BaseLossSchema(BaseModel):
@@ -323,7 +326,7 @@ class HuberLossSchema(BaseLossSchema):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
 
     class Config(BaseModel.Config):
@@ -368,7 +371,6 @@ LossSchemas = (
     | KernelCRPSSchema
     | SpectralLossSchema
     | MultiScaleLossSchema
-    | None
 )
 
 
