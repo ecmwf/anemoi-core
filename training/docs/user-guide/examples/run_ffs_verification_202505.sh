@@ -4,7 +4,7 @@
 #
 # Usage:
 #   bash training/docs/user-guide/examples/run_ffs_verification_202505.sh \
-#     <checkpoint_path> <start> <end> [frequency] [graph_path]
+#     <checkpoint_path> <start> <end> [frequency] [graph_path] [dataset_path]
 #
 # Example:
 #   bash training/docs/user-guide/examples/run_ffs_verification_202505.sh \
@@ -12,8 +12,8 @@
 #     2024-05-01T00:00:00 2024-05-31T23:00:00 1h
 set -euo pipefail
 
-if [[ $# -lt 3 || $# -gt 5 ]]; then
-  echo "Usage: run_ffs_verification_202505.sh <checkpoint_path> <start> <end> [frequency] [graph_path]"
+if [[ $# -lt 3 || $# -gt 6 ]]; then
+  echo "Usage: run_ffs_verification_202505.sh <checkpoint_path> <start> <end> [frequency] [graph_path] [dataset_path]"
   exit 1
 fi
 
@@ -22,6 +22,7 @@ START="$2"
 END="$3"
 FREQ="${4:-1h}"
 GRAPH_PATH="${5:-}"
+DATASET_PATH="${6:-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/tmp/rrfs-monthly/rrfs-conus-3km-202405-bcmask-time-s.zarr}"
 
 if [[ ! -f "$CHECKPOINT_PATH" ]]; then
   echo "ERROR: checkpoint file not found: $CHECKPOINT_PATH"
@@ -30,6 +31,11 @@ fi
 
 if [[ -n "$GRAPH_PATH" && ! -f "$GRAPH_PATH" ]]; then
   echo "ERROR: graph file not found: $GRAPH_PATH"
+  exit 2
+fi
+
+if [[ ! -e "$DATASET_PATH" ]]; then
+  echo "ERROR: dataset path not found: $DATASET_PATH"
   exit 2
 fi
 
@@ -55,6 +61,7 @@ echo "Running verification export"
 echo "  checkpoint: $CHECKPOINT_PATH"
 echo "  start/end : $START -> $END"
 echo "  frequency : $FREQ"
+echo "  dataset   : $DATASET_PATH"
 echo "  run root  : $RUN_ROOT"
 
 CMD=(
@@ -62,6 +69,7 @@ CMD=(
   --config-path "$CONFIG_PATH"
   --config-name "$CONFIG_NAME"
   system.input.warm_start="$CHECKPOINT_PATH"
+  system.input.dataset="$DATASET_PATH"
   system.output.root="$RUN_ROOT"
   dataloader.training.datasets.data.start="$START"
   dataloader.training.datasets.data.end="$END"
