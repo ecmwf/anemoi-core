@@ -13,86 +13,23 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.models import BaseGraphModel
-from anemoi.utils.config import DotDict
+from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelAutoEncoder(BaseGraphModel):
-
-    def _build_networks(self, model_config: DotDict) -> None:
-        """Builds the model components."""
-
-        self.encoder_graph_provider = torch.nn.ModuleDict()
-        self.encoder = torch.nn.ModuleDict()
-
-        for dataset_name in self._graph_data.keys():
-            # Create graph providers
-            self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
-            )
-
-            self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
-                hidden_dim=self.num_channels,
-                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
-            )
-
-        # Decoder hidden -> data
-        self.decoder_graph_provider = torch.nn.ModuleDict()
-        self.decoder = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
-            )
-
-            self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.num_channels,
-                in_channels_dst=self.target_dim[dataset_name],
-                hidden_dim=self.num_channels,
-                out_channels_dst=self.output_dim[dataset_name],
-                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
-            )
-
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        super()._calculate_shapes_and_indices(data_indices)
-
-        self._forcing_input_idx = {}
-        self.num_input_channels_forcings = {}
-        self.target_dim = {}
-
-        for dataset_name, dataset_indices in data_indices.items():
-            forcing_names = dataset_indices.model._forcing
-            self._forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in forcing_names]
-            self.num_input_channels_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
-
-            self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
+class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
+    """Autoencoder model"""
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         return (
-            self.n_step_output * self.num_input_channels_forcings[dataset_name]
+            self.n_step_output * self.num_input_channels_decoding_forcings[dataset_name]
             + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
         )
 
@@ -155,7 +92,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         x_target_latent = torch.cat(
             (
                 einops.rearrange(
-                    x_forcing[..., self._forcing_input_idx[dataset_name]],
+                    x_forcing[..., self._decoding_forcing_input_idx[dataset_name]],
                     "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
                 ),
                 node_attributes_target,

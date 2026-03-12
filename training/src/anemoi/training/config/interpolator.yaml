@@ -25,10 +25,10 @@ data:
 model:
   model:
     _target_: anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator
+    latent_skip: False # True/False for skip connection on latent mesh
   residual:
     _target_: anemoi.models.layers.residual.SkipConnection
     step: 0 # use the previous step as skip connection
-  latent_skip: False # True/False for skip connection on latent mesh
 
 training:
   model_task: anemoi.training.train.tasks.GraphMultiOutInterpolator
