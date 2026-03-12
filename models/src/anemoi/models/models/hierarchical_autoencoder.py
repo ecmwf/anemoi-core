@@ -114,6 +114,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             )
             self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
+                name=f"encoder_{dataset_name}",
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent[dataset_name],
@@ -144,6 +145,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
                 self.down_level_processor[nodes_names] = instantiate(
                     model_config.model.processor,
+                    name=f"downwards_processor_{nodes_names}",
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
@@ -161,6 +163,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
                 self.up_level_processor[nodes_names] = instantiate(
                     model_config.model.processor,
+                    name=f"upwards_processor_{nodes_names}",
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
@@ -185,6 +188,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
             self.downscale[src_nodes_name] = instantiate(
                 model_config.model.encoder,
+                name=f"encoder_{src_nodes_name}-{dst_nodes_name}",
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.node_attributes[first_dataset_name].attr_ndims[dst_nodes_name],
@@ -210,6 +214,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
             self.upscale[src_nodes_name] = instantiate(
                 model_config.model.decoder,
+                name=f"decoder_{src_nodes_name}-{dst_nodes_name}",
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.hidden_dims[dst_nodes_name],
@@ -232,6 +237,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
+                name=f"decoder_{dataset_name}",
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
                 in_channels_dst=self.target_dim[dataset_name],

@@ -84,6 +84,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
             self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
+                name=f"encoder_{dataset_name}",
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
@@ -107,6 +108,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         self.processor = instantiate(
             model_config.model.processor,
+            name=f"processor",
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
@@ -125,6 +127,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             )
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
+                name=f"decoder_{dataset_name}",
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.input_dim[dataset_name],

@@ -37,6 +37,7 @@ class BaseProcessor(nn.Module, ABC):
     def __init__(
         self,
         *,
+        name: str,
         num_layers: int,
         num_channels: int,
         num_chunks: int,
@@ -49,6 +50,8 @@ class BaseProcessor(nn.Module, ABC):
 
         Parameters
         ----------
+        name: str
+            Assigned name to the Processor.
         num_layers : int
             Number of processor layers.
         num_channels : int
@@ -67,6 +70,7 @@ class BaseProcessor(nn.Module, ABC):
         """
         super().__init__()
 
+        self.name = name
         self.num_layers = num_layers
         self.num_chunks = num_chunks
         self.chunk_size = num_layers // num_chunks
@@ -135,6 +139,7 @@ class PointWiseMLPProcessor(BaseProcessor):
     def __init__(
         self,
         *,
+        name: str,
         num_layers: int,
         num_channels: int,
         num_chunks: int,
@@ -145,6 +150,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         **kwargs,
     ):
         super().__init__(
+            name=name,
             num_layers=num_layers,
             num_channels=num_channels,
             num_chunks=num_chunks,
@@ -189,6 +195,7 @@ class TransformerProcessor(BaseProcessor):
     def __init__(
         self,
         *,
+        name: str,
         num_layers: int,
         num_channels: int,
         num_chunks: int,
@@ -208,6 +215,8 @@ class TransformerProcessor(BaseProcessor):
 
         Parameters
         ----------
+        name : str
+            Assigned name to the processor
         num_layers : int
             Number of layers
         num_channels : int
@@ -238,6 +247,7 @@ class TransformerProcessor(BaseProcessor):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            name=name,
             num_layers=num_layers,
             num_channels=num_channels,
             window_size=window_size,
@@ -293,6 +303,7 @@ class GNNProcessor(BaseProcessor):
     def __init__(
         self,
         *,
+        name : str,
         num_channels: int,
         num_layers: int,
         num_chunks: int,
@@ -306,6 +317,8 @@ class GNNProcessor(BaseProcessor):
 
         Parameters
         ----------
+        name : str
+            Assigned name to the processor
         num_layers : int
             Number of layers
         num_channels : int
@@ -324,6 +337,7 @@ class GNNProcessor(BaseProcessor):
 
         """
         super().__init__(
+            name=name,
             num_channels=num_channels,
             num_layers=num_layers,
             num_chunks=num_chunks,
@@ -390,6 +404,7 @@ class GraphTransformerProcessor(BaseProcessor):
     def __init__(
         self,
         *,
+        name: str,
         num_layers: int,
         num_channels: int,
         num_chunks: int,
@@ -407,6 +422,8 @@ class GraphTransformerProcessor(BaseProcessor):
 
         Parameters
         ----------
+        name : str
+            Assigned name to the processor
         num_layers : int
             Number of layers
         num_channels : int
@@ -432,6 +449,7 @@ class GraphTransformerProcessor(BaseProcessor):
             Allow for edge feature mixing
         """
         super().__init__(
+            name=name, 
             num_channels=num_channels,
             num_layers=num_layers,
             num_chunks=num_chunks,

@@ -47,6 +47,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
             self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
+                name=f"encoder_{dataset_name}",
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
@@ -68,6 +69,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
+                name=f"decoder_{dataset_name}",
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],

@@ -55,6 +55,7 @@ class BaseMapper(nn.Module, ABC):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -67,6 +68,7 @@ class BaseMapper(nn.Module, ABC):
         """Initialize BaseMapper."""
         super().__init__()
 
+        self.name = name
         self.in_channels_src = in_channels_src
         self.in_channels_dst = in_channels_dst
         self.hidden_dim = hidden_dim
@@ -141,6 +143,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -161,6 +164,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -192,6 +197,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Allow for edge feature mixing
         """
         super().__init__(
+            name=name, 
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -495,6 +501,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -514,6 +521,8 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -542,6 +551,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Allow for edge feature mixing
         """
         super().__init__(
+            name=name, 
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -612,6 +622,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -633,6 +644,8 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -666,6 +679,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Allow for edge feature mixing
         """
         super().__init__(
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -717,6 +731,7 @@ class GNNBaseMapper(BaseMapper, ABC):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -732,6 +747,8 @@ class GNNBaseMapper(BaseMapper, ABC):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -753,6 +770,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -854,6 +872,7 @@ class GNNForwardMapper(GNNBaseMapper):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -869,6 +888,8 @@ class GNNForwardMapper(GNNBaseMapper):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -890,6 +911,7 @@ class GNNForwardMapper(GNNBaseMapper):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -951,6 +973,7 @@ class GNNBackwardMapper(GNNBaseMapper):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -966,6 +989,8 @@ class GNNBackwardMapper(GNNBaseMapper):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -987,6 +1012,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -1071,6 +1097,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -1092,6 +1119,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -1122,6 +1151,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            name=name, 
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -1215,6 +1245,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -1237,6 +1268,8 @@ class TransformerForwardMapper(TransformerBaseMapper):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -1267,6 +1300,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
@@ -1339,6 +1373,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
     def __init__(
         self,
         *,
+        name: str,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
@@ -1361,6 +1396,8 @@ class TransformerBackwardMapper(TransformerBaseMapper):
 
         Parameters
         ----------
+        name : str
+            Assigned name to mapper
         in_channels_src : int
             Input channels of the source node
         in_channels_dst : int
@@ -1391,6 +1428,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            name=name,
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
