@@ -191,6 +191,7 @@ class AnemoiTrainer(ABC):
                 # Add dataset nodes from dataloader into graph recepe
                 self.config.graph.nodes[dataset_name] = {
                     "node_builder": {"_target_": "anemoi.graphs.nodes.AnemoiDatasetNodes", "dataset": dataset_source},
+                    "attributes": self.config.graph.attributes.nodes,
                 }
             else:
                 LOGGER.info("Graph node entry for dataset '%s' is already specified in the config.", dataset_name)
