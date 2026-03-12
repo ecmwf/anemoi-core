@@ -66,8 +66,9 @@ class MultiDataset(IterableDataset):
         # Create each dataset. It will correspond to one key of the batch
         self.datasets = {name: create_dataset(data_reader, task=task) for name, data_reader in data_readers.items()}
 
+        # Convert task offsets (timedeltas) to per-dataset integer indices
         self.relative_date_indices = {
-            dataset_name: task.get_relative_time_indices(ds.frequency) for dataset_name, ds in self.datasets.items()
+            dataset_name: [o // ds.frequency for o in task.offset] for dataset_name, ds in self.datasets.items()
         }
         self._lazy_init_model_and_reader_group_info()
 

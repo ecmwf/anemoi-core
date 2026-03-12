@@ -9,19 +9,27 @@
 
 import datetime
 import logging
-from functools import cached_property
 
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks.base import BaseTask
-from anemoi.utils.dates import frequency_to_seconds
+from anemoi.utils.dates import frequency_to_string, frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
 
 class ForecastingTask(BaseTask):
-    """Forecasting task implementation."""
+    """Forecasting task implementation.
+
+    Builds input and output offsets from ``multistep_input``,
+    ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
+
+    For rollout training the ``offset`` property extends the output
+    offsets up to ``rollout_max`` steps so the datamodule loads enough
+    time steps, while ``steps`` only iterates over the current
+    ``rollout`` value which grows via ``on_train_epoch_end``.
+    """
 
     name: str = "forecasting"
 
@@ -35,7 +43,7 @@ class ForecastingTask(BaseTask):
         rollout_max: int = 1,
         **_kwargs,
     ) -> None:
-        self.timestep = frequency_to_seconds(timestep)
+        self.timestep = frequency_to_timedelta(timestep)
 
         self.num_input_steps = multistep_input
         self.num_output_steps = multistep_output
@@ -44,54 +52,45 @@ class ForecastingTask(BaseTask):
         self.rollout_epoch_increment = rollout_epoch_increment
         self.rollout_max = rollout_max
 
-    def timeincrement(self, frequency: str | datetime.timedelta) -> int:
-        freq_seconds = frequency_to_seconds(frequency)
-        return self.timestep // freq_seconds
+        # Build offsets from multistep configuration
+        # Input: e.g. multistep_input=2, timestep=6H    ->  [-6H, 0H]
+        inputs_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
+        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout_max
+        outputs_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
+        super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets)
 
-    def get_batch_input_time_indices(self) -> list[int]:
-        return list(range(self.num_input_steps))
+    # ------------------------------------------------------------------
+    # Offset overrides for rollout
+    # ------------------------------------------------------------------
 
-    def get_batch_output_time_indices(self, rollout_step: int = 1) -> list[int]:
-        return list(
-            range(
-                self.num_input_steps + rollout_step * self.num_output_steps,
-                self.num_input_steps + (rollout_step + 1) * self.num_output_steps,
-            ),
-        )
+    @property
+    def _step_shift(self) -> datetime.timedelta:
+        """Time shift between consecutive rollout steps."""
+        return self.timestep * self.num_output_steps
 
-    def get_dataset_input_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
-        """Get the relative time indices for the model input sequence.
+    @property
+    def offset(self) -> list[datetime.timedelta]:
+        """Union of input + all rollout output offsets up to ``rollout_max``.
 
-        Returns
-        -------
-            list[int]: List of relative time indices.
+        Pre-allocates enough batch timesteps so the datamodule always
+        loads data for the maximum rollout length.
         """
-        return list(range(0, self.timeincrement(frequency) * self.num_input_steps, self.timeincrement(frequency)))
+        all_offsets = set(self._inputs_offsets)
+        for step in range(self.rollout_max):
+            shift = self._step_shift * step
+            for o in self._outputs_offsets:
+                all_offsets.add(o + shift)
+        return sorted(all_offsets)
 
-    def get_dataset_target_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
-        """Get the relative time indices for the model target sequence.
+    def get_output_offset(self, rollout_step: int = 0, **_kwargs) -> list[datetime.timedelta]:
+        """Return output offsets shifted by ``rollout_step``."""
+        shift = self._step_shift * rollout_step
+        return sorted(o + shift for o in self._outputs_offsets)
 
-        Returns
-        -------
-            list[int]: List of relative time indices.
-        """
-        start = self.timeincrement(frequency) * self.num_input_steps
-        return list(
-            range(
-                start,
-                start + self.timeincrement(frequency) * self.num_output_steps,
-                self.timeincrement(frequency),
-            ),
-        )
-
-    def get_relative_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
-        """Get the relative time indices for the model input sequence.
-
-        Returns
-        -------
-            list[int]: List of relative time indices.
-        """
-        return self.get_dataset_input_time_indices(frequency) + self.get_dataset_target_time_indices(frequency)
+    @property
+    def steps(self) -> tuple[dict[str, int], ...]:
+        """Get the range of rollout steps to perform."""
+        return tuple({"rollout_step": i} for i in range(self.rollout))
 
     def _advance_dataset_input(
         self,
@@ -101,16 +100,17 @@ class ForecastingTask(BaseTask):
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
     ) -> torch.Tensor:
-        """Default implementation used by simple rollout tasks.
+        """Advance a single dataset's input state for the next rollout step.
 
-        Supports model outputs shaped like:
-        - (B, T, E, G, V)
+        Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
         keep_steps = min(self.num_input_steps, self.num_output_steps)
 
         x = x.roll(-keep_steps, dims=1)
 
-        # TODO(dieter): see if we can replace for loop with tensor operations
+        # Compute batch indices for the output offsets of this rollout step
+        output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
+
         for i in range(keep_steps):
             # Get prognostic variables
             x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
@@ -120,14 +120,7 @@ class ForecastingTask(BaseTask):
                 data_indices.model.output.prognostic,
             ]
 
-            batch_time_index = self.num_input_steps + (rollout_step + 1) * self.num_output_steps - (i + 1)
-
-            # x[:, -(i + 1)] = self.output_mask[dataset_name].rollout_boundary(
-            #    x[:, -(i + 1)],
-            #    batch[:, batch_time_index],
-            #    data_indices,
-            #    grid_shard_slice=self.grid_shard_slice[dataset_name],
-            # )
+            batch_time_index = output_batch_indices[-(i + 1)]
 
             # get new "constants" needed for time-varying fields
             x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
@@ -156,11 +149,6 @@ class ForecastingTask(BaseTask):
                 data_indices=data_indices[dataset_name],
             )
         return x
-
-    @cached_property
-    def steps(self) -> tuple[dict[str, int]]:
-        """Get the range of rollout steps to perform."""
-        return tuple({"rollout_step": i} for i in range(self.rollout))
 
     def log_extra(self, logger, logger_enabled) -> None:
         """Log any task-specific information."""

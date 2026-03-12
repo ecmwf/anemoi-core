@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -16,12 +17,24 @@ from functools import cached_property
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.utils.dates import frequency_to_string, frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
 
 class BaseTask(ABC):
     """Base class for all tasks.
+
+    Tasks define the temporal structure of a training sample by specifying
+    input and output time offsets as ``timedelta`` objects. The base class
+    provides:
+
+    * An ``offset`` property that is the union of input and output offsets,
+      used by the datamodule to determine which time steps to load.
+    * ``get_inputs`` / ``get_targets`` to split a loaded batch into model
+      inputs and targets based on position within ``offset``.
+    * ``get_relative_time_indices(frequency)`` to convert offsets into
+      integer indices for a specific dataset frequency.
 
     Attributes
     ----------
@@ -37,39 +50,83 @@ class BaseTask(ABC):
 
     name: str
 
-    def __init__(self, input_time_indices: list[int], target_input_indices: list[int]) -> None:
-        self.input_time_indices = input_time_indices
-        self.target_input_indices = target_input_indices
+    def __init__(
+        self,
+        inputs_offsets: list[datetime.timedelta],
+        outputs_offsets: list[datetime.timedelta],
+    ) -> None:
+        self._input_offset = sorted(inputs_offsets)
+        self._output_offset = sorted(outputs_offsets)
 
-    def get_batch_input_time_indices(self) -> list[int]:
-        """Get the relative time indices for the model input sequence.
+    @property
+    def inputs_offsets(self) -> list[datetime.timedelta]:
+        """Sorted input time offsets."""
+        return self._input_offset
+
+    @property
+    def outputs_offsets(self) -> list[datetime.timedelta]:
+        """Sorted output time offsets for the current step.
+
+        Subclasses may override this to support parametrised output
+        selection (e.g. per rollout step).
+        """
+        return self._output_offset
+
+    @property
+    def offset(self) -> list[datetime.timedelta]:
+        """Full sorted union of input and output offsets.
+
+        This is used by the datamodule to compute
+        ``data_relative_time_indices``.
+        """
+        return sorted(set(self._input_offset + self._output_offset))
+
+    def _offset_to_batch_indices(self, offsets: list[datetime.timedelta]) -> list[int]:
+        """Map a list of offsets to their positions in ``self.offset``."""
+        full = self.offset
+        return [full.index(o) for o in offsets]
+
+    def get_relative_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
+        """Convert ``self.offset`` to integer dataset indices for a given *frequency*.
+
+        The smallest offset is mapped to index 0.
+
+        Parameters
+        ----------
+        frequency : str | datetime.timedelta
+            Data frequency of the dataset (e.g. ``"1H"`` or ``timedelta(hours=1)``).
 
         Returns
         -------
-            list[int]: List of relative time indices.
+        list[int]
+            Integer indices suitable for indexing into the dataset's time
+            dimension.
         """
-        return self.input_time_indices
+        if not isinstance(frequency, datetime.timedelta):
+            frequency = frequency_to_timedelta(frequency)
 
-    def get_batch_output_time_indices(self) -> list[int]:
-        """Get the relative time indices for the model target sequence.
+        return [o // frequency for o in self.offset]
 
-        By default, this is the same as the input time indices, but it can be overridden by specific tasks.
+    def get_batch_input_indices(self) -> list[int]:
+        """Positions of the input offsets within the full batch ``offset``."""
+        return self._offset_to_batch_indices(self._input_offset)
 
-        Returns
-        -------
-            list[int]: List of relative time indices.
+    def get_batch_output_indices(self, **kwargs) -> list[int]:
+        """Positions of the output offsets within the full batch ``offset``.
+
+        Parameters are forwarded to ``get_output_offset`` so that
+        subclasses can parametrise the output selection (e.g. per
+        rollout step).
         """
-        return self.target_input_indices
+        return self._offset_to_batch_indices(self.get_output_offset(**kwargs))
 
-    @abstractmethod
-    def get_relative_time_indices(self, *args, **kwargs) -> list[int]:
-        """Get the relative time indices for the model input sequence.
+    def get_output_offset(self, **kwargs) -> list[datetime.timedelta]:
+        """Return the output offsets for a given step.
 
-        Returns
-        -------
-            list[int]: List of relative time indices.
+        The default implementation returns ``self.output_offset``.
+        Subclasses may override this to shift outputs per rollout step.
         """
-        raise NotImplementedError
+        return self.outputs_offsets
 
     @cached_property
     @abstractmethod
@@ -78,18 +135,18 @@ class BaseTask(ABC):
         raise NotImplementedError
 
     @property
-    def num_inputs(self) -> int:
-        """Get the number of input time steps for the task."""
-        return len(self.get_batch_input_time_indices())
+    def num_input_timesteps(self) -> int:
+        """Number of input time steps."""
+        return len(self._input_offset)
 
     @property
-    def num_outputs(self) -> int:
-        """Get the number of output time steps for the task."""
-        return len(self.get_batch_output_time_indices())
+    def num_output_timesteps(self) -> int:
+        """Number of output time steps."""
+        return len(self._output_offset)
 
     @property
     def num_steps(self) -> int:
-        """Get the number of steps in the task."""
+        """Number of steps in the task."""
         return len(self.steps)
 
     def get_inputs(
@@ -98,13 +155,27 @@ class BaseTask(ABC):
         data_indices: dict[str, IndexCollection],
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        time_indices = self.get_batch_input_time_indices(**kwargs)
+        """Extract model inputs from a batch.
+
+        Parameters
+        ----------
+        batch : dict[str, torch.Tensor]
+            Full batch keyed by dataset name.
+        data_indices : dict[str, IndexCollection]
+            Data indices per dataset.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Input tensors per dataset with shape
+            ``(bs, num_inputs, grid, nvar)``.
+        """
+        time_indices = self.get_batch_input_indices()
 
         x = {}
         for dataset_name, dataset_batch in batch.items():
             dataset_batch = dataset_batch[:, time_indices]
             x[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
-            # shape: (bs, multi_step, latlon, nvar)
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
@@ -114,7 +185,25 @@ class BaseTask(ABC):
         data_indices: dict[str, IndexCollection],
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        time_indices = self.get_batch_output_time_indices(**kwargs)
+        """Extract model targets from a batch.
+
+        Parameters
+        ----------
+        batch : dict[str, torch.Tensor]
+            Full batch keyed by dataset name.
+        data_indices : dict[str, IndexCollection]
+            Data indices per dataset.
+        **kwargs
+            Forwarded to ``get_batch_output_indices`` (e.g.
+            ``rollout_step``).
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Target tensors per dataset with shape
+            ``(bs, num_outputs, grid, nvar)``.
+        """
+        time_indices = self.get_batch_output_indices(**kwargs)
 
         y = {}
         for dataset_name, dataset_batch in batch.items():
@@ -124,23 +213,22 @@ class BaseTask(ABC):
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
+    # ------------------------------------------------------------------
+    # Hooks & metadata
+    # ------------------------------------------------------------------
+
     def log_extra(self, *args, **kwargs) -> None:
         """Log any task-specific information."""
+        return
 
     def on_train_epoch_end(self, current_epoch: int) -> None:
         pass
 
     def fill_metadata(self, md_dict: dict) -> None:
-        """Fill the metadata dictionary with task-specific information.
-
-        Args:
-            md_dict (dict): The metadata dictionary to fill.
-        """
+        """Fill the metadata dictionary with task-specific information."""
         md_dict["task"] = self.name
-        # md_dict["timestep"] = self.timestep
-        # Save relative time indices
-        # md_dict["relative_input_time_indices"] = self.get_batch_input_time_indices()
-        # md_dict["relative_output_time_indices"] = self.get_batch_output_time_indices()
+        md_dict["input_offsets"] = [frequency_to_string(o) for o in self.inputs_offsets]
+        md_dict["output_offsets"] = [frequency_to_string(o) for o in self.outputs_offsets]
         md_dict["num_inputs"] = self.num_inputs
         md_dict["num_outputs"] = self.num_outputs
 

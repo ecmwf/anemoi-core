@@ -7,29 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
+
 from anemoi.training.tasks.base import BaseSingleStepTask
 
 
 class BaseTimelessTask(BaseSingleStepTask):
-    """Base class for timeless tasks."""
+    """Base class for timeless tasks.
+
+    Both input and output are a single snapshot at t=0.
+    """
 
     def __init__(self, **_kwargs) -> None:
-        pass
-
-    def get_relative_time_indices(self, *_args, **_kwargs) -> list[int]:
-        """Get the relative time indices for the model input sequence.
-
-        Returns
-        -------
-            list[int]: List of relative time indices.
-        """
-        return [0]
-
-    def get_batch_input_time_indices(self, *args, **kwargs) -> list[int]:
-        return [0]
-
-    def get_batch_output_time_indices(self, *args, **kwargs) -> list[int]:
-        return [0]
+        super().__init__(input_offset=[datetime.timedelta(0)], output_offset=[datetime.timedelta(0)])
 
 
 class DownscalingTask(BaseTimelessTask):
