@@ -378,8 +378,9 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             **processor_kwargs,
         )
 
-        # Processor skip connection
-        x_latent_proc = x_latent_proc + x_latent
+        if self.latent_skip:
+            # Processor skip connection
+            x_latent = x_latent_proc + x_latent
 
         # Decoder
         x_out_dict = {}
@@ -393,7 +394,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=bse,
                 shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
                 edge_attr=decoder_edge_attr,

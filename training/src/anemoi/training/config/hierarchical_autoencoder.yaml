@@ -13,6 +13,8 @@ model:
   model:
     _target_: anemoi.models.models.AnemoiModelHierarchicalAutoEncoder
     hidden_nodes_name: ["hidden_1", "hidden_2"]
+  processor:
+    _target_: anemoi.models.layers.processor.NoOpProcessor
   enable_hierarchical_level_processing: False
   keep_batch_sharded: True
 
