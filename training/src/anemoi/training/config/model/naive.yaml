@@ -1,0 +1,22 @@
+_target_: anemoi.models.naive.NaiveModel
+_recursive_: false
+
+training_config: ${training}
+data_config: ${data}
+dataloader_config: ${dataloader}
+graph_config: ${graph}
+system_config: ${system}
+
+num_channels: 0
+
+backbone:
+  _target_: anemoi.models.models.NaiveModel
+
+trainable_parameters:
+  data: 0
+  hidden: 0
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
+
+bounding: []

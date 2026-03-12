@@ -9,6 +9,8 @@
 
 
 import logging
+import matplotlib
+matplotlib.use("Agg")
 
 import datashader as dsh
 import matplotlib.cm as cm

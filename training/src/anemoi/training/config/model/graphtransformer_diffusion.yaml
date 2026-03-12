@@ -1,9 +1,18 @@
+_target_: anemoi.training.builder.build_anemoi_model
+_recursive_: false
+
+training_config: ${training}
+data_config: ${data}
+dataloader_config: ${dataloader}
+graph_config: ${graph}
+system_config: ${system}
+
 num_channels: 1024
 cpu_offload: False
 
 keep_batch_sharded: True
 
-model:
+backbone:
   _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
   # Diffusion parameters
   diffusion:
@@ -15,7 +24,7 @@ model:
     rho: 7.0
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
-      num_channels: ${model.model.diffusion.noise_channels}
+      num_channels: ${model.backbone.diffusion.noise_channels}
       max_period: 1000
     inference_defaults:
       noise_scheduler:

@@ -20,11 +20,9 @@ from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import model_validator
 from pydantic._internal import _model_construction
-from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
-from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import CUSTOM_MESSAGES
@@ -113,24 +111,6 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
             self.dataloader.read_group_size = self.system.hardware.num_gpus_per_model
         return self
 
-    @model_validator(mode="after")
-    def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
-        """Check that bounding is not used with zero data extractor."""
-        if (
-            isinstance(self.model.decoder, GraphTransformerDecoderSchema)
-            and self.model.decoder.initialise_data_extractor_zero
-            and self.model.bounding
-        ):
-            error = "bounding_conflict_with_data_extractor_zero"
-            msg = (
-                "Boundings cannot be used with zero initialized weights in decoder. "
-                "Set initalise_data_extractor_zero to False."
-            )
-            raise PydanticCustomError(
-                error,
-                msg,
-            )
-        return self
 
 
 class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):

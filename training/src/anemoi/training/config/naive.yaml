@@ -1,0 +1,58 @@
+defaults:
+  - data: zarr
+  - dataloader: native_grid
+  - diagnostics: evaluation
+  - system: example
+  - graph: multi_scale
+  - model: naive
+  - training: default
+  - _self_
+
+config_validation: True
+
+system:
+  input:
+    dataset: storage/benchmark/benchmark.zarr
+    graph: storage/benchmark/stage_a/graph.pt
+  output:
+    root: checkpoints
+
+graph:
+  overwrite: False
+  data: "grid"
+  hidden: "mesh"
+
+dataloader:
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  num_workers:
+    training: 2
+    validation: 2
+    test: 2
+  training:
+    datasets:
+      data:
+        start: null
+        end: "2024-12-31"
+  validation:
+    datasets:
+      data:
+        start: null
+        end: "2024-12-31"
+  test:
+    datasets:
+      data:
+        start: null
+        end: "2024-12-31"
+
+diagnostics:
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: "file://checkpoints/mlflow"
+
+training:
+  max_steps: 100
+  max_epochs: null

@@ -206,6 +206,7 @@ class AnemoiTrainer(ABC):
     def _validate_transfer_learning_datasets(
         self,
         model: pl.LightningModule,
+        data_indices: dict,
     ) -> None:
         """Validate dataset compatibility between checkpoint and config for transfer learning.
 
@@ -237,11 +238,11 @@ class AnemoiTrainer(ABC):
             return
 
         # Validate each dataset in current config against checkpoint
-        for dataset_name, data_indices in self.data_indices.items():
+        for dataset_name, dataset_indices in data_indices.items():
             if dataset_name in model._ckpt_model_name_to_index:
                 # Dataset found in checkpoint - validate variables match
                 ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
-                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                dataset_indices.compare_variables(ckpt_name_to_index, dataset_indices.name_to_index)
                 loaded_datasets.append(dataset_name)
             else:
                 # Dataset not found in checkpoint - will be randomly initialized
@@ -252,7 +253,7 @@ class AnemoiTrainer(ABC):
                 initialized_datasets.append(dataset_name)
 
         # Check for datasets in checkpoint but not in config
-        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
+        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in data_indices]
         if ignored_datasets:
             for ignored_dataset in ignored_datasets:
                 LOGGER.warning(
@@ -271,33 +272,22 @@ class AnemoiTrainer(ABC):
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        assert (
-            not (
-                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.processor.target_
-            )
-            and not (
-                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
-            )
-            and not (
-                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
-            )
-        ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
-        "Please use a different activation function."
+        model_task = get_class(self.config.training.model_task)
+
+        model = instantiate(self.config.model)
+
+        model.metadata["metadata_inference"]["task"] = model_task.task_type
 
         kwargs = {
+            "model": model,
             "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
-            "supporting_arrays": self.supporting_arrays,
         }
 
-        model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 
         # Load the model weights
@@ -320,7 +310,7 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config
-            self._validate_transfer_learning_datasets(model)
+            self._validate_transfer_learning_datasets(model, self.data_indices)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights

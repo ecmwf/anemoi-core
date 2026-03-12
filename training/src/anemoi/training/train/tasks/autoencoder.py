@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import AnemoiModelInterface
 
 
 LOGGER = logging.getLogger(__name__)
@@ -37,18 +38,20 @@ class GraphAutoEncoder(BaseGraphModule):
     def __init__(
         self,
         *,
+        model: "AnemoiModelInterface",
         config: DictConfig,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
         """Initialize graph neural network interpolator.
 
         Parameters
         ----------
+        model : AnemoiModelInterface
+            Pre-built model
         config : DictConfig
             Job configuration
         graph_data : HeteroData
@@ -57,20 +60,16 @@ class GraphAutoEncoder(BaseGraphModule):
             Statistics of the training data
         data_indices : IndexCollection
             Indices of the training data,
-        metadata : dict
-            Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
 
         """
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
 
         assert (

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import AnemoiModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -37,26 +38,26 @@ class BaseDiffusionForecaster(BaseGraphModule):
     def __init__(
         self,
         *,
+        model: "AnemoiModelInterface",
         config: BaseSchema,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
 
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
 
-        self.rho = config.model.model.diffusion.rho
+        self.rho = config.model.nn.diffusion.rho
 
         from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 
@@ -97,7 +98,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
-        return self.model.model.fwd_with_preconditioning(
+        return self.model.backbone.fwd_with_preconditioning(
             x,
             y_noised,
             sigma,
@@ -219,9 +220,9 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         shapes = {k: y_.shape for k, y_ in y.items()}
         sigma, noise_weights = self._get_noise_level(
             shape=shapes,
-            sigma_max=self.model.model.sigma_max,
-            sigma_min=self.model.model.sigma_min,
-            sigma_data=self.model.model.sigma_data,
+            sigma_max=self.model.backbone.sigma_max,
+            sigma_min=self.model.backbone.sigma_min,
+            sigma_data=self.model.backbone.sigma_data,
             rho=self.rho,
             device=next(iter(batch.values())).device,
         )
@@ -247,22 +248,22 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     def __init__(
         self,
         *,
+        model: "AnemoiModelInterface",
         config: BaseSchema,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
         self._tendency_pre_processors: dict[str, object] = {}
         self._tendency_post_processors: dict[str, object] = {}
@@ -348,7 +349,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             for step, pre_proc in enumerate(pre_tend):
                 y_step = y_dataset[:, step : step + 1]
                 x_ref_step = x_ref[dataset_name].unsqueeze(1)
-                tendency_step = self.model.model.compute_tendency(
+                tendency_step = self.model.backbone.compute_tendency(
                     {dataset_name: y_step},
                     {dataset_name: x_ref_step},
                     {dataset_name: self.model.pre_processors[dataset_name]},
@@ -373,7 +374,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             for step, post_proc in enumerate(post_tend):
                 x_ref_step = x_ref[dataset_name].unsqueeze(1)
                 tendency_step = tendency_dataset[:, step : step + 1]
-                state_step = self.model.model.add_tendency_to_state(
+                state_step = self.model.backbone.add_tendency_to_state(
                     {dataset_name: x_ref_step},
                     {dataset_name: tendency_step},
                     {dataset_name: self.model.post_processors[dataset_name]},
@@ -383,7 +384,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 )[dataset_name]
                 state_steps.append(state_step)
             out_dataset = torch.cat(state_steps, dim=1)
-            out_dataset = self.model.model._apply_imputer_inverse(self.model.post_processors, dataset_name, out_dataset)
+            out_dataset = self.model.backbone._apply_imputer_inverse(self.model.post_processors, dataset_name, out_dataset)
             states[dataset_name] = out_dataset
         return states
 
@@ -430,7 +431,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
             y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
                 y_pred_state[dataset_name],
-                self.model.model._apply_imputer_inverse(
+                self.model.backbone._apply_imputer_inverse(
                     self.model.post_processors,
                     dataset_name,
                     y_state[dataset_name],
@@ -484,7 +485,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             )
             raise AttributeError(msg)
 
-        x_ref = self.model.model.apply_reference_state_truncation(
+        x_ref = self.model.backbone.apply_reference_state_truncation(
             x,
             self.grid_shard_shapes,
             self.model_comm_group,
@@ -498,9 +499,9 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         shapes = {k: target.shape for k, target in tendency_target.items()}
         sigma, noise_weights = self._get_noise_level(
             shape=shapes,
-            sigma_max=self.model.model.sigma_max,
-            sigma_min=self.model.model.sigma_min,
-            sigma_data=self.model.model.sigma_data,
+            sigma_max=self.model.backbone.sigma_max,
+            sigma_min=self.model.backbone.sigma_min,
+            sigma_data=self.model.backbone.sigma_data,
             rho=self.rho,
             device=next(iter(batch.values())).device,
         )

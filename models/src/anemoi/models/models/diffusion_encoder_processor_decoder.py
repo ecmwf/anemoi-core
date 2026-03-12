@@ -49,7 +49,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         model_config_local = DotDict(model_config)
 
-        diffusion_config = model_config_local.model.model.diffusion
+        diffusion_config = model_config_local.model.nn.diffusion
         self.noise_channels = diffusion_config.noise_channels
         self.noise_cond_dim = diffusion_config.noise_cond_dim
         self.sigma_data = diffusion_config.sigma_data

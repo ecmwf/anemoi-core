@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
+    from anemoi.models.interface import AnemoiModelInterface
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -37,35 +39,35 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
     def __init__(
         self,
         *,
+        model: "AnemoiModelInterface",
         config: DictConfig,
         graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
+        model : AnemoiModelInterface
+            Pre-built model
         config : DictConfig
             Job configuration
         statistics : dict
             Statistics of the training data
         data_indices : dict
             Indices of the training data,
-        metadata : dict
-            Provenance information
         """
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
