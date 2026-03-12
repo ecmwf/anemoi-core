@@ -12,6 +12,8 @@ defaults:
 model:
   model:
     _target_: anemoi.models.models.AnemoiModelHierarchicalAutoEncoder
+  processor:
+    _target_: anemoi.models.layers.processor.NoOpProcessor
   enable_hierarchical_level_processing: False
   keep_batch_sharded: True
 
