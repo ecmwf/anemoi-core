@@ -168,7 +168,9 @@ class AnemoiTrainer(ABC):
         else:
             graph_filename = None
 
+        # Introduce Data Nodes in graph config
         dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
+
         for dataset_name, dataset_config in dataset_configs.items():
             if dataset_name not in self.config.graph.nodes.keys():
                 LOGGER.info("Creating graph node entry for dataset '%s'", dataset_name)
@@ -185,9 +187,7 @@ class AnemoiTrainer(ABC):
                     msg = f"Dataset source is None for dataset '{dataset_name}'. Check dataloader.dataset_config.dataset."
                     raise ValueError(msg)
                 
-                # dataset: ${dataloader.training.datasets.cerra.dataset_config}
-
-                # Modify config to include new dataset nodes
+                # Add dataset nodes from dataloader into graph recepe
                 self.config.graph.nodes[dataset_name] = {
                     "node_builder": {
                         "_target_": "anemoi.graphs.nodes.AnemoiDatasetNodes",
@@ -195,7 +195,7 @@ class AnemoiTrainer(ABC):
                     }
                 }
             else:
-                LOGGER.info("Graph node entry for dataset '%s' was already specified in the config.", dataset_name)
+                LOGGER.info("Graph node entry for dataset '%s' is already specified in the config.", dataset_name)
 
         # Create new graph
         from anemoi.graphs.create import GraphCreator
