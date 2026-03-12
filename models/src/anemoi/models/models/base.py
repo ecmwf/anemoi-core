@@ -69,7 +69,6 @@ class BaseGraphModel(nn.Module):
         model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
-
         self.num_channels = model_config.model.num_channels
         self.latent_skip = model_config.model.model.latent_skip
 
