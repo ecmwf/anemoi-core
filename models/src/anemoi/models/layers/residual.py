@@ -10,10 +10,12 @@
 
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Optional
 
 import einops
 import torch
+from omegaconf import OmegaConf
 from torch import nn
 from torch_geometric.data import HeteroData
 
@@ -22,6 +24,12 @@ from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.utils.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+from anemoi.models.utils.projection_helpers import projection_node_name
+from anemoi.models.utils.projection_helpers import residual_projection_edge_names
+from anemoi.models.utils.projection_helpers import residual_projection_truncation_node_name
+from anemoi.models.utils.projection_helpers import rewrite_dataset_projection_edge_name
+from anemoi.models.utils.projection_helpers import rewrite_dataset_projection_node_name
 
 
 class BaseResidualConnection(nn.Module, ABC):
@@ -150,10 +158,32 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_file_path: Optional[str] = None,
         truncation_up_edges_name: Optional[tuple[str, str, str]] = None,
         truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
+        truncation_projection_config: Mapping | None = None,
+        dataset_name: str | None = None,
+        dataset_names: list[str] | None = None,
         autocast: bool = False,
         row_normalize: bool = False,
     ) -> None:
         super().__init__()
+        (
+            data_nodes,
+            truncation_nodes,
+            edge_weight_attribute,
+            truncation_up_edges_name,
+            truncation_down_edges_name,
+        ) = self._resolve_projection_inputs(
+            graph=graph,
+            data_nodes=data_nodes,
+            truncation_nodes=truncation_nodes,
+            edge_weight_attribute=edge_weight_attribute,
+            truncation_up_file_path=truncation_up_file_path,
+            truncation_down_file_path=truncation_down_file_path,
+            truncation_up_edges_name=truncation_up_edges_name,
+            truncation_down_edges_name=truncation_down_edges_name,
+            truncation_projection_config=truncation_projection_config,
+            dataset_name=dataset_name,
+            dataset_names=dataset_names,
+        )
         up_edges, down_edges = self._get_edges_name(
             graph,
             data_nodes,
@@ -185,6 +215,122 @@ class TruncatedConnection(BaseResidualConnection):
 
         self.projector = SparseProjector(autocast=autocast)
 
+    @staticmethod
+    def _resolve_projection_inputs(
+        *,
+        graph: HeteroData | None,
+        data_nodes: str | None,
+        truncation_nodes: str | None,
+        edge_weight_attribute: str | None,
+        truncation_up_file_path: str | None,
+        truncation_down_file_path: str | None,
+        truncation_up_edges_name: tuple[str, str, str] | None,
+        truncation_down_edges_name: tuple[str, str, str] | None,
+        truncation_projection_config: Mapping | None,
+        dataset_name: str | None,
+        dataset_names: list[str] | None,
+    ) -> tuple[
+        str | None,
+        str | None,
+        str | None,
+        tuple[str, str, str] | None,
+        tuple[str, str, str] | None,
+    ]:
+        """Resolve implicit truncation graph references from projection config.
+
+        This helper lets ``TruncatedConnection`` consume the shorthand trainer
+        config directly: if file paths or explicit edge names were not supplied,
+        it fills in the dataset-specific node and edge names from the graph and
+        truncation settings.
+        """
+        if graph is None or dataset_name is None or dataset_names is None:
+            return (
+                data_nodes,
+                truncation_nodes,
+                edge_weight_attribute,
+                truncation_up_edges_name,
+                truncation_down_edges_name,
+            )
+
+        projection_cfg = truncation_projection_config
+        if OmegaConf.is_config(projection_cfg):
+            projection_cfg = OmegaConf.to_container(projection_cfg, resolve=True)
+
+        if (
+            truncation_up_file_path is None
+            and truncation_down_file_path is None
+            and truncation_down_edges_name is None
+            and truncation_up_edges_name is None
+        ):
+            down_edges, up_edges = residual_projection_edge_names(
+                dataset_name=dataset_name,
+                graph_or_config=graph,
+                dataset_names=dataset_names,
+                projection_config=projection_cfg,
+            )
+            truncation_down_edges_name = down_edges
+            truncation_up_edges_name = up_edges
+
+        if edge_weight_attribute is None:
+            derived_edge_weight_attribute = None
+            if projection_cfg is not None:
+                truncation_cfg = projection_cfg.get("truncation")
+                if truncation_cfg is not None:
+                    if OmegaConf.is_config(truncation_cfg):
+                        truncation_cfg = OmegaConf.to_container(truncation_cfg, resolve=True)
+                    derived_edge_weight_attribute = truncation_cfg.get("edge_weight_attribute")
+                derived_edge_weight_attribute = derived_edge_weight_attribute or projection_cfg.get(
+                    "edge_weight_attribute",
+                )
+            edge_weight_attribute = derived_edge_weight_attribute or DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+
+        if data_nodes is not None:
+            data_nodes = rewrite_dataset_projection_node_name(
+                data_nodes,
+                dataset_name=dataset_name,
+                graph_or_config=graph,
+                dataset_names=dataset_names,
+            )
+
+        if truncation_nodes is not None:
+            truncation_nodes = rewrite_dataset_projection_node_name(
+                truncation_nodes,
+                dataset_name=dataset_name,
+                graph_or_config=graph,
+                dataset_names=dataset_names,
+            )
+        elif truncation_up_file_path is None and truncation_down_file_path is None:
+            truncation_nodes = projection_node_name(
+                residual_projection_truncation_node_name(projection_cfg),
+                dataset_name=dataset_name,
+                graph_or_config=graph,
+                dataset_names=dataset_names,
+            )
+
+        if truncation_down_edges_name is not None:
+            truncation_down_edges_name = rewrite_dataset_projection_edge_name(
+                truncation_down_edges_name,
+                dataset_name=dataset_name,
+                graph_or_config=graph,
+                dataset_names=dataset_names,
+            )
+
+        if truncation_up_edges_name is not None:
+            truncation_up_edges_name = rewrite_dataset_projection_edge_name(
+                truncation_up_edges_name,
+                dataset_name=dataset_name,
+                graph_or_config=graph,
+                dataset_names=dataset_names,
+            )
+
+        return (
+            data_nodes,
+            truncation_nodes,
+            edge_weight_attribute,
+            (tuple(truncation_up_edges_name) if truncation_up_edges_name is not None else None),
+            (tuple(truncation_down_edges_name) if truncation_down_edges_name is not None else None),
+        )
+
     def _get_edges_name(
         self,
         graph,
@@ -196,6 +342,7 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_edges_name,
         edge_weight_attribute,
     ):
+        """Resolve and validate the edge tuples used for up/down sparse projections."""
         files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
         edge_names_specified = truncation_up_edges_name is not None or truncation_down_edges_name is not None
         if not files_specified:
@@ -242,17 +389,24 @@ class TruncatedConnection(BaseResidualConnection):
         x = self.projector(x, self.provider_down.get_edges(device=x.device))
         x = self.projector(x, self.provider_up.get_edges(device=x.device))
         x = self._to_grid_shards(x, shard_shapes, model_comm_group)
-        x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
+        x = einops.rearrange(
+            x,
+            "(batch ensemble) grid features -> batch ensemble grid features",
+            batch=batch_size,
+        )
 
         return self._expand_time(x, n_step_output)
 
     def _to_channel_shards(self, x, shard_shapes=None, model_comm_group=None):
+        """Move node-major tensors into the channel-sharded layout used by projection kernels."""
         return self._reshard(x, shard_channels, shard_shapes, model_comm_group)
 
     def _to_grid_shards(self, x, shard_shapes=None, model_comm_group=None):
+        """Restore projected tensors back to the original grid-sharded layout."""
         return self._reshard(x, gather_channels, shard_shapes, model_comm_group)
 
     def _reshard(self, x, fn, shard_shapes=None, model_comm_group=None):
+        """Apply a sharding transform only when shard metadata is available."""
         if shard_shapes is not None:
             x = fn(x, shard_shapes, model_comm_group)
         return x

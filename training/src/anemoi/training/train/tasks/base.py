@@ -167,7 +167,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
-        # Handle dictionary of graph_data
         graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
@@ -219,6 +218,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
+        graph_projections = getattr(self.config.graph, "projections", None)
+        multiscale_projection_config = None if graph_projections is None else graph_projections.get("multiscale")
+
         for dataset_name in self.dataset_names:
             if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
                 LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
@@ -257,14 +259,19 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
-                graph_data=graph_data[dataset_name],
+                graph_data=graph_data,
+                multiscale_projection_config=multiscale_projection_config,
+                dataset_name=dataset_name,
+                dataset_names=self.dataset_names,
             )
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
-                graph_data=graph_data[dataset_name],
+                graph_data=graph_data,
+                multiscale_projection_config=multiscale_projection_config,
+                dataset_name=dataset_name,
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
@@ -279,7 +286,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.is_first_step = True
         self.n_step_input = config.training.multistep_input
         self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
-        LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
+        LOGGER.info(
+            "GraphModule with n_step_input=%s and n_step_output=%s",
+            self.n_step_input,
+            self.n_step_output,
+        )
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -393,6 +404,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scalers: dict,
         data_indices: IndexCollection,
         graph_data: object | None = None,
+        multiscale_projection_config: Any = None,
+        dataset_name: str | None = None,
     ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
@@ -401,6 +414,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     scalers=scalers,
                     data_indices=data_indices,
                     graph_data=graph_data,
+                    multiscale_projection_config=multiscale_projection_config,
+                    dataset_name=dataset_name,
+                    dataset_names=self.dataset_names,
                 )
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
@@ -431,7 +447,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if update_states:
             processor_prefixes += ("model.pre_processors.", "model.post_processors.")
         if update_tendencies:
-            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+            processor_prefixes += (
+                "model.pre_processors_tendencies.",
+                "model.post_processors_tendencies.",
+            )
 
         if not processor_prefixes:
             return
@@ -1071,7 +1090,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+    def configure_optimizers(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
         scheduler = self._create_scheduler(optimizer)

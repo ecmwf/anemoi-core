@@ -134,6 +134,37 @@ file created with ``anemoi-graphs export_to_sparse`` (see
 ``row_normalize_noise_matrix`` and ``autocast`` control how the
 projection matrix is applied.
 
+Instead of a precomputed sparse matrix, the noise can also be generated
+on a custom graph node set and projected to the hidden grid using a
+graph edge store. In that case, add a ``noise`` node group and a
+``noise -> hidden`` edge to the graph config, then point the ensemble
+noise injector to that edge:
+
+.. code:: yaml
+
+   graph:
+      nodes:
+         noise:
+            node_builder:
+               _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+               grid: o32
+      edges:
+         - source_name: noise
+           target_name: hidden
+           edge_builders:
+              - _target_: anemoi.graphs.edges.KNNEdges
+                num_nearest_neighbours: 32
+           attributes:
+              gauss_weight:
+                 _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+                 norm: l1
+                 sigma: 1.0
+
+   model:
+      noise_injector:
+         noise_edges_name: [noise, to, hidden]
+         edge_weight_attribute: gauss_weight
+
 .. code:: yaml
 
    layer_kernels:

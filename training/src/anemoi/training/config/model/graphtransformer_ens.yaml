@@ -109,9 +109,9 @@ residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
   step: -1 # use the latest step as skip connection
 #  _target_: anemoi.models.layers.residual.TruncatedConnection
-#  truncation_down_edges_name: ${graph.projections.residual.down_edges_name}
-#  truncation_up_edges_name: ${graph.projections.residual.up_edges_name}
-#  edge_weight_attribute: ${graph.projections.residual.edge_weight_attribute}
+#  # Edge names are derived from the residual projection config and dataset name.
+#  # edge_weight_attribute defaults to gauss_weight and can be overridden if needed.
+#  edge_weight_attribute: gauss_weight
 
 trainable_parameters:
   data: 8

@@ -13,8 +13,10 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
+import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from torch_geometric.data import HeteroData
 
 from anemoi.training.train.train import AnemoiTrainer
 
@@ -77,6 +79,14 @@ def build_mock_config(
         "model": {},
     }
     return OmegaConf.create(config_dict)
+
+
+def make_mock_graph(*node_names: str) -> HeteroData:
+    graph = HeteroData()
+    for node_name in node_names:
+        graph[node_name].x = torch.zeros(1, 2)
+        graph[node_name].num_nodes = 1
+    return graph
 
 
 @pytest.fixture
@@ -311,3 +321,109 @@ def test_restart_run_id_file_not_found(
     assert trainer.run_id == run_id
     with pytest.raises(RuntimeError, match=r"Could not find last checkpoint"):
         _ = trainer.last_checkpoint
+
+
+def test_graph_data_loads_existing_graph_for_multiple_datasets(
+    trainer_factory: AnemoiTrainer,
+    tmp_path: Path,
+) -> None:
+    graph_path = tmp_path / "existing-fused.pt"
+    graph_path.write_text("fake graph")
+
+    config = OmegaConf.merge(
+        build_mock_config(checkpoints_path=tmp_path),
+        OmegaConf.create(
+            {
+                "system": {
+                    "input": {
+                        "graph": graph_path,
+                    },
+                },
+                "dataloader": {
+                    "training": {
+                        "datasets": {
+                            "era5": {"dataset_config": {"dataset": "datasets/era5.zarr"}},
+                            "cerra": {"dataset_config": {"dataset": "datasets/cerra.zarr"}},
+                        },
+                    },
+                },
+                "graph": {
+                    "overwrite": False,
+                    "projections": {
+                        "truncation": {
+                            "down_edges_name": ["era5", "to", "era5_truncation"],
+                            "up_edges_name": ["era5_truncation", "to", "era5"],
+                        },
+                    },
+                },
+            },
+        ),
+    )
+
+    trainer = trainer_factory(config)
+    graph = make_mock_graph("era5", "cerra", "hidden", "era5_truncation", "cerra_truncation")
+
+    with (
+        patch("anemoi.training.train.graph_data.torch.load", return_value=graph) as torch_load,
+        patch("anemoi.graphs.utils.get_distributed_device", return_value="cpu"),
+    ):
+        loaded_graph = trainer.graph_data
+
+    assert loaded_graph is graph
+    torch_load.assert_called_once_with(graph_path, map_location="cpu", weights_only=False)
+
+
+def test_fused_graph_cache_path_is_dataset_scoped(
+    trainer_factory: AnemoiTrainer,
+    tmp_path: Path,
+) -> None:
+    graph_path = tmp_path / "fused.pt"
+
+    config = OmegaConf.merge(
+        build_mock_config(checkpoints_path=tmp_path),
+        OmegaConf.create(
+            {
+                "system": {
+                    "input": {
+                        "graph": graph_path,
+                    },
+                },
+                "dataloader": {
+                    "training": {
+                        "datasets": {
+                            "era5": {"dataset_config": {"dataset": "datasets/era5.zarr"}},
+                            "cerra": {"dataset_config": {"dataset": "datasets/cerra.zarr"}},
+                        },
+                    },
+                },
+                "graph": {
+                    "overwrite": False,
+                    "nodes": {
+                        "era5": {},
+                        "cerra": {},
+                        "hidden": {},
+                    },
+                    "edges": [],
+                },
+            },
+        ),
+    )
+
+    trainer = trainer_factory(config)
+    dataset_names = ["era5", "cerra"]
+    cached_graph_path = trainer.graph_data_factory.cache_graph_path(
+        graph_path,
+        trainer.graph_data_factory.fused_graph_cache_key(dataset_names),
+    )
+    cached_graph_path.write_text("fake graph")
+    graph = make_mock_graph("era5", "cerra", "hidden")
+
+    with (
+        patch("anemoi.training.train.graph_data.torch.load", return_value=graph) as torch_load,
+        patch("anemoi.graphs.utils.get_distributed_device", return_value="cpu"),
+    ):
+        loaded_graph = trainer.graph_data
+
+    assert loaded_graph is graph
+    assert cached_graph_path != graph_path
+    torch_load.assert_called_once_with(cached_graph_path, map_location="cpu", weights_only=False)

@@ -30,7 +30,6 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -38,9 +37,9 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.train.graph_data import TrainerGraphDataFactory
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.training.utils.graph_config import merge_projection_and_graph_config
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -144,38 +143,9 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
-        """Create graph for a specific dataset, overriding the dataset path in config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
-
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        graph_config = OmegaConf.create(OmegaConf.to_container(self.config.graph, resolve=False))
-        merge_projection_and_graph_config(graph_config)
-
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
-
-        return GraphCreator(config=graph_config).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
+    @cached_property
+    def graph_data_factory(self) -> TrainerGraphDataFactory:
+        return TrainerGraphDataFactory(self.config)
 
     @cached_property
     @abstractmethod
@@ -184,26 +154,9 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            dataset_reader_config = dataset_config.dataset_config
-            if isinstance(dataset_reader_config, (DictConfig, dict)):
-                if "dataset" not in dataset_reader_config:
-                    msg = f"Dataset '{dataset_name}' is missing 'dataset' key."
-                    raise ValueError(msg)
-                dataset_source = dataset_reader_config["dataset"]
-            else:
-                dataset_source = dataset_reader_config
-
-            if dataset_source is None:
-                msg = f"Dataset source is None for dataset '{dataset_name}'. Check dataloader.dataset_config.dataset."
-                raise ValueError(msg)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_source, dataset_name)
-        return graphs
+    def graph_data(self) -> HeteroData:
+        """Graph data built or loaded for the current trainer config."""
+        return self.graph_data_factory.build()
 
     def _validate_transfer_learning_datasets(
         self,

@@ -319,13 +319,11 @@ def ensemble_graph_multiscale_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     cfg.training.training_loss.datasets.data.loss_matrices = None
-    cfg.training.training_loss.datasets.data.loss_matrices_graph = cfg.graph.projections.multiscale.matrices
+    cfg.training.training_loss.datasets.data.loss_matrices_graph = True
     cfg.training.training_loss.datasets.data.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
 
     cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices = None
-    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices_graph = (
-        cfg.graph.projections.multiscale.matrices
-    )
+    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices_graph = True
     cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
     cfg.diagnostics.plot.callbacks = []
     OmegaConf.resolve(cfg)
@@ -344,7 +342,7 @@ def ensemble_truncated_connection_config(
     overrides = [
         "model=graphtransformer_ens",
         "graph=multi_scale",
-        "graph/projections/residual=o32",
+        "graph/projections/truncation=o32",
     ]
 
     with initialize(
@@ -362,20 +360,19 @@ def ensemble_truncated_connection_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     cfg.training.training_loss.datasets.data.loss_matrices = None
-    cfg.training.training_loss.datasets.data.loss_matrices_graph = [None]
+    cfg.training.training_loss.datasets.data.loss_matrices_graph = False
+    cfg.training.training_loss.datasets.data.loss_matrices = [None]
     cfg.training.training_loss.datasets.data.weights = [1.0]
 
     cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices = None
-    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices_graph = [None]
+    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices_graph = False
+    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices = [None]
     cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0]
     cfg.diagnostics.plot.callbacks = []
 
     cfg.model.residual = OmegaConf.create(
         {
             "_target_": "anemoi.models.layers.residual.TruncatedConnection",
-            "truncation_down_edges_name": "${graph.projections.residual.down_edges_name}",
-            "truncation_up_edges_name": "${graph.projections.residual.up_edges_name}",
-            "edge_weight_attribute": "${graph.projections.residual.edge_weight_attribute}",
         },
     )
 
@@ -385,6 +382,80 @@ def ensemble_truncated_connection_config(
     cfg.training.multistep_input = 3
     cfg.training.multistep_output = 2
     return cfg, url_dataset
+
+
+@pytest.fixture
+def multidatasets_graph_multiscale_truncated_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, list[str]]:
+    overrides = [
+        "+graph/projections/truncation=o32",
+    ]
+
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_multidatasets_graph_multiscale_truncated",
+    ):
+        template = compose(config_name="multi", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    tmp_dir_dataset_b, url_dataset_b = get_tmp_path(use_case_modifications.system.input.dataset_b)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    use_case_modifications.system.input.dataset_b = str(tmp_dir_dataset_b)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.set_struct(cfg.graph.projections, False)
+    cfg.graph.projections.multiscale = OmegaConf.create(
+        {
+            "smoothers": {
+                "smooth_test": {
+                    "edge_weight_attribute": "gauss_weight",
+                    "gaussian_norm": "l1",
+                    "num_nearest_neighbours": 4,
+                    "sigma": 1.0,
+                },
+            },
+        },
+    )
+
+    multiscale_weights = [1.0, 1.0]
+    for dataset_name in cfg.training.training_loss.datasets:
+        per_scale_loss = OmegaConf.create(
+            OmegaConf.to_container(
+                cfg.training.training_loss.datasets[dataset_name],
+                resolve=False,
+            ),
+        )
+
+        cfg.training.training_loss.datasets[dataset_name] = OmegaConf.create(
+            {
+                "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+                "loss_matrices_path": None,
+                "loss_matrices": None,
+                "loss_matrices_graph": True,
+                "weights": multiscale_weights,
+                "keep_batch_sharded": cfg.model.keep_batch_sharded,
+                "per_scale_loss": per_scale_loss,
+            },
+        )
+
+    cfg.model.residual = OmegaConf.create(
+        {
+            "_target_": "anemoi.models.layers.residual.TruncatedConnection",
+        },
+    )
+
+    cfg.diagnostics.plot.callbacks = []
+    cfg.training.multistep_input = 3
+    cfg.training.multistep_output = 2
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, [url_dataset, url_dataset_b]
 
 
 @pytest.fixture

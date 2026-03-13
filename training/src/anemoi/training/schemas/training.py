@@ -272,11 +272,13 @@ class BaseLossSchema(BaseModel):
 
 
 class KernelCRPSSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.kcrps.KernelCRPS"] = Field(..., alias="_target_")
     fair: bool = True
     "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
 
 
 class AlmostFairKernelCRPSSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.kcrps.AlmostFairKernelCRPS"] = Field(..., alias="_target_")
     alpha: float = 1.0
     """Factor for linear combination of fair (unbiased, ensemble variance component
     weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
@@ -286,30 +288,29 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
+    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
     weights: list[float]
     keep_batch_sharded: bool
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
-    loss_matrices_graph: list[dict[str, Any] | None] | None = None
+    loss_matrices_graph: bool = False
 
     @field_validator("weights")
     @classmethod
     def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
-        if "loss_matrices_graph" in info.data and info.data.get("loss_matrices_graph") is not None:
-            assert len(v) == len(
-                info.data["loss_matrices_graph"],
-            ), "weights must have same length as loss_matrices_graph"
-        elif "loss_matrices" in info.data and info.data.get("loss_matrices") is not None:
+        if "loss_matrices" in info.data and info.data.get("loss_matrices") is not None:
             assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
         return v
 
     @model_validator(mode="after")
     def validate_matrix_source(self) -> Self:
         file_based = self.loss_matrices is not None
-        graph_based = self.loss_matrices_graph is not None
+        graph_based = bool(self.loss_matrices_graph)
         if file_based and graph_based:
             msg = "Specify either loss_matrices or loss_matrices_graph, not both."
+            raise ValueError(msg)
+        if not file_based and not graph_based:
+            msg = "Specify either loss_matrices_graph=True or provide loss_matrices."
             raise ValueError(msg)
         return self
 

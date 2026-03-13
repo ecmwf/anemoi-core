@@ -47,52 +47,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def _build_networks(self, model_config):
         super()._build_networks(model_config)
-        self._assert_noise_injector_graph_consistency(model_config)
 
-        first_dataset_name = next(iter(self._graph_data.keys()))
         self.noise_injector = instantiate(
             model_config.model.noise_injector,
             _recursive_=False,
             num_channels=self.num_channels,
-            graph_data=self._graph_data[first_dataset_name],
+            graph_data=self._graph_data,
         )
-
-    def _assert_noise_injector_graph_consistency(self, model_config) -> None:
-        """Validate graph consistency for graph-based noise injector configs."""
-        noise_edges_name = getattr(model_config.model.noise_injector, "noise_edges_name", None)
-        if noise_edges_name is None:
-            return
-        self._assert_consistent_noise_projection_graph(
-            edges_name=tuple(noise_edges_name),
-            edge_weight_attribute=getattr(model_config.model.noise_injector, "edge_weight_attribute", None),
-        )
-
-    def _assert_consistent_noise_projection_graph(
-        self,
-        edges_name: tuple[str, str, str],
-        edge_weight_attribute: str | None,
-    ) -> None:
-        """Ensure noise projection edges are identical across datasets."""
-        if len(self._graph_data) <= 1:
-            return
-
-        dataset_names = list(self._graph_data.keys())
-        reference_dataset = dataset_names[0]
-        reference_edges = self._graph_data[reference_dataset][edges_name]
-        reference_weight = reference_edges[edge_weight_attribute] if edge_weight_attribute is not None else None
-
-        for dataset_name in dataset_names[1:]:
-            dataset_edges = self._graph_data[dataset_name][edges_name]
-            assert torch.equal(reference_edges.edge_index, dataset_edges.edge_index), (
-                f"Noise projection edge_index mismatch between '{reference_dataset}' and '{dataset_name}' "
-                f"for edges {edges_name}."
-            )
-
-            if reference_weight is not None:
-                assert torch.equal(reference_weight, dataset_edges[edge_weight_attribute]), (
-                    f"Noise projection attribute '{edge_weight_attribute}' mismatch between "
-                    f"'{reference_dataset}' and '{dataset_name}' for edges {edges_name}."
-                )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         base_input_dim = super()._calculate_input_dim(dataset_name)

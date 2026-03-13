@@ -41,6 +41,21 @@ def _target_class_name(loss_config: dict) -> str | None:
     return None
 
 
+def _wrapper_context_kwargs(
+    *,
+    target_class_name: str | None,
+    graph_data: object | None,
+    kwargs: dict,
+) -> dict:
+    if target_class_name not in GRAPH_DATA_WRAPPER_CLASS_NAMES:
+        return {}
+
+    wrapper_kwargs = dict(kwargs)
+    if graph_data is not None:
+        wrapper_kwargs["graph_data"] = graph_data
+    return wrapper_kwargs
+
+
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
@@ -91,10 +106,17 @@ def get_loss_function(
             scalers,
             data_indices,
             graph_data=graph_data,
+            **kwargs,
         )
-        if graph_data is not None:
-            return instantiate(loss_config, per_scale_loss=per_scale_loss, graph_data=graph_data, **kwargs)
-        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
+        return instantiate(
+            loss_config,
+            per_scale_loss=per_scale_loss,
+            **_wrapper_context_kwargs(
+                target_class_name=target_class_name,
+                graph_data=graph_data,
+                kwargs=kwargs,
+            ),
+        )
 
     if scalers is None:
         scalers = {}
@@ -102,10 +124,15 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    if graph_data is not None and target_class_name in GRAPH_DATA_WRAPPER_CLASS_NAMES:
-        loss_function = instantiate(loss_config, graph_data=graph_data, **kwargs, _recursive_=False)
-    else:
-        loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
+    loss_function = instantiate(
+        loss_config,
+        **_wrapper_context_kwargs(
+            target_class_name=target_class_name,
+            graph_data=graph_data,
+            kwargs=kwargs,
+        ),
+        _recursive_=False,
+    )
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"

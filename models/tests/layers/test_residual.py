@@ -74,6 +74,28 @@ def test_forward_with_edges_name(graph_data):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
+def test_forward_with_fused_graph_projection_config():
+    graph = HeteroData()
+    graph["era5"].num_nodes = 2
+    graph["cerra"].num_nodes = 1
+    graph["era5_truncation"].num_nodes = 1
+    graph["cerra_truncation"].num_nodes = 1
+    graph[("era5", "to", "era5_truncation")].edge_index = torch.tensor([[0, 1], [0, 0]])
+    graph[("era5", "to", "era5_truncation")].edge_length = torch.tensor([1.0, 2.0])
+    graph[("era5_truncation", "to", "era5")].edge_index = torch.tensor([[0, 0], [0, 1]])
+    graph[("era5_truncation", "to", "era5")].edge_length = torch.tensor([1.0, 2.0])
+
+    mapper = TruncatedConnection(
+        graph=graph,
+        truncation_projection_config={"truncation": {"edge_weight_attribute": "edge_length"}},
+        dataset_name="era5",
+        dataset_names=["era5", "cerra"],
+    )
+    x = torch.randn(5, 2, 2, 2, 3)
+    x_truncated = mapper.forward(x)
+    assert x_truncated.shape == (5, 2, 2, 3)
+
+
 def test_skipconnection(flat_data):
     mapper = SkipConnection()
     out = mapper.forward(flat_data)

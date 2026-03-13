@@ -65,10 +65,12 @@ class TruncatedConnectionSchema(BaseModel):
     @model_validator(mode="after")
     def check_instantiation_method(self) -> Any:
         # Check that only one method is used: either file paths or graph-based
+        any_file_based = self.truncation_up_file_path is not None or self.truncation_down_file_path is not None
         file_based = self.truncation_up_file_path is not None and self.truncation_down_file_path is not None
         graph_based_nodes = self.data_nodes is not None and self.truncation_nodes is not None
         graph_based_edges = self.truncation_up_edges_name is not None and self.truncation_down_edges_name is not None
-        graph_based = graph_based_nodes or graph_based_edges
+        graph_based_implicit = not any_file_based and not graph_based_nodes and not graph_based_edges
+        graph_based = graph_based_nodes or graph_based_edges or graph_based_implicit
 
         if file_based and graph_based:
             raise ValueError(
@@ -78,7 +80,8 @@ class TruncatedConnectionSchema(BaseModel):
         if not file_based and not graph_based:
             raise ValueError(
                 "You must specify either both file paths (truncation_up_file_path and truncation_down_file_path) "
-                "or graph-based projection with data_nodes/truncation_nodes or truncation_*_edges_name."
+                "or graph-based projection with data_nodes/truncation_nodes, truncation_*_edges_name, "
+                "or implicit graph-based projection."
             )
 
         if file_based:

@@ -15,6 +15,7 @@ import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import ValidationError
+from torch_geometric.data import HeteroData
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -39,19 +40,25 @@ def test_training_cycle_global(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_global_config(global_config: tuple[DictConfig, str, str]) -> None:
+def test_config_validation_global_config(
+    global_config: tuple[DictConfig, str, str],
+) -> None:
     cfg, _, _ = global_config
     BaseSchema(**cfg)
 
 
-def test_config_validation_rejects_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+def test_config_validation_rejects_invalid_projection_kind(
+    global_config: tuple[DictConfig, str, str],
+) -> None:
     cfg, _, _ = global_config
     cfg.diagnostics.plot.projection_kind = "invalid_projection"
     with pytest.raises(ValidationError, match="projection_kind"):
         BaseSchema(**cfg)
 
 
-def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+def test_config_without_validation_accepts_invalid_projection_kind(
+    global_config: tuple[DictConfig, str, str],
+) -> None:
     cfg, _, _ = global_config
     cfg.config_validation = False
     cfg.diagnostics.plot.projection_kind = "invalid_projection"
@@ -123,7 +130,9 @@ def test_training_cycle_stretched(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[str]]) -> None:
+def test_config_validation_stretched(
+    stretched_config: tuple[DictConfig, list[str]],
+) -> None:
     cfg, _ = stretched_config
     BaseSchema(**cfg)
 
@@ -140,7 +149,48 @@ def test_training_cycle_multidatasets(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multidatasets_graph_multiscale_truncated(
+    multidatasets_graph_multiscale_truncated_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multidatasets_graph_multiscale_truncated_config
+    assert cfg.training.multistep_output == 2
+    assert cfg.training.multistep_input == 3
+
+    for url in urls:
+        get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    pl_module = trainer.model
+    assert isinstance(trainer.graph_data, HeteroData)
+
+    for dataset_name in ["era5", "cerra"]:
+        graph_data = trainer.graph_data
+
+        truncation_node = f"{dataset_name}_truncation"
+        smoothing_node = f"{dataset_name}_smooth_test"
+        assert truncation_node in graph_data.node_types
+        assert smoothing_node in graph_data.node_types
+        assert ("truncation", "to", "data") not in graph_data.edge_types
+        assert ("smooth_test", "to", "smooth_test") not in graph_data.edge_types
+        assert (dataset_name, "to", truncation_node) in graph_data.edge_types
+        assert (truncation_node, "to", dataset_name) in graph_data.edge_types
+        assert (smoothing_node, "to", smoothing_node) in graph_data.edge_types
+
+        assert pl_module.model.model.residual[dataset_name].provider_down is not None
+        assert pl_module.model.model.residual[dataset_name].provider_up is not None
+        assert pl_module.loss[dataset_name].smoothing_matrices[0] is not None
+        assert len(pl_module.loss[dataset_name].smoothing_matrices) == 2
+        assert pl_module.loss[dataset_name].smoothing_matrices[-1] is None
+
+    trainer.train()
+
+
+def test_config_validation_multidatasets(
+    multidatasets_config: tuple[DictConfig, list[str]],
+) -> None:
     cfg, _ = multidatasets_config
     BaseSchema(**cfg)
 
@@ -196,7 +246,7 @@ def test_training_cycle_ensemble_graph_multiscale(
     get_test_archive(url)
 
     trainer = AnemoiTrainer(cfg)
-    graph_data = trainer.graph_data["data"]
+    graph_data = trainer.graph_data
 
     for node_name in ["smooth_1x", "smooth_2x", "smooth_4x", "smooth_8x"]:
         assert node_name in graph_data.node_types
@@ -224,7 +274,7 @@ def test_training_cycle_ensemble_truncated_connection(
     get_test_archive(url)
 
     trainer = AnemoiTrainer(cfg)
-    graph_data = trainer.graph_data["data"]
+    graph_data = trainer.graph_data
 
     assert "truncation" in graph_data.node_types
     assert ("data", "to", "truncation") in graph_data.edge_types
@@ -252,7 +302,9 @@ def test_training_cycle_hierarchical(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
+def test_config_validation_hierarchical(
+    hierarchical_config: tuple[DictConfig, list[str]],
+) -> None:
     cfg, _ = hierarchical_config
     BaseSchema(**cfg)
 
@@ -269,7 +321,9 @@ def test_training_cycle_autoencoder(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, list[str]]) -> None:
+def test_config_validation_autoencoder(
+    autoencoder_config: tuple[DictConfig, list[str]],
+) -> None:
     cfg, _ = autoencoder_config
     BaseSchema(**cfg)
 
@@ -340,7 +394,9 @@ def test_training_cycle_interpolator(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
+def test_config_validation_interpolator(
+    interpolator_config: tuple[DictConfig, str],
+) -> None:
     """Schema-level validation for the temporal interpolation config."""
     cfg, _ = interpolator_config
     BaseSchema(**cfg)
