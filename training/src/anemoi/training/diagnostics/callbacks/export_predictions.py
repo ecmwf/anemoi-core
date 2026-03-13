@@ -254,7 +254,6 @@ class ExportPredictions(pl.Callback):
                     data_indices.data.output.full,
                 ]
                 .detach()
-                .cpu()
             )
             # Post-process expects (batch,node,var); flatten time then restore.
             bsz, tlen = input_tensor.shape[0], input_tensor.shape[1]
@@ -265,7 +264,7 @@ class ExportPredictions(pl.Callback):
             pred_steps = []
             for x in outputs[1]:
                 step_pred = x["data"] if isinstance(x, dict) else x
-                step_pred = step_pred.detach().cpu()
+                step_pred = step_pred.detach()
                 step_pred = self._post_process(pl_module, step_pred)
                 pred_steps.append(step_pred[self.sample_idx : self.sample_idx + 1])
             preds = torch.cat(pred_steps, dim=0)
@@ -282,8 +281,8 @@ class ExportPredictions(pl.Callback):
                 )
 
         var_names, var_idx = self._select_variables(pl_module)
-        data = self._ensure_3d(data.numpy(), "data")
-        preds = self._ensure_3d(preds.numpy(), "preds")
+        data = self._ensure_3d(data.detach().cpu().numpy(), "data")
+        preds = self._ensure_3d(preds.detach().cpu().numpy(), "preds")
         # Select variables after enforcing (time,node,variable) to avoid slicing the wrong axis.
         data = data[:, :, var_idx]
         preds = preds[:, :, var_idx]
