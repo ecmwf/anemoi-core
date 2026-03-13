@@ -219,8 +219,12 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         )
         self.use_cuda_graphs= True
         if self.use_cuda_graphs:
-            self.proc = torch.compile(self.proc, mode="reduce-overhead")
+            #self.proc = torch.compile(self.proc, mode="reduce-overhead")
+            self.run_processor_chunk_edge_sharding, torch.compile(self.run_processor_chunk_edge_sharding, mode="reduce-overhead")
             LOGGER.info("Using cuda graphs via torch compile the GT mapper")
+            #if self.gradient_checkpointing:
+            #    LOGGER.info("Disable gradient checkpointing while using cuda graphs")
+            #    self.gradient_checkpointing = False
 
         self.offload_layers(cpu_offload)
 
