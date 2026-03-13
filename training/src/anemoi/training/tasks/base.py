@@ -215,11 +215,9 @@ class BaseTask(ABC):
 
     def log_extra(self, *_args, **_kwargs) -> None:
         """Hook to log any task-specific information."""
-        pass
 
     def on_train_epoch_end(self, current_epoch: int) -> None:
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""
-        pass
 
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information."""
