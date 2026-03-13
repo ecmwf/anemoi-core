@@ -20,9 +20,11 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.dataset import create_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
 
@@ -34,8 +36,8 @@ class MultiDataset(IterableDataset):
 
     def __init__(
         self,
-        data_readers: dict,
-        relative_date_indices: list,
+        task: BaseTask,
+        data_readers: dict[str, dict],
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
@@ -44,10 +46,10 @@ class MultiDataset(IterableDataset):
 
         Parameters
         ----------
-        datasets_config : dict
+        data_readers : dict
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
-        relative_date_indices: list
+        relative_date_indices: dict[str, list[int]]
             list of time indices to load from the data relative to the current sample
         timestep : str, optional
             the time frequency of the samples, by default '6h'
@@ -61,22 +63,13 @@ class MultiDataset(IterableDataset):
         self.timestep = timestep
         self.dataset_names = list(data_readers.keys())
 
-        # Create each dataset
-        self.datasets = {name: create_dataset(data_reader) for name, data_reader in data_readers.items()}
+        # Create each dataset. It will correspond to one key of the batch
+        self.datasets = {name: create_dataset(data_reader, task=task) for name, data_reader in data_readers.items()}
 
-        # relative_date_indices are computed in terms of data frequency
-        # data_relative_date_indices are in terms of the specific dataset
-        self.data_relative_date_indices = np.array(
-            [self.timeincrement * idx for idx in relative_date_indices],
-            dtype=np.int64,
-        )
-
-        LOGGER.info(
-            "MultiDataset initialized with %d datasets (%s), %d valid indices each",
-            len(self.datasets),
-            ", ".join(self.dataset_names),
-            len(self.valid_date_indices),
-        )
+        # Convert task offsets (timedeltas) to per-dataset integer indices
+        self.relative_date_indices = {
+            dataset_name: [o // ds.frequency for o in task.offset] for dataset_name, ds in self.datasets.items()
+        }
         self._lazy_init_model_and_reader_group_info()
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
@@ -200,11 +193,11 @@ class MultiDataset(IterableDataset):
         Returns the intersection of valid indices from all datasets.
         """
         valid_date_indices_intersection = None
-        for name, ds in self.datasets.items():
+        for dataset_name, ds in self.datasets.items():
             valid_date_indices = get_usable_indices(
                 ds.missing,
                 len(ds.dates),
-                self.data_relative_date_indices,
+                self.relative_date_indices[dataset_name],
                 ds.trajectory_ids if ds.has_trajectories else None,
             )
             if valid_date_indices_intersection is None:
@@ -213,10 +206,10 @@ class MultiDataset(IterableDataset):
                 valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
 
             if len(valid_date_indices) == 0:
-                msg = f"No valid date indices found for dataset '{name}': \n{ds}"
+                msg = f"No valid date indices found for dataset '{dataset_name}': \n{ds}"
                 raise ValueError(msg)
 
-            LOGGER.info("Dataset '%s' has %d valid indices", name, len(valid_date_indices))
+            LOGGER.info("Dataset '%s' has %d valid indices", dataset_name, len(valid_date_indices))
 
         if len(valid_date_indices_intersection) == 0:
             msg = "No valid date indices found after intersection across all datasets."
@@ -360,20 +353,28 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        start = index + self.data_relative_date_indices[0]
-        end = index + self.data_relative_date_indices[-1] + 1
-        if len(self.data_relative_date_indices) > 1:
-            timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
-        else:
-            timeincrement = 1  # single time step
-        time_indices = slice(start, end, timeincrement)
+    @cached_property
+    def shard_shapes(self) -> dict[str, list]:
+        """Return shard shapes for all datasets."""
+        shard_shapes = {}
+        for name, dataset in self.datasets.items():
+            shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
+        return shard_shapes
 
+    def get_shard_slice(self, dataset_name: str, reader_group_rank: int) -> slice:
+        """Get the grid shard slice according to the reader rank."""
+        start, end = get_partition_range(
+            partition_sizes=self.shard_shapes[dataset_name],
+            partition_id=reader_group_rank,
+        )
+        return slice(start, end)
+
+    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         x = {}
         for name, dataset in self.datasets.items():
+            time_steps = [index + i for i in self.relative_date_indices[name]]
             start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
-            x[name] = dataset.get_sample(time_indices, slice(start, end))
-
+            x[name] = dataset.get_sample(time_steps, slice(start, end))
         return x
 
     def __iter__(self) -> dict[str, torch.Tensor]:

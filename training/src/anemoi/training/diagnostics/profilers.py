@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
     from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-    from anemoi.training.train.tasks.base import BaseGraphModule
+    from anemoi.training.train.protocols.base import BaseGraphModule
 
     if importlib.util.find_spec("ipywidgets") is not None:
         from tqdm.auto import tqdm as _tqdm

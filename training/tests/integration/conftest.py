@@ -496,7 +496,7 @@ def interpolator_config(
         [],
         [
             "model=graphtransformer_diffusiontend",
-            "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+            "training.model_task=anemoi.training.train.protocols.GraphDiffusionTendForecaster",
         ],
     ],
     ids=["diffusion", "diffusiontend"],
@@ -525,14 +525,14 @@ def diffusion_config(
         pytest.param(
             [
                 "model=graphtransformer_diffusion",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
+                "training.model_task=anemoi.training.train.protocols.GraphDiffusionForecaster",
             ],
             id="diffusion",
         ),
         pytest.param(
             [
                 "model=graphtransformer_diffusiontend",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+                "training.model_task=anemoi.training.train.protocols.GraphDiffusionTendForecaster",
             ],
             id="diffusiontend",
         ),

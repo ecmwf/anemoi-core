@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.tasks.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
 
@@ -137,7 +138,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        task: BaseTask,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -163,6 +165,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         """
         super().__init__()
+        self.task = task
 
         assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
@@ -181,18 +184,16 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        if not hasattr(self.__class__, "task_type"):
-            msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
-                indicating the type of task (e.g., 'forecaster', 'time-interpolator')."""
-            raise AttributeError(msg)
-
-        metadata["metadata_inference"]["task"] = self.task_type
+        self.n_step_input = self.task.num_input_timesteps
+        self.n_step_output = self.task.num_output_timesteps
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
+            n_step_input=self.n_step_input,
+            n_step_output=self.n_step_output,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             config=config,
@@ -235,6 +236,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
+                task=self.task,
                 graph_data=graph_data,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
@@ -275,8 +277,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
-        self.n_step_input = config.training.multistep_input
-        self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
+
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.lr = (
             config.system.hardware.num_nodes
@@ -978,6 +979,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             sync_dist=True,
         )
 
+        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
+
         return train_loss
 
     def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
@@ -1061,7 +1064,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scheduler.step(epoch=self.trainer.global_step)
 
     def on_train_epoch_end(self) -> None:
-        pass
+        self.task.on_train_epoch_end(current_epoch=self.current_epoch)
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""

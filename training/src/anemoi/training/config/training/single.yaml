@@ -17,18 +17,6 @@ deterministic: False
 # miscellaneous
 precision: 16-mixed
 
-# multistep input
-# Number of timesteps to be loaded as model input
-# k = 1: single step scheme, uses only [X(t-1)] to predict X(t).
-# k = 1, is also necessary for autoencoder training as X(t) is used to predict X^(t)
-# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-multistep_input: 2
-
-# multistep output
-# 1 = single step output scheme, single model forward predicts X(t)
-# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
-multistep_output: 1
-
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * K
 accum_grad_batches: 1
@@ -82,7 +70,7 @@ optimizer:
   # betas: [0.9, 0.95]
 
 # select model
-model_task: anemoi.training.train.tasks.GraphForecaster
+model_task: anemoi.training.train.protocols.SingleProtocol
 
 # select strategy
 strategy:

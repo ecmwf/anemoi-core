@@ -5,13 +5,14 @@ defaults:
 - system: example
 - graph: multi_scale
 - model: graphtransformer
-- training: default
+- task: timeinterpolating
+- training: single
 - _self_
 
-config_validation: True
+config_validation: False
 
 data:
-  frequency: 1h
+  frequency: 6h
   resolution: o96
 
   diagnostics: [] # Default behaviour is to interpolate between observed fields, not predict unseen fields

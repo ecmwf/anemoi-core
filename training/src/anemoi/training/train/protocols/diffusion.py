@@ -17,6 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 
 from .base import BaseGraphModule
 
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
+    from training.src.anemoi.training.tasks.base import BaseTask
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -48,6 +52,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -57,9 +62,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
         )
 
         self.rho = config.model.model.diffusion.rho
-
-        from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
-
         self._plot_adapter = DiffusionPlotAdapter(self)
 
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -187,7 +189,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         return sigma, weight
 
 
-class GraphDiffusionForecaster(BaseDiffusionForecaster):
+class DiffusionProtocol(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion."""
 
     def _step(
@@ -212,8 +214,10 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -241,13 +245,14 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         return loss, metrics, [y_pred]
 
 
-class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
+class DiffusionTendProtocol(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
 
     def __init__(
         self,
         *,
         config: BaseSchema,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -257,6 +262,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     ) -> None:
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -473,8 +479,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         """
         # batch is already normalized in BaseGraphModule._normalize_batch
         # x: data.input.full (normalized), y: data.output.full (normalized)
-        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.get_target(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
+        y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:

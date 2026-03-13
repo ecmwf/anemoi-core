@@ -22,7 +22,7 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.protocols.base import BaseGraphModule
 from anemoi.utils.checkpoints import save_metadata
 
 chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
