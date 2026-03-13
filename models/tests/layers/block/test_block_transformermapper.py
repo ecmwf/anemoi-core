@@ -16,6 +16,7 @@ from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
 
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.utils import load_layer_kernels
@@ -93,7 +94,6 @@ def test_TransformerMapperBlock_init(mapper_block):
     factor_attention_heads=st.integers(min_value=1, max_value=10),
     hidden_dim=st.integers(min_value=1, max_value=100),
     num_heads=st.integers(min_value=1, max_value=10),
-    shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
     batch_size=st.integers(min_value=1, max_value=40),
     dropout_p=st.floats(min_value=0.01, max_value=1.0),
 )
@@ -102,7 +102,6 @@ def test_forward_output(
     factor_attention_heads,
     hidden_dim,
     num_heads,
-    shapes,
     batch_size,
     dropout_p,
 ):
@@ -120,7 +119,8 @@ def test_forward_output(
     )
 
     x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
-    output, _ = block.forward((x, x), shapes, batch_size)
+    shape_info = BipartiteGraphShardInfo(src_nodes=[batch_size], dst_nodes=[batch_size])
+    output, _ = block.forward((x, x), shape_info, batch_size)
     assert isinstance(output[0], torch.Tensor)
     assert isinstance(output[1], torch.Tensor)
     assert output[1].shape == (batch_size, num_channels)
