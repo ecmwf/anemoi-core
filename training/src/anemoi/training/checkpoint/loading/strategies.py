@@ -151,6 +151,73 @@ class TransferLearningLoader(LoadingStrategy):
         return context
 
 
+class WarmStartLoader(LoadingStrategy):
+    """Resume training with full state restoration.
+
+    Restores model weights, optimizer state, scheduler state, and
+    training progress (epoch, global_step). This is the strategy to use
+    when resuming an interrupted training run on the same architecture.
+
+    Unlike other strategies, WarmStart uses ``strict=True`` for model
+    weights because an exact architecture match is expected when resuming.
+    Optimizer and scheduler states are restored from Lightning-format
+    checkpoint keys (``optimizer_states``, ``lr_schedulers``).
+    """
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        """Restore full training state from checkpoint.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context with ``checkpoint_data``, ``model``, and
+            optionally ``optimizer`` and ``scheduler`` set.
+
+        Returns
+        -------
+        CheckpointContext
+            Context with all training state restored.
+        """
+        from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
+
+        # 1. Model weights (strict — exact match expected for resume)
+        state_dict = self._extract_state_dict(context)
+        try:
+            context.model.load_state_dict(state_dict, strict=True)
+        except RuntimeError as e:
+            msg = f"WarmStart requires exact model match: {e}"
+            raise CheckpointIncompatibleError(msg) from e
+
+        # 2. Optimizer state
+        if context.optimizer is not None and "optimizer_states" in context.checkpoint_data:
+            context.optimizer.load_state_dict(context.checkpoint_data["optimizer_states"][0])
+        elif context.optimizer is not None:
+            LOGGER.warning("Checkpoint has no 'optimizer_states'; optimizer state not restored")
+
+        # 3. Scheduler state
+        if context.scheduler is not None and "lr_schedulers" in context.checkpoint_data:
+            context.scheduler.load_state_dict(context.checkpoint_data["lr_schedulers"][0])
+        elif context.scheduler is not None:
+            LOGGER.warning("Checkpoint has no 'lr_schedulers'; scheduler state not restored")
+
+        # 4. Training progress
+        context.metadata["epoch"] = context.checkpoint_data.get("epoch", 0)
+        context.metadata["global_step"] = context.checkpoint_data.get("global_step", 0)
+
+        # 5. Anemoi metadata
+        self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        self._mark_weights_loaded(context.model)
+        context.metadata["loading_strategy"] = "warm_start"
+
+        LOGGER.info(
+            "Warm start: restored full state (epoch=%d, global_step=%d)",
+            context.metadata["epoch"],
+            context.metadata["global_step"],
+        )
+
+        return context
+
+
 class ColdStartLoader(WeightsOnlyLoader):
     """Start fresh training from pretrained weights.
 
