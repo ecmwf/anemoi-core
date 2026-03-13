@@ -13,6 +13,7 @@ import logging
 import numpy as np
 import torch
 from torch import Tensor
+from torch.cuda.graphs import make_graphed_callables
 from torch.nn import Module
 
 LOGGER = logging.getLogger(__name__)
@@ -139,7 +140,7 @@ class SphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(self, lons_per_lat: list[int], truncation: int) -> None:
+    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphs: bool = True) -> None:
         r"""Initializes SphericalHarmonicTransform.
 
         Parameters
@@ -169,7 +170,7 @@ class SphericalHarmonicTransform(Module):
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
             LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
-            self.rfft_rings = self.rfft_rings_reduced
+            self.rfft_rings = self.rfft_rings_reduced_graphed_autograd if use_graphs else self.rfft_rings_reduced_naive
         else:
             LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
@@ -186,10 +187,13 @@ class SphericalHarmonicTransform(Module):
         weight = torch.from_numpy(weight)
         weight = torch.einsum("mlk, k -> mlk", pct, weight)
 
+        self._graphed_rfft_cache = {}
+
         self.register_buffer("weight", weight, persistent=False)
 
-    def rfft_rings_reduced(self, x: Tensor) -> Tensor:
-        """Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+    def rfft_rings_reduced_naive(self, x: Tensor) -> Tensor:
+        r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+        Uses naive (eager) implementation.
 
         Parameters
         ----------
@@ -216,6 +220,38 @@ class SphericalHarmonicTransform(Module):
             output_tensor[..., i, : nlon // 2 + 1] = torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
 
         return output_tensor
+
+    def _rfft_reduced_impl(self, x: Tensor) -> Tensor:
+        r"""Helper used for the graphed reduced-grid FFT path."""
+
+        return self.rfft_rings_reduced_naive(x)
+
+    def rfft_rings_reduced_graphed_autograd(self, x: Tensor) -> Tensor:
+        r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+        """
+
+        if x.device.type != "cuda":
+            return self.rfft_rings_reduced_naive(x)
+
+        key = (tuple(x.shape), x.dtype, x.device, x.requires_grad)
+        if key not in self._graphed_rfft_cache:
+            LOGGER.info(f"Compiling graphed callable for rfft_rings_reduced with input signature {key}")
+            sample_x = torch.zeros_like(x, requires_grad=x.requires_grad)
+            self._graphed_rfft_cache[key] = make_graphed_callables(self._rfft_reduced_impl, (sample_x,))
+        else:
+            LOGGER.info(f"Reusing graphed callable for rfft_rings_reduced with input signature {key}")
+
+        return self._graphed_rfft_cache[key](x)
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
         """Performs direct real-to-complex FFT on each latitude ring of a regular grid.
