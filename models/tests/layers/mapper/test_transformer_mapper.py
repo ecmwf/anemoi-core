@@ -20,10 +20,9 @@ from anemoi.models.layers.utils import load_layer_kernels
 class ConcreteTransformerBaseMapper(TransformerBaseMapper):
     """Concrete implementation of TransformerBaseMapper for testing."""
 
-    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
-        shapes_src, shapes_dst = shard_shapes
+    def pre_process(self, x):
         x_src, x_dst = x
-        return x_src, x_dst, shapes_src, shapes_dst
+        return x_src, x_dst
 
     def post_process(self, x_dst, **kwargs):
         return x_dst
@@ -167,26 +166,17 @@ class TestTransformerBaseMapper:
             _layer_kernels,
             _attention_implementation,
         ) = mapper_init
-        shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
-
-        x_src, x_dst, shapes_src, shapes_dst = mapper.pre_process(x, shard_shapes)
+        x_src, x_dst = mapper.pre_process(x)
         assert x_src.shape == torch.Size(
             x[0].shape
         ), f"x_src.shape ({x_src.shape}) != torch.Size(x[0].shape) ({torch.Size(x[0].shape)})"
         assert x_dst.shape == torch.Size(
             x[1].shape
         ), f"x_dst.shape ({x_dst.shape}) != torch.Size(x[1].shape) ({x[1].shape})"
-        assert shapes_src == [
-            list(x[0].shape)
-        ], f"shapes_src ({shapes_src}) != [list(x[0].shape)] ({[list(x[0].shape)]})"
-        assert shapes_dst == [
-            list(x[1].shape)
-        ], f"shapes_dst ({shapes_dst}) != [list(x[1].shape)] ({[list(x[1].shape)]})"
 
     def test_post_process(self, mapper, pair_tensor):
         # Should be a no-op in the base class
         x_dst = pair_tensor[1]
-        shapes_dst = [list(x_dst.shape)]
 
-        result = mapper.post_process(x_dst, shapes_dst=shapes_dst)
+        result = mapper.post_process(x_dst)
         assert torch.equal(result, x_dst)

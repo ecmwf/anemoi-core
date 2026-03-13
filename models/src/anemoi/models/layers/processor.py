@@ -177,7 +177,7 @@ class PointWiseMLPProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
 
-        (x,) = self.run_layers((x,), shard_info.nodes, batch_size, model_comm_group, **kwargs)
+        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group, **kwargs)
 
         return x
 
@@ -280,7 +280,7 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shard_info.nodes, batch_size, model_comm_group=model_comm_group, **kwargs)
+        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return x
 

@@ -94,7 +94,7 @@ class PointWiseMLPProcessorBlock(BaseBlock):
     def forward(
         self,
         x: Tensor,
-        shard_shapes: ShardShapes,
+        shard_info: GraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
@@ -149,7 +149,7 @@ class TransformerProcessorBlock(BaseBlock):
     def forward(
         self,
         x: Tensor,
-        shard_shapes: ShardShapes,
+        shard_info: GraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
@@ -160,7 +160,7 @@ class TransformerProcessorBlock(BaseBlock):
         cond_kwargs = {"cond": cond} if cond is not None else {}
 
         x = x + self.attention(
-            self.layer_norm_attention(x, **cond_kwargs), shard_shapes, batch_size, model_comm_group=model_comm_group
+            self.layer_norm_attention(x, **cond_kwargs), shard_info, batch_size, model_comm_group=model_comm_group
         )
         x = x + self.mlp(
             self.layer_norm_mlp(
@@ -233,9 +233,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
     ) -> tuple[Tensor, Tensor]:
         x_src = self.layer_norm_attention_src(x[0])
         x_dst = self.layer_norm_attention_dst(x[1])
-        x_dst = x_dst + self.attention(
-            (x_src, x_dst), shard_info.dst_nodes, batch_size, model_comm_group=model_comm_group
-        )
+        x_dst = x_dst + self.attention((x_src, x_dst), shard_info, batch_size, model_comm_group=model_comm_group)
         x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst))
         return (x_src, x_dst), None  # logic expects return of edge_attr
 

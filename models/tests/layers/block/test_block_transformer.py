@@ -16,6 +16,7 @@ from hypothesis import settings
 from hypothesis import strategies as st
 from torch import nn
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.block import MLP
 from anemoi.models.layers.block import GraphConvProcessorBlock
@@ -81,7 +82,6 @@ class TestTransformerProcessorBlock:
                 "anemoi.models.layers.activations.SwiGLU",
             ]
         ),
-        shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
         batch_size=st.integers(min_value=1, max_value=40),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
         qk_norm=st.booleans(),
@@ -93,7 +93,6 @@ class TestTransformerProcessorBlock:
         hidden_dim,
         num_heads,
         activation,
-        shapes,
         batch_size,
         dropout_p,
         qk_norm,
@@ -118,7 +117,8 @@ class TestTransformerProcessorBlock:
         )
 
         x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
-        output = block.forward(x, shapes, batch_size)
+        shape_info = GraphShardInfo(nodes=[batch_size])
+        output = block.forward(x, shape_info, batch_size)
         assert isinstance(output[0], torch.Tensor)
         assert output[0].shape == (batch_size, num_channels)
 
