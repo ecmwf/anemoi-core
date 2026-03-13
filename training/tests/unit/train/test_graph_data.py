@@ -94,6 +94,25 @@ def test_create_graph_for_dataset_updates_dataset_path_and_merges_projections() 
     graph_creator_cls.return_value.create.assert_called_once_with(save_path=None, overwrite=True)
 
 
+def test_create_graph_for_dataset_reuses_configured_graph_path_without_suffix(tmp_path: Path) -> None:
+    graph_path = tmp_path / "graph.pt"
+    config = build_graph_config(
+        {
+            "system": {"input": {"graph": graph_path}},
+            "graph": {"overwrite": False},
+        },
+    )
+    factory = TrainerGraphDataFactory(config)
+    loaded_graph = HeteroData()
+    graph_path.write_text("fake graph")
+
+    with patch.object(factory, "load_graph_from_file", return_value=loaded_graph) as load_graph_from_file:
+        graph = factory.create_graph_for_dataset("datasets/era5.zarr", "era5")
+
+    assert graph is loaded_graph
+    load_graph_from_file.assert_called_once_with(graph_path)
+
+
 def test_build_uses_fused_graph_for_multiple_datasets() -> None:
     config = build_graph_config(
         {

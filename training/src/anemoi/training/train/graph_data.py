@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,7 +21,6 @@ from anemoi.graphs.create import GraphCreator
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.models.utils.projection_helpers import uses_fused_dataset_graph
 from anemoi.training.utils.graph_config import merge_projection_and_graph_config
-from anemoi.training.utils.jsonify import map_config_to_primitives
 
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
@@ -32,11 +29,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 class TrainerGraphDataFactory:
-    """Build the final trainer graph from config, cache, or an existing file.
+    """Build the final trainer graph from config or an existing file.
 
     This factory keeps the trainer graph steps in one place:
     - detect load-only `graph=existing` mode
-    - reuse cached graph files when possible
+    - reuse the configured graph file when possible
     - expand projection configs before graph creation
     - choose between single-dataset and combined multi-dataset graph creation
     """
@@ -52,14 +49,6 @@ class TrainerGraphDataFactory:
 
         LOGGER.info("Loading graph data from %s", graph_filename)
         return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-
-    @staticmethod
-    def cache_graph_path(graph_filename: Path, suffix: str) -> Path:
-        """Append a stable suffix to a cached graph filename."""
-        suffix = suffix.replace("/", "_")
-        if graph_filename.suffix:
-            return graph_filename.with_name(f"{graph_filename.stem}_{suffix}{graph_filename.suffix}")
-        return graph_filename.with_name(f"{graph_filename.name}_{suffix}")
 
     def is_existing_graph_mode(self) -> bool:
         """Return whether the trainer should load `system.input.graph` as-is.
@@ -93,21 +82,11 @@ class TrainerGraphDataFactory:
             )
             raise ValueError(msg)
 
-    def fused_graph_cache_key(self, dataset_names: list[str]) -> str:
-        """Build a cache key that depends on the datasets and graph config."""
-        graph_config = map_config_to_primitives(OmegaConf.to_container(self.config.graph, resolve=True))
-        payload = {
-            "datasets": dataset_names,
-            "graph": graph_config,
-        }
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
-        return f"{'_'.join(dataset_names)}_{digest}"
-
     def create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
         """Create or load a single-dataset graph, including any derived projections."""
         graph_filename = None
         if self.config.system.input.graph is not None:
-            graph_filename = self.cache_graph_path(Path(self.config.system.input.graph), dataset_name)
+            graph_filename = Path(self.config.system.input.graph)
             if graph_filename.exists() and not self.config.graph.overwrite:
                 return self.load_graph_from_file(graph_filename)
 
@@ -126,10 +105,7 @@ class TrainerGraphDataFactory:
         """Create or load one graph that already contains all dataset node groups."""
         graph_filename = None
         if self.config.system.input.graph is not None:
-            graph_filename = self.cache_graph_path(
-                Path(self.config.system.input.graph),
-                self.fused_graph_cache_key(dataset_names),
-            )
+            graph_filename = Path(self.config.system.input.graph)
             if graph_filename.exists() and not self.config.graph.overwrite:
                 return self.load_graph_from_file(graph_filename)
 
