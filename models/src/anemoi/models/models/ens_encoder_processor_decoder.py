@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Any
 from typing import Optional
 
 import einops
@@ -32,7 +33,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: Any,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
