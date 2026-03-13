@@ -12,8 +12,8 @@ import logging
 import torch
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
-from anemoi.training.utils.enums import TensorDim
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
