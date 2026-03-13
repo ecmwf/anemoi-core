@@ -76,6 +76,81 @@ class WeightsOnlyLoader(LoadingStrategy):
         return context
 
 
+class TransferLearningLoader(LoadingStrategy):
+    """Flexible loading for transfer learning scenarios.
+
+    Filters the source state dict to only include keys compatible with the
+    target model (matching key names and tensor shapes), then loads the
+    filtered weights. Keys that are missing in the target or have shape
+    mismatches are skipped rather than raising an error.
+
+    The filter is non-mutating: it builds a new dict and never modifies the
+    original ``checkpoint_data["state_dict"]``.
+
+    Parameters
+    ----------
+    skip_mismatched : bool, optional
+        Whether to skip keys with mismatched shapes (default: True).
+        If False, shape mismatches raise ``CheckpointIncompatibleError``.
+    """
+
+    def __init__(self, skip_mismatched: bool = True) -> None:
+        self.skip_mismatched = skip_mismatched
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        """Filter and load compatible weights from checkpoint.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context with ``checkpoint_data`` and ``model`` set.
+
+        Returns
+        -------
+        CheckpointContext
+            Context with compatible weights loaded and metadata updated.
+        """
+        from anemoi.training.checkpoint.loading.utils import filter_state_dict
+
+        source_state = self._extract_state_dict(context)
+        target_state = context.model.state_dict()
+
+        filtered, skipped = filter_state_dict(source_state, target_state)
+
+        if not self.skip_mismatched:
+            shape_skipped = {k: v for k, v in skipped.items() if "Shape mismatch" in v}
+            if shape_skipped:
+                from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
+
+                msg = f"Shape mismatches found and skip_mismatched=False: {shape_skipped}"
+                raise CheckpointIncompatibleError(msg)
+
+        try:
+            context.model.load_state_dict(filtered, strict=False)
+        except RuntimeError as e:
+            msg = f"Failed to load filtered state dict into model: {e}"
+            raise CheckpointLoadError(msg) from e
+
+        self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        self._mark_weights_loaded(context.model)
+
+        # Discard optimizer/scheduler — transfer learning means fresh training state
+        context.optimizer = None
+        context.scheduler = None
+
+        context.metadata["loading_strategy"] = "transfer_learning"
+        context.metadata["transferred_params"] = list(filtered.keys())
+        context.metadata["skipped_params"] = skipped
+
+        LOGGER.info(
+            "Transfer learning: loaded %d params, skipped %d",
+            len(filtered),
+            len(skipped),
+        )
+
+        return context
+
+
 class ColdStartLoader(WeightsOnlyLoader):
     """Start fresh training from pretrained weights.
 
