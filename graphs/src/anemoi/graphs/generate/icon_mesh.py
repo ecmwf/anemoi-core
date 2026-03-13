@@ -146,7 +146,7 @@ class ICONMultiMesh:
         cell_vertices: np.ndarray,
     ) -> tuple[list[np.ndarray], np.ndarray]:
         """Creates a new mesh with only the vertices at the desired level."""
-        vertex_mask = self.reflvl_vertex < self.max_level
+        vertex_mask = self.reflvl_vertex <= self.max_level
         num_vertices = vertex_mask.shape[0]
         vertex_glb2loc = np.zeros(num_vertices, dtype=int)
         vertex_glb2loc[vertex_mask] = np.arange(vertex_mask.sum())
