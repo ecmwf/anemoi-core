@@ -66,6 +66,7 @@ class MultiHeadSelfAttention(nn.Module):
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
+        exclusive_self_attention: bool = False,
     ):
         """Initialize MultiHeadSelfAttention.
 
@@ -99,6 +100,8 @@ class MultiHeadSelfAttention(nn.Module):
             Anything > 0 activates softcapping attention, by default None
         use_alibi_slopes : bool, optional
             Adds bias
+        exclusive_self_attention : bool, optional
+            Enables exclusive self attention (see https://arxiv.org/pdf/2603.09078)
         """
         super().__init__()
 
@@ -137,6 +140,10 @@ class MultiHeadSelfAttention(nn.Module):
         if self.qk_norm:
             self.q_norm = layer_kernels["QueryNorm"](self.head_dim)
             self.k_norm = layer_kernels["KeyNorm"](self.head_dim)
+
+        self.exclusive_self_attention = exclusive_self_attention
+        if self.exclusive_self_attention:
+            LOGGER.info("Using exclusive self attention")
 
     def set_attention_function(self):
         attn_funcs = {
@@ -198,6 +205,10 @@ class MultiHeadSelfAttention(nn.Module):
             softcap=self.softcap,
             alibi_slopes=self.alibi_slopes,
         )
+
+        if self.exclusive_self_attention:
+            value_norm = torch.nn.functional.normalize(value, dim=-1)
+            out = out - (out * value_norm).sum(dim=-1, keepdim=True) * value_norm
 
         out = shard_sequence(out, shapes=shapes, num_heads=self.num_heads, mgroup=model_comm_group)
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
@@ -310,6 +321,7 @@ class SDPAAttentionWrapper(nn.Module):
             is_causal=False,
             dropout_p=dropout_p,
         )
+
 
         return out
 

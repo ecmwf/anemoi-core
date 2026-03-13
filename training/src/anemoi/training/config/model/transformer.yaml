@@ -39,6 +39,7 @@ processor:
   gradient_checkpointing: True
   use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
+  exclusive_self_attention: False
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
