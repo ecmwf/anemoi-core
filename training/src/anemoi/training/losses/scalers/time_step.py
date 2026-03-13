@@ -55,7 +55,7 @@ class UniformTimeStepScaler(TimeStepScaler):
 
     def __init__(
         self,
-        task: BaseTask=None,
+        task: BaseTask = None,
         **kwargs,
     ) -> None:
         """Initialise Scaler.
