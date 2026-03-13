@@ -74,3 +74,36 @@ class WeightsOnlyLoader(LoadingStrategy):
         LOGGER.info("Loaded weights only (strict=%s), optimizer/scheduler discarded", self.strict)
 
         return context
+
+
+class ColdStartLoader(WeightsOnlyLoader):
+    """Start fresh training from pretrained weights.
+
+    Loads model weights (via WeightsOnlyLoader), then explicitly resets
+    training state (epoch, global_step) to zero and records the
+    pretrained checkpoint source. Optimizer and scheduler are discarded.
+    """
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        """Load weights and reset training state to zero.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context with ``checkpoint_data`` and ``model`` set.
+
+        Returns
+        -------
+        CheckpointContext
+            Context with weights loaded and training state reset.
+        """
+        context = await super().process(context)
+
+        context.metadata["epoch"] = 0
+        context.metadata["global_step"] = 0
+        context.metadata["loading_strategy"] = "cold_start"
+        context.metadata["pretrained_from"] = str(context.checkpoint_path) if context.checkpoint_path else None
+
+        LOGGER.info("Cold start: training state reset, pretrained from %s", context.checkpoint_path)
+
+        return context
