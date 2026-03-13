@@ -293,6 +293,11 @@ class SparseObservationDataset(BaseAnemoiReader):
         return False
 
     @property
+    def is_tabular(self) -> bool:
+        """Return whether the dataset is tabular."""
+        return True
+
+    @property
     def missing(self) -> set[int]:
         """Return dataset missing values mask."""
         return set()
@@ -311,7 +316,7 @@ class SparseObservationDataset(BaseAnemoiReader):
         x_metadata = {
             "latitudes": torch.from_numpy(x.latitudes),
             "longitudes": torch.from_numpy(x.longitudes),
-            "timedeltas": torch.from_numpy(x.time_deltas.astype(np.float32)),
+            "timedeltas": torch.from_numpy(x.timedeltas.astype(np.float32)),
             "boundaries": x.boundaries,
             # optionally, we can include the actual dates of the observations if needed
             # "dates": torch.from_numpy(x.dates.astype(np.int64)),
