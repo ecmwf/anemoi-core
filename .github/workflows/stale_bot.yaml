@@ -1,0 +1,34 @@
+name: Mark stale issues and PRs
+
+on:
+  schedule:
+    - cron: "0 23 * * *"  # every day at 23pm on default(main) branch
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Issue settings
+          days-before-issue-stale: 30
+          days-before-issue-close: 7
+          stale-issue-label: stale
+          stale-issue-message: >
+            This issue has been marked as stale due to inactivity.
+            It will be closed if no further activity occurs.
+          exempt-issue-labels: good first issue
+
+          # PR settings
+          days-before-pr-stale: 30
+          days-before-pr-close: 7 #! could be set to -1 to never auto-close PRs - TO BE DISCUSSED
+          stale-pr-label: stale
+          stale-pr-message: >
+            This PR has been marked as stale due to inactivity.
+            It will be closed if no further activity occurs.
+          exempt-pr-labels: autorelease: pending
+
+          remove-stale-when-updated: true
