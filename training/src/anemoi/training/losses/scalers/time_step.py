@@ -13,6 +13,7 @@ import torch
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
+from training.src.anemoi.training.tasks.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class UniformTimeStepScaler(TimeStepScaler):
 
     def __init__(
         self,
-        task=None,
+        task: BaseTask=None,
         **kwargs,
     ) -> None:
         """Initialise Scaler.
@@ -68,7 +69,7 @@ class UniformTimeStepScaler(TimeStepScaler):
             task is not None
         ), "Task must be provided to TimeStepScaler to determine the number of output steps for scaling."
         del kwargs
-        weights = [1.0] * task.num_outputs
+        weights = [1.0] * task.num_output_timesteps
         super().__init__(weights=weights, norm="unit-sum")
 
 

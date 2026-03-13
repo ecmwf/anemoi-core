@@ -138,7 +138,11 @@ class EnsembleProtocol(BaseGraphModule):
         return x
 
     def _collapse_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Collapse the ensemble dimension in the input batch by taking the first element along the ensemble dimension."""
+        """Collapse ensemble dimension.
+
+        Collapse the ensemble dimension in the input batch by taking the first (and only) element along the ensemble
+        dimension.
+        """
         y = {}
         for dataset_name, dataset_batch in batch.items():
             y[dataset_name] = dataset_batch[:, :, 0, ...]

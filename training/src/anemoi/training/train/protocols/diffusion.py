@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
+    from training.src.anemoi.training.tasks.base import BaseTask
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
-        task,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -250,7 +252,7 @@ class DiffusionTendProtocol(BaseDiffusionForecaster):
         self,
         *,
         config: BaseSchema,
-        task,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,

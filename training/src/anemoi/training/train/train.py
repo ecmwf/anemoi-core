@@ -37,6 +37,7 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -104,7 +105,7 @@ class AnemoiTrainer(ABC):
         self._log_information()
 
     @cached_property
-    def task(self) -> "BaseTask":
+    def task(self) -> BaseTask:
         """Task instance."""
         return instantiate(self.config.task)
 

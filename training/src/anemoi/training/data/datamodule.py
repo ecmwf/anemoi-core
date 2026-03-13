@@ -68,8 +68,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        n_step_output = self.task.num_outputs  # TODO(): Replace by a call to the task
-        lead_times = [self._lead_time_for_step(step) for step in range(1, n_step_output + 1)]
+        lead_times = [self._lead_time_for_step(step + 1) for step in range(self.task.num_output_timesteps)]
 
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.datasets.items():
@@ -179,7 +178,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
         timesteps = {
-            # "relative_date_indices_training": self.relative_date_indices(),
             "timestep": self.config.data.timestep,
         }
         for dataset_name in self.dataset_names:

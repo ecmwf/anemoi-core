@@ -14,7 +14,7 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks.base import BaseTask
-from anemoi.utils.dates import frequency_to_string, frequency_to_timedelta
+from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +57,8 @@ class ForecastingTask(BaseTask):
         inputs_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
         # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout_max
         outputs_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
-        super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets)
+        steps = tuple({"rollout_step": i} for i in range(self.rollout))
+        super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets, steps=steps)
 
     # ------------------------------------------------------------------
     # Offset overrides for rollout
@@ -82,15 +83,10 @@ class ForecastingTask(BaseTask):
                 all_offsets.add(o + shift)
         return sorted(all_offsets)
 
-    def get_output_offset(self, rollout_step: int = 0, **_kwargs) -> list[datetime.timedelta]:
+    def get_output_offsets(self, rollout_step: int = 0, **_kwargs) -> list[datetime.timedelta]:
         """Return output offsets shifted by ``rollout_step``."""
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._outputs_offsets)
-
-    @property
-    def steps(self) -> tuple[dict[str, int], ...]:
-        """Get the range of rollout steps to perform."""
-        return tuple({"rollout_step": i} for i in range(self.rollout))
 
     def _advance_dataset_input(
         self,
@@ -150,7 +146,7 @@ class ForecastingTask(BaseTask):
             )
         return x
 
-    def log_extra(self, logger, logger_enabled) -> None:
+    def log_extra(self, logger, logger_enabled: bool) -> None:
         """Log any task-specific information."""
         logger(
             "rollout",

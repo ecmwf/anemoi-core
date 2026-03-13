@@ -10,14 +10,13 @@
 import datetime
 import logging
 from abc import ABC
-from abc import abstractmethod
 from collections.abc import Iterable
-from functools import cached_property
 
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.utils.dates import frequency_to_string, frequency_to_timedelta
+from anemoi.utils.dates import frequency_to_string
+from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,14 +53,16 @@ class BaseTask(ABC):
         self,
         inputs_offsets: list[datetime.timedelta],
         outputs_offsets: list[datetime.timedelta],
+        steps: Iterable[dict] | None = None,
     ) -> None:
-        self._input_offset = sorted(inputs_offsets)
-        self._output_offset = sorted(outputs_offsets)
+        self._inputs_offsets = sorted(inputs_offsets)
+        self._outputs_offsets = sorted(outputs_offsets)
+        self._steps = steps if steps is not None else ({},)
 
     @property
     def inputs_offsets(self) -> list[datetime.timedelta]:
         """Sorted input time offsets."""
-        return self._input_offset
+        return self._inputs_offsets
 
     @property
     def outputs_offsets(self) -> list[datetime.timedelta]:
@@ -70,7 +71,12 @@ class BaseTask(ABC):
         Subclasses may override this to support parametrised output
         selection (e.g. per rollout step).
         """
-        return self._output_offset
+        return self._outputs_offsets
+
+    @property
+    def steps(self) -> Iterable[dict]:
+        """Get the steps for the task."""
+        return self._steps
 
     @property
     def offset(self) -> list[datetime.timedelta]:
@@ -79,7 +85,22 @@ class BaseTask(ABC):
         This is used by the datamodule to compute
         ``data_relative_time_indices``.
         """
-        return sorted(set(self._input_offset + self._output_offset))
+        return sorted(set(self._inputs_offsets + self._outputs_offsets))
+
+    @property
+    def num_input_timesteps(self) -> int:
+        """Number of input time steps."""
+        return len(self._inputs_offsets)
+
+    @property
+    def num_output_timesteps(self) -> int:
+        """Number of output time steps."""
+        return len(self._outputs_offsets)
+
+    @property
+    def num_steps(self) -> int:
+        """Number of steps in the task."""
+        return len(self._steps)
 
     def _offset_to_batch_indices(self, offsets: list[datetime.timedelta]) -> list[int]:
         """Map a list of offsets to their positions in ``self.offset``."""
@@ -109,7 +130,7 @@ class BaseTask(ABC):
 
     def get_batch_input_indices(self) -> list[int]:
         """Positions of the input offsets within the full batch ``offset``."""
-        return self._offset_to_batch_indices(self._input_offset)
+        return self._offset_to_batch_indices(self._inputs_offsets)
 
     def get_batch_output_indices(self, **kwargs) -> list[int]:
         """Positions of the output offsets within the full batch ``offset``.
@@ -118,42 +139,21 @@ class BaseTask(ABC):
         subclasses can parametrise the output selection (e.g. per
         rollout step).
         """
-        return self._offset_to_batch_indices(self.get_output_offset(**kwargs))
+        return self._offset_to_batch_indices(self.get_output_offsets(**kwargs))
 
-    def get_output_offset(self, **kwargs) -> list[datetime.timedelta]:
+    def get_output_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Return the output offsets for a given step.
 
-        The default implementation returns ``self.output_offset``.
+        The default implementation returns ``self.outputs_offsets``.
         Subclasses may override this to shift outputs per rollout step.
         """
         return self.outputs_offsets
-
-    @cached_property
-    @abstractmethod
-    def steps(self) -> Iterable[dict]:
-        """Get the steps for the task."""
-        raise NotImplementedError
-
-    @property
-    def num_input_timesteps(self) -> int:
-        """Number of input time steps."""
-        return len(self._input_offset)
-
-    @property
-    def num_output_timesteps(self) -> int:
-        """Number of output time steps."""
-        return len(self._output_offset)
-
-    @property
-    def num_steps(self) -> int:
-        """Number of steps in the task."""
-        return len(self.steps)
 
     def get_inputs(
         self,
         batch: dict[str, torch.Tensor],
         data_indices: dict[str, IndexCollection],
-        **kwargs,
+        **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Extract model inputs from a batch.
 
@@ -217,7 +217,7 @@ class BaseTask(ABC):
     # Hooks & metadata
     # ------------------------------------------------------------------
 
-    def log_extra(self, *args, **kwargs) -> None:
+    def log_extra(self, *_args, **_kwargs) -> None:
         """Log any task-specific information."""
         return
 
@@ -229,14 +229,14 @@ class BaseTask(ABC):
         md_dict["task"] = self.name
         md_dict["input_offsets"] = [frequency_to_string(o) for o in self.inputs_offsets]
         md_dict["output_offsets"] = [frequency_to_string(o) for o in self.outputs_offsets]
-        md_dict["num_inputs"] = self.num_inputs
-        md_dict["num_outputs"] = self.num_outputs
+        md_dict["num_input_timesteps"] = self.num_input_timesteps
+        md_dict["num_output_timesteps"] = self.num_output_timesteps
 
 
 class BaseSingleStepTask(BaseTask):
     """Base class for single-step tasks."""
 
-    def advance_input(self, *args, **kwargs) -> dict[str, torch.Tensor]:
+    def advance_input(self, *args, **_kwargs) -> dict[str, torch.Tensor]:
         """Advance the input state for each dataset based on the task's requirements.
 
         This method can be overridden by specific tasks to implement custom logic for advancing the input state.
@@ -246,8 +246,3 @@ class BaseSingleStepTask(BaseTask):
             dict[str, torch.Tensor]: The advanced input state for each dataset.
         """
         return args[0]
-
-    @cached_property
-    def steps(self) -> Iterable[dict[str, int]]:
-        """Get the range of rollout steps to perform."""
-        return ({},)
