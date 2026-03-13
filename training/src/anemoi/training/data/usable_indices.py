@@ -39,7 +39,7 @@ def get_usable_indices(
     if isinstance(relative_indices, list):
         relative_indices = np.array(relative_indices)
 
-    usable_indices = np.arange(series_length - max(relative_indices))
+    usable_indices = np.arange(series_length)
 
     # Avoid crossing model runs by selecting only relative indices with the same model run id
     if trajectory_ids is not None:
@@ -48,7 +48,7 @@ def get_usable_indices(
         usable_indices = usable_indices[include]
 
     # Missing indices
-    for i in missing_indices:
+    for i in missing_indices | {-1, series_length}:
         rel_missing = i - relative_indices  # indices which have their relative indices match the missing.
         usable_indices = usable_indices[np.all(usable_indices != rel_missing[:, np.newaxis], axis=0)]
 

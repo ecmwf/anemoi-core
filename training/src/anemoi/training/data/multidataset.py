@@ -68,7 +68,7 @@ class MultiDataset(IterableDataset):
 
         # Convert task offsets (timedeltas) to per-dataset integer indices
         self.relative_date_indices = {
-            dataset_name: [int(o // ds.frequency) for o in task.offset] for dataset_name, ds in self.datasets.items()
+            dataset_name: [o // ds.frequency for o in task.offset] for dataset_name, ds in self.datasets.items()
         }
         self._lazy_init_model_and_reader_group_info()
 
