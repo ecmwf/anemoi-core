@@ -111,11 +111,10 @@ diagnostics:
     sample_idx: 0
     parameters:
       - height_500
-      - temp_850
-      - ugrd_850
-      - vgrd_850
-      - pres_0g
-      - swdown
+      - refc
+      - temp_500
+      - ugrd_500
+      - vgrd_500
     precip_and_related_fields: []
     colormaps: {}
     callbacks:
@@ -136,11 +135,10 @@ diagnostics:
     sample_idx: 0
     parameters:
       - height_500
-      - temp_850
-      - ugrd_850
-      - vgrd_850
-      - pres_0g
-      - swdown
+      - refc
+      - temp_500
+      - ugrd_500
+      - vgrd_500
     output_dir: ${system.output.root}/predictions
     start: ${dataloader.training.datasets.data.start}
     frequency: ${data.frequency}
