@@ -102,6 +102,18 @@ class TestTransformerBaseMapper:
     def test_pre_process(self, mapper, pair_tensor):
         # Should be a no-op in the base class
         x = pair_tensor
+        (
+            _in_channels_src,
+            _in_channels_dst,
+            _hidden_dim,
+            _out_channels_dst,
+            _num_chunks,
+            _cpu_offload,
+            _num_heads,
+            _mlp_hidden_ratio,
+            _layer_kernels,
+            _attention_implementation,
+        ) = mapper_init
         x_src, x_dst = mapper.pre_process(x)
         assert x_src.shape == torch.Size(
             x[0].shape
