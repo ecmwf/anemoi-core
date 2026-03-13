@@ -131,6 +131,38 @@ def build_global_config(
     return cfg, url_dataset, model_architecture
 
 
+def _configure_multigpu_model_sharding(cfg: DictConfig) -> None:
+    cfg.system.hardware.accelerator = "cuda"
+    cfg.system.hardware.num_gpus_per_node = 4
+    cfg.system.hardware.num_nodes = 1
+    cfg.system.hardware.num_gpus_per_model = 2
+    cfg.dataloader.read_group_size = 2
+    cfg.model.keep_batch_sharded = True
+    cfg.dataloader.batch_size.training = 1
+    cfg.dataloader.batch_size.validation = 1
+    # Some base fixtures call OmegaConf.resolve() before this helper is used,
+    # so we must also update the strategy block directly.
+    cfg.training.strategy.num_gpus_per_model = 2
+    cfg.training.strategy.read_group_size = 2
+
+
+def _configure_multigpu_ensemble(cfg: DictConfig) -> None:
+    cfg.system.hardware.accelerator = "cuda"
+    cfg.system.hardware.num_gpus_per_node = 4
+    cfg.system.hardware.num_nodes = 1
+    cfg.system.hardware.num_gpus_per_model = 2
+    cfg.system.hardware.num_gpus_per_ensemble = 4
+    cfg.dataloader.read_group_size = 2
+    cfg.model.keep_batch_sharded = True
+    cfg.dataloader.batch_size.training = 1
+    cfg.dataloader.batch_size.validation = 1
+    # Some base fixtures call OmegaConf.resolve() before this helper is used,
+    # so we must also update the strategy block directly.
+    cfg.training.strategy.num_gpus_per_model = 2
+    cfg.training.strategy.num_gpus_per_ensemble = 4
+    cfg.training.strategy.read_group_size = 2
+
+
 @pytest.fixture(
     params=[["model=gnn"], ["model=graphtransformer"]],
     ids=["gnn", "graphtransformer"],
@@ -188,6 +220,17 @@ def stretched_config(
 
 
 @pytest.fixture
+def stretched_multigpu_config(
+    stretched_config: tuple[DictConfig, list[str]],
+) -> tuple[DictConfig, list[str]]:
+    cfg, urls = stretched_config
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, urls
+
+
+@pytest.fixture
 def multidatasets_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
@@ -232,6 +275,17 @@ def lam_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, [url_dataset, url_forcing_dataset]
+
+
+@pytest.fixture
+def lam_multigpu_config(
+    lam_config: tuple[DictConfig, list[str]],
+) -> tuple[DictConfig, list[str]]:
+    cfg, urls = lam_config
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, urls
 
 
 @pytest.fixture
@@ -298,6 +352,17 @@ def ensemble_config(
 
 
 @pytest.fixture
+def ensemble_multigpu_config(
+    ensemble_config: tuple[DictConfig, str],
+) -> tuple[DictConfig, str]:
+    cfg, url = ensemble_config
+    _configure_multigpu_ensemble(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, url
+
+
+@pytest.fixture
 def hierarchical_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
@@ -315,6 +380,43 @@ def hierarchical_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, [url_dataset]
+
+
+@pytest.fixture
+def hierarchical_multigpu_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, list[str]]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_hierarchical"):
+        template = compose(config_name="hierarchical")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, [url_dataset]
+
+
+@pytest.fixture
+def graphtransformer_multigpu_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    cfg, url, _model_architecture = build_global_config(
+        ["model=graphtransformer"],
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+    )
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, url
 
 
 @pytest.fixture
@@ -518,6 +620,16 @@ def diffusion_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, url_dataset
+
+
+@pytest.fixture
+def diffusion_multigpu_config(
+    diffusion_config: tuple[OmegaConf, str],
+) -> tuple[OmegaConf, str]:
+    cfg, url = diffusion_config
+    _configure_multigpu_model_sharding(cfg)
+    OmegaConf.resolve(cfg)
+    return cfg, url
 
 
 @pytest.fixture(
