@@ -217,6 +217,10 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
         )
+        self.use_cuda_graphs= True
+        if self.use_cuda_graphs:
+            self.proc = torch.compile(self.proc, mode="reduce-overhead")
+            LOGGER.info("Using cuda graphs via torch compile the GT mapper")
 
         self.offload_layers(cpu_offload)
 
