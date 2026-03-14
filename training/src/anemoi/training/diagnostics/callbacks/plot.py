@@ -1336,6 +1336,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 batch_idx,
                                 truth_idx,
                             )
+                            time_token = self._target_time_token(time_label, batch_idx)
                             fig = plot_predicted_multilevel_flat_sample(
                                 plot_parameters_dict,
                                 self.per_sample,
@@ -1357,7 +1358,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 tag=(
                                     "pred_val_sample_"
                                     f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
-                                    f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}_chunk{chunk_idx:02d}"
+                                    f"{time_token}_rank{local_rank:01d}_{var_label}_chunk{chunk_idx:02d}"
                                     f"{self.focus_mask.tag}"
                                 ),
                                 exp_log_tag=(
@@ -1390,6 +1391,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                             batch_idx,
                             rollout_step + 1,
                         )
+                        time_token = self._target_time_token(time_label, batch_idx)
                         fig = plot_predicted_multilevel_flat_sample(
                             plot_parameters_dict,
                             self.per_sample,
@@ -1410,7 +1412,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                             epoch=epoch,
                             tag=(
                                 f"pred_val_sample_{dataset_name}_istep{interp_step:02d}_"
-                                f"batch{batch_idx:04d}_rank{local_rank:01d}_{var_label}_chunk{chunk_idx:02d}"
+                                f"{time_token}_rank{local_rank:01d}_{var_label}_chunk{chunk_idx:02d}"
                                 f"{self.focus_mask.tag}"
                             ),
                             exp_log_tag=(
@@ -1513,6 +1515,17 @@ class PlotSample(BasePlotAdditionalMetrics):
         except Exception:
             return None
         return None
+
+    def _target_time_token(self, time_label: str | None, batch_idx: int) -> str:
+        if not time_label:
+            return f"batch{batch_idx:04d}"
+        # time_label format: "time: YYYY-MM-DDTHH:MM:SS"
+        prefix = "time: "
+        if not time_label.startswith(prefix):
+            return f"batch{batch_idx:04d}"
+        dt = time_label[len(prefix) :]
+        safe = dt.replace("-", "").replace(":", "").replace(" ", "_")
+        return f"valid{safe}"
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
