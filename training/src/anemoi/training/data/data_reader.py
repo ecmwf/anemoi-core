@@ -158,15 +158,15 @@ class BaseAnemoiReader:
         return self.data.resolution
 
     @cached_property
-    def latlons(self) -> np.ndarray:
+    def latlons(self) -> torch.Tensor:
         """Return lat/lon coordinates of dataset grid points.
 
         Returns
         -------
-        np.ndarray
-            Array of shape (N, 2) with latitudes and longitudes in radians.
+        torch.Tensor
+            Tensor of shape (N, 2) with latitudes and longitudes in radians.
         """
-        return np.stack([self.data.latitudes, self.data.longitudes], axis=-1)
+        return torch.from_numpy(np.stack([self.data.latitudes, self.data.longitudes], axis=-1))
 
     @cached_property
     def cutout_mask(self) -> np.ndarray:
@@ -192,7 +192,7 @@ class BaseAnemoiReader:
         self,
         time_indices: slice | int | list[int],
         grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Get a sample from the dataset."""
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory
@@ -206,7 +206,11 @@ class BaseAnemoiReader:
             x = x[..., grid_shard_indices]  # select the grid shard
 
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-        return torch.from_numpy(x)
+        return {
+            "tensor":torch.from_numpy(x),
+            "grid_size": self.grid_size,
+            "latlons": self.latlons[grid_shard_indices],
+        }
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)

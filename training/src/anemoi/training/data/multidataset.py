@@ -389,6 +389,7 @@ class MultiDataset(IterableDataset):
         for name, dataset in self.datasets.items():
             start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
             x[name] = dataset.get_sample(time_indices, slice(start, end))
+            x[name]["shard_shapes"] = self.shard_shapes[name]
 
         return x
 

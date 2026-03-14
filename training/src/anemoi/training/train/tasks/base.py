@@ -218,11 +218,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        # shard_shapes and grid_sizes are computed by the DDPStrategy from the datamodule
-        # and set externally before training starts. Initialize as empty dicts.
-        self.shard_shapes: dict = {}
-        self.grid_sizes: dict = {}
-
         self.grid_dim = -2
 
         # check sharding support
@@ -691,7 +686,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         for dataset_name in self.dataset_names:
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
-                self.grid_shard_shapes[dataset_name] = self.shard_shapes[dataset_name]
+                self.grid_shard_shapes[dataset_name] = batch[dataset_name]["shard_shapes"]
                 start, end = get_partition_range(
                     partition_sizes=self.grid_shard_shapes[dataset_name],
                     partition_id=self.reader_group_rank,
@@ -769,8 +764,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Allgathered (full) batch
         """
-        grid_size = self.grid_sizes[dataset_name]
-        grid_shard_shapes = self.shard_shapes[dataset_name]
+        grid_size = batch[dataset_name]["grid_size"]
+        grid_shard_shapes = batch[dataset_name]["shard_shapes"]
 
         if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
