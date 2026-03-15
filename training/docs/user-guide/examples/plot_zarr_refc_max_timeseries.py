@@ -71,8 +71,8 @@ def _variable_names(ds: xr.Dataset, data_var: str, variable_dim: str) -> list[st
         return names
 
     attr_candidates = [
-        ds.attrs.get("variables"),
         ds[data_var].attrs.get("variables"),
+        ds.attrs.get("variables"),
     ]
     for candidate in attr_candidates:
         if isinstance(candidate, (list, tuple)):
@@ -206,6 +206,7 @@ def main() -> None:
     print(f"Data variable: {data_var}")
     print(f"Time coord   : {time_coord}")
     print(f"Variable     : {args.variable}")
+    print(f"Var index    : {vidx}")
     print(f"Samples      : {vals.size}")
     print(f"Peak         : {peak_val:.6g} at {peak_time}")
     if vals_q is not None:
