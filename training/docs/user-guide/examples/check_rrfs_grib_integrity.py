@@ -52,7 +52,7 @@ def default_expected_keys() -> List[Key]:
         [
             ("PRES", "surface", "anl"),
             ("TMP", "surface", "anl"),
-            ("SMREF", "surface", "anl"),
+            ("REFC", "entire atmosphere (considered as a single layer)", "anl"),
             ("SDSWRF", "surface", "anl"),
             ("LSM", "surface", "anl"),
             ("OROG", "surface", "anl"),
@@ -194,4 +194,3 @@ def main(argv: Iterable[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

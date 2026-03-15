@@ -1,19 +1,22 @@
 # Anemoi-datasets recipe for RRFS GRIB2 using shortest-lead valid-time links.
-# This expects preprocessed symlinks like:
-#   /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.vYYYYMMDDHH.grib2
-# created from the shortest lead (0-5h) of each cycle.
+# This creates the boundary/forcing dataset for LAM training.
+#
+# Target grid should be a larger lat/lon box than the core subdomain so
+# that boundary nodes exist outside the core. Build a separate regrid matrix
+# for that boundary grid (core extent + 20 km) and point to it below.
 
-name: rrfs-conus-3km-202405-1h
+name: rrfs-boundary-3km-20km-202405-1h
 
 description: >
-  RRFS CONUS GRIB2 collapsed to a single valid-time axis using shortest lead
-  forecasts (0-5h). One file per valid time.
+  RRFS GRIB2 collapsed to a single valid-time axis using shortest lead
+  forecasts (0-5h), regridded to the boundary (larger) lat/lon grid.
+  One file per valid time. Boundary grid is core extent + 20 km.
 
 dates:
   # One full month per run (example: May 2024).
-  # Use a monthly output path, e.g. rrfs-conus-3km-202405.zarr
-  start: "2024-05-02T09:00:00"
-  end: "2024-05-31T20:00:00"
+  # Use a monthly output path, e.g. rrfs-boundary-3km-20km-202405.zarr
+  start: "2024-05-01T00:00:00"
+  end: "2024-05-31T23:00:00"
   frequency: 1h
 
 build:
@@ -38,7 +41,6 @@ input:
                   - grle
                 typeOfLevel: isobaricInhPa
                 levelist: [925, 850, 500, 200]
-                step: 0
             - rename:
                 param:
                   u: ugrd
@@ -58,7 +60,6 @@ input:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
                 param: [sp, tmp]
                 typeOfLevel: surface
-                step: 0
             - rename:
                 param:
                   sp: pres_0g
@@ -67,20 +68,8 @@ input:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
                 shortName: [refc]
-                step: 0
-        - pipe:
-            - grib:
-                path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-                shortName: [sdswrf, lsm, orog]
-                typeOfLevel: surface
-                step: 0
-            - rename:
-                param:
-                  sdswrf: swdown
-                  lsm: landcover
-                  orog: orography
     - regrid:
-        matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km.npz
+        matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km-boundary-20km.npz
 
 # output is provided on the command line as the second argument to
 # `anemoi-datasets create`.
