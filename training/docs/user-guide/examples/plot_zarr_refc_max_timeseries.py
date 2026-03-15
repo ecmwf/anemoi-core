@@ -55,13 +55,43 @@ def _pick_variable_dim(arr: xr.DataArray) -> str:
     raise ValueError(f"No variable dimension found in data dims: {arr.dims}")
 
 
-def _variable_index(ds: xr.Dataset, variable_dim: str, variable_name: str) -> int:
+def _is_numeric_strings(values: list[str]) -> bool:
+    return all(v.isdigit() for v in values)
+
+
+def _variable_names(ds: xr.Dataset, data_var: str, variable_dim: str) -> list[str]:
+    names: list[str] | None = None
     if variable_dim in ds.coords:
         names = [str(v) for v in ds.coords[variable_dim].values]
     elif "variable" in ds.coords:
         names = [str(v) for v in ds.coords["variable"].values]
-    else:
-        raise ValueError("Variable names coordinate not found (expected 'variable').")
+
+    # Some zarrs store numeric indices in the coord, with real names in attrs.
+    if names and not _is_numeric_strings(names):
+        return names
+
+    attr_candidates = [
+        ds.attrs.get("variables"),
+        ds[data_var].attrs.get("variables"),
+    ]
+    for candidate in attr_candidates:
+        if isinstance(candidate, (list, tuple)):
+            c = [str(v) for v in candidate]
+            if len(c) == int(ds[data_var].sizes[variable_dim]):
+                return c
+
+    meta = ds.attrs.get("variables_metadata")
+    if isinstance(meta, dict):
+        c = [str(k) for k in meta.keys()]
+        if len(c) == int(ds[data_var].sizes[variable_dim]):
+            return c
+
+    if names:
+        return names
+    raise ValueError("Variable names not found in coords or attrs.")
+
+
+def _variable_index(names: list[str], variable_name: str) -> int:
 
     if variable_name not in names:
         sample = names[:20]
@@ -74,6 +104,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Plot per-valid-time max of a variable from Anemoi Zarr.")
     p.add_argument("dataset", type=Path, help="Path to Zarr dataset.")
     p.add_argument("--variable", default="refc", help="Variable name to analyze (default: refc).")
+    p.add_argument("--variable-index", type=int, default=None, help="Use explicit variable index instead of --variable.")
+    p.add_argument("--list-variables", action="store_true", help="Print resolved variable names and exit.")
     p.add_argument("--start", default=None, help="Optional start time (inclusive), e.g. 2024-05-02T09:00:00.")
     p.add_argument("--end", default=None, help="Optional end time (inclusive), e.g. 2024-05-31T20:00:00.")
     p.add_argument("--out-png", type=Path, default=Path("refc_max_timeseries.png"), help="Output PNG path.")
@@ -98,7 +130,17 @@ def main() -> None:
     arr = ds[data_var]
 
     variable_dim = _pick_variable_dim(arr)
-    vidx = _variable_index(ds, variable_dim, args.variable)
+    names = _variable_names(ds, data_var, variable_dim)
+    if args.list_variables:
+        print("\n".join(f"{i:4d} {name}" for i, name in enumerate(names)))
+        return
+
+    if args.variable_index is not None:
+        vidx = args.variable_index
+        if vidx < 0 or vidx >= len(names):
+            raise ValueError(f"--variable-index {vidx} out of range [0, {len(names)-1}]")
+    else:
+        vidx = _variable_index(names, args.variable)
     arr = arr.isel({variable_dim: vidx})
 
     # Apply optional time range.
