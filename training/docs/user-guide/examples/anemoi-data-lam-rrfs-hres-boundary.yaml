@@ -67,7 +67,7 @@ input:
         - pipe:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-                shortName: [refc]
+                param: [refc]
     - regrid:
         matrix: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/regrid/rrfs-to-latlon-3km-boundary-20km.npz
 

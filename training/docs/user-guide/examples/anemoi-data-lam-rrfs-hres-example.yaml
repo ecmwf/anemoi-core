@@ -66,7 +66,7 @@ input:
         - pipe:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-                shortName: [refc]
+                param: [refc]
                 step: 0
         - pipe:
             - grib:

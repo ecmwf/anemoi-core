@@ -73,6 +73,27 @@ echo "  final:      $FINAL_ZARR"
 
 anemoi-datasets create "$TMP_RECIPE" "$RAW_ZARR" --overwrite
 
+# Fail fast if required variables are missing from the newly built dataset.
+python - "$RAW_ZARR" <<'PY'
+import sys
+import xarray as xr
+
+path = sys.argv[1]
+required = ["refc", "height_500", "temp_500", "ugrd_500", "vgrd_500"]
+
+ds = xr.open_zarr(path, consolidated=False, mask_and_scale=False)
+vars_attr = ds.attrs.get("variables", [])
+names = [str(v) for v in vars_attr]
+missing = [v for v in required if v not in names]
+
+if missing:
+    print(f"ERROR: required variables missing in raw dataset: {missing}", file=sys.stderr)
+    print("Available variables (first 60):", names[:60], file=sys.stderr)
+    raise SystemExit(4)
+
+print("Raw dataset variable check OK.")
+PY
+
 python training/docs/user-guide/examples/add_boundary_mask.py \
   "$RAW_ZARR" \
   "$FINAL_ZARR" \
@@ -91,6 +112,7 @@ python - "$FINAL_ZARR" <<'PY'
 import sys
 import numpy as np
 import zarr
+import xarray as xr
 
 path = sys.argv[1]
 g = zarr.open_group(path, mode="a")
@@ -126,6 +148,17 @@ if fixed_mu:
     g["mean"][:] = mu
 
 print(f"Fixed stats: stdev={fixed_st}, mean={fixed_mu}")
+
+# Confirm required variables survive post-processing.
+ds = xr.open_zarr(path, consolidated=False, mask_and_scale=False)
+names = [str(v) for v in ds.attrs.get("variables", [])]
+required = ["refc", "height_500", "temp_500", "ugrd_500", "vgrd_500"]
+missing = [v for v in required if v not in names]
+if missing:
+    print(f"ERROR: required variables missing in final dataset: {missing}", file=sys.stderr)
+    print("Available variables (first 60):", names[:60], file=sys.stderr)
+    raise SystemExit(5)
+print("Final dataset variable check OK.")
 PY
 
 echo "Done: $FINAL_ZARR"
