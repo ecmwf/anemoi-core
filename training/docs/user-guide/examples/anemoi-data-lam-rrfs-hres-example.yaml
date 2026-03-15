@@ -66,8 +66,15 @@ input:
         - pipe:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2
-                param: [refc]
+                discipline: [0]
+                parameterCategory: [16]
+                parameterNumber: [5]
+                typeOfLevel: atmosphereSingleLayer
+                levelist: [0]
                 step: 0
+            - rename:
+                param:
+                  unknown: refc
         - pipe:
             - grib:
                 path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/rrfs-valid/rrfs.v{date:strftime(%Y%m%d%H)}.grib2

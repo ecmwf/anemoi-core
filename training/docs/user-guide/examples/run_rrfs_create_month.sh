@@ -12,7 +12,8 @@ set -euo pipefail
 #   run_rrfs_create_month.sh 202405 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/data
 #
 # Optional overrides (environment variables):
-#   LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, BOUNDARY_KM, TIME_UNIT
+#   LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, BOUNDARY_KM, TIME_UNIT,
+#   SKIP_REFC_KEY_CHECK=1 (skip REFC consistency precheck)
 # Defaults:
 #   LAT_MIN=25, LAT_MAX=40, LON_MIN=-105, LON_MAX=-90, BOUNDARY_KM=20, TIME_UNIT=s
 
@@ -70,6 +71,49 @@ echo "  frequency:  $FREQ"
 echo "  recipe:     $TMP_RECIPE"
 echo "  raw:        $RAW_ZARR"
 echo "  final:      $FINAL_ZARR"
+
+# Optional precheck: confirm REFC key tuple is stable in source GRIB files.
+if [[ "${SKIP_REFC_KEY_CHECK:-0}" != "1" ]]; then
+  GRIB_DIR="$(sed -n -E 's|^[[:space:]]*path:[[:space:]]*([^ ]*rrfs-valid)/rrfs\.v\{date:strftime\(%Y%m%d%H\)\}\.grib2$|\1|p' "$TMP_RECIPE" | head -n1)"
+  if [[ -n "$GRIB_DIR" && -d "$GRIB_DIR" ]]; then
+    echo "Checking REFC key consistency in $GRIB_DIR ..."
+    python training/docs/user-guide/examples/check_rrfs_refc_consistency.py "$GRIB_DIR"
+  else
+    echo "WARN: Could not infer rrfs-valid GRIB directory from recipe; skipping REFC key consistency check."
+  fi
+fi
+
+# Preflight: create a single-timestep probe dataset to catch recipe/selector
+# issues (e.g., missing REFC) before the expensive full-month build.
+PROBE_RECIPE="./tmp/anemoi-data-rrfs-${NAME_TAG}-probe.yaml"
+PROBE_ZARR="${OUT_DIR}/rrfs-conus-3km-${NAME_TAG}-probe.zarr"
+cp "$TMP_RECIPE" "$PROBE_RECIPE"
+sed -i -E "s|^name:.*$|name: rrfs-conus-3km-${NAME_TAG}-probe|g" "$PROBE_RECIPE"
+sed -i -E "0,/^[[:space:]]*start:[[:space:]]*/s|^([[:space:]]*start:[[:space:]]*).*$|\\1\"$START\"|" "$PROBE_RECIPE"
+sed -i -E "0,/^[[:space:]]*end:[[:space:]]*/s|^([[:space:]]*end:[[:space:]]*).*$|\\1\"$START\"|" "$PROBE_RECIPE"
+
+echo "Running preflight probe create for $START ..."
+anemoi-datasets create "$PROBE_RECIPE" "$PROBE_ZARR" --overwrite
+
+python - "$PROBE_ZARR" <<'PY'
+import sys
+import xarray as xr
+
+path = sys.argv[1]
+required = ["refc", "height_500", "temp_500", "ugrd_500", "vgrd_500"]
+ds = xr.open_zarr(path, consolidated=False, mask_and_scale=False)
+names = [str(v) for v in ds.attrs.get("variables", [])]
+missing = [v for v in required if v not in names]
+
+if missing:
+    print(f"ERROR: preflight failed, missing variables: {missing}", file=sys.stderr)
+    print("Available variables (first 60):", names[:60], file=sys.stderr)
+    raise SystemExit(4)
+
+print("Preflight variable check OK.")
+PY
+
+rm -rf "$PROBE_ZARR" "$PROBE_RECIPE"
 
 anemoi-datasets create "$TMP_RECIPE" "$RAW_ZARR" --overwrite
 
