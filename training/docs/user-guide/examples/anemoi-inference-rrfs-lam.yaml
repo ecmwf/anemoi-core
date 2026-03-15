@@ -1,0 +1,39 @@
+# Example: RRFS LAM inference config for a trained checkpoint.
+#
+# Run with overrides:
+#   anemoi-inference run training/docs/user-guide/examples/anemoi-inference-rrfs-lam.yaml \
+#     checkpoint=/path/to/inference-last.ckpt \
+#     date=2024-05-20T00:00:00 \
+#     lead_time=24h \
+#     output.netcdf.path=/path/to/output.nc \
+#     device=cpu
+
+checkpoint: /path/to/inference-last.ckpt
+date: 2024-05-20T00:00:00
+lead_time: 24h
+device: cpu
+verbosity: 1
+
+# For a standard trained LAM checkpoint use the default runner.
+runner: default
+
+# Use dataloader "test" source stored in checkpoint metadata.
+# Can be changed to training / validation / dataset / grib / netcdf / mars.
+input: test
+
+# If output_mask exists in checkpoint supporting arrays, boundary forcings are
+# automatically applied on ~output_mask during autoregressive rollout.
+# By default they are taken from `input`. You can override:
+# boundary_forcings:
+#   dataset: /path/to/boundary_source.zarr
+
+output:
+  netcdf:
+    path: /tmp/rrfs_lam_inference.nc
+    output_frequency: 1h
+    variables:
+      - height_500
+      - refc
+      - temp_500
+      - ugrd_500
+      - vgrd_500

@@ -1,0 +1,38 @@
+# Example: RRFS LAM inference using external_graph runner.
+#
+# Use this when you want to run a checkpoint on a different graph than the one
+# stored in the checkpoint (transfer / LAM-on-new-domain scenario).
+
+checkpoint: /path/to/inference-last.ckpt
+date: 2024-05-20T00:00:00
+lead_time: 24h
+device: cpu
+verbosity: 1
+
+runner:
+  external_graph:
+    graph: /path/to/external-graph.pt
+    # output_mask controls the forecasted interior and activates boundary forcing.
+    # The mask must be a boolean attribute on graph nodes.
+    output_mask:
+      nodes_name: data
+      attribute_name: cutout_mask
+    # If graph was built from a different dataset, provide it here:
+    # graph_dataset: /path/to/graph_dataset.zarr
+    # Optional advanced patching of supporting arrays:
+    # update_supporting_arrays:
+    #   graph:
+    #     output_mask: cutout_mask
+
+input: test
+
+output:
+  netcdf:
+    path: /tmp/rrfs_lam_inference_external_graph.nc
+    output_frequency: 1h
+    variables:
+      - height_500
+      - refc
+      - temp_500
+      - ugrd_500
+      - vgrd_500
