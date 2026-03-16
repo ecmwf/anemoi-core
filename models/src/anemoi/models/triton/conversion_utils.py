@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+
 try:
     import triton
     import triton.language as tl
@@ -17,6 +18,7 @@ except ImportError:
     raise ValueError(msg)
 
 import logging
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ LOGGER = logging.getLogger(__name__)
 #   - CSC: destination-centric
 #   - CSR: source-centric
 #
-# To allow efficient conversions between these formats and avoiding permuations of edge features, auxiliary structures 
+# To allow efficient conversions between these formats and avoiding permuations of edge features, auxiliary structures
 # can be helpful. Relevant buffers are
 #   - edge_index: [2, num_edges] tensor of COO format (src, dst)
 #   - csc_offets: [num_dst + 1] tensor of column pointers for CSC format
@@ -41,6 +43,7 @@ LOGGER = logging.getLogger(__name__)
 #   - map_csr_to_coo: [num_edges] tensor mapping CSR order → COO order
 #   - map_csc_to_coo: [num_edges] tensor mapping CSC order → COO order
 #   - map_coo_to_csr: [num_edges] tensor mapping COO
+
 
 @triton.jit
 def node_count_kernel(node_counts, indices, num_indices: int, TILE_E: tl.constexpr):
@@ -52,12 +55,19 @@ def node_count_kernel(node_counts, indices, num_indices: int, TILE_E: tl.constex
 
 @triton.jit
 def compress_coo_kernel(
-    csr_indices, map_csr_to_coo, 
-    csc_indices, map_csc_to_coo,
-    edge_index, csr_offsets, csc_offsets, 
-    csr_aux_node_counts, csc_aux_node_counts,
-    num_indices, SORTED_BY_DST: tl.constexpr, TILE_E: tl.constexpr,
-): 
+    csr_indices,
+    map_csr_to_coo,
+    csc_indices,
+    map_csc_to_coo,
+    edge_index,
+    csr_offsets,
+    csc_offsets,
+    csr_aux_node_counts,
+    csc_aux_node_counts,
+    num_indices,
+    SORTED_BY_DST: tl.constexpr,
+    TILE_E: tl.constexpr,
+):
     eidx = tl.program_id(0).to(tl.int64) * TILE_E + tl.arange(0, TILE_E)
     mask = eidx < num_indices
 
@@ -82,9 +92,7 @@ def _cosort_segments(offsets, indices, values):
     # that respects segment boundaries. Assumption is to not overflow in int64,
     # which should be fine for the graph sizes considered in these contexts here.
     counts = offsets[1:] - offsets[:-1]
-    seg_ids = torch.repeat_interleave(
-        torch.arange(len(counts), device=indices.device, dtype=torch.int64), counts
-    )
+    seg_ids = torch.repeat_interleave(torch.arange(len(counts), device=indices.device, dtype=torch.int64), counts)
     sort_idx = seg_ids.to(torch.int64) * (int(indices.max()) + 1) + indices.to(torch.int64)
     perm = torch.argsort(sort_idx)
     return indices[perm].contiguous(), values[perm].contiguous()
@@ -92,8 +100,8 @@ def _cosort_segments(offsets, indices, values):
 
 @torch.library.custom_op("anemoi::edge_index_to_csc_impl", mutates_args=())
 def fast_edge_index_to_csc_impl(
-    edge_index: torch.Tensor, 
-    num_src_nodes: int, 
+    edge_index: torch.Tensor,
+    num_src_nodes: int,
     num_dst_nodes: int,
     is_sorted_by_dst: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -131,11 +139,18 @@ def fast_edge_index_to_csc_impl(
 
     # kernel creating csc_indices, csr_indices and their ID maps back to original COO indices at the same time
     compress_coo_kernel[grid](
-        csr_indices, map_csr_to_coo,
-        csc_indices, map_csc_to_coo,
-        edge_index, csr_offsets, csc_offsets,
-        aux_src_node_counts, aux_dst_node_counts,
-        num_indices, is_sorted_by_dst, TILE_E,
+        csr_indices,
+        map_csr_to_coo,
+        csc_indices,
+        map_csc_to_coo,
+        edge_index,
+        csr_offsets,
+        csc_offsets,
+        aux_src_node_counts,
+        aux_dst_node_counts,
+        num_indices,
+        is_sorted_by_dst,
+        TILE_E,
     )
 
     if torch.are_deterministic_algorithms_enabled():
@@ -151,8 +166,8 @@ def fast_edge_index_to_csc_impl(
 
 @fast_edge_index_to_csc_impl.register_fake
 def _(
-    edge_index: torch.Tensor, 
-    num_src_nodes: int, 
+    edge_index: torch.Tensor,
+    num_src_nodes: int,
     num_dst_nodes: int,
     is_sorted_by_dst: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -168,8 +183,8 @@ def _(
 
 
 def fast_edge_index_to_csc(
-    edge_index: torch.Tensor, 
-    num_src_nodes: int, 
+    edge_index: torch.Tensor,
+    num_src_nodes: int,
     num_dst_nodes: int,
     is_sorted_by_dst: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:

@@ -7,17 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import torch
 from typing import Tuple
+
+import torch
 
 # check if triton is installed
 # If pytorch is installed on CPU then torch is not available
 try:
     import triton
     import triton.language as tl
+
     from anemoi.models.triton.conversion_utils import fast_edge_index_to_csc
 except ImportError:
-    msg =  "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. "
+    msg = "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. "
     msg += "To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     raise ValueError(msg)
 
@@ -30,7 +32,7 @@ def _graphtransformer_fwd_kernel(
     E_ptr,  # [E, H, C]
     CSC_offsets_ptr,  # [N_dst+1]
     CSC_indices_ptr,  # [E]
-    CSC_map_to_coo_ptr, # [E]
+    CSC_map_to_coo_ptr,  # [E]
     M_ptr,  # [N_dst, H]
     OUT_ptr,  # [N_dst, H, C]
     H: tl.constexpr,
@@ -61,13 +63,13 @@ def _graphtransformer_fwd_kernel(
         H_C_PAD_VAL = None
     elif H % H_PER_BLK == 0:
         H_mask = None
-        C_mask = (C_off < C)
+        C_mask = C_off < C
         H_C_mask = C_mask
         H_PAD_VAL = None
         H_C_PAD_VAL = 0.0
     else:
-        H_mask = (H_off < H)
-        C_mask = (C_off < C)
+        H_mask = H_off < H
+        C_mask = C_off < C
         H_C_mask = H_mask & C_mask
         H_PAD_VAL = 0.0
         H_C_PAD_VAL = 0.0
@@ -154,7 +156,7 @@ def _graphtransformer_bwd_dq_kernel(
     D_OUT_ptr,  # [N_dst * H * C]
     CSC_offsets_ptr,  # [N_dst+1]
     CSC_indices_ptr,  # [E]
-    CSC_map_to_coo_ptr, # [E]
+    CSC_map_to_coo_ptr,  # [E]
     D_Q_ptr,  # OUT
     D_ptr,  # [N_dst * H]
     H: tl.constexpr,
@@ -185,13 +187,13 @@ def _graphtransformer_bwd_dq_kernel(
         H_C_PAD_VAL = None
     elif H % H_PER_BLK == 0:
         H_mask = None
-        C_mask = (C_off < C)
+        C_mask = C_off < C
         H_C_mask = C_mask
         H_PAD_VAL = None
         H_C_PAD_VAL = 0.0
     else:
-        H_mask = (H_off < H)
-        C_mask = (C_off < C)
+        H_mask = H_off < H
+        C_mask = C_off < C
         H_C_mask = H_mask & C_mask
         H_PAD_VAL = 0.0
         H_C_PAD_VAL = 0.0
@@ -263,7 +265,7 @@ def _graphtransformer_bwd_dkdv_kernel(
     D_OUT_ptr,  # [N_dst * H * C]
     CSR_offsets_ptr,  # [N_src+1]
     CSR_indices_ptr,  # [E]
-    CSR_map_to_coo_ptr, # [E]
+    CSR_map_to_coo_ptr,  # [E]
     D_K_ptr,  # [N_src * H * C]
     D_V_ptr,  # [N_src * H * C]
     D_E_ptr,  # [M * H * C]
@@ -295,13 +297,13 @@ def _graphtransformer_bwd_dkdv_kernel(
         H_C_PAD_VAL = None
     elif H % H_PER_BLK == 0:
         H_mask = None
-        C_mask = (C_off < C)
+        C_mask = C_off < C
         H_C_mask = C_mask
         H_PAD_VAL = None
         H_C_PAD_VAL = 0.0
     else:
-        H_mask = (H_off < H)
-        C_mask = (C_off < C)
+        H_mask = H_off < H
+        C_mask = C_off < C
         H_C_mask = H_mask & C_mask
         H_PAD_VAL = 0.0
         H_C_PAD_VAL = 0.0
@@ -399,10 +401,20 @@ def sparse_graph_attention_coo(
 
     grid = (N_dst, triton.cdiv(H, H_PER_BLK), 1)
     _graphtransformer_fwd_kernel[grid](
-        q, k, v, e,
-        csc_offsets, csc_indices, map_csc_to_coo,
-        m, out,
-        H, H_PER_BLK, C, C_PAD, True,
+        q,
+        k,
+        v,
+        e,
+        csc_offsets,
+        csc_indices,
+        map_csc_to_coo,
+        m,
+        out,
+        H,
+        H_PER_BLK,
+        C,
+        C_PAD,
+        True,
     )
 
     return out, m
@@ -424,8 +436,14 @@ def _sparse_graph_attention_coo_setup_context(ctx, inputs, output):
 
 @torch.library.custom_op("anemoi::sparse_graph_attention_coo_backward_impl", mutates_args=())
 def sparse_graph_attention_coo_backward_impl(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, e: torch.Tensor,
-    edge_index: torch.Tensor, out: torch.Tensor, m: torch.Tensor, grad_out: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    e: torch.Tensor,
+    edge_index: torch.Tensor,
+    out: torch.Tensor,
+    m: torch.Tensor,
+    grad_out: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     N_dst, H, C = q.shape
     N_src = k.size(0)
@@ -448,20 +466,45 @@ def sparse_graph_attention_coo_backward_impl(
 
     grid_dst = (N_dst, triton.cdiv(H, H_PER_BLK), 1)
     _graphtransformer_bwd_dq_kernel[grid_dst](
-        q, k, v, e, out, m,
+        q,
+        k,
+        v,
+        e,
+        out,
+        m,
         grad_out,
-        csc_offsets, csc_indices, map_csc_to_coo,
-        dq, D,
-        H, H_PER_BLK, C, C_PAD, True,
+        csc_offsets,
+        csc_indices,
+        map_csc_to_coo,
+        dq,
+        D,
+        H,
+        H_PER_BLK,
+        C,
+        C_PAD,
+        True,
     )
 
     grid_src = (N_src, triton.cdiv(H, H_PER_BLK), 1)
     _graphtransformer_bwd_dkdv_kernel[grid_src](
-        q, k, v, e,
-        D, m, grad_out,
-        csr_offsets, csr_indices, map_csr_to_coo,
-        dk, dv, de,
-        H, H_PER_BLK, C, C_PAD, True,
+        q,
+        k,
+        v,
+        e,
+        D,
+        m,
+        grad_out,
+        csr_offsets,
+        csr_indices,
+        map_csr_to_coo,
+        dk,
+        dv,
+        de,
+        H,
+        H_PER_BLK,
+        C,
+        C_PAD,
+        True,
     )
 
     return dq, dk, dv, de
@@ -469,8 +512,14 @@ def sparse_graph_attention_coo_backward_impl(
 
 @sparse_graph_attention_coo_backward_impl.register_fake
 def _(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, e: torch.Tensor,
-    edge_index: torch.Tensor, out: torch.Tensor, m: torch.Tensor, grad_out: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    e: torch.Tensor,
+    edge_index: torch.Tensor,
+    out: torch.Tensor,
+    m: torch.Tensor,
+    grad_out: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     return torch.empty_like(q), torch.empty_like(k), torch.empty_like(v), torch.empty_like(e)
 
@@ -479,9 +528,7 @@ def sparse_graph_attention_coo_backward(
     ctx, grad_out: torch.Tensor, grad_m: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, None]:
     q, k, v, e, edge_index, out, m = ctx.saved_tensors
-    dq, dk, dv, de = sparse_graph_attention_coo_backward_impl(
-        q, k, v, e, edge_index, out, m, grad_out.contiguous()
-    )
+    dq, dk, dv, de = sparse_graph_attention_coo_backward_impl(q, k, v, e, edge_index, out, m, grad_out.contiguous())
     return dq, dk, dv, de, None
 
 

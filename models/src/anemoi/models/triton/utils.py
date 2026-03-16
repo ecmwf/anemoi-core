@@ -11,7 +11,6 @@ from typing import Optional
 from typing import Tuple
 
 import torch
-
 from torch_geometric.typing import Adj
 from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr

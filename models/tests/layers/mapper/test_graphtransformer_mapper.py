@@ -218,13 +218,19 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         x_src, x_dst = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
 
         torch.testing.assert_allclose(
-            x_src, x_src_c, atol=1e-4, rtol=1e-4,
-            msg=lambda msg: f"x_src ({x_src}) != x_src_c ({x_src_c}) when num_chunks is changed: {msg}"
+            x_src,
+            x_src_c,
+            atol=1e-4,
+            rtol=1e-4,
+            msg=lambda msg: f"x_src ({x_src}) != x_src_c ({x_src_c}) when num_chunks is changed: {msg}",
         )
         torch.testing.assert_allclose(
-            x_dst, x_dst_c, atol=1e-4, rtol=1e-4,
-            msg=lambda msg: f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed: {msg}"
-        ) 
+            x_dst,
+            x_dst_c,
+            atol=1e-4,
+            rtol=1e-4,
+            msg=lambda msg: f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed: {msg}",
+        )
 
     def test_strategy(self, mapper, pair_tensor, graph_provider):
         x = pair_tensor
@@ -238,8 +244,11 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes, edge_attr, edge_index)
 
         torch.testing.assert_allclose(
-            out_heads, out_edges, atol=1e-4, rtol=1e-4,
-            msg=lambda msg:f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies: {msg}"
+            out_heads,
+            out_edges,
+            atol=1e-4,
+            rtol=1e-4,
+            msg=lambda msg: f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies: {msg}",
         )
 
 

@@ -61,10 +61,7 @@ def test_graph_transformer_opcheck(n_src: int, n_dst: int, h: int, d: int):
     value = torch.randn((n_src, h, d), requires_grad=True)
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
-    torch.library.opcheck(
-        sparse_graph_attention_coo,
-        (query, key, value, edge_attr, edge_index)
-    )
+    torch.library.opcheck(sparse_graph_attention_coo, (query, key, value, edge_attr, edge_index))
 
 
 @pytest.mark.slow
@@ -141,7 +138,8 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     ],
 )
 @pytest.mark.parametrize(
-    "deterministic", [False, True],
+    "deterministic",
+    [False, True],
 )
 def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int, deterministic: bool):
     """Test that triton GraphTransformerFunction matches reference implementation."""
@@ -184,7 +182,8 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     ],
 )
 @pytest.mark.parametrize(
-    "deterministic", [False, True],
+    "deterministic",
+    [False, True],
 )
 def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int, deterministic: bool):
     """Test that triton GraphTransformerFunction matches reference implementation."""
@@ -228,4 +227,3 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
 
     torch.use_deterministic_algorithms(prev_det_mode)
-
