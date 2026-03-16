@@ -52,7 +52,7 @@ class ForecastingTask(BaseTask):
         self.rollout_epoch_increment = rollout_epoch_increment
         self.rollout_max = rollout_max
 
-        # Input: e.g. multistep_input=2, timestep=6H    ->  [-6H, 0H]
+        # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
         inputs_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
         # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout_max
         outputs_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]

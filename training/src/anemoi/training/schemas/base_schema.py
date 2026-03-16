@@ -36,6 +36,7 @@ from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .diagnostics import DiagnosticsSchema
 from .system import SystemSchema
+from .tasks import TaskSchema
 from .training import TrainingSchema
 
 _object_setattr = _model_construction.object_setattr
@@ -102,7 +103,7 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Graph configuration."""
     model: ModelSchema
     """Model configuration."""
-    task: Any
+    task: TaskSchema
     """Task configuration."""
     training: TrainingSchema
     """Training configuration."""
