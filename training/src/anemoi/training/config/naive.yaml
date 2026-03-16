@@ -48,6 +48,8 @@ dataloader:
         end: "2024-12-31"
 
 diagnostics:
+  plot:
+    callbacks: []
   log:
     mlflow:
       enabled: False
