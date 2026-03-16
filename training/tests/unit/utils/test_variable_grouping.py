@@ -41,7 +41,7 @@ def mocked_variable_metadata() -> dict[str, Variable]:
         "q_100": MockedVariable("q", "pl", "100"),
         "q_200": MockedVariable("q", "pl", "200"),
         "q_500": MockedVariable("q", "pl", "500"),
-        "q": MockedVariable("q", "sfc", None),
+        "z": MockedVariable("z", "sfc", None),
         "z_500": MockedVariable("z", "pl", "500"),
         "z_ml_500": MockedVariable("z", "ml", "500"),
         "t_500": MockedVariable("t", "pl", "500"),
