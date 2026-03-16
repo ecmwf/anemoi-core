@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.5...graphs-0.9.0) (2026-03-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** expands graph config for multiple datasets ([#895](https://github.com/ecmwf/anemoi-core/issues/895))
+* **training:** remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848))
+
+### Features
+
+* **graphs:** Add custom area weightings ([#926](https://github.com/ecmwf/anemoi-core/issues/926)) ([5c43509](https://github.com/ecmwf/anemoi-core/commit/5c435092dee7f09735d8e958c298b620e7313c33))
+
+
+### Bug Fixes
+
+* **training:** Call correct open_datasets ([#965](https://github.com/ecmwf/anemoi-core/issues/965)) ([470b725](https://github.com/ecmwf/anemoi-core/commit/470b72588f178ddac913c6efd503ffd065dbf60d))
+* **training:** Expands graph config for multiple datasets ([#895](https://github.com/ecmwf/anemoi-core/issues/895)) ([33d7f4e](https://github.com/ecmwf/anemoi-core/commit/33d7f4e11fff8da22243fbb924036bab07f17c65))
+
+
+### Code Refactoring
+
+* **training:** Remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848)) ([dcd69ac](https://github.com/ecmwf/anemoi-core/commit/dcd69ac415894131876c2f19af643896f1605fe6))
+
 ## [0.8.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.4...graphs-0.8.5) (2026-02-09)
 
 

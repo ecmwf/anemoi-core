@@ -3,12 +3,15 @@ defaults:
 - dataloader: multi
 - diagnostics: evaluation_multi
 - system: example
-- graph: multi_scale
+- graph: multi
 - model: graphtransformer
 - training: multi
 - _self_
 
 config_validation: True
+
+data:
+  resolution: o96
 
 system:
   input:

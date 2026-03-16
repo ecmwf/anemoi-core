@@ -243,12 +243,8 @@ def lam_config_with_graph(
     cfg, urls = lam_config
     cfg.graph = existing_graph_config
 
-    dataset_name = "data"  # default dataset name
     url_graph = "anemoi-integration-tests/training/graphs/lam-graph-2026-02-19.pt"
-    tmp_path_graph = Path(get_test_data(url_graph))
-    dataset_graph_filename = tmp_path_graph.name.replace(".pt", f"_{dataset_name}.pt")
-    tmp_path_graph.rename(tmp_path_graph.parent / dataset_graph_filename)
-    cfg.system.input.graph = tmp_path_graph
+    cfg.system.input.graph = Path(get_test_data(url_graph))
     cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in lam training cycle test
     return cfg, urls
 
@@ -428,36 +424,22 @@ def migrator() -> Migrator:
     return Migrator()
 
 
-@pytest.fixture(
-    params=[
-        ["model=gnn"],
-        ["model=graphtransformer"],
-    ],
-    ids=["gnn", "graphtransformer"],
-)
+@pytest.fixture
 def global_config_with_checkpoint(
     migrator: Migrator,
-    request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    global_config: tuple[DictConfig, str, str],
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
-    # Reuse the same overrides that global_config gets
-    overrides = request.param
 
-    cfg, dataset_url, model_architecture = build_global_config(
-        overrides,
-        testing_modifications_with_temp_dir,
-        get_tmp_path,
-    )
-    # rest of your logic...
+    cfg, dataset_url, model_architecture = global_config
+
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-23.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-03-06.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-01-23.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-03-06.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"

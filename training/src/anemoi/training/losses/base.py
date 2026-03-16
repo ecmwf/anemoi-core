@@ -12,6 +12,7 @@ import functools
 import logging
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Iterator
 
 import torch
 from torch import nn
@@ -154,6 +155,8 @@ class BaseLoss(nn.Module, ABC):
             Mode to use for squashing the variable dimension, by default "avg"
             If "avg", the last dimension is averaged.
             If "sum", the last dimension is summed.
+        group : ProcessGroup | None, optional
+            Distributed group to reduce over, by default None
 
         Returns
         -------
@@ -196,6 +199,14 @@ class BaseLoss(nn.Module, ABC):
 
         return out if group is None else reduce_tensor(out, group)
 
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """Yield all leaf loss modules.
+
+        For simple losses, yields self. For composite losses (e.g. CombinedLoss),
+        recursively yields the underlying leaf losses.
+        """
+        yield self
+
     @property
     def name(self) -> str:
         """Used for logging identification purposes."""
@@ -233,6 +244,8 @@ class BaseLoss(nn.Module, ABC):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group to reduce over, by default None
+        **kwargs
+            Additional keyword arguments
 
         Returns
         -------
@@ -270,7 +283,7 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,  # noqa: ARG002
+        **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -291,12 +304,15 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
+        **kwargs
+            Additional keyword arguments
 
         Returns
         -------
         torch.Tensor
             Weighted loss
         """
+        del kwargs  # not used in this base implementation, but may be used in child classes
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)

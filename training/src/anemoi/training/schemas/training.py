@@ -179,8 +179,6 @@ class VariableLevelScalerSchema(BaseModel):
 
 class GraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.GraphNodeAttributeScaler"] = Field(..., alias="_target_")
-    nodes_name: str = Field(example="data")
-    "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
     "Name of the node attribute to return."
     norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
@@ -222,8 +220,6 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
         ...,
         alias="_target_",
     )
-    nodes_name: str = Field(example="data")
-    "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
     "Name of the node attribute to return."
     scaling_mask_attribute_name: str = Field(example="cutout_mask")
@@ -261,6 +257,9 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     combined = "anemoi.training.losses.combined.CombinedLoss"
     fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
+    logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
+    spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
+    spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
 
 
 class BaseLossSchema(BaseModel):
@@ -309,7 +308,7 @@ class HuberLossSchema(BaseLossSchema):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
 
     class Config(BaseModel.Config):
@@ -354,7 +353,6 @@ LossSchemas = (
     | KernelCRPSSchema
     | SpectralLossSchema
     | MultiScaleLossSchema
-    | None
 )
 
 
@@ -411,7 +409,8 @@ class BaseTrainingSchema(BaseModel):
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
-    "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
+    "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
+    " reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
