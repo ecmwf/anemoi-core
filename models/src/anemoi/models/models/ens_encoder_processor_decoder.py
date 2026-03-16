@@ -197,7 +197,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_data_latent_dict = {}
         shard_shapes_data_dict = {}
 
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
@@ -264,7 +264,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             **processor_kwargs,
         )
 
-        x_latent_proc = x_latent_proc + x_latent
+        if self.latent_skip:
+            x_latent = x_latent_proc + x_latent
 
         x_out_dict = {}
         for dataset_name in dataset_names:
@@ -277,7 +278,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=batch_ens_size,
                 shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
                 edge_attr=decoder_edge_attr,

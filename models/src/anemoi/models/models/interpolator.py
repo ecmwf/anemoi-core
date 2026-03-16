@@ -64,7 +64,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return (
             len(self.input_times) * self.num_input_channels[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+            + self.node_attributes.attr_ndims[dataset_name]
         )
 
     def _assemble_input(
@@ -218,7 +218,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
 
         # add skip connection (hidden -> hidden)
         if self.latent_skip:
-            x_latent_proc = x_latent_proc + x_latent
+            x_latent = x_latent_proc + x_latent
 
         # Decode
         x_out_dict = {}
@@ -232,7 +232,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
                 edge_attr=decoder_edge_attr,

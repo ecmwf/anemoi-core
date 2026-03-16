@@ -1034,14 +1034,16 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
             for dataset in self.loss:
-                if (
-                    hasattr(self.loss[dataset].scaler, "nan_mask_weights")
-                    and self.loss[dataset].scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-                ):
-                    self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(
-                        self.loss[dataset].scaler.nan_mask_weights,
-                        dataset,
-                    )
+                for leaf_loss in self.loss[dataset].iter_leaf_losses():
+                    if (
+                        hasattr(leaf_loss, "scaler")
+                        and hasattr(leaf_loss.scaler, "nan_mask_weights")
+                        and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+                    ):
+                        leaf_loss.scaler.nan_mask_weights = pl_module.allgather_batch(
+                            leaf_loss.scaler.nan_mask_weights,
+                            dataset,
+                        )
 
             super().on_validation_batch_end(
                 trainer,
