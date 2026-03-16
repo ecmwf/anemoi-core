@@ -9,7 +9,6 @@
 
 
 import logging
-import time
 from collections.abc import Mapping
 from operator import itemgetter
 
@@ -117,8 +116,6 @@ class GraphNowcaster(BaseGraphModule):
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[Tensor, Mapping[str, Tensor], Tensor]:
-        t0 = time.perf_counter()
-        profile_model = self._should_log_step_timing()
         decode_dataset_names = tuple(self.target_dataset_names)
         x, y = {}, {}
         processed_batch = {}
@@ -152,17 +149,12 @@ class GraphNowcaster(BaseGraphModule):
             if dataset_name in decode_dataset_names:
                 y[dataset_name] = data_batch[:, itemgetter(*self.interp_times)(self.imap)]
             x[dataset_name] = x_init
-        t_preprocess = time.perf_counter()
         decoder_ctx = self._build_decoder_context(processed_batch, decode_dataset_names=decode_dataset_names)
-        t_ctx = time.perf_counter()
         y_pred = self(
             x,
             decoder_context=decoder_ctx,
             decode_dataset_names=decode_dataset_names,
-            profile_model=profile_model,
-            profile_model_tag=f"global_step={int(self.global_step)} validation={validation_mode}",
         )
-        t_forward = time.perf_counter()
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
@@ -170,21 +162,6 @@ class GraphNowcaster(BaseGraphModule):
             validation_mode=validation_mode,
             use_reentrant=False,
         )
-        t_loss = time.perf_counter()
-        if profile_model:
-            LOGGER.info(
-                (
-                    "Timing nowcaster_step global_step=%d validation=%s preprocess_ms=%.1f "
-                    "decoder_ctx_ms=%.1f model_forward_ms=%.1f loss_ms=%.1f total_ms=%.1f"
-                ),
-                int(self.global_step),
-                validation_mode,
-                (t_preprocess - t0) * 1e3,
-                (t_ctx - t_preprocess) * 1e3,
-                (t_forward - t_ctx) * 1e3,
-                (t_loss - t_forward) * 1e3,
-                (t_loss - t0) * 1e3,
-            )
 
         return loss, metrics, y_pred
 

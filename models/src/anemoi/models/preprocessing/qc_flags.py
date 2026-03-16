@@ -64,6 +64,7 @@ class QCPackedEmbedding(nn.Module):
             raise ValueError("QCPackedEmbedding: bit_indices too large; prefer <= 16")
         vocab = 2 ** len(bit_indices)
         self.register_buffer("bits", torch.tensor(bit_indices, dtype=torch.int64), persistent=False)
+        self.emb_dim = emb_dim
         self.emb = nn.Embedding(vocab, emb_dim)
 
     def forward(self, qc_flags: torch.Tensor) -> torch.Tensor:
