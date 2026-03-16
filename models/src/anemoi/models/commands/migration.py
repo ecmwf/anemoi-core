@@ -245,7 +245,6 @@ class Migration(Command):
                         "migration_version": "1.0.0",
                         "imports": imports,
                         "final": args.final,
-                        "no_rollback": args.no_rollback,
                         "with_setup": args.with_setup,
                     }
                 )

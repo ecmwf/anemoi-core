@@ -28,8 +28,8 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
     # to set up the file where to send the output logs
     if not os.getenv("TMPDIR") and not os.getenv("SCRATCH"):
         error_msg = "Please set one of those variables TMPDIR:{} or SCRATCH:{} to proceed.".format(
-            os.environ["SCRATCH"],
-            os.environ["TMPDIR"],
+            os.getenv("TMPDIR", "not set"),
+            os.getenv("SCRATCH", "not set"),
         )
         raise ValueError(error_msg)
 

@@ -34,6 +34,7 @@ from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
 from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
+from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 from .residual import ResidualConnectionSchema
@@ -48,8 +49,6 @@ class DefinedModels(str, Enum):
     ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
     ANEMOI_MODEL_HIER_ENC_PROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
-    ANEMOI_MODEL_INTERP_ENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
-    ANEMOI_MODEL_INTERP_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecInterpolator"
     ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecMultiOutInterpolator"
     ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator"
     ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
@@ -69,6 +68,10 @@ class DefinedModels(str, Enum):
 class Model(BaseModel):
     target_: DefinedModels = Field(..., alias="_target_")
     "Model object defined in anemoi.models.model."
+    hidden_nodes_name: str | list[str] = Field(examples=["hidden", ["hidden1", "hidden2"]])
+    "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
+    latent_skip: bool = Field(default=True)
+    "Add skip connection in latent space before/after processor."
     convert_: str = Field("all", alias="_convert_")
     "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
 
@@ -175,7 +178,6 @@ class NoOutputMaskSchema(BaseModel):
 
 class Boolean1DSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.Boolean1DMask"] = Field(..., alias="_target_")
-    nodes_name: str = Field(examples="data")
     attribute_name: str = Field(example="cutout_mask")
 
 
@@ -217,7 +219,11 @@ class BaseModelSchema(PydanticBaseModel):
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
     processor: Union[
-        GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema, PointWiseMLPProcessorSchema
+        NoOpProcessorSchema,
+        GNNProcessorSchema,
+        GraphTransformerProcessorSchema,
+        TransformerProcessorSchema,
+        PointWiseMLPProcessorSchema,
     ] = Field(
         ...,
         discriminator="target_",

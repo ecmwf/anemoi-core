@@ -7,7 +7,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from enum import Enum
+from enum import StrEnum
 from functools import partial
 from typing import Annotated
 from typing import Any
@@ -16,6 +16,7 @@ from typing import Self
 
 from pydantic import AfterValidator
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import ConfigDict
 from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -83,6 +84,8 @@ class LR(BaseModel):
 class OptimizerSchema(PydanticBaseModel):
     """Choosing the PydanticBaseModel to allow extra inputs."""
 
+    model_config = ConfigDict(extra="allow")
+
     target_: str = Field(..., alias="_target_")
     """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
 
@@ -140,7 +143,7 @@ class NaNMaskScalerSchema(BaseModel):
     "Flag to include processors for tendencies when building the loss mask."
 
 
-class TendencyScalerTargets(str, Enum):
+class TendencyScalerTargets(StrEnum):
     stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
     var = "anemoi.training.losses.scalers.VarTendencyScaler"
 
@@ -154,7 +157,7 @@ class TendencyScalerSchema(BaseModel):
     "Timestep key used to select tendency statistics for scalers."
 
 
-class VariableLevelScalerTargets(str, Enum):
+class VariableLevelScalerTargets(StrEnum):
     relu_scaler = "anemoi.training.losses.scalers.ReluVariableLevelScaler"
     linear_scaler = "anemoi.training.losses.scalers.LinearVariableLevelScaler"
     polynomial_sclaer = "anemoi.training.losses.scalers.PolynomialVariableLevelScaler"
@@ -176,8 +179,6 @@ class VariableLevelScalerSchema(BaseModel):
 
 class GraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.GraphNodeAttributeScaler"] = Field(..., alias="_target_")
-    nodes_name: str = Field(example="data")
-    "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
     "Name of the node attribute to return."
     norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
@@ -219,8 +220,6 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
         ...,
         alias="_target_",
     )
-    nodes_name: str = Field(example="data")
-    "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
     "Name of the node attribute to return."
     scaling_mask_attribute_name: str = Field(example="cutout_mask")
@@ -246,7 +245,7 @@ ScalerSchema = (
 )
 
 
-class ImplementedLossesUsingBaseLossSchema(str, Enum):
+class ImplementedLossesUsingBaseLossSchema(StrEnum):
     kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
     afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
     rmse = "anemoi.training.losses.RMSELoss"
@@ -258,6 +257,9 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     combined = "anemoi.training.losses.combined.CombinedLoss"
     fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
+    logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
+    spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
+    spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
 
 
 class BaseLossSchema(BaseModel):
@@ -306,7 +308,7 @@ class HuberLossSchema(BaseLossSchema):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
 
     class Config(BaseModel.Config):
@@ -351,11 +353,10 @@ LossSchemas = (
     | KernelCRPSSchema
     | SpectralLossSchema
     | MultiScaleLossSchema
-    | None
 )
 
 
-class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
+class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):
     ddp_ens = "anemoi.training.distributed.strategy.DDPEnsGroupStrategy"
     ddp = "anemoi.training.distributed.strategy.DDPGroupStrategy"
 
@@ -408,7 +409,8 @@ class BaseTrainingSchema(BaseModel):
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
-    "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
+    "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
+    " reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
@@ -482,15 +484,6 @@ class DiffusionTendForecasterSchema(ForecasterSchema):
     "Training objective."
 
 
-class InterpolationSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
-    "Training objective."
-    explicit_times: ExplicitTimes
-    "Time indices for input and output."
-    target_forcing: DatasetDict[TargetForcing]
-    "Forcing parameters for target output times."
-
-
 class AutoencoderSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
     "Training objective."
@@ -501,14 +494,15 @@ class InterpolationMultiSchema(BaseTrainingSchema):
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
-    target_forcing: None
-    "Forcing parameters not applied for multi-outputs."
+
+    # Needed to allow to override default training configuration
+    # Forced to be None (null)
+    rollout: Literal[None] = None
 
 
 TrainingSchema = Annotated[
     ForecasterSchema
     | ForecasterEnsSchema
-    | InterpolationSchema
     | InterpolationMultiSchema
     | DiffusionForecasterSchema
     | DiffusionTendForecasterSchema

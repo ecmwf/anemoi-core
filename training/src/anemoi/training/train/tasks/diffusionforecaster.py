@@ -38,7 +38,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -57,6 +57,10 @@ class BaseDiffusionForecaster(BaseGraphModule):
         )
 
         self.rho = config.model.model.diffusion.rho
+
+        from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
+
+        self._plot_adapter = DiffusionPlotAdapter(self)
 
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
@@ -244,7 +248,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         self,
         *,
         config: BaseSchema,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],

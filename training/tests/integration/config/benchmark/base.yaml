@@ -6,8 +6,6 @@ system:
     num_gpus_per_node: 2
     num_nodes: 1
 
-
-
 dataloader:
   num_workers:
     training: 8

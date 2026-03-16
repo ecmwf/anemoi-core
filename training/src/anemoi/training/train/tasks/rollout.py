@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -52,8 +53,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : dict[str, HeteroData]
-            Graph objects keyed by dataset name
+        graph_data : HeteroData
+            Graph object representing the graph data
         statistics : dict
             Statistics of the training data
         data_indices : dict[str, IndexCollection]
@@ -81,6 +82,8 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout window length: %d", self.rollout)
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
+
+        self._plot_adapter = ForecasterPlotAdapter(self)
 
     def _advance_dataset_input(
         self,
