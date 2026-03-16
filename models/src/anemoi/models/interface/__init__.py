@@ -19,6 +19,14 @@ class AnemoiModelInterface(torch.nn.Module, ABC):
     """Abstract interface for Anemoi model wrappers."""
 
     @abstractmethod
+    def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Apply pre-processing (e.g. normalisation) to model inputs."""
+
+    @abstractmethod
+    def post_process(self, y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Apply post-processing (e.g. denormalisation) to model outputs."""
+
+    @abstractmethod
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
