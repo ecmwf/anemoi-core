@@ -66,7 +66,7 @@ def _build_edge_data(src_size: int, dst_size: int) -> tuple[torch.Tensor, torch.
     return edge_index, edge_attr
 
 
-def _build_tiny_graph() -> dict[str, HeteroData]:
+def _build_tiny_graph() -> HeteroData:
     num_data_nodes = 8
     num_hidden_nodes = 8
     graph = HeteroData()
@@ -85,7 +85,7 @@ def _build_tiny_graph() -> dict[str, HeteroData]:
     graph[("hidden", "to", "hidden")].edge_attr = edge_attr_hh
     graph[("hidden", "to", "data")].edge_index = edge_index_hd
     graph[("hidden", "to", "data")].edge_attr = edge_attr_hd
-    return {"data": graph}
+    return graph
 
 
 def _build_tiny_model() -> AnemoiModelEncProcDec:
@@ -153,7 +153,7 @@ def _compute_full_model_grads(
     model: AnemoiModelEncProcDec,
 ) -> dict[str, torch.Tensor | None]:
     model.zero_grad(set_to_none=True)
-    num_nodes = model._graph_data["data"]["data"].num_nodes
+    num_nodes = model._graph_data["data"].num_nodes
     x = torch.arange(num_nodes * 2, dtype=torch.float32).reshape(1, 1, 1, num_nodes, 2) / 16.0
     y = model({"data": x})["data"]
     loss = y.pow(2).mean()
@@ -167,8 +167,8 @@ def test_register_gradient_scaling_hooks_tiny_model_parameter_selection() -> Non
     scale = 4.0
 
     expected_skipped = {
-        "node_attributes.data.trainable_tensors.data.trainable",
-        "node_attributes.data.trainable_tensors.hidden.trainable",
+        "node_attributes.trainable_tensors.data.trainable",
+        "node_attributes.trainable_tensors.hidden.trainable",
     }
     actual_skipped = {name for name, _ in base.named_parameters() if "trainable" in name or "no_gradscaling" in name}
     assert actual_skipped == expected_skipped

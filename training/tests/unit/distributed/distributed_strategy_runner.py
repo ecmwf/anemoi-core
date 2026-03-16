@@ -113,7 +113,7 @@ def _build_edge_data(
     return edge_index, edge_attr
 
 
-def _build_tiny_graph(dataset_name: str, device: torch.device) -> dict[str, HeteroData]:
+def _build_tiny_graph(device: torch.device) -> HeteroData:
     num_data_nodes = 12
     num_hidden_nodes = 12
 
@@ -146,7 +146,7 @@ def _build_tiny_graph(dataset_name: str, device: torch.device) -> dict[str, Hete
     graph[("hidden", "to", "data")].edge_index = edge_index_hd
     graph[("hidden", "to", "data")].edge_attr = edge_attr_hd
 
-    return {dataset_name: graph}
+    return graph
 
 
 def _training_config_dir() -> Path:
@@ -349,7 +349,7 @@ def _run_diffusion_gradient_scaling_parity(
     if device.type == "cuda":
         torch.cuda.manual_seed_all(42)
 
-    graph_data = _build_tiny_graph(dataset_name=dataset_name, device=device)
+    graph_data = _build_tiny_graph(device=device)
     data_indices = {
         dataset_name: IndexCollection(
             data_config=OmegaConf.create(
@@ -386,7 +386,7 @@ def _run_diffusion_gradient_scaling_parity(
     sharded_hooked_model.train()
     sharded_unhooked_model.train()
 
-    num_nodes = graph_data[dataset_name]["data"].x.shape[0]
+    num_nodes = graph_data["data"].x.shape[0]
     x_full = (
         torch.arange(num_nodes * num_vars, dtype=torch.float32, device=device).reshape(
             1,
@@ -536,7 +536,7 @@ def _run_ensemble_partitioning_parity(
     if device.type == "cuda":
         torch.cuda.manual_seed_all(42)
 
-    graph_data = _build_tiny_graph(dataset_name=dataset_name, device=device)
+    graph_data = _build_tiny_graph(device=device)
     data_indices = {
         dataset_name: IndexCollection(
             data_config=OmegaConf.create(
@@ -564,7 +564,7 @@ def _run_ensemble_partitioning_parity(
     model_local_ens.train()
     model_dist_ens.train()
 
-    num_nodes = graph_data[dataset_name]["data"].x.shape[0]
+    num_nodes = graph_data["data"].x.shape[0]
     x_member0 = (
         torch.arange(num_nodes * num_vars, dtype=torch.float32, device=device).reshape(
             1,
@@ -703,7 +703,7 @@ def _run_ensemble_world_step_scaling_parity(
     if device.type == "cuda":
         torch.cuda.manual_seed_all(42)
 
-    graph_data = _build_tiny_graph(dataset_name=dataset_name, device=device)
+    graph_data = _build_tiny_graph(device=device)
     data_indices = {
         dataset_name: IndexCollection(
             data_config=OmegaConf.create(
@@ -731,7 +731,7 @@ def _run_ensemble_world_step_scaling_parity(
     model_local_ens.train()
     model_dist_ens.train()
 
-    num_nodes = graph_data[dataset_name]["data"].x.shape[0]
+    num_nodes = graph_data["data"].x.shape[0]
     x_member0 = (
         torch.arange(num_nodes * num_vars, dtype=torch.float32, device=device).reshape(
             1,
