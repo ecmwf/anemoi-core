@@ -49,10 +49,11 @@ def _crack_variable_name(variable_name: str) -> tuple[str, str | None]:
 
 def filter_variables(variables: dict[str, Variable], criteria: dict) -> list[Variable]:
     """Filter variables based on criteria."""
+    assert isinstance(criteria, dict), f"variable_groups criteria must be a dict. Got: {type(criteria)}"
+
     result = []
     for var in variables.values():
         match = True
-        assert isinstance(criteria, dict), f"variable_groups criteria must be a dict. Got: {type(criteria)}"
         for key, value in criteria.items():
             attr = getattr(var, key, None)
             if isinstance(value, list):
