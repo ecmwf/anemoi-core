@@ -417,7 +417,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def supporting_arrays(self) -> dict:
-        from anemoi.training.train.tasks.base import build_combined_supporting_arrays
+        from anemoi.training.utils.supporting_arrays import build_combined_supporting_arrays
         return build_combined_supporting_arrays(self.config, self.graph_data, self.datamodule.supporting_arrays)
 
     @cached_property

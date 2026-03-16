@@ -27,7 +27,6 @@ from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.train.tasks.base import build_combined_supporting_arrays
 from anemoi.training.utils.jsonify import map_config_to_primitives
 
 LOGGER = logging.getLogger(__name__)
@@ -178,6 +177,7 @@ def build_anemoi_model(
     graph_data = _build_graph(config)
 
     # Combine supporting arrays with output-mask arrays
+    from anemoi.training.utils.supporting_arrays import build_combined_supporting_arrays
     supporting_arrays = build_combined_supporting_arrays(
         config=config,
         graph_data=graph_data,

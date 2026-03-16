@@ -53,14 +53,6 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def build_combined_supporting_arrays(config, graph_data: dict, supporting_arrays: dict) -> dict:
-    """Merge output-mask supporting arrays into supporting_arrays."""
-    combined = supporting_arrays.copy()
-    for name, data in graph_data.items():
-        mask = instantiate(config.model.output_mask, graph_data=data)
-        combined[name].update(mask.supporting_arrays)
-    return combined
-
 
 class BaseGraphModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
