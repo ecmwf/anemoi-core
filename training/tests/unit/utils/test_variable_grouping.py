@@ -97,7 +97,7 @@ FILTERED_GROUPS = {
         # Complex metadata-less groups
         (COMPLEX_METADATA_LESS_GROUPS, "q_100", "pl"),
         (COMPLEX_METADATA_LESS_GROUPS, "q_500", "pl"),
-        (COMPLEX_METADATA_LESS_GROUPS, "q", "sfc"),
+        (COMPLEX_METADATA_LESS_GROUPS, "z", "sfc"),
         (COMPLEX_METADATA_LESS_GROUPS, "z_500", "pl"),
         (COMPLEX_METADATA_LESS_GROUPS, "z_123", "pl"),
         (COMPLEX_METADATA_LESS_GROUPS, "2t", "default"),
