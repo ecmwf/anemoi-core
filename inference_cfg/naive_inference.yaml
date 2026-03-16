@@ -1,0 +1,7 @@
+checkpoint: /home/masc/dmi/programming/anemoi/anemoi-core/checkpoints/checkpoint/4150f883-0abc-4f7a-9429-d9b6dfad5422/inference-anemoi-by_epoch-epoch_002-step_000009.ckpt
+date: 2024-11-13
+lead_time: 6h
+input:
+  dataset: /home/masc/dmi/programming/anemoi/anemoi-core/storage/benchmark/benchmark.zarr
+output:
+  none:
