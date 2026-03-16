@@ -986,7 +986,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             parameter_positions = list[int](data_indices.model.output.name_to_index.values())
             # reorder parameter_names by position
             parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
-            metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
+            metadata_variables = pl_module.metadata["dataset"].get("variables_metadata")
 
             # Sort the list using the custom key
             argsort_indices = argsort_variablename_variablelevel(

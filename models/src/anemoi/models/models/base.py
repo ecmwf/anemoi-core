@@ -343,7 +343,3 @@ class BaseGraphModel(nn.Module):
 
         return y_hat
 
-    @abstractmethod
-    def fill_metadata(self, md_dict) -> None:
-        """To be implemented in subclasses to fill model-specific metadata."""
-        pass

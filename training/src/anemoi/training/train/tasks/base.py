@@ -152,6 +152,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
         metadata: dict,
+        supporting_arrays: dict,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -192,6 +193,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.model = model
         self.config = config
+        self.metadata = metadata
+        self.supporting_arrays = supporting_arrays
 
         self.data_indices = data_indices
 
@@ -223,7 +226,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
-                metadata_variables=model.metadata["dataset"][dataset_name].get("variables_metadata"),
+                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
             )
 
             dataset_scalers, dataset_updating_scalars = create_scalers(
@@ -792,6 +795,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             self.is_first_step = False
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
         return
+
+    @abstractmethod
+    def fill_metadata(self, metadata: dict) -> None:
+        """Fill inference metadata with task-specific timestep indices."""
 
     @abstractmethod
     def _step(

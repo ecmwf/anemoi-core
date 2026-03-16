@@ -276,7 +276,7 @@ class AnemoiTrainer(ABC):
 
         model = instantiate(self.config.model)
 
-        model.metadata["metadata_inference"]["task"] = model_task.task_type
+        self.metadata["metadata_inference"]["task"] = model_task.task_type
 
         kwargs = {
             "model": model,
@@ -284,6 +284,7 @@ class AnemoiTrainer(ABC):
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
+            "supporting_arrays": self.supporting_arrays,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
         }
@@ -416,7 +417,8 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def supporting_arrays(self) -> dict:
-        return self.datamodule.supporting_arrays
+        from anemoi.training.train.tasks.base import build_combined_supporting_arrays
+        return build_combined_supporting_arrays(self.config, self.graph_data, self.datamodule.supporting_arrays)
 
     @cached_property
     def _logger_kwargs(self) -> dict:

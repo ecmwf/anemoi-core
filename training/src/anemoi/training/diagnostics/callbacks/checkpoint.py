@@ -163,28 +163,14 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             Path(lightning_checkpoint_filepath).parent.mkdir(parents=True, exist_ok=True)
 
-            save_config = model.config
-            model.config = None
-
-            tmp_metadata = model.metadata
-            model.metadata = None
-
-            tmp_supporting_arrays = model.supporting_arrays
-            model.supporting_arrays = None
-
-            # Make sure we don't accidentally modify these
-            metadata = tmp_metadata.copy()
-            supporting_arrays = tmp_supporting_arrays.copy()
+            metadata = trainer.lightning_module.metadata.copy()
+            supporting_arrays = trainer.lightning_module.supporting_arrays.copy()
 
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
             torch.save(model, inference_checkpoint_filepath)
 
             save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
-
-            model.config = save_config
-            model.metadata = tmp_metadata
-            model.supporting_arrays = tmp_supporting_arrays
 
             self._last_global_step_saved = trainer.global_step
 
@@ -208,9 +194,8 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid
 
                 # Extract and save metadata for lightning checkpoint
-                model = self._torch_drop_down(trainer)
-                metadata = model.metadata.copy()
-                supporting_arrays = model.supporting_arrays.copy()
+                metadata = trainer.lightning_module.metadata.copy()
+                supporting_arrays = trainer.lightning_module.supporting_arrays.copy()
 
                 save_metadata(lightning_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
 

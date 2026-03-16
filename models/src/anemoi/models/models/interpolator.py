@@ -257,20 +257,3 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
 
         return x_out_dict
 
-    def fill_metadata(self, md_dict):
-        for dataset in self.input_dim.keys():
-            input_rel_date_indices = self.input_times
-            output_rel_date_indices = self.output_times
-
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": len(input_rel_date_indices),
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
-            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
-            md_dict["metadata_inference"][dataset]["timesteps"][
-                "output_relative_date_indices"
-            ] = output_rel_date_indices

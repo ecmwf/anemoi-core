@@ -90,6 +90,14 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         self._plot_adapter = InterpolatorMultiOutPlotAdapter(self)
 
+        self.fill_metadata(self.metadata)
+
+    def fill_metadata(self, metadata: dict) -> None:
+        for dataset_name in self.dataset_names:
+            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
+            ts["input_relative_date_indices"] = self.boundary_times
+            ts["output_relative_date_indices"] = self.interp_times
+
     def _step(
         self,
         batch: dict[str, torch.Tensor],
