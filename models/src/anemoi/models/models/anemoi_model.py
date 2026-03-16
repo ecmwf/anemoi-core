@@ -41,13 +41,10 @@ class AnemoiModel(AnemoiModelInterface):
     ) -> None:
         super().__init__()
         self.id = str(uuid.uuid4())
-        self.config = model_config
         self.n_step_input = model_config.training.multistep_input
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
-        self.metadata = metadata
-        self.supporting_arrays = supporting_arrays or {}
         self.data_indices = data_indices
         self.pre_processors = pre_processors
         self.post_processors = post_processors
@@ -67,16 +64,18 @@ class AnemoiModel(AnemoiModelInterface):
             graph_data=graph_data,
             _recursive_=False,
         )
-        self.backbone.fill_metadata(metadata)
+    def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        return {name: self.pre_processors[name](x[name], in_place=False) for name in x}
+
+    def post_process(self, y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        return {name: self.post_processors[name](y[name], in_place=False) for name in y}
 
     def forward(
         self,
         x: dict[str, torch.Tensor],
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        x = {name: self.pre_processors[name](x[name], in_place=False) for name in x}
-        y = self.backbone(x, **kwargs)
-        return {name: self.post_processors[name](y[name], in_place=False) for name in y}
+        return self.post_process(self.backbone(self.pre_process(x), **kwargs))
 
     def predict_step(
         self,
