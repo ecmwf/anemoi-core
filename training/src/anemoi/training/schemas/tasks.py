@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+
 from anemoi.utils.schemas import BaseModel
 
 
