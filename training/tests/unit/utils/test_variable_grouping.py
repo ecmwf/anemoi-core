@@ -64,7 +64,7 @@ LARGE_GROUPS = {
 COMPLEX_METADATA_LESS_GROUPS = {
     "default": "default",
     "sfc": {"param": ["z"], "is_surface_level": True},
-     "pl": {"param": ["q", "z"], "is_surface_level": False},
+    "pl": {"param": ["q", "z"], "is_surface_level": False},
 }
 
 
