@@ -34,12 +34,11 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
-from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
 
 if is_triton_available():
-    from anemoi.models.triton.gt import GraphTransformerFunction
+    from anemoi.models.triton.gt import sparse_graph_attention_coo
 
 LOGGER = logging.getLogger(__name__)
 
@@ -532,7 +531,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         if self.graph_attention_backend == "triton":
             LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
-            self.conv = GraphTransformerFunction.apply
+            self.conv = sparse_graph_attention_coo
         else:
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
@@ -605,9 +604,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         conv_size = (size, size) if isinstance(size, int) else size
 
         if self.graph_attention_backend == "triton":
-            csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
-            edges_csc = edges.index_select(0, perm)
-            args_conv = (edges_csc, csc, reverse)
+            args_conv = (edges, edge_index)
         else:
             args_conv = (edges, edge_index, conv_size)
 
