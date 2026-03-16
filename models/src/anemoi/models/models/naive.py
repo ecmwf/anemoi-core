@@ -17,8 +17,6 @@ import torch
 from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.utils.config import DotDict
-
 from anemoi.models.interface import AnemoiModelInterface
 
 
@@ -26,7 +24,7 @@ class NaiveModel(AnemoiModelInterface):
     """Simplest possible baseline: independent linear layer per grid point.
 
     No graph neural network, no encoder/processor/decoder — just a learned
-    linear map from (n_step_input × n_input_vars) to (n_step_output × n_output_vars)
+    linear map from (n_step_input × n_input) to (n_step_output × n_output)
     applied identically at every grid point.
 
     Implements AnemoiModelInterface directly, independent of AnemoiModel.
@@ -35,40 +33,33 @@ class NaiveModel(AnemoiModelInterface):
     def __init__(
         self,
         *,
-        model_config: DotDict,
-        data_indices: dict,
-        metadata: dict,
-        supporting_arrays: dict | None = None,
+        n_input: int,
+        n_output: int,
+        n_step_input: int,
+        n_step_output: int,
         **_,
     ) -> None:
         super().__init__()
 
-        self.config = model_config
-        self.metadata = metadata
-        self.supporting_arrays = supporting_arrays or {}
-        self.data_indices = data_indices
-
-        n_step_input = model_config.training.multistep_input
-        n_step_output = model_config.training.multistep_output
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
-        self._n_output_vars = {name: len(idx.model.output) for name, idx in data_indices.items()}
+        self._n_output = n_output
 
-        self.linear = nn.ModuleDict({
-            name: nn.Linear(
-                len(idx.model.input) * n_step_input,
-                len(idx.model.output) * n_step_output,
-            )
-            for name, idx in data_indices.items()
-        })
+        self.linear = nn.Linear(n_input * n_step_input, n_output * n_step_output)
+
+    def pre_process(self, x: dict[str, Tensor]) -> dict[str, Tensor]:
+        return x
+
+    def post_process(self, y: dict[str, Tensor]) -> dict[str, Tensor]:
+        return y
 
     def forward(self, x: dict[str, Tensor], **_) -> dict[str, Tensor]:
         out = {}
         for name, x_ds in x.items():
             bs, t, ens, grid, nv = x_ds.shape
             x_flat = x_ds.reshape(bs * grid, t * nv)
-            y_flat = self.linear[name](x_flat)
-            out[name] = y_flat.reshape(bs, self.n_step_output, ens, grid, self._n_output_vars[name])
+            y_flat = self.linear(x_flat)
+            out[name] = y_flat.to(x_ds.dtype).reshape(bs, self.n_step_output, ens, grid, self._n_output)
         return out
 
     def predict_step(
