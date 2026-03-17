@@ -27,6 +27,72 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 
 LOGGER = logging.getLogger(__name__)
 
+# This schema defines the expected structure of the metadata dictionary produced by the trainer.
+# Note that it is not a pydantic schema, and it is still evolving.
+# The purpose is to track changes in the interface with anemoi-inference.
+# Before making changes to the schema, check whether the change is compatible with anemoi-inference.
+METADATA_SCHEMA = {
+    "version": None,
+    "config": None,
+    "seed": None,
+    "run_id": None,
+    "dataset": None,
+    "data_indices": None,
+    "provenance_training": None,
+    "timestamp": None,
+    "metadata_inference": {
+        "seed": None,
+        "run_id": None,
+        "dataset_names": list,  # list of datasets
+        "task": None,
+        "__datasets__": {  # schema applied to each dataset entry
+            "timesteps": {
+                "relative_date_indices_training": None,
+                "input_relative_date_indices": None,
+                "output_relative_date_indices": None,
+                "timestep": None,
+            },
+            "data_indices": {
+                "input": None,
+                "output": None,
+            },
+            "variable_types": {
+                "forcing": None,
+                "target": None,
+                "prognostic": None,
+                "diagnostic": None,
+            },
+            "shapes": {
+                "variables": None,
+                "input_timesteps": None,
+                "ensemble": None,
+                "grid": None,
+            },
+        },
+    },
+}
+
+
+def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
+    """Recursively check that the metadata dictionary conforms to the expected schema."""
+    for key, subschema in schema.items():
+
+        if key == "__datasets__":
+            dataset_names = data.get("dataset_names", [])
+            for ds in dataset_names:
+                assert ds in data, f"{path}: dataset '{ds}' missing"
+                assert_keys_exist(data[ds], subschema, f"{path}.{ds}")
+            continue
+
+        assert key in data, f"{path}: missing key '{key}'"
+
+        if isinstance(subschema, dict):
+            assert isinstance(data[key], dict), f"{path}.{key} should be dict"
+            assert_keys_exist(data[key], subschema, f"{path}.{key}")
+
+        if subschema is list:
+            assert isinstance(data[key], list), f"{path}.{key} should be list"
+
 
 @skip_if_offline
 @pytest.mark.slow
@@ -36,7 +102,9 @@ def test_training_cycle_global(
 ) -> None:
     cfg, url, _ = global_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
 
 
 def test_config_validation_global_config(global_config: tuple[DictConfig, str, str]) -> None:
@@ -120,7 +188,9 @@ def test_training_cycle_stretched(
     cfg, urls = stretched_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
 
 
 def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[str]]) -> None:
@@ -137,7 +207,9 @@ def test_training_cycle_multidatasets(
     cfg, urls = multidatasets_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
 
 
 def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
@@ -151,7 +223,9 @@ def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_a
     cfg, urls = lam_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
 
 
 @skip_if_offline
@@ -176,7 +250,9 @@ def test_config_validation_lam(lam_config: DictConfig) -> None:
 def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = ensemble_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
 
 
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
@@ -210,7 +286,9 @@ def test_training_cycle_autoencoder(
     cfg, urls = autoencoder_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
 
 
 def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, list[str]]) -> None:
@@ -281,7 +359,9 @@ def test_training_cycle_interpolator(
     """Full training-cycle smoke-test for the temporal interpolation task."""
     cfg, url = interpolator_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
 
 
 def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
@@ -295,7 +375,9 @@ def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, s
 def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
     cfg, url = diffusion_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
 
 
 def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
@@ -336,4 +418,6 @@ def test_training_cycle_multidatasets_diffusion(
     cfg, urls = multidatasets_diffusion_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, METADATA_SCHEMA)
