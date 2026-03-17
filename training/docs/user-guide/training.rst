@@ -222,6 +222,7 @@ and the batch size. ``num_workers`` relates to model parallelisation.
       validation: null
       test: 20
 
+
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we
 separate our data into: training data, used to train the model;
@@ -324,8 +325,6 @@ performed. The user can specify the imputer for each dataset by setting
 ensuring that the variable value over NaNs becomes zero after mean-std
 normalisation. Another option is to impute with a given constant.
 
-The ``DynamicInputImputer`` can be used for fields where the NaN
-locations change in time.
 
 .. code:: yaml
 
