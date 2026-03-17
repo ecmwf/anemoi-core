@@ -18,7 +18,7 @@ source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/activate anemoi-trai
 cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
 
 
-run_id="9ca82919-27de-4c6d-8edb-f441052164d1"
+run_id="0bc5949c-722d-4f8a-b56e-49fe41382ac5"
 bash training/docs/user-guide/examples/run_ffs_verification_202505.sh \
   /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/${run_id}/inference-last.ckpt \
   2024-05-02T09:00:00 2024-05-31T20:00:00 1h
