@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     import pytorch_lightning as pl
     from omegaconf import DictConfig
 
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,34 +51,14 @@ class EnsemblePlotMixin:
             Processed batch and predictions
         """
         # For ensemble models, batch is a tuple - allgather the full batch first
-        batch = {
-            dataset: pl_module.allgather_batch(batch[dataset], pl_module.grid_indices[dataset], pl_module.grid_dim)
-            for dataset in batch
-        }
+        batch = {ds_name: pl_module.allgather_batch(batch[ds_name], ds_name) for ds_name in batch}
+
         # Extract ensemble predictions
         loss, y_preds = output
-        y_preds = [
-            {
-                dataset: pl_module.allgather_batch(
-                    pred[dataset],
-                    pl_module.grid_indices[dataset],
-                    pl_module.grid_dim,
-                )
-                for dataset in pred
-            }
-            for pred in y_preds
-        ]
+        y_preds = [{ds_name: pl_module.allgather_batch(pred[ds_name], ds_name) for ds_name in pred} for pred in y_preds]
 
         # Return batch (normalized data) and structured output like regular forecaster
         return batch, [loss, y_preds]
-
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
-        """Return times outputted by the model."""
-        if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
-            output_times = (len(config.training.explicit_times.target), "time_interp")
-        else:
-            output_times = (getattr(pl_module, "rollout", 0), "forecast")
-        return output_times
 
     def process(
         self,
@@ -87,12 +66,12 @@ class EnsemblePlotMixin:
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
-        output_times: tuple,
         members: Union[int, list[int]] = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process ensemble outputs for metrics plotting.
 
         Note: Return only the first ensemble member!!!
+        Uses pl_module.plot_adapter for total_targets and prepare_plot_output_tensor.
 
         Parameters
         ----------
@@ -102,7 +81,6 @@ class EnsemblePlotMixin:
             List of outputs from the model
         batch : torch.Tensor
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
-        output_times : tuple
         members : int, list[int], optional
             Ensemble members to plot. If None, all members are returned. Default to 0.
 
@@ -124,14 +102,10 @@ class EnsemblePlotMixin:
             members = [members]
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][
-                pl_module.model.model._graph_name_data
-            ].x.detach()
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
-        total_targets = output_times[0]
-        if output_times[1] == "forecast":
-            total_targets *= pl_module.n_step_output
+        total_targets = pl_module.plot_adapter.get_total_plot_targets()
 
         input_tensor = (
             batch[dataset_name][
@@ -155,8 +129,7 @@ class EnsemblePlotMixin:
                 for x in outputs[1]
             ),
         )
-        if output_times[1] == "time_interp" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
-            output_tensor = output_tensor.squeeze(0)
+        output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
         output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=-2, fill_value=np.nan)
         data = data.numpy()
@@ -194,12 +167,9 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                     if hasattr(post_processor, "nan_locations"):
                         post_processor.nan_locations = pl_module.allgather_batch(
                             post_processor.nan_locations,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
+                            dataset_name,
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
-
-            output_times = self._get_output_times(self.config, pl_module)
 
             self.plot(
                 trainer,
@@ -209,7 +179,6 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                 processed_batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                output_times=output_times,
                 **kwargs,
             )
 
@@ -291,7 +260,6 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
     ) -> None:
         from anemoi.training.diagnostics.plots import plot_predicted_ensemble
 
@@ -306,7 +274,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 else self.config.data.datasets[dataset_name].diagnostic
             )
             plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name not in diagnostics)
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
                 for name in self.parameters
             }
 
@@ -315,7 +283,6 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 dataset_name,
                 outputs,
                 batch,
-                output_times=output_times,
                 members=self.plot_members,
             )
 
@@ -328,62 +295,42 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             local_rank = pl_module.local_rank
-            if output_times[1] == "forecast" and pl_module.n_step_output > 1:
-                max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
-                        fig = plot_predicted_ensemble(
-                            parameters=plot_parameters_dict,
-                            n_plots_per_sample=4,
-                            latlons=self.latlons[dataset_name],
-                            clevels=self.accumulation_levels_plot,
-                            y_true=data[truth_idx, ...].squeeze(),
-                            y_pred=output_tensor[rollout_step, out_step, ...].squeeze(),
-                            datashader=self.datashader_plotting,
-                            precip_and_related_fields=self.precip_and_related_fields,
-                            colormaps=self.colormaps,
-                        )
-
-                        self._output_figure(
-                            logger,
-                            fig,
-                            epoch=epoch,
-                            tag=(
-                                "pred_val_sample_"
-                                f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
-                                f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                            exp_log_tag=(
-                                "pred_val_sample_"
-                                f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
-                                f"rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                        )
-            else:
-                for rollout_step in range(output_times[0]):
-                    fig = plot_predicted_ensemble(
-                        parameters=plot_parameters_dict,
-                        n_plots_per_sample=4,
-                        latlons=self.latlons[dataset_name],
-                        clevels=self.accumulation_levels_plot,
-                        y_true=data[rollout_step + 1, ...].squeeze(),
-                        y_pred=output_tensor[rollout_step, ...].squeeze(),
-                        datashader=self.datashader_plotting,
-                        precip_and_related_fields=self.precip_and_related_fields,
-                        colormaps=self.colormaps,
-                    )
-
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=(
-                            f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_"
-                            f"rank{local_rank:01d}{self.focus_mask.tag}"
-                        ),
-                        exp_log_tag=f"pred_val_sample_{dataset_name}_rstep{rollout_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                    )
+            for item in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                pl_module.plot_adapter.output_times,
+                max_out_steps=self.output_steps,
+            ):
+                if len(item) == 3:
+                    y_true, y_pred, tag_suffix = item[0], item[1], item[2]
+                else:
+                    _, y_true, y_pred, tag_suffix = item
+                y_true = np.asarray(y_true).squeeze()
+                y_pred = np.asarray(y_pred).squeeze()
+                fig = plot_predicted_ensemble(
+                    parameters=plot_parameters_dict,
+                    n_plots_per_sample=4,
+                    latlons=self.latlons[dataset_name],
+                    clevels=self.accumulation_levels_plot,
+                    y_true=y_true,
+                    y_pred=y_pred,
+                    datashader=self.datashader_plotting,
+                    precip_and_related_fields=self.precip_and_related_fields,
+                    colormaps=self.colormaps,
+                    projection_kind=self.projection_kind,
+                )
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=(
+                        f"pred_val_sample_{dataset_name}_{tag_suffix}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    exp_log_tag=(
+                        f"pred_val_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                )
 
 
 # Overload callbacks from single forecaster by using them with the first ensemble member
