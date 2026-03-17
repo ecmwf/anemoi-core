@@ -11,7 +11,8 @@
 import functools
 from collections import deque
 from typing import Any
-
+from omegaconf.dictconfig import DictConfig
+from omegaconf.listconfig import ListConfig
 
 class FixedLengthSet:
     def __init__(self, maxlen: int):
@@ -42,7 +43,7 @@ class FixedLengthSet:
 
 
 def expand_iterables(
-    params: dict[str, Any],
+    params: dict[str, Any] | DictConfig[str, Any],
     *,
     size_threshold: int | None = None,
     recursive: bool = True,
@@ -57,7 +58,7 @@ def expand_iterables(
 
     Parameters
     ----------
-    params : dict[str, Any]
+    params : dict[str, Any] | DictConfig[str, Any]
         Parameters to be expanded.
     size_threshold : int | None, optional
         Threshold of str(value) to expand iterable at.
@@ -89,24 +90,23 @@ def expand_iterables(
     def should_be_expanded(x: Any) -> bool:
         return size_threshold is None or len(str(x)) > size_threshold
 
-    nested_func = functools.partial(expand_iterables, size_threshold=size_threshold, recursive=recursive)
+    nested_func = functools.partial(expand_iterables, size_threshold=size_threshold, recursive=recursive, delimiter=delimiter)
 
-    def expand(val: dict | list) -> dict[str, Any]:
+    def expand(val:  Any) -> dict[str, Any]:
         if not recursive:
             return val
-        if isinstance(val, dict):
+        if isinstance(val, dict | DictConfig):
             return nested_func(val)
-        if isinstance(val, list):
+        if isinstance(val, list | ListConfig):
             return nested_func(dict(enumerate(val)))
         return val
 
     expanded_params = {}
 
     for key, value in params.items():
-        if isinstance(value, list | tuple):
+        if isinstance(value, list | tuple | ListConfig):
             if should_be_expanded(value):
-                for i, v in enumerate(value):
-                    expanded_params[f"{key}{delimiter}{i}"] = expand(v)
+                expanded_params[key] = expand(dict(enumerate(value)))
 
                 expanded_params[f"{key}{delimiter}all"] = value
                 expanded_params[f"{key}{delimiter}length"] = len(value)

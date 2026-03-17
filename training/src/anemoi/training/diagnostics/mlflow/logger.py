@@ -681,7 +681,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         for key in expand_keys or []:
             if key in params:
                 expanded_params.update(
-                    expand_iterables(params, size_threshold=None, delimiter="."),
+                    expand_iterables({key: params.pop(key)}, size_threshold=None, delimiter="."),
                 )
         expanded_params.update(params)
 
