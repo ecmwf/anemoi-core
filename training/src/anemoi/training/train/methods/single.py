@@ -20,7 +20,7 @@ from anemoi.training.train.methods.base import BaseGraphModule
 LOGGER = logging.getLogger(__name__)
 
 
-class SingleProtocol(BaseGraphModule):
+class SingleTraining(BaseGraphModule):
     """Base class for deterministic prediction tasks."""
 
     def _compute_metrics(

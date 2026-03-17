@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class EnsembleProtocol(BaseGraphModule):
+class EnsembleTraining(BaseGraphModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
 
     def __init__(

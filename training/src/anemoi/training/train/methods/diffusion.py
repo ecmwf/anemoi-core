@@ -160,7 +160,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         return sigma, weight
 
 
-class DiffusionProtocol(BaseDiffusionForecaster):
+class DiffusionTraining(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion."""
 
     def _step(
@@ -218,7 +218,7 @@ class DiffusionProtocol(BaseDiffusionForecaster):
         return loss, metrics, [y_pred]
 
 
-class DiffusionTendProtocol(BaseDiffusionForecaster):
+class DiffusionTendTraining(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
 
     def __init__(
