@@ -93,7 +93,10 @@ def expand_iterables(
         return size_threshold is None or len(str(x)) > size_threshold
 
     nested_func = functools.partial(
-        expand_iterables, size_threshold=size_threshold, recursive=recursive, delimiter=delimiter,
+        expand_iterables,
+        size_threshold=size_threshold,
+        recursive=recursive,
+        delimiter=delimiter,
     )
 
     def expand(val: Any) -> dict[str, Any]:
