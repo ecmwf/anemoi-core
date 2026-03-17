@@ -22,8 +22,9 @@ config_validation: True
 diagnostics:
   plot:
     callbacks: []
-
 system:
+  input:
+    graph: ???
   hardware:
     accelerator: auto
     num_gpus_per_node: 1
