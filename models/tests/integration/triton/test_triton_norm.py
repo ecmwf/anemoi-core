@@ -18,10 +18,17 @@ if is_triton_available():
     from anemoi.models.triton.norm import RMSNorm
 
 
+@pytest.fixture
+def device():
+    if torch.cuda.is_available():
+        return "cuda"
+    else:
+        return "cpu"
+
+
 @pytest.fixture(autouse=True)
-def setup_torch():
+def setup_torch(device):
     """Set up torch defaults for all tests."""
-    device = "cuda"
     torch.set_default_device(device)
     torch.set_default_dtype(torch.float32)
     yield
@@ -40,10 +47,10 @@ def test_norm_forward(b: int, h: int, d: int, norm_type: str):
 
     x = torch.randn((b, h, d))
     if norm_type == "rmsNorm":
-        norm = RMSNorm().cuda()
+        norm = RMSNorm()
         norm_ref = torch.nn.RMSNorm(d, elementwise_affine=False)
     elif norm_type == "layerNorm":
-        norm = LayerNorm().cuda()
+        norm = LayerNorm()
         norm_ref = torch.nn.LayerNorm(d, elementwise_affine=False, bias=False)
 
     x_triton = norm(x)
@@ -68,10 +75,10 @@ def test_norm_backward(b: int, h: int, d: int, norm_type: str):
     x = torch.randn((b, h, d), requires_grad=True)
 
     if norm_type == "rmsNorm":
-        norm = RMSNorm().cuda()
+        norm = RMSNorm()
         norm_ref = torch.nn.RMSNorm(d, elementwise_affine=False)
     elif norm_type == "layerNorm":
-        norm = LayerNorm().cuda()
+        norm = LayerNorm()
         norm_ref = torch.nn.LayerNorm(d, elementwise_affine=False, bias=False)
 
     x_triton = norm(x)
