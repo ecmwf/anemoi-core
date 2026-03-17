@@ -106,7 +106,8 @@ def expand_iterables(
     for key, value in params.items():
         if isinstance(value, list | tuple | ListConfig):
             if should_be_expanded(value):
-                expanded_params[key] = expand(dict(enumerate(value)))
+                for i, v in enumerate(value):
+                    expanded_params[f"{key}{delimiter}{i}"] = expand(v)
 
                 expanded_params[f"{key}{delimiter}all"] = value
                 expanded_params[f"{key}{delimiter}length"] = len(value)

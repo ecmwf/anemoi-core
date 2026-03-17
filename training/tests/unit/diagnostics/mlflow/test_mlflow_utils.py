@@ -74,3 +74,16 @@ def test_expand_iterables_with_nested_list() -> None:
         "a.all": [[0, 1, 2], "b", "c"],
         "a.length": 3,
     }
+
+def test_expand_iterables_with_omegaconf() -> None:
+    from omegaconf.dictconfig import DictConfig
+    from omegaconf.listconfig import ListConfig
+    dictionary = DictConfig({"a": ListConfig([ListConfig([0, 1, 2]), "b", "c"])})
+    expanded = expand_iterables(dictionary)
+    assert expanded == {
+        "a.0": {0: 0, 1: 1, 2: 2},
+        "a.1": "b",
+        "a.2": "c",
+        "a.all": [[0, 1, 2], "b", "c"],
+        "a.length": 3,
+    }
