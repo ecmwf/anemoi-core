@@ -247,7 +247,8 @@ class SphericalHarmonicTransform(Module):
         if key not in self._graphed_rfft_cache:
             LOGGER.info(f"Compiling graphed callable for rfft_rings_reduced with input signature {key}")
             sample_x = torch.zeros_like(x, requires_grad=x.requires_grad)
-            self._graphed_rfft_cache[key] = make_graphed_callables(self._rfft_reduced_impl, (sample_x,))
+            with torch.amp.autocast("cuda", cache_enabled=False):
+                self._graphed_rfft_cache[key] = make_graphed_callables(self._rfft_reduced_impl, (sample_x,))
         else:
             LOGGER.info(f"Reusing graphed callable for rfft_rings_reduced with input signature {key}")
 
