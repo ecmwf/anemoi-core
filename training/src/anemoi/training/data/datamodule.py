@@ -177,9 +177,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
+        input_relative_date_indices = self.task.get_batch_input_indices()
+        output_relative_date_indices = self.task.get_batch_output_indices()
+        relative_date_indices = sorted(input_relative_date_indices + output_relative_date_indices)
         timesteps = {
             "timestep": self.config.data.timestep,
+            "relative_date_indices_training": relative_date_indices,  # backwards compatibility with inference
+            "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
+            "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
         }
+
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
             metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
