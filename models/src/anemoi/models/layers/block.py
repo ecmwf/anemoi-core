@@ -529,25 +529,27 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             )
             self.graph_attention_backend = "pyg"
 
+        self.unfused_qk_norm = False  # Will be set to true only if using qk_norm with pyg backend. no qk_norm or qk_norm with triton backend will not use unfused qk norm
         if self.graph_attention_backend == "triton":
-            LOGGER.info(
-                f"{self.__class__.__name__} using triton graph attention backend with qk_normalisation mode: {self.qk_norm}."
-            )
             assert self.qk_norm in [
                 "none",
                 "rms_norm",
                 "layer_norm",
             ], f"Invalid qk_norm {self.qk_norm} for triton backend. Valid options are 'none', 'rms_norm' and 'layer_norm'."
+            LOGGER.info(
+                f"{self.__class__.__name__} using triton graph attention backend with qk_normalisation mode: {self.qk_norm}."
+            )
 
             self.conv = GraphTransformer(self.out_channels_conv, self.qk_norm)
         else:
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
-
-        # Triton graph attention has a fused QK norm which will be used instead to perform QK normalisation
-        if self.qk_norm != "none" and self.graph_attention_backend != "triton":
-            LOGGER.info("Using standalone QK Norms")
-            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
-            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
+            if self.qk_norm != "none":
+                LOGGER.info(
+                    f"Normalizing query with {layer_kernels.QueryNorm.__name__} and key with {layer_kernels.KeyNorm.__name__}."
+                )
+                self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
+                self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
+                self.unfused_qk_norm = True
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
@@ -821,7 +823,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         else:
             query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
 
-        if self.qk_norm != "none" and self.graph_attention_backend != "triton":
+        if self.unfused_qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
 
@@ -932,7 +934,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
         # Triton graphtransformer has a fused qk_norm option which is used instead
-        if self.qk_norm != "none" and self.graph_attention_backend != "triton":
+        if self.unfused_qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
 

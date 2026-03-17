@@ -29,17 +29,10 @@ def setup_torch():
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "b,h,d,elementwise_affine,norm_type",
-    [
-        (B, H, C, affine, norm_type)
-        for B in (1, 4)
-        for H in (2, 6)
-        for C in (4, 6)
-        for affine in [False]
-        for norm_type in ["rmsNorm", "layerNorm"]
-    ],
+    "b,h,d,norm_type",
+    [(B, H, C, norm_type) for B in (1, 4) for H in (2, 6) for C in (4, 6) for norm_type in ["rmsNorm", "layerNorm"]],
 )
-def test_norm_forward(b: int, h: int, d: int, elementwise_affine: bool, norm_type: str):
+def test_norm_forward(b: int, h: int, d: int, norm_type: str):
     """Test forward pass of RMS Norm."""
 
     if not torch.cuda.is_available():
@@ -47,16 +40,11 @@ def test_norm_forward(b: int, h: int, d: int, elementwise_affine: bool, norm_typ
 
     x = torch.randn((b, h, d))
     if norm_type == "rmsNorm":
-        norm = RMSNorm(d, elementwise_affine=elementwise_affine).cuda()
-        norm_ref = torch.nn.RMSNorm(d, elementwise_affine=elementwise_affine)
+        norm = RMSNorm().cuda()
+        norm_ref = torch.nn.RMSNorm(d, elementwise_affine=False)
     elif norm_type == "layerNorm":
-        norm = LayerNorm(d, elementwise_affine=elementwise_affine).cuda()
-        norm_ref = torch.nn.LayerNorm(d, elementwise_affine=elementwise_affine, bias=False)
-    # change weights from inital value of [1] for correctness testing
-    if elementwise_affine:
-        with torch.no_grad():
-            norm.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
-            norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
+        norm = LayerNorm().cuda()
+        norm_ref = torch.nn.LayerNorm(d, elementwise_affine=False, bias=False)
 
     x_triton = norm(x)
 
@@ -68,10 +56,10 @@ def test_norm_forward(b: int, h: int, d: int, elementwise_affine: bool, norm_typ
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "b, h,d,elementwise_affine",
-    [(B, H, C, affine) for B in (1, 4) for H in (2, 6) for C in (4, 6) for affine in [False]],
+    "b, h,d,norm_type",
+    [(B, H, C, norm_type) for B in (1, 4) for H in (2, 6) for C in (4, 6) for norm_type in ["rmsNorm", "layerNorm"]],
 )
-def test_norm_backward(b: int, h: int, d: int, elementwise_affine: bool):
+def test_norm_backward(b: int, h: int, d: int, norm_type: str):
     """Test backward pass of RMS Norm."""
 
     if not torch.cuda.is_available():
@@ -79,35 +67,25 @@ def test_norm_backward(b: int, h: int, d: int, elementwise_affine: bool):
 
     x = torch.randn((b, h, d), requires_grad=True)
 
-    rms_norm = RMSNorm(d, elementwise_affine=elementwise_affine).cuda()
-    rms_norm_ref = torch.nn.RMSNorm(d, elementwise_affine=elementwise_affine)
+    if norm_type == "rmsNorm":
+        norm = RMSNorm().cuda()
+        norm_ref = torch.nn.RMSNorm(d, elementwise_affine=False)
+    elif norm_type == "layerNorm":
+        norm = LayerNorm().cuda()
+        norm_ref = torch.nn.LayerNorm(d, elementwise_affine=False, bias=False)
 
-    # change weights from inital value of [1] for correctness testing
-    if elementwise_affine:
-        with torch.no_grad():
-            rms_norm.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
-            rms_norm_ref.weight[:] = torch.arange(d, device=x.device) * 0.1 + 1.0
-
-    x_triton = rms_norm(x)
+    x_triton = norm(x)
     loss_triton = x_triton.pow(2).sum()
     loss_triton.backward()
     grad_x_triton = x.grad.clone()
 
-    if elementwise_affine:
-        grad_w_triton = rms_norm.weight.grad.clone()
-
     x.grad.zero_()
 
-    x_ref = rms_norm_ref(x)
+    x_ref = norm_ref(x)
     loss_ref = x_ref.pow(2).sum()
     loss_ref.backward()
     grad_x_ref = x.grad.clone()
 
-    if elementwise_affine:
-        grad_w_ref = rms_norm_ref.weight.grad.clone()
-
     tolerance = 1e-4
     torch.testing.assert_close(x_triton, x_ref, atol=tolerance, rtol=0)
     torch.testing.assert_close(grad_x_triton, grad_x_ref, atol=tolerance, rtol=0)  # dx
-    if elementwise_affine:
-        torch.testing.assert_close(grad_w_triton, grad_w_ref, atol=tolerance, rtol=0)  # dw

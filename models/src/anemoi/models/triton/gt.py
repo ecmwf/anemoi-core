@@ -78,9 +78,9 @@ def _gt_fwd(
 
     if qk_norm > 0:
         if qk_norm == 1:  # rms norm
-            q = _rms_norm_fwd(q, None, C, False)
+            q = _rms_norm_fwd(q, C)
         elif qk_norm == 2:  # layer norm
-            q = _layer_norm_fwd(q, None, C, False)
+            q = _layer_norm_fwd(q, C)
 
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
@@ -103,9 +103,9 @@ def _gt_fwd(
 
         if qk_norm > 0:
             if qk_norm == 1:  # rms norm
-                k = _rms_norm_fwd(k, None, C, False)
+                k = _rms_norm_fwd(k, C)
             elif qk_norm == 2:  # layer norm
-                k = _layer_norm_fwd(k, None, C, False)
+                k = _layer_norm_fwd(k, C)
 
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -205,9 +205,9 @@ def _gt_bwd_dst_pass(
         q_unnorm = q  # need to save an unnormalised copy for the bwd pass later
 
         if qk_norm == 1:  # rms norm
-            q = _rms_norm_fwd(q, None, C, False)
+            q = _rms_norm_fwd(q, C)
         elif qk_norm == 2:  # layer norm
-            q = _layer_norm_fwd(q, None, C, False)
+            q = _layer_norm_fwd(q, C)
 
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
@@ -224,9 +224,9 @@ def _gt_bwd_dst_pass(
 
         # Normalise k if required
         if qk_norm == 1:  # rms norm
-            k = _rms_norm_fwd(k, None, C, False)
+            k = _rms_norm_fwd(k, C)
         elif qk_norm == 2:  # layer norm
-            k = _layer_norm_fwd(k, None, C, False)
+            k = _layer_norm_fwd(k, C)
 
         ke = k + e
         # score and alpha using saved M
@@ -249,9 +249,9 @@ def _gt_bwd_dst_pass(
     if qk_norm > 0:
         # Compute the backward pass of RMS norm
         if qk_norm == 1:  # rms norm
-            dq, dw_q_norm = _rms_norm_bwd(q_unnorm, None, dq, C, False)
+            dq = _rms_norm_bwd(q_unnorm, dq, C)
         elif qk_norm == 2:  # layer norm
-            dq, dw_q_norm = _layer_norm_bwd(q_unnorm, None, dq, C, False)
+            dq = _layer_norm_bwd(q_unnorm, dq, C)
 
     # store D_j and dQ
     tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
@@ -311,9 +311,9 @@ def _gt_bwd_src_pass(
         # Since normalisation was done in the fwd pass, we must renormalise now
         k_unnorm = k  # must save copy of unnormalised value for bwd pass later
         if qk_norm == 1:  # rms norm
-            k = _rms_norm_fwd(k, None, C, False)
+            k = _rms_norm_fwd(k, C)
         elif qk_norm == 2:  # layer norm
-            k = _layer_norm_fwd(k, None, C, False)
+            k = _layer_norm_fwd(k, C)
 
     v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -333,9 +333,9 @@ def _gt_bwd_src_pass(
         dst_off = dst * H * C + H_C_off
         q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         if qk_norm == 1:  # rms norm
-            q = _rms_norm_fwd(q, None, C, False)
+            q = _rms_norm_fwd(q, C)
         elif qk_norm == 2:  # layer norm
-            q = _layer_norm_fwd(q, None, C, False)
+            q = _layer_norm_fwd(q, C)
         d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
@@ -371,9 +371,9 @@ def _gt_bwd_src_pass(
     if qk_norm > 0:
         # Compute the backward pass of RMS Norm
         if qk_norm == 1:  # rms norm
-            accK, dw_k_norm = _rms_norm_bwd(k_unnorm, None, accK, C, False)
+            accK = _rms_norm_bwd(k_unnorm, accK, C)
         elif qk_norm == 2:  # layer norm
-            accK, dw_k_norm = _layer_norm_bwd(k_unnorm, None, accK, C, False)
+            accK = _layer_norm_bwd(k_unnorm, accK, C)
 
     # write final accumulated per-src grads
     tl.store(
