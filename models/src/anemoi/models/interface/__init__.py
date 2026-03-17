@@ -7,26 +7,39 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from abc import ABC
-from abc import abstractmethod
 from typing import Optional
+from typing import Protocol
+from typing import runtime_checkable
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 
-class AnemoiModelInterface(torch.nn.Module, ABC):
-    """Abstract interface for Anemoi model wrappers."""
+@runtime_checkable
+class AnemoiModelInterface(Protocol):
+    """Structural interface for Anemoi model wrappers.
 
-    @abstractmethod
+    Any class that implements these methods satisfies this interface without
+    needing to inherit from it. Concrete implementations should inherit from
+    ``torch.nn.Module`` directly.
+    """
+
     def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Apply pre-processing (e.g. normalisation) to model inputs."""
+        ...
 
-    @abstractmethod
     def post_process(self, y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Apply post-processing (e.g. denormalisation) to model outputs."""
+        ...
 
-    @abstractmethod
+    def forward(
+        self,
+        x: dict[str, torch.Tensor],
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Run the model forward pass on pre-processed inputs."""
+        ...
+
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
@@ -35,6 +48,7 @@ class AnemoiModelInterface(torch.nn.Module, ABC):
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Run a full inference step (pre-process → forward → post-process)."""
+        ...
 
 
 __all__ = ["AnemoiModelInterface"]

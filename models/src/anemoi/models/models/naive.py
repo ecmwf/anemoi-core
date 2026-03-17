@@ -17,10 +17,7 @@ import torch
 from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.interface import AnemoiModelInterface
-
-
-class NaiveModel(AnemoiModelInterface):
+class NaiveModel(torch.nn.Module):
     """Simplest possible baseline: independent linear layer per grid point.
 
     No graph neural network, no encoder/processor/decoder — just a learned
