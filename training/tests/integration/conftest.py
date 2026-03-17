@@ -693,3 +693,185 @@ def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str
     cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
     cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
     return cfg, url
+
+
+# ---------------------------------------------------------------------------
+# Unified parameterized multigpu fixtures
+# ---------------------------------------------------------------------------
+
+_MULTIGPU_MODEL_TYPES = [
+    "stretched",
+    "lam",
+    "graphtransformer",
+    "hierarchical",
+    "diffusion",
+    "diffusiontend",
+    "ensemble",
+]
+
+_MULTIGPU_ROLLOUT_MODEL_TYPES = [
+    "graphtransformer",
+    "hierarchical",
+    "ensemble",
+]
+
+
+def _build_multigpu_config(
+    model_type: str,
+    testing_modifications: DictConfig,
+    get_tmp_path: GetTmpPath,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, list[str]]:
+    """Build a multigpu config for the given model type.
+
+    Returns (cfg, urls) where urls is always a list of archive URLs.
+    """
+    config_dir = Path.cwd() / "training/tests/integration/config"
+
+    if model_type == "stretched":
+        with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched_mg"):
+            template = compose(config_name="stretched")
+        use_case = OmegaConf.load(config_dir / "test_stretched.yaml")
+        assert isinstance(use_case, DictConfig)
+        tmp_dataset, url_dataset = get_tmp_path(use_case.system.input.dataset)
+        tmp_forcing, url_forcing = get_tmp_path(use_case.system.input.forcing_dataset)
+        use_case.system.input.dataset = str(tmp_dataset)
+        use_case.system.input.forcing_dataset = str(tmp_forcing)
+        cfg = OmegaConf.merge(template, testing_modifications, use_case)
+        OmegaConf.resolve(cfg)
+        _configure_multigpu_model_sharding(cfg)
+        OmegaConf.resolve(cfg)
+        urls = [url_dataset, url_forcing]
+
+    elif model_type == "lam":
+        with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_lam_mg"):
+            template = compose(config_name="lam")
+        use_case = OmegaConf.load(config_dir / "test_lam.yaml")
+        assert isinstance(use_case, DictConfig)
+        tmp_dataset, url_dataset = get_tmp_path(use_case.system.input.dataset)
+        tmp_forcing, url_forcing = get_tmp_path(use_case.system.input.forcing_dataset)
+        use_case.system.input.dataset = str(tmp_dataset)
+        use_case.system.input.forcing_dataset = str(tmp_forcing)
+        cfg = OmegaConf.merge(template, testing_modifications, use_case)
+        OmegaConf.resolve(cfg)
+        _configure_multigpu_model_sharding(cfg)
+        OmegaConf.resolve(cfg)
+        urls = [url_dataset, url_forcing]
+
+    elif model_type == "graphtransformer":
+        cfg, url, _ = build_global_config(
+            ["model=graphtransformer"],
+            testing_modifications,
+            get_tmp_path,
+        )
+        _configure_multigpu_model_sharding(cfg)
+        OmegaConf.resolve(cfg)
+        urls = [url]
+
+    elif model_type == "hierarchical":
+        with initialize(
+            version_base=None,
+            config_path="../../src/anemoi/training/config",
+            job_name="test_hierarchical_mg",
+        ):
+            template = compose(config_name="hierarchical")
+        use_case = OmegaConf.load(config_dir / "test_global.yaml")
+        assert isinstance(use_case, DictConfig)
+        tmp_dataset, url_dataset = get_tmp_path(use_case.system.input.dataset)
+        use_case.system.input.dataset = str(tmp_dataset)
+        cfg = OmegaConf.merge(template, testing_modifications, use_case)
+        _configure_multigpu_model_sharding(cfg)
+        OmegaConf.resolve(cfg)
+        urls = [url_dataset]
+
+    elif model_type in ("diffusion", "diffusiontend"):
+        overrides = []
+        if model_type == "diffusiontend":
+            overrides = [
+                "model=graphtransformer_diffusiontend",
+                "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+            ]
+        with initialize(
+            version_base=None,
+            config_path="../../src/anemoi/training/config",
+            job_name="test_diffusion_mg",
+        ):
+            template = compose(config_name="diffusion", overrides=overrides)
+        use_case = OmegaConf.load(config_dir / "test_diffusion.yaml")
+        tmp_dataset, url_dataset = get_tmp_path(use_case.system.input.dataset)
+        use_case.system.input.dataset = str(tmp_dataset)
+        cfg = OmegaConf.merge(template, testing_modifications, use_case)
+        OmegaConf.resolve(cfg)
+        _configure_multigpu_model_sharding(cfg)
+        OmegaConf.resolve(cfg)
+        urls = [url_dataset]
+
+    elif model_type == "ensemble":
+        overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
+        with initialize(
+            version_base=None,
+            config_path="../../src/anemoi/training/config",
+            job_name="test_ensemble_mg",
+        ):
+            template = compose(config_name="ensemble_crps", overrides=overrides)
+        use_case = OmegaConf.load(config_dir / "test_ensemble_crps.yaml")
+        assert isinstance(use_case, DictConfig)
+        tmp_dataset, url_dataset = get_tmp_path(use_case.system.input.dataset)
+        use_case.system.input.dataset = str(tmp_dataset)
+        cfg = OmegaConf.merge(template, testing_modifications, use_case)
+        OmegaConf.resolve(cfg)
+        cfg = handle_truncation_matrices(cfg, get_test_data)
+        cfg.training.multistep_input = 3
+        cfg.training.multistep_output = 2
+        _configure_multigpu_ensemble(cfg)
+        OmegaConf.resolve(cfg)
+        urls = [url_dataset]
+
+    else:
+        msg = f"Unknown multigpu model type: {model_type}"
+        raise ValueError(msg)
+
+    assert isinstance(cfg, DictConfig)
+    return cfg, urls
+
+
+@pytest.fixture(
+    params=_MULTIGPU_MODEL_TYPES,
+    ids=_MULTIGPU_MODEL_TYPES,
+)
+def multigpu_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, list[str], str]:
+    """Parameterized fixture that builds multigpu configs for each model type."""
+    model_type = request.param
+    cfg, urls = _build_multigpu_config(
+        model_type,
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+        get_test_data,
+    )
+    return cfg, urls, model_type
+
+
+@pytest.fixture(
+    params=_MULTIGPU_ROLLOUT_MODEL_TYPES,
+    ids=_MULTIGPU_ROLLOUT_MODEL_TYPES,
+)
+def multigpu_rollout_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, list[str], str]:
+    """Parameterized fixture for model types that support rollout > 1."""
+    model_type = request.param
+    cfg, urls = _build_multigpu_config(
+        model_type,
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+        get_test_data,
+    )
+    return cfg, urls, model_type

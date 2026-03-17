@@ -37,12 +37,13 @@ def _configure_rollout_gt1(cfg: DictConfig) -> None:
     [True, False],
     ids=["keep_batch_sharded", "allgather_batch"],
 )
-def test_training_cycle_stretched_model_sharding(
-    stretched_multigpu_config: tuple[DictConfig, list[str]],
+def test_training_cycle_model_sharding(
+    multigpu_config: tuple[DictConfig, list[str], str],
     get_test_archive: GetTestArchive,
     keep_batch_sharded: bool,
 ) -> None:
-    cfg, urls = stretched_multigpu_config
+    """Test multigpu model-sharding training for all model types."""
+    cfg, urls, _model_type = multigpu_config
     cfg.model.keep_batch_sharded = keep_batch_sharded
     for url in urls:
         get_test_archive(url)
@@ -52,130 +53,14 @@ def test_training_cycle_stretched_model_sharding(
 @skip_if_offline
 @pytest.mark.slow
 @pytest.mark.multigpu
-@pytest.mark.parametrize(
-    "keep_batch_sharded",
-    [True, False],
-    ids=["keep_batch_sharded", "allgather_batch"],
-)
-def test_training_cycle_lam_model_sharding(
-    lam_multigpu_config: tuple[DictConfig, list[str]],
-    get_test_archive: GetTestArchive,
-    keep_batch_sharded: bool,
-) -> None:
-    cfg, urls = lam_multigpu_config
-    cfg.model.keep_batch_sharded = keep_batch_sharded
-    for url in urls:
-        get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-@skip_if_offline
-@pytest.mark.slow
-@pytest.mark.multigpu
-def test_training_cycle_ensemble_multigpu(
-    ensemble_multigpu_config: tuple[DictConfig, str],
+def test_training_cycle_model_sharding_rollout2(
+    multigpu_rollout_config: tuple[DictConfig, list[str], str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = ensemble_multigpu_config
-    get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-@skip_if_offline
-@pytest.mark.slow
-@pytest.mark.multigpu
-def test_training_cycle_ensemble_multigpu_rollout2(
-    ensemble_multigpu_config: tuple[DictConfig, str],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, url = ensemble_multigpu_config
-    _configure_rollout_gt1(cfg)
-    get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-@skip_if_offline
-@pytest.mark.slow
-@pytest.mark.multigpu
-@pytest.mark.parametrize(
-    "keep_batch_sharded",
-    [True, False],
-    ids=["keep_batch_sharded", "allgather_batch"],
-)
-def test_training_cycle_graphtransformer_model_sharding(
-    graphtransformer_multigpu_config: tuple[DictConfig, str],
-    get_test_archive: GetTestArchive,
-    keep_batch_sharded: bool,
-) -> None:
-    cfg, url = graphtransformer_multigpu_config
-    cfg.model.keep_batch_sharded = keep_batch_sharded
-    get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-@skip_if_offline
-@pytest.mark.slow
-@pytest.mark.multigpu
-def test_training_cycle_graphtransformer_model_sharding_rollout2(
-    graphtransformer_multigpu_config: tuple[DictConfig, str],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, url = graphtransformer_multigpu_config
-    cfg.model.keep_batch_sharded = True
-    _configure_rollout_gt1(cfg)
-    get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-@skip_if_offline
-@pytest.mark.slow
-@pytest.mark.multigpu
-@pytest.mark.parametrize(
-    "keep_batch_sharded",
-    [True, False],
-    ids=["keep_batch_sharded", "allgather_batch"],
-)
-def test_training_cycle_hierarchical_model_sharding(
-    hierarchical_multigpu_config: tuple[DictConfig, list[str]],
-    get_test_archive: GetTestArchive,
-    keep_batch_sharded: bool,
-) -> None:
-    cfg, urls = hierarchical_multigpu_config
-    cfg.model.keep_batch_sharded = keep_batch_sharded
-    for url in urls:
-        get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-@skip_if_offline
-@pytest.mark.slow
-@pytest.mark.multigpu
-def test_training_cycle_hierarchical_model_sharding_rollout2(
-    hierarchical_multigpu_config: tuple[DictConfig, list[str]],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, urls = hierarchical_multigpu_config
+    """Test multigpu model-sharding training with rollout > 1."""
+    cfg, urls, _model_type = multigpu_rollout_config
     cfg.model.keep_batch_sharded = True
     _configure_rollout_gt1(cfg)
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-@skip_if_offline
-@pytest.mark.slow
-@pytest.mark.multigpu
-@pytest.mark.parametrize(
-    "keep_batch_sharded",
-    [True, False],
-    ids=["keep_batch_sharded", "allgather_batch"],
-)
-def test_training_cycle_diffusion_model_sharding(
-    diffusion_multigpu_config: tuple[DictConfig, str],
-    get_test_archive: GetTestArchive,
-    keep_batch_sharded: bool,
-) -> None:
-    cfg, url = diffusion_multigpu_config
-    cfg.model.keep_batch_sharded = keep_batch_sharded
-    get_test_archive(url)
     AnemoiTrainer(cfg).train()
