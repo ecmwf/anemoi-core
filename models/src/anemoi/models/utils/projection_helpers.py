@@ -144,18 +144,17 @@ def residual_projection_edge_names(
     dataset_name: str,
     graph_or_config: HeteroData | DictConfig | Mapping,
     dataset_names: list[str],
-    projection_config: Mapping | DictConfig | None = None,
+    truncation_projection_config: Mapping | DictConfig | None = None,
 ) -> tuple[tuple[str, str, str], tuple[str, str, str]]:
     """Return the down/up edge tuples used by ``TruncatedConnection``.
 
     The returned names already follow the multi-dataset graph naming when the
     graph contains one node group per dataset.
     """
-    truncation_node_name = residual_projection_truncation_node_name(projection_config)
-    truncation_cfg = projection_config.get("truncation") if projection_config is not None else None
+    truncation_node_name = residual_projection_truncation_node_name(truncation_projection_config)
     relation_name = (
-        truncation_cfg.get("relation_name", DEFAULT_EDGE_RELATION_NAME)
-        if truncation_cfg is not None
+        truncation_projection_config.get("relation_name", DEFAULT_EDGE_RELATION_NAME)
+        if truncation_projection_config is not None
         else DEFAULT_EDGE_RELATION_NAME
     )
     down_edges = projection_edge_name(

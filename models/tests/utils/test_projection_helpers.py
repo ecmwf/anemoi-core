@@ -103,16 +103,18 @@ def test_residual_projection_helpers_resolve_custom_and_default_truncation_names
     fused_graph: HeteroData,
 ) -> None:
     projection_config = {"truncation": {"node_name": "truncation", "relation_name": "projects_to"}}
+    truncation_config = projection_config["truncation"]
 
     assert residual_projection_truncation_node_name(None) == "truncation"
     assert residual_projection_truncation_node_name({"truncation_nodes": "legacy"}) == "legacy"
     assert residual_projection_truncation_node_name(projection_config) == "truncation"
+    assert residual_projection_truncation_node_name(truncation_config) == "truncation"
 
     down_edges, up_edges = residual_projection_edge_names(
         dataset_name="era5",
         graph_or_config=fused_graph,
         dataset_names=["era5", "cerra"],
-        projection_config=projection_config,
+        truncation_projection_config=truncation_config,
     )
 
     assert down_edges == ("era5", "projects_to", "era5_truncation")

@@ -266,7 +266,7 @@ class TruncatedConnection(BaseResidualConnection):
                 dataset_name=dataset_name,
                 graph_or_config=graph,
                 dataset_names=dataset_names,
-                projection_config=projection_cfg,
+                truncation_projection_config=projection_cfg,
             )
             truncation_down_edges_name = down_edges
             truncation_up_edges_name = up_edges

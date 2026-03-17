@@ -234,6 +234,26 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
     BaseSchema(**cfg)
 
 
+def test_default_ensemble_template_keeps_main_multiscale_defaults() -> None:
+    from hydra import compose
+    from hydra import initialize
+
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_ensemble_defaults",
+    ):
+        cfg = compose(config_name="ensemble_crps")
+
+    training_loss_cfg = cfg.training.training_loss.datasets.data
+    validation_loss_cfg = cfg.training.validation_metrics.datasets.data.multiscale
+
+    assert training_loss_cfg.loss_matrices == [None]
+    assert training_loss_cfg.get("loss_matrices_graph", False) is False
+    assert validation_loss_cfg.loss_matrices == [None]
+    assert validation_loss_cfg.get("loss_matrices_graph", False) is False
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_ensemble_graph_multiscale(
