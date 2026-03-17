@@ -522,6 +522,7 @@ class Migrator:
 
         for module_path_end, module_path_start in context.module_paths.items():
             LOGGER.debug("Move module %s to %s.", module_path_start, module_path_end)
+            importlib.import_module(module_path_end)
             sys.modules[module_path_start] = sys.modules[module_path_end]
         for full_attribute_path_end, attribute_path_start in context.attribute_paths.items():
             attribute_path_start, _, mod_name_start = attribute_path_start.rpartition(".")
