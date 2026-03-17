@@ -82,9 +82,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config_local, self.data_indices, self.statistics)
 
-    def _calculate_input_dim_latent(self, dataset_name: str) -> int:
-        return self.node_attributes.attr_ndims[self._graph_name_hidden[0]]
-
     def _build_networks(self, model_config):
 
         # note that this is called by the super class init
@@ -107,7 +104,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.input_dim_latent[dataset_name],
+                in_channels_dst=self.input_dim_latent,
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )

@@ -107,7 +107,7 @@ class BaseGraphModel(nn.Module):
         self._internal_output_idx = {}
         self._decoding_forcing_input_idx = {}
         self.input_dim = {}
-        self.input_dim_latent = {}
+        self.input_dim_latent = self._calculate_input_dim_latent()
         self.target_dim = {}
         self.output_dim = {}
 
@@ -126,15 +126,16 @@ class BaseGraphModel(nn.Module):
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
-            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
 
-    def _calculate_input_dim_latent(self, dataset_name: str) -> int:
-        return self.node_attributes.attr_ndims[dataset_name]
+    def _calculate_input_dim_latent(self) -> int:
+        """Calculate the latent input dimension."""
+        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
+        return self.node_attributes.attr_ndims[nodes_name]
 
     @staticmethod
     def _as_hidden_node_names(

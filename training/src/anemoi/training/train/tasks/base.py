@@ -624,12 +624,18 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        return self.loss[dataset_name](
-            y_pred,
-            y,
-            grid_shard_slice=grid_shard_slice,
-            group=self.model_comm_group,
-        )
+        loss = self.loss[dataset_name]
+        loss_kwargs = {
+            "grid_shard_slice": grid_shard_slice,
+            "group": self.model_comm_group,
+        }
+        if getattr(loss, "needs_shard_layout_info", False):
+            loss_kwargs.update(
+                grid_dim=self.grid_dim,
+                grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+            )
+
+        return loss(y_pred, y, **loss_kwargs)
 
     def _compute_metrics(
         self,
@@ -959,7 +965,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     model_comm_group=self.model_comm_group,
                     model_comm_group_size=self.model_comm_group_size,
                     grid_dim=self.grid_dim,
-                    grid_shard_shapes=self.grid_shard_shapes,
+                    grid_shard_shapes=self.grid_shard_shapes[dataset_name],
                 )
                 continue
 
@@ -972,15 +978,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     )
                     raise ValueError(exception_msg)
 
+                metric_kwargs = {
+                    "grid_shard_slice": grid_shard_slice,
+                    "group": self.model_comm_group,
+                }
+                if getattr(metric, "needs_shard_layout_info", False):
+                    metric_kwargs.update(
+                        grid_dim=self.grid_dim,
+                        grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+                    )
+
                 metrics[metric_step_name] = metric(
                     y_pred_postprocessed,
                     y_postprocessed,
                     scaler_indices=(..., indices),
-                    grid_shard_slice=grid_shard_slice,
-                    group=self.model_comm_group,
-                    model_comm_group_size=self.model_comm_group_size,
-                    grid_dim=self.grid_dim,
-                    grid_shard_shapes=self.grid_shard_shapes,
+                    **metric_kwargs,
                 )
 
         return metrics
