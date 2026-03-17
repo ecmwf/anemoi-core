@@ -9,13 +9,10 @@ defaults:
 - training: single
 - _self_
 
-config_validation: False
+config_validation: True
 
 data:
-  frequency: 6h
-  resolution: o96
-
-  diagnostics: [] # Default behaviour is to interpolate between observed fields, not predict unseen fields
+  frequency: 1h
 
 #dataloader:
 # model_run_info: #Add for non-analysis training

@@ -9,7 +9,7 @@ defaults:
 - training: ensemble
 - _self_
 
-config_validation: False
+config_validation: True
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords
@@ -19,16 +19,8 @@ config_validation: False
 #   num_gpus_per_node: 1
 
 diagnostics:
-  callbacks: []
   plot:
     callbacks: []
-  log:
-    mlflow:
-      enabled: False
-      tracking_uri: None
-    wandb:
-      enabled: False
-      entity: example
 
 system:
   input:
@@ -37,8 +29,6 @@ system:
     truncation: ${data.resolution}-o32-linear.mat.npz
     truncation_inv: o32-${data.resolution}-linear.mat.npz
     loss_matrices_path: null
-  output:
-    root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
   hardware:
     accelerator: auto
     num_gpus_per_ensemble: 1
