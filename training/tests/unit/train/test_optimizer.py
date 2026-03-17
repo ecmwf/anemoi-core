@@ -5,13 +5,13 @@ from pytest_mock import MockerFixture
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.tasks.base import BaseTrainingModule
 
 
 @pytest.fixture
-def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
-    """Create a lightweight mock BaseGraphModule instance with real methods bound."""
-    module = mocker.MagicMock(spec=BaseGraphModule)
+def mocked_module(mocker: MockerFixture) -> BaseTrainingModule:
+    """Create a lightweight mock BaseTrainingModule instance with real methods bound."""
+    module = mocker.MagicMock(spec=BaseTrainingModule)
 
     # Inject minimal attributes required by the tested functions
     module.lr = 0.001
@@ -21,9 +21,9 @@ def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
     module.parameters.return_value = [torch.nn.Parameter(torch.randn(2, 2))]
 
     # Bind real methods from the class so they work on this mock
-    module._create_optimizer_from_config = BaseGraphModule._create_optimizer_from_config.__get__(module)
-    module._create_scheduler = BaseGraphModule._create_scheduler.__get__(module)
-    module.configure_optimizers = BaseGraphModule.configure_optimizers.__get__(module)
+    module._create_optimizer_from_config = BaseTrainingModule._create_optimizer_from_config.__get__(module)
+    module._create_scheduler = BaseTrainingModule._create_scheduler.__get__(module)
+    module.configure_optimizers = BaseTrainingModule.configure_optimizers.__get__(module)
 
     return module
 
@@ -31,7 +31,7 @@ def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
 # ---- Tests ----
 
 
-def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
+def test_create_optimizer_from_config(mocked_module: BaseTrainingModule) -> None:
 
     optimizer_cfg = OmegaConf.create(
         {
@@ -55,7 +55,7 @@ def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
     assert optimizer.defaults["betas"] == expected_betas
 
 
-def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -> None:
+def test_create_optimizer_from_config_ademamix(mocked_module: BaseTrainingModule) -> None:
 
     optimizer_cfg = OmegaConf.create(
         {
@@ -79,7 +79,7 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -
     assert optimizer.defaults["betas"] == expected_betas
 
 
-def test_create_optimizer_from_config_invalid(mocked_module: BaseGraphModule) -> None:
+def test_create_optimizer_from_config_invalid(mocked_module: BaseTrainingModule) -> None:
     bad_cfg = OmegaConf.create(
         {
             "_target_": "nonexistent.OptimizerClass",
@@ -89,7 +89,7 @@ def test_create_optimizer_from_config_invalid(mocked_module: BaseGraphModule) ->
         mocked_module._create_optimizer_from_config(bad_cfg)
 
 
-def test_create_scheduler(mocked_module: BaseGraphModule) -> None:
+def test_create_scheduler(mocked_module: BaseTrainingModule) -> None:
     """Ensure cosine scheduler is constructed correctly."""
     optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.lr)
     sched_dict = mocked_module._create_scheduler(optimizer)

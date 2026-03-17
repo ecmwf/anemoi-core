@@ -12,7 +12,7 @@ from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAd
 from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.tasks.base import BaseTrainingModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.forecaster import GraphForecaster
@@ -165,7 +165,7 @@ _CFG_FORECASTER = DictConfig(
 
 
 def _set_base_task_attrs(
-    obj: BaseGraphModule,
+    obj: BaseTrainingModule,
     *,
     data_indices: dict[str, IndexCollection],
     config: DictConfig,

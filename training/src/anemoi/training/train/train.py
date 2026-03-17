@@ -379,7 +379,7 @@ class AnemoiTrainer(ABC):
             "seed": self.initial_seed,
             "run_id": self.run_id,
             "dataset_names": None,  # will be populated in DataModule
-            "task": None,  # will be populated in BaseGraphModule
+            "task": None,  # will be populated in BaseTrainingModule
         }
         # Store metadata needed in inference in a separate dict "metadata_inference"
         # For each group, we add a dictionary with:

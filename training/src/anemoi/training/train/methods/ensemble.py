@@ -16,7 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.training.train.methods.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class EnsembleTraining(BaseGraphModule):
+class EnsembleTraining(BaseTrainingModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
 
     def __init__(

@@ -15,12 +15,12 @@ import logging
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.train.methods.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 
 LOGGER = logging.getLogger(__name__)
 
 
-class SingleTraining(BaseGraphModule):
+class SingleTraining(BaseTrainingModule):
     """Base class for deterministic prediction tasks."""
 
     def _compute_metrics(

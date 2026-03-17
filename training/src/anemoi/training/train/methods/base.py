@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseGraphModule(pl.LightningModule, ABC):
+class BaseTrainingModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 
     This class encapsulates the shared functionality for distributed training,

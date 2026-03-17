@@ -19,7 +19,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 
-from .base import BaseGraphModule
+from .base import BaseTrainingModule
 
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseDiffusionForecaster(BaseGraphModule):
+class BaseDiffusionForecaster(BaseTrainingModule):
     """Base class for diffusion forecasters."""
 
     task_type = "forecaster"
@@ -450,7 +450,7 @@ class DiffusionTendTraining(BaseDiffusionForecaster):
         tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
             Loss value, metrics, and predictions (per step)
         """
-        # batch is already normalized in BaseGraphModule._normalize_batch
+        # batch is already normalized in BaseTrainingModule._normalize_batch
         # x: data.input.full (normalized), y: data.output.full (normalized)
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
         y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
