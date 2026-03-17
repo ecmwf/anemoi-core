@@ -729,7 +729,9 @@ def _build_multigpu_config(
     config_dir = Path.cwd() / "training/tests/integration/config"
 
     if model_type == "stretched":
-        with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched_mg"):
+        with initialize(
+            version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched_mg",
+        ):
             template = compose(config_name="stretched")
         use_case = OmegaConf.load(config_dir / "test_stretched.yaml")
         assert isinstance(use_case, DictConfig)
