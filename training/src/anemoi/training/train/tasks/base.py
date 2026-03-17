@@ -22,6 +22,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
@@ -45,7 +46,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
@@ -78,7 +78,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ----------
     config : BaseSchema
         Configuration object defining all parameters.
-    graph_data : dict[str, HeteroData]
+    graph_data : HeteroData
         Graph-structured input data containing node and edge features, keyed by dataset name.
     statistics : dict
         Dictionary of training statistics (mean, std, etc.) used for normalization.
@@ -137,7 +137,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -150,7 +150,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : dict[str, HeteroData]
+        graph_data : HeteroData
             Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
@@ -164,17 +164,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         super().__init__()
 
-        assert isinstance(graph_data, dict), "graph_data must be a dict keyed by dataset name"
+        assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
         # Handle dictionary of graph_data
-        graph_data = {name: data.to(self.device) for name, data in graph_data.items()}
-        self.dataset_names = list(graph_data.keys())
+        graph_data = graph_data.to(self.device)
+        self.dataset_names = list(data_indices.keys())
 
         # Create output_mask dictionary for each dataset
-        self.output_mask = {}
-        for name in self.dataset_names:
-            self.output_mask[name] = instantiate(config.model.output_mask, graph_data=graph_data[name])
+        self.output_mask = {
+            name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
+        }
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
@@ -235,12 +235,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
-                graph_data=graph_data[dataset_name],
+                graph_data=graph_data,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
                 ),
                 metadata_extractor=metadata_extractor,
+                nodes_name=dataset_name,
                 output_mask=self.output_mask[dataset_name],
             )
             self.scalers[dataset_name] = dataset_scalers
@@ -295,8 +296,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.shard_shapes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[dataset_name][
-                "data"
+            self.grid_sizes[dataset_name] = graph_data[
+                dataset_name
             ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
             self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
@@ -347,16 +348,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return "multi_dataset"
 
     def _check_sharding_support(self) -> None:
-        self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())
+        self.loss_supports_sharding = all(
+            getattr(leaf, "supports_sharding", False) for loss in self.loss.values() for leaf in loss.iter_leaf_losses()
+        )
         self.metrics_support_sharding = all(
             getattr(metric, "supports_sharding", False)
             for dataset_metrics in self.metrics.values()
             for metric in dataset_metrics.values()
         )
-
         if not self.loss_supports_sharding and self.keep_batch_sharded:
             unsupported_losses = [
-                loss.name for loss in self.loss.values() if not getattr(loss, "supports_sharding", False)
+                type(leaf).__name__
+                for loss in self.loss.values()
+                for leaf in loss.iter_leaf_losses()
+                if not getattr(leaf, "supports_sharding", False)
             ]
             LOGGER.warning(
                 "Some loss functions do not support sharding: %s. "
@@ -453,15 +458,32 @@ class BaseGraphModule(pl.LightningModule, ABC):
         kwargs = {"model": self.model, "dataset_name": dataset_name}
 
         scaler = scaler_builder.update_scaling_values(callback, **kwargs)
-        if scaler is None:  # If scalar is None, no update to be applied
+        if scaler is None:  # If scaler is None, no update to be applied
             return
 
-        if name in loss_obj.scaler:  # If scalar in loss, update it
+        if self._can_update_scaler(loss_obj, name):
             loss_obj.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
         for metric in metrics_dict.values():  # If scalar in metrics, update it
-            if name in metric.scaler:
+            if self._can_update_scaler(metric, name):
                 metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+
+    @staticmethod
+    def _can_update_scaler(loss_or_metric: torch.nn.Module, scaler_name: str) -> bool:
+        """Whether a module can update a scaler with this name.
+
+        Standard losses/metrics expose a ``scaler`` container, while composite losses
+        (e.g., ``CombinedLoss``) intentionally remove this attribute and route updates
+        through their ``update_scaler`` implementation.
+        """
+        if not hasattr(loss_or_metric, "update_scaler"):
+            return False
+
+        scaler = getattr(loss_or_metric, "scaler", None)
+        if scaler is None:
+            return True
+
+        return scaler_name in scaler
 
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
@@ -532,7 +554,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         is_sharded = grid_shard_slice is not None
 
-        sharding_supported = (self.loss_supports_sharding or validation_mode) and (
+        sharding_supported = (self.loss_supports_sharding) and (  # loss calculated in training and validation mode
             self.metrics_support_sharding or not validation_mode
         )
 
