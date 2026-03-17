@@ -440,6 +440,8 @@ def plot_predicted_multilevel_flat_sample(
     precip_and_related_fields: list | None = None,
     colormaps: dict[str, Colormap] | None = None,
     time_label: str | None = None,
+    input_time_label: str | None = None,
+    valid_time_label: str | None = None,
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
@@ -485,6 +487,12 @@ def plot_predicted_multilevel_flat_sample(
     if colormaps is None:
         colormaps = {}
 
+    if valid_time_label is None and time_label is not None:
+        # Backward-compatible behavior for existing callers.
+        valid_time_label = time_label
+    if input_time_label is None and time_label is not None:
+        input_time_label = time_label
+
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
         xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
         yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
@@ -513,6 +521,8 @@ def plot_predicted_multilevel_flat_sample(
             cmap=cmap,
             error_cmap=error_cmap,
             time_label=time_label,
+            input_time_label=input_time_label,
+            valid_time_label=valid_time_label,
         )
     return fig
 
@@ -532,6 +542,8 @@ def plot_flat_sample(
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
     time_label: str | None = None,
+    input_time_label: str | None = None,
+    valid_time_label: str | None = None,
 ) -> None:
     """Plot a "flat" 1D sample.
 
@@ -589,8 +601,21 @@ def plot_flat_sample(
         f"{vname} increment [pred - input]",
         f"{vname} persist err",
     ]
-    if time_label:
-        titles = [f"{title}\n{time_label}" for title in titles]
+    if valid_time_label is None and time_label is not None:
+        valid_time_label = time_label
+    if input_time_label is None and time_label is not None:
+        input_time_label = time_label
+
+    if input_time_label or valid_time_label:
+        labels = [
+            input_time_label,  # input
+            valid_time_label,  # target
+            valid_time_label,  # pred
+            valid_time_label,  # pred err
+            valid_time_label,  # increment
+            valid_time_label,  # persist err
+        ]
+        titles = [f"{title}\n{label}" if label else title for title, label in zip(titles, labels, strict=True)]
     # colormaps
     cmaps = [cmap] * 3 + [error_cmap] * 3
     # normalizations for significant colormaps

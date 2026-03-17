@@ -1336,6 +1336,12 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 batch_idx,
                                 truth_idx,
                             )
+                            input_time_label = self._format_target_time_label(
+                                batch,
+                                dataset_name,
+                                batch_idx,
+                                init_step,
+                            )
                             time_token = self._target_time_token(time_label, batch_idx)
                             fig = plot_predicted_multilevel_flat_sample(
                                 plot_parameters_dict,
@@ -1348,7 +1354,8 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 datashader=self.datashader_plotting,
                                 precip_and_related_fields=self.precip_and_related_fields,
                                 colormaps=self.colormaps,
-                                time_label=time_label,
+                                input_time_label=input_time_label,
+                                valid_time_label=time_label,
                             )
 
                             self._output_figure(
@@ -1391,6 +1398,12 @@ class PlotSample(BasePlotAdditionalMetrics):
                             batch_idx,
                             rollout_step + 1,
                         )
+                        input_time_label = self._format_target_time_label(
+                            batch,
+                            dataset_name,
+                            batch_idx,
+                            init_step,
+                        )
                         time_token = self._target_time_token(time_label, batch_idx)
                         fig = plot_predicted_multilevel_flat_sample(
                             plot_parameters_dict,
@@ -1403,7 +1416,8 @@ class PlotSample(BasePlotAdditionalMetrics):
                             datashader=self.datashader_plotting,
                             precip_and_related_fields=self.precip_and_related_fields,
                             colormaps=self.colormaps,
-                            time_label=time_label,
+                            input_time_label=input_time_label,
+                            valid_time_label=time_label,
                         )
 
                         self._output_figure(
