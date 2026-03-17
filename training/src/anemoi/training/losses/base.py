@@ -236,7 +236,7 @@ class BaseLoss(nn.Module, ABC):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
         squash_mode: str = "avg",
-        **kwargs,
+        **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -299,7 +299,7 @@ class FunctionalLoss(BaseLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
         squash_mode: str = "avg",
-        **kwargs,
+        **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
