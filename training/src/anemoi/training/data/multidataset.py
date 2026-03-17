@@ -381,7 +381,7 @@ class MultiDataset(IterableDataset):
                 grid_indices = slice(start, end)
             else:
                 grid_indices = slice(None)
-            x[name] = dataset.get_sample(time_indices, grid_indices)
+            x[name] = dataset.get_sample(time_steps, grid_indices)
 
         return x
 

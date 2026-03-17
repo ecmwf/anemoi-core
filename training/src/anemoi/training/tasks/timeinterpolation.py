@@ -10,6 +10,7 @@
 import logging
 
 from anemoi.training.tasks.base import BaseSingleStepTask
+from anemoi.utils.dates import as_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,4 +30,6 @@ class TimeInterpolationTask(BaseSingleStepTask):
         outputs_offsets: list[str],
         **_kwargs,
     ) -> None:
+        inputs_offsets = [as_timedelta(offset) for offset in inputs_offsets]
+        outputs_offsets = [as_timedelta(offset) for offset in outputs_offsets]
         super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets)
