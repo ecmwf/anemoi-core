@@ -49,7 +49,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.input_dim_latent[dataset_name],
+                in_channels_dst=self.input_dim_latent,
                 hidden_dim=self.num_channels,
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
