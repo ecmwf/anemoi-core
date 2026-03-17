@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from anemoi.training.utils.index_space import IndexSpace
+
 from .combined import CombinedLoss
 from .huber import HuberLoss
 from .kcrps import AlmostFairKernelCRPS
@@ -24,7 +26,6 @@ from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
 from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
-from anemoi.training.utils.index_space import IndexSpace
 
 __all__ = [
     "AlmostFairKernelCRPS",

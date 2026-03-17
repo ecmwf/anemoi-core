@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
+from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
     from collections.abc import Generator

@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.utils.index_space import IndexSpace
     from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.utils.index_space import IndexSpace
 
 
 LOGGER = logging.getLogger(__name__)

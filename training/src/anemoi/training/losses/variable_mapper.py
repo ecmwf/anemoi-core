@@ -16,9 +16,9 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 
 
 class LossVariableMapper(BaseLoss):

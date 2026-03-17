@@ -20,8 +20,8 @@ from omegaconf import DictConfig
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import get_loss_function
-from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.losses.variable_mapper import LossVariableMapper
+from anemoi.training.utils.index_space import IndexSpace
 
 
 class TestScalerFilteringWithTargetOnlyVariables:

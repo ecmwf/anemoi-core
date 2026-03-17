@@ -19,8 +19,8 @@ from omegaconf import DictConfig
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
-from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 
 

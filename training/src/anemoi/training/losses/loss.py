@@ -82,7 +82,7 @@ def _extract_constructor_context(
 
 
 # Future import breaks other type hints TODO Harrison Cook
-def get_loss_function(  # noqa: C901
+def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: IndexCollection | None = None,

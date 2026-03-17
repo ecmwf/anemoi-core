@@ -17,13 +17,13 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
-from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionTendForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -1002,6 +1002,8 @@ def test_graphdiffusiontendforecaster_validation_metrics_use_data_full_state_tar
     assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
     torch.testing.assert_close(captured["metric_target"], y_state["data"] + 7.0)
     torch.testing.assert_close(y_pred_state_full, y_pred_state["data"])
+
+
 def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
     module = MagicMock(spec=BaseGraphModule)
     loss = CaptureLoss()

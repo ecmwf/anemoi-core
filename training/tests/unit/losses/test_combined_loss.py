@@ -22,8 +22,8 @@ from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
-from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.index_space import IndexSpace
 
 

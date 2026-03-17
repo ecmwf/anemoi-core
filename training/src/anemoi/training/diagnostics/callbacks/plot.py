@@ -45,9 +45,9 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 

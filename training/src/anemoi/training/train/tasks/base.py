@@ -48,8 +48,8 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.utils.index_space import IndexSpace
     from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
