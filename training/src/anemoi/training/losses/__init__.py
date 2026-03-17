@@ -9,7 +9,6 @@
 
 from .combined import CombinedLoss
 from .huber import HuberLoss
-from .index_space import IndexSpace
 from .kcrps import AlmostFairKernelCRPS
 from .kcrps import KernelCRPS
 from .logcosh import LogCoshLoss
@@ -25,6 +24,7 @@ from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
 from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
+from anemoi.training.utils.index_space import IndexSpace
 
 __all__ = [
     "AlmostFairKernelCRPS",

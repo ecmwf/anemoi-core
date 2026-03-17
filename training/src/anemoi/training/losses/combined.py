@@ -16,15 +16,20 @@ from typing import Any
 import torch
 from omegaconf import DictConfig
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.utils.enums import TensorDim
 
 
 class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
+    # CombinedLoss builds child losses itself, so it needs the filtered scaler
+    # set and data indices during construction.
+    factory_context_keys = frozenset({"available_scalers", "data_indices"})
     _initial_set_scaler: bool = False
 
     def __init__(
@@ -32,6 +37,8 @@ class CombinedLoss(BaseLoss):
         *extra_losses: dict[str, Any] | Callable | BaseLoss,
         loss_weights: tuple[int, ...] | None = None,
         losses: tuple[dict[str, Any] | Callable | BaseLoss] | None = None,
+        available_scalers: dict[str, TENSOR_SPEC] | None = None,
+        data_indices: IndexCollection | None = None,
         **kwargs,
     ):
         """Combined loss function.
@@ -71,6 +78,11 @@ class CombinedLoss(BaseLoss):
             Must be the same length as the number of losses.
             If None, all losses are weighted equally.
             by default None.
+        available_scalers : dict[str, TENSOR_SPEC] | None, optional
+            Scaler tensors already filtered by the top-level CombinedLoss configuration.
+            These are passed down to child losses when present.
+        data_indices : IndexCollection | None, optional
+            Training data indices needed by child losses that perform variable mapping.
         kwargs: Any
             Additional arguments to pass to the loss functions, if not Loss.
 
@@ -121,9 +133,6 @@ class CombinedLoss(BaseLoss):
         if loss_weights is None:
             loss_weights = (1.0,) * len(losses)
 
-        data_indices = kwargs.pop("data_indices", None)
-        scalers = kwargs.pop("scalers", {})
-
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
@@ -133,12 +142,12 @@ class CombinedLoss(BaseLoss):
                 scaler_spec = loss_config.pop("scalers", ["*"])
                 self._loss_scaler_specification[i] = scaler_spec
                 # Only propagate scaler declarations when explicitly provided.
-                if scalers:
+                if available_scalers:
                     loss_config["scalers"] = scaler_spec
                 self.losses.append(
                     get_loss_function(
                         DictConfig(loss_config),
-                        scalers=scalers,
+                        scalers=available_scalers,
                         data_indices=data_indices,
                         **dict(kwargs),
                     ),

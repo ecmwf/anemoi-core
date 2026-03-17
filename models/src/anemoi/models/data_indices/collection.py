@@ -29,6 +29,7 @@ class IndexCollection:
 
     @staticmethod
     def _contiguous_span(indices: list[int]) -> tuple[bool, int, int]:
+        """Return whether indices form a contiguous run and, if so, its start and length."""
         if not indices:
             return True, 0, 0
         start = indices[0]

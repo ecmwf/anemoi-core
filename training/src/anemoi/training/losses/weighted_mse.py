@@ -37,6 +37,7 @@ class WeightedMSELoss(MSELoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
     ) -> torch.Tensor:
         """Calculates the weighted MSE loss.
 
@@ -73,4 +74,4 @@ class WeightedMSELoss(MSELoss):
 
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(out, squash, group=group if is_sharded else None)
+        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

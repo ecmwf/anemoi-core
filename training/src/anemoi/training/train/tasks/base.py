@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.losses.index_space import IndexSpace
+    from anemoi.training.utils.index_space import IndexSpace
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -974,6 +974,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
+            # Validation now compares the model output tensor with the full target tensor.
+            # Those can contain different variables, so the metric needs to know how to
+            # line them up before computing the score. Other metrics do not have this information.
             assert isinstance(
                 metric,
                 BaseLoss,

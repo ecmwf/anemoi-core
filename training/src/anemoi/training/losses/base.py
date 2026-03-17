@@ -13,6 +13,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
+from typing import ClassVar
 
 import torch
 from torch import nn
@@ -28,6 +29,9 @@ LOGGER = logging.getLogger(__name__)
 class BaseLoss(nn.Module, ABC):
     """Base loss."""
 
+    # Most losses are built from config alone. Subclasses can list any
+    # extra inputs they need from get_loss_function() here.
+    factory_context_keys: ClassVar[frozenset[str]] = frozenset()
     scaler: ScaleTensor
 
     def __init__(
@@ -226,6 +230,7 @@ class BaseLoss(nn.Module, ABC):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
         **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
@@ -247,6 +252,8 @@ class BaseLoss(nn.Module, ABC):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group to reduce over, by default None
+        squash_mode : str, optional
+            Reduction mode for the variable dimension, by default ``"avg"``
         **kwargs
             Additional keyword arguments
 
@@ -286,6 +293,7 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
         **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
@@ -307,6 +315,8 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
+        squash_mode : str, optional
+            Reduction mode for the variable dimension, by default ``"avg"``
         **kwargs
             Additional keyword arguments
 
@@ -318,5 +328,4 @@ class FunctionalLoss(BaseLoss):
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-        squash_mode = kwargs.get("squash_mode", "avg")
         return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

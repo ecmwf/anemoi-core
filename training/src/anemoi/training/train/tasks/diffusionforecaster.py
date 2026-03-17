@@ -17,7 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.training.losses.index_space import IndexSpace
+from anemoi.training.utils.index_space import IndexSpace
 
 from .base import BaseGraphModule
 

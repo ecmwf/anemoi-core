@@ -16,7 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.training.losses.index_space import IndexSpace
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 from anemoi.training.utils.enums import TensorDim
 

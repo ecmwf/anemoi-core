@@ -11,7 +11,7 @@ from enum import StrEnum
 
 
 class IndexSpace(StrEnum):
-    """Tensor index-space for variable resolution in loss wrappers."""
+    """Tensor index-space used when aligning predictions and targets."""
 
     MODEL_OUTPUT = "model_output"
     DATA_OUTPUT = "data_output"

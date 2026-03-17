@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
-from anemoi.training.losses.index_space import IndexSpace
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:

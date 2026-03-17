@@ -21,7 +21,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
-from anemoi.training.losses.index_space import IndexSpace
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:

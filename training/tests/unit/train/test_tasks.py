@@ -12,7 +12,7 @@ from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAd
 from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
-from anemoi.training.losses.index_space import IndexSpace
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionTendForecaster
