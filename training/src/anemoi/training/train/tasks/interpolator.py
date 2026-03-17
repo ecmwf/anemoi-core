@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.models.interface import ModelInterface
 
 
 LOGGER = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
     def __init__(
         self,
         *,
-        model: "AnemoiModelInterface",
+        model: "ModelInterface",
         config: DictConfig,
         graph_data: dict[str, HeteroData],
         statistics: dict,
@@ -56,7 +56,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
 
         Parameters
         ----------
-        model : AnemoiModelInterface
+        model : ModelInterface
             Pre-built model
         config : DictConfig
             Job configuration

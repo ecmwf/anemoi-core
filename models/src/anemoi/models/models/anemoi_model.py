@@ -18,7 +18,7 @@ from torch_geometric.data import HeteroData
 from anemoi.utils.config import DotDict
 
 class AnemoiModel(torch.nn.Module):
-    """Standard implementation of :class:`AnemoiModelInterface`."""
+    """Standard implementation of :class:`ModelInterface`."""
 
     def __init__(
         self,

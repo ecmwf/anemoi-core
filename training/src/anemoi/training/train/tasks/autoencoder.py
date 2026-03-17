@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.models.interface import ModelInterface
 
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class GraphAutoEncoder(BaseGraphModule):
     def __init__(
         self,
         *,
-        model: "AnemoiModelInterface",
+        model: "ModelInterface",
         config: DictConfig,
         graph_data: HeteroData,
         statistics: dict,
@@ -50,7 +50,7 @@ class GraphAutoEncoder(BaseGraphModule):
 
         Parameters
         ----------
-        model : AnemoiModelInterface
+        model : ModelInterface
             Pre-built model
         config : DictConfig
             Job configuration

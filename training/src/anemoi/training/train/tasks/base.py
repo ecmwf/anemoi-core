@@ -28,7 +28,7 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.interface import ModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -94,7 +94,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     Attributes
     ----------
-    model : AnemoiModelInterface
+    model : ModelInterface
         Wrapper for the underlying GNN model and its pre/post-processing logic.
     loss : BaseLoss
         Training loss function, optionally supporting variable scaling and sharding.
@@ -126,7 +126,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     See Also
     --------
-    - `AnemoiModelInterface`
+    - `ModelInterface`
     - `BaseLoss`
     - `IndexCollection`
     - `CosineLRScheduler`
@@ -137,7 +137,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def __init__(
         self,
         *,
-        model: AnemoiModelInterface,
+        model: ModelInterface,
         config: BaseSchema,
         graph_data: dict[str, HeteroData],
         statistics: dict,
@@ -150,7 +150,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        model : AnemoiModelInterface
+        model : ModelInterface
             Pre-built model
         config : DictConfig
             Job configuration

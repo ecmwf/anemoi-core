@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
-    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.models.interface import ModelInterface
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
     def __init__(
         self,
         *,
-        model: "AnemoiModelInterface",
+        model: "ModelInterface",
         config: DictConfig,
         graph_data: dict[str, HeteroData],
         statistics: dict,
@@ -51,7 +51,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         Parameters
         ----------
-        model : AnemoiModelInterface
+        model : ModelInterface
             Pre-built model
         config : DictConfig
             Job configuration

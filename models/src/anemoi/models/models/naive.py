@@ -24,7 +24,7 @@ class NaiveModel(torch.nn.Module):
     linear map from (n_step_input × n_input) to (n_step_output × n_output)
     applied identically at every grid point.
 
-    Implements AnemoiModelInterface directly, independent of AnemoiModel.
+    Implements ModelInterface directly, independent of AnemoiModel.
     """
 
     def __init__(

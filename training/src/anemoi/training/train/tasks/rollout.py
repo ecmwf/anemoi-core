@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.models.interface import ModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
 
 
@@ -40,7 +40,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
     def __init__(
         self,
         *,
-        model: "AnemoiModelInterface",
+        model: "ModelInterface",
         config: BaseSchema,
         graph_data: dict[str, HeteroData],
         statistics: dict,
@@ -52,7 +52,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
 
         Parameters
         ----------
-        model : AnemoiModelInterface
+        model : ModelInterface
             Pre-built model
         config : DictConfig
             Job configuration

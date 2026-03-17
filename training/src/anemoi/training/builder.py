@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Factory function for building AnemoiModelInterface via Hydra instantiate."""
+"""Factory function for building ModelInterface via Hydra instantiate."""
 from __future__ import annotations
 
 import datetime
@@ -21,7 +21,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from anemoi.utils.provenance import gather_provenance_info
 
-from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.interface import ModelInterface
 from anemoi.models.models import AnemoiModel
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
@@ -138,8 +138,8 @@ def build_anemoi_model(
     graph_config: DictConfig,
     system_config: DictConfig,
     **model_arch_kwargs,
-) -> AnemoiModelInterface:
-    """Build and return a fully constructed AnemoiModelInterface.
+) -> ModelInterface:
+    """Build and return a fully constructed ModelInterface.
 
     Called by Hydra instantiate(config.model) from train.py. All inputs come
     from OmegaConf interpolations in the model yaml — no kwargs from train.py.

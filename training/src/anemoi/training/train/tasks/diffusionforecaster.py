@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.models.interface import ModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
     def __init__(
         self,
         *,
-        model: "AnemoiModelInterface",
+        model: "ModelInterface",
         config: BaseSchema,
         graph_data: dict[str, HeteroData],
         statistics: dict,
@@ -257,7 +257,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     def __init__(
         self,
         *,
-        model: "AnemoiModelInterface",
+        model: "ModelInterface",
         config: BaseSchema,
         graph_data: dict[str, HeteroData],
         statistics: dict,

@@ -16,12 +16,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 
 @runtime_checkable
-class AnemoiModelInterface(Protocol):
-    """Structural interface for Anemoi model wrappers.
-
-    Any class that implements these methods satisfies this interface without
-    needing to inherit from it. Concrete implementations should inherit from
-    ``torch.nn.Module`` directly.
+class ModelInterface(Protocol):
+    """
+    Interface for Anemoi models.
     """
 
     def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -51,4 +48,4 @@ class AnemoiModelInterface(Protocol):
         ...
 
 
-__all__ = ["AnemoiModelInterface"]
+__all__ = ["ModelInterface"]
