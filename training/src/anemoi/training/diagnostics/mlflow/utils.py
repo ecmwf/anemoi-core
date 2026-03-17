@@ -11,8 +11,10 @@
 import functools
 from collections import deque
 from typing import Any
+
 from omegaconf.dictconfig import DictConfig
 from omegaconf.listconfig import ListConfig
+
 
 class FixedLengthSet:
     def __init__(self, maxlen: int):
@@ -90,9 +92,11 @@ def expand_iterables(
     def should_be_expanded(x: Any) -> bool:
         return size_threshold is None or len(str(x)) > size_threshold
 
-    nested_func = functools.partial(expand_iterables, size_threshold=size_threshold, recursive=recursive, delimiter=delimiter)
+    nested_func = functools.partial(
+        expand_iterables, size_threshold=size_threshold, recursive=recursive, delimiter=delimiter,
+    )
 
-    def expand(val:  Any) -> dict[str, Any]:
+    def expand(val: Any) -> dict[str, Any]:
         if not recursive:
             return val
         if isinstance(val, dict | DictConfig):
