@@ -15,7 +15,7 @@ import logging
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.train.protocols.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseGraphModule
 
 LOGGER = logging.getLogger(__name__)
 

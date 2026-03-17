@@ -16,7 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.training.train.protocols.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseGraphModule
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
