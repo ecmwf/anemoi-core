@@ -86,6 +86,21 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             y_non_residual_indices,
             persistent=True,
         )
+        self.DEFAULT_NOISE_SCHEDULER_PARAMS = {
+            "schedule_type": "karras",
+            "sigma_max": 88,
+            "sigma_min": 0.03,
+            "rho": 7.0,
+            "num_steps": 40,
+        }
+
+        self.DEFAULT_SAMPLER_PARAMS = {
+            "sampler": "heun",
+            "S_churn": 2.5,
+            "S_min": 0.75,
+            "S_max": 88,
+            "S_noise": 1.05,
+        }
     
     def _set_residual_channel_indices(self, data_indices, model_config):
         input_name_to_index = self.data_indices.data.input[0].name_to_index
@@ -587,27 +602,6 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             Sampled output (after post-processing)
         """
 
-        noise_scheduler_params = {
-            "schedule_type": "karras",
-            # "sigma_max": 88,
-            "sigma_max": 100000,
-            "sigma_min": 0.03,
-            "rho": 7.0,
-            "num_steps": 80,
-        }
-
-        sampler_params = {
-            "sampler": "heun",
-            "S_churn": 2.5,
-            "S_min": 0.75,
-            # "S_max": 88,
-            "S_max": 100000,
-            "S_noise": 1.05,
-        }
-
-        print("noise_scheduler_params:", noise_scheduler_params)
-        print("sampler_params:", sampler_params)
-
         with torch.no_grad():
 
             if len(x_in_lres.shape) == 4:
@@ -659,7 +653,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 post_processors_tendencies=post_processors_tendencies,
                 **kwargs,
             )
-
+        print(f"predict step out.shape {out.shape}")
         return out
 
     def sample(
@@ -696,7 +690,11 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         """
 
         # Start with inference defaults
-        noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
+        if hasattr(self.inference_defaults, "noise_scheduler"):
+            noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
+        else:
+            noise_scheduler_config = dict(self.DEFAULT_NOISE_SCHEDULER_PARAMS)
+        print(f"default {noise_scheduler_config=}")
 
         # Override config with provided noise scheduler parameters
         if noise_scheduler_params is not None:
@@ -737,8 +735,12 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         print("sigmas", sigmas)
 
         # Build diffusion sampler config dict from all inference defaults
-        diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
-
+        if hasattr(self.inference_defaults, "diffusion_sampler"):
+            diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
+        else:
+            diffusion_sampler_config = dict(self.DEFAULT_SAMPLER_PARAMS)
+        print(f"default {diffusion_sampler_config=}")
+        
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
