@@ -114,7 +114,7 @@ class TestComponentCatalog:
         assert "checkpoint" not in components
         # Only concrete classes should appear
         for name in components:
-            assert name in {"local", "http"}, f"Unexpected component: {name}"
+            assert name in {"local", "http", "s3"}, f"Unexpected component: {name}"
 
     @patch("anemoi.training.checkpoint.catalog.ComponentCatalog._discover_components")
     def test_get_source_target_when_empty(self, mock_discover: MagicMock) -> None:
