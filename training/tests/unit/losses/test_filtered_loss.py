@@ -10,10 +10,12 @@
 import torch
 from omegaconf import DictConfig
 
+from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.losses.variable_mapper import LossVariableMapper
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 
@@ -125,3 +127,15 @@ def test_print_variable_scaling() -> None:
     assert "LossVariableMapper" in scaling_dict  # loss is filtered
     assert "tp" in scaling_dict["LossVariableMapper"]
     assert [var not in scaling_dict["LossVariableMapper"] for var in data_indices.name_to_index if var != "tp"]
+
+
+def test_loss_variable_mapper_propagates_needs_shard_layout_info() -> None:
+    loss = LossVariableMapper(
+        loss=MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0],
+            keep_batch_sharded=True,
+        ),
+    )
+
+    assert loss.needs_shard_layout_info is True

@@ -219,6 +219,11 @@ class BaseLoss(nn.Module, ABC):
         """Used for logging identification purposes."""
         return self.__class__.__name__.lower()
 
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Whether the loss needs explicit shard-layout metadata beyond grid_shard_slice/group."""
+        return False
+
     @abstractmethod
     def forward(
         self,

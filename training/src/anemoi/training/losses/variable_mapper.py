@@ -58,10 +58,16 @@ class LossVariableMapper(BaseLoss):
             # Share the inner loss scaler so scaler membership and updates remain visible
             # to training/task utilities that inspect `loss.scaler`.
             self.scaler = self.loss.scaler
+        self.supports_sharding = getattr(self.loss, "supports_sharding", False)
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
         self.predicted_indices_by_layout: dict[IndexSpace, list[int]] = {}
         self.target_indices_by_layout: dict[IndexSpace, list[int]] = {}
+
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Whether the wrapped loss requires explicit shard-layout metadata."""
+        return getattr(self.loss, "needs_shard_layout_info", False)
 
     def _get_predicted_indices_for_scaler_variable_axis(self, variable_size: int) -> list[int] | None:
         if variable_size == 1:

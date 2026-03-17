@@ -1,4 +1,5 @@
 from typing import Any
+from unittest.mock import MagicMock
 
 import einops
 import pytest
@@ -12,6 +13,10 @@ from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAd
 from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
+from anemoi.training.losses import CombinedLoss
+from anemoi.training.losses import MSELoss
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
@@ -27,6 +32,30 @@ class DummyLoss(torch.nn.Module):
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
         del kwargs
         return torch.mean((y_pred - y) ** 2)
+
+
+class CaptureLoss(BaseLoss):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[dict[str, Any]] = []
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+        self.calls.append({"pred": pred, "target": target, "kwargs": kwargs})
+        return torch.tensor(0.0)
+
+
+class ShardingAwareCaptureLoss(CaptureLoss):
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        return True
+
+
+class FakeGroup:
+    def __init__(self, size: int) -> None:
+        self._size = size
+
+    def size(self) -> int:
+        return self._size
 
 
 class DummyModel:
@@ -973,6 +1002,272 @@ def test_graphdiffusiontendforecaster_validation_metrics_use_data_full_state_tar
     assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
     torch.testing.assert_close(captured["metric_target"], y_state["data"] + 7.0)
     torch.testing.assert_close(y_pred_state_full, y_pred_state["data"])
+def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    loss = CaptureLoss()
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    result = BaseGraphModule._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+    )
+
+    assert torch.equal(result, torch.tensor(0.0))
+    assert len(loss.calls) == 1
+    assert loss.calls[0]["pred"] is y_pred
+    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["kwargs"] == {
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+    }
+
+
+def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    loss = ShardingAwareCaptureLoss()
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    result = BaseGraphModule._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+    )
+
+    assert torch.equal(result, torch.tensor(0.0))
+    assert len(loss.calls) == 1
+    assert loss.calls[0]["pred"] is y_pred
+    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["kwargs"] == {
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+        "grid_dim": -2,
+        "grid_shard_shapes": shard_shapes,
+    }
+
+
+def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    group = FakeGroup(size=2)
+    grid_shard_shapes = [1, 1]
+    pred = torch.randn(1, 1, 1, 2, 1)
+    target = torch.randn(1, 1, 2, 1)
+    grid_shard_slice = slice(0, 1)
+
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=MSELoss(),
+        weights=[1.0],
+        keep_batch_sharded=True,
+    )
+    prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_shapes, grid_shard_shapes))
+    monkeypatch.setattr(multiscale_loss, "_prepare_for_smoothing", prepare_for_smoothing)
+    monkeypatch.setattr("anemoi.training.losses.multiscale.gather_channels", lambda x, *_args: x)
+    monkeypatch.setattr("anemoi.training.losses.base.reduce_tensor", lambda x, *_args: x)
+
+    combined_loss = CombinedLoss(multiscale_loss)
+
+    module.loss = {"data": combined_loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": grid_shard_shapes}
+
+    result = BaseGraphModule._compute_loss(
+        module,
+        y_pred=pred,
+        y=target,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+    )
+
+    assert result.shape == (1,)
+    prepare_for_smoothing.assert_called_once_with(pred, target, group, -2, grid_shard_shapes)
+
+
+def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
+    module = MagicMock(spec=GraphDiffusionForecaster)
+    loss = CaptureLoss()
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    weights = {"data": torch.tensor([0.25])}
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    result = GraphDiffusionForecaster._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        weights=weights,
+        grid_shard_slice=grid_shard_slice,
+    )
+
+    assert torch.equal(result, torch.tensor(0.0))
+    assert len(loss.calls) == 1
+    assert loss.calls[0]["pred"] is y_pred
+    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["kwargs"] == {
+        "weights": weights["data"],
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+    }
+
+
+def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> None:
+    module = MagicMock(spec=GraphDiffusionForecaster)
+    loss = ShardingAwareCaptureLoss()
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    weights = {"data": torch.tensor([0.25])}
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    result = GraphDiffusionForecaster._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        weights=weights,
+        grid_shard_slice=grid_shard_slice,
+    )
+
+    assert torch.equal(result, torch.tensor(0.0))
+    assert len(loss.calls) == 1
+    assert loss.calls[0]["pred"] is y_pred
+    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["kwargs"] == {
+        "weights": weights["data"],
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+        "grid_dim": -2,
+        "grid_shard_shapes": shard_shapes,
+    }
+
+
+def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    metric = CaptureLoss()
+    post_processor = MagicMock(side_effect=lambda x, **_: x)
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+
+    module.model = MagicMock()
+    module.model.post_processors = {"data": post_processor}
+    module.metrics = {"data": {"multiscale": metric}}
+    module.val_metric_ranges = {"data": {"z_500": [1]}}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    metrics = BaseGraphModule.calculate_val_metrics(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+        step=0,
+    )
+
+    assert "multiscale_metric/data/z_500/1" in metrics
+    assert len(metric.calls) == 1
+    assert metric.calls[0]["pred"] is y_pred
+    assert metric.calls[0]["target"] is y
+    assert metric.calls[0]["kwargs"] == {
+        "scaler_indices": (..., [1]),
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+    }
+
+
+def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    metric = ShardingAwareCaptureLoss()
+    post_processor = MagicMock(side_effect=lambda x, **_: x)
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+
+    module.model = MagicMock()
+    module.model.post_processors = {"data": post_processor}
+    module.metrics = {"data": {"multiscale": metric}}
+    module.val_metric_ranges = {"data": {"z_500": [1]}}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    metrics = BaseGraphModule.calculate_val_metrics(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+        step=0,
+    )
+
+    assert "multiscale_metric/data/z_500/1" in metrics
+    assert len(metric.calls) == 1
+    assert metric.calls[0]["pred"] is y_pred
+    assert metric.calls[0]["target"] is y
+    assert metric.calls[0]["kwargs"] == {
+        "scaler_indices": (..., [1]),
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+        "grid_dim": -2,
+        "grid_shard_shapes": shard_shapes,
+    }
 
 
 def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.MonkeyPatch) -> None:
