@@ -40,9 +40,13 @@ def uses_fused_dataset_graph(graph_or_config: HeteroData | DictConfig | Mapping,
     In this form, each dataset name is itself a node group in the graph,
     rather than reusing a single generic ``data`` node group.
     """
-    if len(dataset_names) <= 1:
+    if not dataset_names:
         return False
-    return set(dataset_names).issubset(get_graph_node_names(graph_or_config))
+    node_names = get_graph_node_names(graph_or_config)
+    if not set(dataset_names).issubset(node_names):
+        return False
+
+    return dataset_names != [DEFAULT_DATASET_NAME] or DEFAULT_DATASET_NAME not in node_names
 
 
 def dataset_projection_node_name(dataset_name: str, base_node_name: str) -> str:
@@ -148,12 +152,19 @@ def residual_projection_edge_names(
     graph contains one node group per dataset.
     """
     truncation_node_name = residual_projection_truncation_node_name(projection_config)
+    truncation_cfg = projection_config.get("truncation") if projection_config is not None else None
+    relation_name = (
+        truncation_cfg.get("relation_name", DEFAULT_EDGE_RELATION_NAME)
+        if truncation_cfg is not None
+        else DEFAULT_EDGE_RELATION_NAME
+    )
     down_edges = projection_edge_name(
         DEFAULT_DATASET_NAME,
         truncation_node_name,
         dataset_name=dataset_name,
         graph_or_config=graph_or_config,
         dataset_names=dataset_names,
+        relation_name=relation_name,
     )
     up_edges = projection_edge_name(
         truncation_node_name,
@@ -161,6 +172,7 @@ def residual_projection_edge_names(
         dataset_name=dataset_name,
         graph_or_config=graph_or_config,
         dataset_names=dataset_names,
+        relation_name=relation_name,
     )
     return down_edges, up_edges
 
@@ -206,6 +218,7 @@ def multiscale_loss_matrices_graph(
             dataset_name=dataset_name,
             graph_or_config=graph_or_config,
             dataset_names=dataset_names,
+            relation_name=smoother_cfg.get("relation_name", DEFAULT_EDGE_RELATION_NAME),
         )
 
         entry: dict[str, object] = {

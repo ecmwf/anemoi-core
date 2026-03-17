@@ -47,12 +47,25 @@ def test_get_graph_node_names_and_fused_detection_work_for_graphs_and_configs(fu
             "hidden": {},
         },
     }
+    single_named_dataset_graph = {
+        "nodes": {
+            "era5": {},
+            "hidden": {},
+        },
+    }
+    single_generic_dataset_graph = {
+        "nodes": {
+            "data": {},
+            "hidden": {},
+        },
+    }
 
     assert get_graph_node_names(fused_graph) >= {"era5", "cerra", "hidden"}
     assert get_graph_node_names(graph_config) == {"era5", "cerra", "hidden"}
     assert uses_fused_dataset_graph(fused_graph, ["era5", "cerra"]) is True
     assert uses_fused_dataset_graph(graph_config, ["era5", "cerra"]) is True
-    assert uses_fused_dataset_graph(graph_config, ["era5"]) is False
+    assert uses_fused_dataset_graph(single_named_dataset_graph, ["era5"]) is True
+    assert uses_fused_dataset_graph(single_generic_dataset_graph, ["era5"]) is False
 
 
 def test_projection_node_and_edge_names_expand_for_combined_multi_dataset_graphs() -> None:
@@ -89,7 +102,7 @@ def test_projection_node_and_edge_names_expand_for_combined_multi_dataset_graphs
 def test_residual_projection_helpers_resolve_custom_and_default_truncation_names(
     fused_graph: HeteroData,
 ) -> None:
-    projection_config = {"truncation": {"node_name": "truncation"}}
+    projection_config = {"truncation": {"node_name": "truncation", "relation_name": "projects_to"}}
 
     assert residual_projection_truncation_node_name(None) == "truncation"
     assert residual_projection_truncation_node_name({"truncation_nodes": "legacy"}) == "legacy"
@@ -102,8 +115,8 @@ def test_residual_projection_helpers_resolve_custom_and_default_truncation_names
         projection_config=projection_config,
     )
 
-    assert down_edges == ("era5", "to", "era5_truncation")
-    assert up_edges == ("era5_truncation", "to", "era5")
+    assert down_edges == ("era5", "projects_to", "era5_truncation")
+    assert up_edges == ("era5_truncation", "projects_to", "era5")
 
 
 def test_multiscale_loss_matrices_graph_builds_graph_entries_from_smoothers() -> None:
@@ -121,6 +134,7 @@ def test_multiscale_loss_matrices_graph_builds_graph_entries_from_smoothers() ->
                     "edge_weight_attribute": "weight_8x",
                 },
                 "smooth_4x": {
+                    "relation_name": "maps_to",
                     "row_normalize": True,
                     "src_node_weight_attribute": "cell_area",
                 },
@@ -137,7 +151,7 @@ def test_multiscale_loss_matrices_graph_builds_graph_entries_from_smoothers() ->
 
     assert matrices == [
         {
-            "edges_name": ["era5_smooth_4x", "to", "era5_smooth_4x"],
+            "edges_name": ["era5_smooth_4x", "maps_to", "era5_smooth_4x"],
             "edge_weight_attribute": "gauss_weight",
             "src_node_weight_attribute": "cell_area",
             "row_normalize": True,

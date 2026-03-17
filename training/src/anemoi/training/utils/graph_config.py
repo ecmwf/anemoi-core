@@ -14,6 +14,7 @@ from typing import Any
 from omegaconf import OmegaConf
 from omegaconf import open_dict
 
+from anemoi.models.utils.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.models.utils.projection_helpers import DEFAULT_EDGE_RELATION_NAME
 from anemoi.models.utils.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.utils.projection_helpers import dataset_projection_node_name
@@ -50,7 +51,7 @@ def _projection_builds_per_dataset(projection_name: str, projection_cfg: Any) ->
 
 def _projection_node_rename_map(projection_cfg: Any, dataset_name: str) -> dict[str, str]:
     """Build the local-to-fused node-name map for one dataset projection expansion."""
-    rename_map = {}
+    rename_map = {DEFAULT_DATASET_NAME: dataset_name}
 
     data_nodes_name = projection_cfg.get("data_nodes", None)
     if isinstance(data_nodes_name, str):
@@ -61,18 +62,14 @@ def _projection_node_rename_map(projection_cfg: Any, dataset_name: str) -> dict[
         rename_map[node_name] = dataset_projection_node_name(dataset_name, node_name)
 
     smoothers = _to_container(projection_cfg.get("smoothers", {}), resolve=True)
-    for smoother_cfg in smoothers.values():
-        node_name = smoother_cfg.get("node_name")
+    for smoother_name, smoother_cfg in smoothers.items():
+        node_name = smoother_cfg.get("node_name", smoother_name)
         if isinstance(node_name, str):
             rename_map[node_name] = dataset_projection_node_name(dataset_name, node_name)
 
-        reference_node_name = smoother_cfg.get("reference_node_name")
-        if isinstance(reference_node_name, str) and reference_node_name == "data":
-            rename_map[reference_node_name] = dataset_name
-
-    truncation_nodes_name = projection_cfg.get("truncation_nodes", None)
-    if isinstance(truncation_nodes_name, str):
-        rename_map[truncation_nodes_name] = dataset_projection_node_name(dataset_name, truncation_nodes_name)
+    truncation_node_name = residual_projection_truncation_node_name(projection_cfg)
+    if isinstance(truncation_node_name, str):
+        rename_map[truncation_node_name] = dataset_projection_node_name(dataset_name, truncation_node_name)
 
     return rename_map
 
@@ -243,6 +240,8 @@ def _derived_residual_projection(
         fused_dataset_graph=fused_dataset_graph,
     )
 
+    rename_map = _projection_node_rename_map(projection_cfg, dataset_name)
+
     node_builder = _to_container(truncation_cfg.get("node_builder"), resolve=True)
     if node_builder is None:
         grid = truncation_cfg.get("grid", truncation_cfg.get("truncation_grid"))
@@ -253,6 +252,8 @@ def _derived_residual_projection(
             "_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes",
             "grid": grid,
         }
+    else:
+        node_builder = _rename_projection_values(node_builder, rename_map)
 
     nodes = {
         graph_node_name: {
@@ -293,6 +294,7 @@ def _derived_multiscale_projection(
     smoothers = _to_container(smoothers, resolve=True)
     projection_nodes: dict[str, Any] = {}
     projection_edges: list[Any] = []
+    rename_map = _projection_node_rename_map(projection_cfg, dataset_name)
     for smoother_name, smoother_cfg in smoothers.items():
         smoother_cfg = dict(smoother_cfg)
         node_name = smoother_cfg.get("node_name", smoother_name)
@@ -312,6 +314,8 @@ def _derived_multiscale_projection(
                     fused_dataset_graph=fused_dataset_graph,
                 ),
             }
+        else:
+            node_builder = _rename_projection_values(node_builder, rename_map)
 
         projection_nodes[graph_node_name] = {
             "node_builder": node_builder,
