@@ -47,10 +47,11 @@ class MultiscaleLossWrapper(BaseLoss):
         weights : list[float]
             Per-scale loss weights
         keep_batch_sharded : bool
-            Whether to keep the batch grid-sharded during loss computation.
-            Sharded multiscale smoothing across the model communication group is
-            only used when this is True. If False, the loss is evaluated on
-            replicated full-grid tensors on each model rank.
+            Whether the task should keep the batch grid-sharded during loss
+            computation. When enabled, the task passes shard-layout metadata to
+            this wrapper and multiscale smoothing follows the sharded path.
+            If disabled, the loss is evaluated on replicated full-grid tensors
+            on each model rank.
         loss_matrices_path : Path | str | None
             Path to the directory containing smoothing matrices
         loss_matrices : list[Path | str] | None
@@ -132,7 +133,7 @@ class MultiscaleLossWrapper(BaseLoss):
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
-        group: ProcessGroup,
+        group: ProcessGroup | None,
         grid_dim: int,
         grid_shard_shapes: list,
     ) -> tuple[torch.Tensor, torch.Tensor, list | None, list | None]:
@@ -143,7 +144,7 @@ class MultiscaleLossWrapper(BaseLoss):
                 Ensemble predictions
             y: torch.Tensor
                 Ground truth
-            group: ProcessGroup
+            group: ProcessGroup | None
                 Model communication group
 
         Returns
@@ -204,9 +205,7 @@ class MultiscaleLossWrapper(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         shard_shapes, shard_shapes_y = None, None
-        # The sharded smoothing path only applies when the batch already enters
-        # the loss sequence-sharded across the model group.
-        is_model_sharded = self.keep_batch_sharded and group is not None and group.size() > 1
+        is_model_sharded = grid_shard_shapes is not None
         if is_model_sharded:
             # go to full sequence dimension for smoothing
             y_pred_ens_for_smooth, y_for_smooth, shard_shapes, shard_shapes_y = self._prepare_for_smoothing(

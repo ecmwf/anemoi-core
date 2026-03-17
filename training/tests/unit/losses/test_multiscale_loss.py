@@ -210,7 +210,7 @@ def test_multiscale_loss_forwards_group_and_without_scalers() -> None:
     ]
 
 
-def test_multiscale_loss_uses_group_size_for_sharding(mocker: MockerFixture) -> None:
+def test_multiscale_loss_uses_grid_shard_shapes_for_sharding(mocker: MockerFixture) -> None:
     per_scale_loss = TrackingLoss()
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
