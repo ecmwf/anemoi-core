@@ -59,10 +59,5 @@ dataloader:
 training:
   ensemble_size_per_device: 2
   max_epochs: 1
-  explicit_times:
-    input: [0, 6]
-    target: [1, 2, 3, 4, 5]
-  multistep_input: 1
-  multistep_output: 5
 
   rollout: null # override the default, it does not make sense for an interpolator
