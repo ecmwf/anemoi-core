@@ -184,11 +184,10 @@ def multiscale_loss_matrices_graph(
     graph_or_config: HeteroData | DictConfig | Mapping,
     dataset_names: list[str],
 ) -> list[dict[str, object] | None] | None:
-    """Materialize ``loss_matrices_graph`` entries from multiscale smoother config.
+    """Build ``loss_matrices_graph`` entries from the multiscale smoother config.
 
-    The returned structure is the explicit list format consumed by
-    ``MultiscaleLossWrapper``: one graph edge reference per smoother, plus a
-    trailing ``None`` entry for the full-resolution residual scale.
+    Returns the list used by ``MultiscaleLossWrapper``: one graph edge
+    reference per smoother, followed by ``None`` for the full-resolution scale.
     """
     if projection_config is None:
         return None
@@ -243,10 +242,10 @@ def rewrite_dataset_projection_node_name(
     graph_or_config: HeteroData | DictConfig | Mapping,
     dataset_names: list[str],
 ) -> str:
-    """Rewrite a local projection node name to the concrete node name in the graph.
+    """Convert a local projection node name to the node name used in the graph.
 
-    If the supplied name already exists in the graph it is left unchanged. This
-    makes the helper safe for both already-expanded names and generic local names.
+    If the supplied name already exists in the graph, leave it unchanged. This
+    works for both expanded names and generic local names.
     """
     node_names = get_graph_node_names(graph_or_config)
     if node_name in node_names:

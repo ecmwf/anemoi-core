@@ -166,7 +166,7 @@ class MultiscaleLossWrapper(BaseLoss):
         dataset_name: str | None,
         dataset_names: list[str] | None,
     ) -> list[dict | None] | None:
-        """Resolve the runtime graph-matrix specification from the public config switch."""
+        """Choose the graph-based smoothing matrices from the config."""
         if isinstance(loss_matrices_graph, list):
             assert not loss_matrices, "Specify either loss_matrices or loss_matrices_graph, not both."
             return loss_matrices_graph

@@ -43,14 +43,14 @@ def _merge_dataset_projection_overrides(projection_cfg: Any, dataset_name: str |
 
 
 def _projection_builds_per_dataset(projection_name: str, projection_cfg: Any) -> bool:
-    """Return whether a projection should be expanded once per dataset in fused graphs."""
+    """Return whether this projection should be expanded separately for each dataset in a fused graph."""
     if projection_cfg.get("build_per_dataset", None) is not None:
         return bool(projection_cfg.build_per_dataset)
     return projection_name in {"multiscale", "truncation"}
 
 
 def _projection_node_rename_map(projection_cfg: Any, dataset_name: str) -> dict[str, str]:
-    """Build the local-to-fused node-name map for one dataset projection expansion."""
+    """Build a map from local node names to dataset-specific node names."""
     rename_map = {DEFAULT_DATASET_NAME: dataset_name}
 
     data_nodes_name = projection_cfg.get("data_nodes", None)
@@ -92,7 +92,7 @@ def _rename_projection_values(value: Any, rename_map: dict[str, str]) -> Any:
 
 
 def _expand_projection_for_datasets(projection_cfg: Any, dataset_names: list[str]) -> tuple[dict[str, Any], list[Any]]:
-    """Expand an explicit projection config into dataset-scoped nodes and edges."""
+    """Expand an explicit projection config into per-dataset nodes and edges."""
     projection_nodes: dict[str, Any] = {}
     projection_edges: list[Any] = []
 
@@ -340,7 +340,7 @@ def _derived_projection_fragments(
     dataset_name: str,
     fused_dataset_graph: bool,
 ) -> tuple[dict[str, Any], list[Any]] | None:
-    """Return synthesized graph fragments for shorthand projection configs."""
+    """Build graph nodes and edges from shorthand projection configs."""
     if projection_cfg.get("nodes") is not None or projection_cfg.get("edges") is not None:
         return None
 
@@ -408,12 +408,11 @@ def _projection_fragments_to_merge(
 
 
 def merge_projection_and_graph_config(graph_config: Any, dataset_names: list[str] | None = None) -> None:
-    """Merge projection graph fragments into the main graph config in-place.
+    """Add projection nodes and edges to the main graph config in place.
 
-    Explicit projection ``nodes``/``edges`` are appended directly. Simplified
-    ``truncation`` and ``multiscale`` configs are first expanded into concrete
-    graph fragments, and in fused graphs that expansion happens once per
-    dataset.
+    If a projection already defines ``nodes`` or ``edges``, add them directly.
+    Shorthand ``truncation`` and ``multiscale`` configs are expanded first. In
+    fused graphs, that happens separately for each dataset.
     """
     projections = getattr(graph_config, "projections", None) or {}
     if not projections:
