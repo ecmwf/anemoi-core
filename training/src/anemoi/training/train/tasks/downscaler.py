@@ -50,6 +50,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
+        LOGGER.info("Commented out scalers!!")
 
         super().__init__(
             config=config,
@@ -197,7 +198,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         residuals_target = self.model.pre_processors(residuals_target, dataset="output")
 
         # Scaler update
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
+        #self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
