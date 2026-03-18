@@ -291,7 +291,7 @@ class MultiScaleLossSchema(BaseModel):
     per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
     weights: list[float]
     keep_batch_sharded: bool
-    loss_matrices_path: str
+    loss_matrices_path: str | None = None
     loss_matrices: list[str | None]
 
     @field_validator("weights")
