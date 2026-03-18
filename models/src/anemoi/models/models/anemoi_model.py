@@ -72,7 +72,7 @@ class AnemoiModel(torch.nn.Module):
         x: dict[str, torch.Tensor],
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        return self.post_process(self.backbone(self.pre_process(x), **kwargs))
+        return self.backbone(x, **kwargs)
 
     def predict_step(
         self,
@@ -83,4 +83,7 @@ class AnemoiModel(torch.nn.Module):
     ) -> dict[str, torch.Tensor]:
         with torch.no_grad():
             x = {name: batch[name][:, : self.n_step_input, None, ...] for name in batch}
-            return self.forward(x, model_comm_group=model_comm_group, **kwargs)
+            x = self.pre_process(x)
+            y = self.forward(x, model_comm_group=model_comm_group, **kwargs)
+            y = self.post_process(y)
+            return y
