@@ -644,9 +644,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
+            y_pred_postprocessed = self.model.post_process({dataset_name: y_pred_full})[dataset_name]
+            y_postprocessed = self.model.post_process({dataset_name: y_full})[dataset_name]
             metrics_next = self._compute_metrics(
-                y_pred_full,
-                y_full,
+                y_pred_postprocessed,
+                y_postprocessed,
                 grid_shard_slice=grid_shard_slice,
                 dataset_name=dataset_name,
                 **kwargs,
