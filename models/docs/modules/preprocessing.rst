@@ -25,6 +25,11 @@ the following classes:
    :no-undoc-members:
    :show-inheritance:
 
+**********
+Remapper
+**********
+
+
 *********
  Imputer
 *********
