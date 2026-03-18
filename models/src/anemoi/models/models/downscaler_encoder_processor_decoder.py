@@ -694,7 +694,6 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
         else:
             noise_scheduler_config = dict(self.DEFAULT_NOISE_SCHEDULER_PARAMS)
-        print(f"default {noise_scheduler_config=}")
 
         # Override config with provided noise scheduler parameters
         if noise_scheduler_params is not None:
@@ -739,13 +738,13 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
         else:
             diffusion_sampler_config = dict(self.DEFAULT_SAMPLER_PARAMS)
-        print(f"default {diffusion_sampler_config=}")
         
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
 
         warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}")
+        print(f"diffusion_sampler_config: {diffusion_sampler_config}")
 
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
