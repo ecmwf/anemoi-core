@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 from pydantic import ValidationError
+from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
