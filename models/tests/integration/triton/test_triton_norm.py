@@ -18,22 +18,6 @@ if is_triton_available():
     from anemoi.models.triton.norm import RMSNorm
 
 
-@pytest.fixture
-def device():
-    if torch.cuda.is_available():
-        return "cuda"
-    else:
-        return "cpu"
-
-
-@pytest.fixture(autouse=True)
-def setup_torch(device):
-    """Set up torch defaults for all tests."""
-    torch.set_default_device(device)
-    torch.set_default_dtype(torch.float32)
-    yield
-
-
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "b,h,d,norm_type",
@@ -41,17 +25,16 @@ def setup_torch(device):
 )
 def test_norm_forward(b: int, h: int, d: int, norm_type: str):
     """Test forward pass of RMS Norm."""
-
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
-    x = torch.randn((b, h, d))
+    x = torch.randn((b, h, d), device="cuda")
     if norm_type == "rmsNorm":
-        norm = RMSNorm()
-        norm_ref = torch.nn.RMSNorm(d, elementwise_affine=False)
+        norm = RMSNorm().cuda()
+        norm_ref = torch.nn.RMSNorm(d, elementwise_affine=False, device="cuda")
     elif norm_type == "layerNorm":
-        norm = LayerNorm()
-        norm_ref = torch.nn.LayerNorm(d, elementwise_affine=False, bias=False)
+        norm = LayerNorm().cuda()
+        norm_ref = torch.nn.LayerNorm(d, elementwise_affine=False, bias=False, device="cuda")
 
     x_triton = norm(x)
 
@@ -72,14 +55,14 @@ def test_norm_backward(b: int, h: int, d: int, norm_type: str):
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
-    x = torch.randn((b, h, d), requires_grad=True)
+    x = torch.randn((b, h, d), requires_grad=True, device="cuda")
 
     if norm_type == "rmsNorm":
-        norm = RMSNorm()
-        norm_ref = torch.nn.RMSNorm(d, elementwise_affine=False)
+        norm = RMSNorm().cuda()
+        norm_ref = torch.nn.RMSNorm(d, elementwise_affine=False, device="cuda")
     elif norm_type == "layerNorm":
-        norm = LayerNorm()
-        norm_ref = torch.nn.LayerNorm(d, elementwise_affine=False, bias=False)
+        norm = LayerNorm().cuda()
+        norm_ref = torch.nn.LayerNorm(d, elementwise_affine=False, bias=False, device="cuda")
 
     x_triton = norm(x)
     loss_triton = x_triton.pow(2).sum()

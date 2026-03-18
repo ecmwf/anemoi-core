@@ -26,15 +26,6 @@ if is_triton_available():
     from anemoi.models.triton.gt import GraphTransformerFunction
 
 
-@pytest.fixture(autouse=True)
-def setup_torch():
-    """Set up torch defaults for all tests."""
-    device = "cuda"
-    torch.set_default_device(device)
-    torch.set_default_dtype(torch.float32)
-    yield
-
-
 def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
     """Build random bipartite graph and return edge_index and number of edges."""
     edges = []
@@ -43,7 +34,7 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
         srcs = torch.randperm(n_src)[:deg]
         edges.extend([(src.item(), dst) for src in srcs])
 
-    edge_index = torch.tensor(edges, dtype=torch.long).t()
+    edge_index = torch.tensor(edges, dtype=torch.long, device="cuda").t()
     return edge_index, edge_index.shape[1]
 
 
@@ -63,11 +54,11 @@ class _GraphTransformerConvQKnorm(GraphTransformerConv):
 
         self.qk_norm = qk_norm
         if self.qk_norm == "rms_norm":  # rms norm
-            self.q_norm = torch.nn.RMSNorm(self.out_channels)
-            self.k_norm = torch.nn.RMSNorm(self.out_channels)
+            self.q_norm = torch.nn.RMSNorm(self.out_channels, device="cuda")
+            self.k_norm = torch.nn.RMSNorm(self.out_channels, device="cuda")
         elif self.qk_norm == "layer_norm":  # layer norm
-            self.q_norm = torch.nn.LayerNorm(self.out_channels, bias=False)
-            self.k_norm = torch.nn.LayerNorm(self.out_channels, bias=False)
+            self.q_norm = torch.nn.LayerNorm(self.out_channels, bias=False, device="cuda")
+            self.k_norm = torch.nn.LayerNorm(self.out_channels, bias=False, device="cuda")
 
     def forward(
         self,
@@ -105,10 +96,10 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int, qk_no
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
-    query = torch.randn((n_dst, h, d), requires_grad=True)
-    key = torch.randn((n_src, h, d), requires_grad=True)
-    value = torch.randn((n_src, h, d), requires_grad=True)
-    edge_attr = torch.randn((m, h, d), requires_grad=True)
+    query = torch.randn((n_dst, h, d), requires_grad=True, device="cuda")
+    key = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    value = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    edge_attr = torch.randn((m, h, d), requires_grad=True, device="cuda")
 
     edge_attr_csc = edge_attr[perm]
     out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse, qk_norm)
@@ -140,10 +131,10 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int, qk_n
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
-    query = torch.randn((n_dst, h, d), requires_grad=True)
-    key = torch.randn((n_src, h, d), requires_grad=True)
-    value = torch.randn((n_src, h, d), requires_grad=True)
-    edge_attr = torch.randn((m, h, d), requires_grad=True)
+    query = torch.randn((n_dst, h, d), requires_grad=True, device="cuda")
+    key = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    value = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    edge_attr = torch.randn((m, h, d), requires_grad=True, device="cuda")
 
     edge_attr_csc = edge_attr[perm]
     out_triton = GraphTransformerFunction.apply(
@@ -178,10 +169,10 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
 
     # Custom implementation
-    query_triton = torch.randn((n_dst, h, d), requires_grad=True)
-    key_triton = torch.randn((n_src, h, d), requires_grad=True)
-    value = torch.randn((n_src, h, d), requires_grad=True)
-    edge_attr = torch.randn((m, h, d), requires_grad=True)
+    query_triton = torch.randn((n_dst, h, d), requires_grad=True, device="cuda")
+    key_triton = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    value = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    edge_attr = torch.randn((m, h, d), requires_grad=True, device="cuda")
 
     query_ref = torch.clone(query_triton)
     key_ref = torch.clone(key_triton)
@@ -222,10 +213,10 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     edge_index, m = build_bipartite_graph(n_src, n_dst)
 
     # Custom implementation
-    query = torch.randn((n_dst, h, d), requires_grad=True)
-    key = torch.randn((n_src, h, d), requires_grad=True)
-    value = torch.randn((n_src, h, d), requires_grad=True)
-    edge_attr = torch.randn((m, h, d), requires_grad=True)
+    query = torch.randn((n_dst, h, d), requires_grad=True, device="cuda")
+    key = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    value = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    edge_attr = torch.randn((m, h, d), requires_grad=True, device="cuda")
 
     gt_triton = GraphTransformer(d, qk_norm)
     # Reference pyg implementation
@@ -271,6 +262,7 @@ def test_graph_transformer_deterministic():
 
     Runs the forward and backward pass of the GraphTransformer 50 times and checks that the outputs and gradients are identical across runs.
     """
+
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
@@ -278,10 +270,10 @@ def test_graph_transformer_deterministic():
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
-    query = torch.randn((n_dst, h, d), requires_grad=True)
-    key = torch.randn((n_src, h, d), requires_grad=True)
-    value = torch.randn((n_src, h, d), requires_grad=True)
-    edge_attr = torch.randn((m, h, d), requires_grad=True)
+    query = torch.randn((n_dst, h, d), requires_grad=True, device="cuda")
+    key = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    value = torch.randn((n_src, h, d), requires_grad=True, device="cuda")
+    edge_attr = torch.randn((m, h, d), requires_grad=True, device="cuda")
 
     edge_attr_csc = edge_attr[perm]
     gt_triton = GraphTransformer(d, qk_norm="layer_norm")
