@@ -26,9 +26,6 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     """Message passing hierarchical graph neural network."""
 
-    def _calculate_input_dim_latent(self, dataset_name: str) -> int:
-        return self.node_attributes.attr_ndims[self._graph_name_hidden[0]]
-
     def _build_networks(self, model_config):
         """Builds the model components."""
         # note that this is called by the super class init
@@ -52,7 +49,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.input_dim_latent[dataset_name],
+                in_channels_dst=self.input_dim_latent,
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
