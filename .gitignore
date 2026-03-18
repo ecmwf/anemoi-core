@@ -128,7 +128,7 @@ _dev/
 _api/
 ./outputs
 *tmp_data/
-*/uv.lock
+*uv.lock
 
 # Project specific
 ?

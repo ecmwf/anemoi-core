@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pydantic import ValidationError
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -41,6 +42,22 @@ def test_training_cycle_global(
 def test_config_validation_global_config(global_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = global_config
     BaseSchema(**cfg)
+
+
+def test_config_validation_rejects_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = global_config
+    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    with pytest.raises(ValidationError, match="projection_kind"):
+        BaseSchema(**cfg)
+
+
+def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = global_config
+    cfg.config_validation = False
+    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    cfg_obj = OmegaConf.to_object(cfg)
+    unvalidated = UnvalidatedBaseSchema(**DictConfig(cfg_obj))
+    assert unvalidated.diagnostics.plot.projection_kind == "invalid_projection"
 
 
 def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:
@@ -225,7 +242,10 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer = AnemoiTrainer(cfg)
     trainer.train()
 
-    assert trainer.model.trainer.global_step == 6
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
@@ -254,19 +274,19 @@ def test_restart_from_existing_checkpoint(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_multi_output_interpolator(
-    multi_output_interpolator_config: tuple[DictConfig, str],
+def test_training_cycle_interpolator(
+    interpolator_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
     """Full training-cycle smoke-test for the temporal interpolation task."""
-    cfg, url = multi_output_interpolator_config
+    cfg, url = interpolator_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_multi_output_interpolator(multi_output_interpolator_config: tuple[DictConfig, str]) -> None:
+def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
     """Schema-level validation for the temporal interpolation config."""
-    cfg, _ = multi_output_interpolator_config
+    cfg, _ = interpolator_config
     BaseSchema(**cfg)
 
 

@@ -125,6 +125,15 @@ Previous format (no longer supported in validated configurations):
                     end: 2020
                     trajectory: null
 
+
+*****************
+ Graph Creation
+*****************
+
+The graph must define a set of nodes for each dataset. The dataset name has to be used as the nodes name in the graph
+recipe.
+
+
 ***************************************
  Dataset Name Conventions in Templates
 ***************************************

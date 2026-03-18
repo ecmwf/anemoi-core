@@ -1,4 +1,5 @@
 from typing import Any
+from unittest.mock import MagicMock
 
 import einops
 import pytest
@@ -8,6 +9,14 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
+from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
+from anemoi.training.losses import CombinedLoss
+from anemoi.training.losses import MSELoss
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
@@ -21,6 +30,30 @@ class DummyLoss(torch.nn.Module):
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
         del kwargs
         return torch.mean((y_pred - y) ** 2)
+
+
+class CaptureLoss(BaseLoss):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[dict[str, Any]] = []
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+        self.calls.append({"pred": pred, "target": target, "kwargs": kwargs})
+        return torch.tensor(0.0)
+
+
+class ShardingAwareCaptureLoss(CaptureLoss):
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        return True
+
+
+class FakeGroup:
+    def __init__(self, size: int) -> None:
+        self._size = size
+
+    def size(self) -> int:
+        return self._size
 
 
 class DummyModel:
@@ -197,12 +230,13 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     forecaster.loss = {"data": DummyLoss()}
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
+    forecaster._plot_adapter = ForecasterPlotAdapter(forecaster)
 
-    assert forecaster.output_times == 1
+    assert forecaster.plot_adapter.output_times == 1
     for i in range(1, _CFG_FORECASTER.training.rollout.max + 1):
         forecaster.rollout = i
-        assert forecaster.get_init_step(i) == 0
-        assert forecaster.output_times == i
+        assert forecaster.plot_adapter.get_init_step(i) == 0
+        assert forecaster.plot_adapter.output_times == i
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
@@ -274,6 +308,274 @@ def test_graphdiffusionforecaster() -> None:
     y_pred = y_preds[0]["data"]
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, 1, e, g, v)
+
+
+def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    loss = CaptureLoss()
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    result = BaseGraphModule._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+    )
+
+    assert torch.equal(result, torch.tensor(0.0))
+    assert len(loss.calls) == 1
+    assert loss.calls[0]["pred"] is y_pred
+    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["kwargs"] == {
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+    }
+
+
+def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    loss = ShardingAwareCaptureLoss()
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    result = BaseGraphModule._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+    )
+
+    assert torch.equal(result, torch.tensor(0.0))
+    assert len(loss.calls) == 1
+    assert loss.calls[0]["pred"] is y_pred
+    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["kwargs"] == {
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+        "grid_dim": -2,
+        "grid_shard_shapes": shard_shapes,
+    }
+
+
+def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    group = FakeGroup(size=2)
+    grid_shard_shapes = [1, 1]
+    pred = torch.randn(1, 1, 1, 2, 1)
+    target = torch.randn(1, 1, 2, 1)
+    grid_shard_slice = slice(0, 1)
+
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=MSELoss(),
+        weights=[1.0],
+        keep_batch_sharded=True,
+    )
+    prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_shapes, grid_shard_shapes))
+    monkeypatch.setattr(multiscale_loss, "_prepare_for_smoothing", prepare_for_smoothing)
+    monkeypatch.setattr("anemoi.training.losses.multiscale.gather_channels", lambda x, *_args: x)
+    monkeypatch.setattr("anemoi.training.losses.base.reduce_tensor", lambda x, *_args: x)
+
+    combined_loss = CombinedLoss(multiscale_loss)
+
+    module.loss = {"data": combined_loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": grid_shard_shapes}
+
+    result = BaseGraphModule._compute_loss(
+        module,
+        y_pred=pred,
+        y=target,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+    )
+
+    assert result.shape == (1,)
+    prepare_for_smoothing.assert_called_once_with(pred, target, group, -2, grid_shard_shapes)
+
+
+def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
+    module = MagicMock(spec=GraphDiffusionForecaster)
+    loss = CaptureLoss()
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    weights = {"data": torch.tensor([0.25])}
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    result = GraphDiffusionForecaster._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        weights=weights,
+        grid_shard_slice=grid_shard_slice,
+    )
+
+    assert torch.equal(result, torch.tensor(0.0))
+    assert len(loss.calls) == 1
+    assert loss.calls[0]["pred"] is y_pred
+    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["kwargs"] == {
+        "weights": weights["data"],
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+    }
+
+
+def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> None:
+    module = MagicMock(spec=GraphDiffusionForecaster)
+    loss = ShardingAwareCaptureLoss()
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    weights = {"data": torch.tensor([0.25])}
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    result = GraphDiffusionForecaster._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        weights=weights,
+        grid_shard_slice=grid_shard_slice,
+    )
+
+    assert torch.equal(result, torch.tensor(0.0))
+    assert len(loss.calls) == 1
+    assert loss.calls[0]["pred"] is y_pred
+    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["kwargs"] == {
+        "weights": weights["data"],
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+        "grid_dim": -2,
+        "grid_shard_shapes": shard_shapes,
+    }
+
+
+def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    metric = CaptureLoss()
+    post_processor = MagicMock(side_effect=lambda x, **_: x)
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+
+    module.model = MagicMock()
+    module.model.post_processors = {"data": post_processor}
+    module.metrics = {"data": {"multiscale": metric}}
+    module.val_metric_ranges = {"data": {"z_500": [1]}}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    metrics = BaseGraphModule.calculate_val_metrics(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+        step=0,
+    )
+
+    assert "multiscale_metric/data/z_500/1" in metrics
+    assert len(metric.calls) == 1
+    assert metric.calls[0]["pred"] is y_pred
+    assert metric.calls[0]["target"] is y
+    assert metric.calls[0]["kwargs"] == {
+        "scaler_indices": (..., [1]),
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+    }
+
+
+def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() -> None:
+    module = MagicMock(spec=BaseGraphModule)
+    metric = ShardingAwareCaptureLoss()
+    post_processor = MagicMock(side_effect=lambda x, **_: x)
+    group = object()
+    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+
+    module.model = MagicMock()
+    module.model.post_processors = {"data": post_processor}
+    module.metrics = {"data": {"multiscale": metric}}
+    module.val_metric_ranges = {"data": {"z_500": [1]}}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_shapes = {"data": shard_shapes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+    grid_shard_slice = slice(0, 2)
+
+    metrics = BaseGraphModule.calculate_val_metrics(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=grid_shard_slice,
+        dataset_name="data",
+        step=0,
+    )
+
+    assert "multiscale_metric/data/z_500/1" in metrics
+    assert len(metric.calls) == 1
+    assert metric.calls[0]["pred"] is y_pred
+    assert metric.calls[0]["target"] is y
+    assert metric.calls[0]["kwargs"] == {
+        "scaler_indices": (..., [1]),
+        "grid_shard_slice": grid_shard_slice,
+        "group": group,
+        "grid_dim": -2,
+        "grid_shard_shapes": shard_shapes,
+    }
 
 
 def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -396,7 +698,11 @@ _CFG_INTERP_STEP = DictConfig({"training": {"explicit_times": {"input": [0, 3], 
 _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}})
 
 
-@pytest.mark.parametrize("task_class", [GraphMultiOutInterpolator], ids=["multi_out"])
+@pytest.mark.parametrize(
+    "task_class",
+    [GraphMultiOutInterpolator],
+    ids=["multi_out"],
+)
 def test_interpolator_output_times_and_get_init_step(
     task_class: type[GraphMultiOutInterpolator],
 ) -> None:
@@ -407,11 +713,11 @@ def test_interpolator_output_times_and_get_init_step(
     interpolator.n_step_output = len(_CFG_INTERP_TWO_TARGETS.training.explicit_times.target)
     interpolator.interp_times = _CFG_INTERP_TWO_TARGETS.training.explicit_times.target
     interpolator.model = None  # unused for this test
-    interpolator.get_init_step = lambda rollout: rollout
+    interpolator._plot_adapter = InterpolatorMultiOutPlotAdapter(interpolator)
 
-    assert interpolator.output_times == 2
-    for i in range(interpolator.output_times):
-        assert interpolator.get_init_step(i) == i
+    assert interpolator.plot_adapter.output_times == 2
+    for i in range(interpolator.plot_adapter.output_times):
+        assert interpolator.plot_adapter.get_init_step(i) == i
 
 
 # ---- output_times / get_init_step / _step return format for all tasks ----
@@ -419,12 +725,11 @@ def test_interpolator_output_times_and_get_init_step(
 
 def test_graphdiffusionforecaster_output_times_and_get_init_step() -> None:
     """Diffusion has output_times=1 and uses base get_init_step (returns 0)."""
-    from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
-
     forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
     pl.LightningModule.__init__(forecaster)
-    assert forecaster.output_times == 1
-    assert forecaster.get_init_step(0) == 0
+    forecaster._plot_adapter = DiffusionPlotAdapter(forecaster)
+    assert forecaster.plot_adapter.output_times == 1
+    assert forecaster.plot_adapter.get_init_step(0) == 0
 
 
 def test_graphforecaster_get_init_step() -> None:
@@ -434,8 +739,9 @@ def test_graphforecaster_get_init_step() -> None:
     forecaster.rollout = 2
     forecaster.n_step_input = 1
     forecaster.n_step_output = 1
-    assert forecaster.get_init_step(0) == 0
-    assert forecaster.get_init_step(1) == 0
+    forecaster._plot_adapter = ForecasterPlotAdapter(forecaster)
+    assert forecaster.plot_adapter.get_init_step(0) == 0
+    assert forecaster.plot_adapter.get_init_step(1) == 0
 
 
 def test_graphautoencoder_output_times() -> None:
@@ -446,7 +752,8 @@ def test_graphautoencoder_output_times() -> None:
     ae = GraphAutoEncoder.__new__(GraphAutoEncoder)
     pl.LightningModule.__init__(ae)
     _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE)
-    assert ae.output_times == 1
+    ae._plot_adapter = AutoencoderPlotAdapter(ae)
+    assert ae.plot_adapter.output_times == 1
 
 
 def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:

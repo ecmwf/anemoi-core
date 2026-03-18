@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from typing import Optional
 
@@ -29,6 +30,22 @@ from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
+
+LOGGER = logging.getLogger(__name__)
+
+
+class NoOpProcessor(nn.Module):
+    """No-op processor, used for ablations."""
+
+    def __init__(self, **kwargs) -> None:
+        if len(kwargs) > 0:
+            LOGGER.warning(
+                f"{self.__class__.__name__} does not use any of the following provided kwargs: {list(kwargs.keys())}"
+            )
+        super().__init__()
+
+    def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
+        return x
 
 
 class BaseProcessor(nn.Module, ABC):
@@ -197,7 +214,7 @@ class TransformerProcessor(BaseProcessor):
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
-        softcap: float = 0,
+        softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
         cpu_offload: bool = False,
@@ -226,7 +243,7 @@ class TransformerProcessor(BaseProcessor):
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
         softcap : float, optional
-            Anything > 0 activates softcapping flash attention, by default 0
+            Anything > 0 activates softcapping flash attention, by default None
         use_alibi_slopes : bool
             Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional

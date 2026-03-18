@@ -5,6 +5,8 @@ keep_batch_sharded: True
 
 model:
   _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
+  hidden_nodes_name: "hidden"
+  latent_skip: True
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0
@@ -142,8 +144,6 @@ compile:
       #dynamic: false
       #mode: max-autotune
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
-    options:
-      dynamic: false
 
 # Bounding configuration
 bounding: []
