@@ -22,6 +22,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities.types import LRSchedulerConfig
+from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
 from pytorch_lightning.utilities.types import OptimizerLRScheduler
 from torch_geometric.data import HeteroData
 
@@ -1059,12 +1060,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return val_loss, *args
 
-    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
+    def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: None = None) -> None:
         """Step the learning rate scheduler by Pytorch Lightning.
 
         Parameters
         ----------
-        scheduler : CosineLRScheduler
+        scheduler : LRSchedulerTypeUnion
             Learning rate scheduler object.
         metric : Any
             Metric object for e.g. ReduceLRonPlateau. Default is None.
