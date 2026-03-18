@@ -153,7 +153,7 @@ def test_multiple_direct_calls(sht_setup):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("sht_setup", ["octahedral"], indirect=True)
+@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_direct_autograd_with_graphed_reduced_fft(sht_setup):
     """Check gradients still work for reduced-grid FFT with CUDA graphs on."""
     dtype = sht_setup["dtype"]
