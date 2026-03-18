@@ -68,6 +68,11 @@ class FilteringLossWrapper(BaseLoss):
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
 
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Whether the wrapped loss requires explicit shard-layout metadata."""
+        return getattr(self.loss, "needs_shard_layout_info", False)
+
     def set_data_indices(self, data_indices: IndexCollection) -> None:
         """Hook to set the data indices for the loss."""
         self.data_indices = data_indices
