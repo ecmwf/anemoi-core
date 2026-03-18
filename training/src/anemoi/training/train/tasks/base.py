@@ -726,6 +726,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         batch = self._setup_batch_sharding(batch)
+        batch = self.model.pre_process(batch)
         self._prepare_loss_scalers()
         return batch
 
