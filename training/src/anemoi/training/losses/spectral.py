@@ -152,10 +152,7 @@ class SpectralL2Loss(SpectralLoss):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        pred_spectral = self._to_spectral_flat(pred)
-        target_spectral = self._to_spectral_flat(target)
-
-        diff = torch.abs(pred_spectral - target_spectral) ** 2
+        diff = torch.abs(self._to_spectral_flat(pred - target)) ** 2
 
         result = self.scale(
             diff,
