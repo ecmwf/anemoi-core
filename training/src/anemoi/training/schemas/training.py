@@ -451,6 +451,8 @@ class BaseTrainingSchema(BaseModel):
     "Learning rate configuration."
     optimizer: OptimizerSchema = Field(default_factory=OptimizerSchema)
     "Optimizer configuration."
+    lr_scheduler: dict | None = None
+    "LR scheduler configuration. If None, no scheduler is used."
     recompile_limit: PositiveInt = 32
     "How many times torch.compile will recompile a function for a given input shape."
     metrics: DatasetDict[list[str]]

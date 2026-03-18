@@ -21,7 +21,8 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-from timm.scheduler import CosineLRScheduler
+from pytorch_lightning.utilities.types import LRSchedulerConfig
+from pytorch_lightning.utilities.types import OptimizerLRScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -1075,38 +1076,37 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+    def configure_optimizers(
+        self,
+    ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
-        optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
-        scheduler = self._create_scheduler(optimizer)
+
+        optimizer_config = self.config.training.optimizer
+        optimizer = instantiate(
+            optimizer_config,
+            params=filter(lambda p: p.requires_grad, self.parameters()),
+            lr=self.lr,
+        )
+        self.log_optimizer(optimizer)
+
+        if not getattr(self.config.training, "lr_scheduler", None):
+            return optimizer
+
+        scheduler_config = self.config.training.lr_scheduler
+
+        scheduler = LRSchedulerConfig(
+            scheduler=instantiate(scheduler_config, optimizer=optimizer),
+            interval="step",
+        )
+
         return [optimizer], [scheduler]
 
-    def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
-        """Instantiate optimizer directly via Hydra config (_target_ style)."""
-        params = filter(lambda p: p.requires_grad, self.parameters())
-
-        # Convert schema to dict if needed
-        if hasattr(opt_cfg, "model_dump"):
-            opt_cfg = opt_cfg.model_dump(by_alias=True)
-
-        optimizer = instantiate(opt_cfg, params=params, lr=self.lr)
-
-        # Log the actual optimizer settings to help users verify configuration
+    @staticmethod
+    def log_optimizer(optimizer: torch.optim.Optimizer) -> None:
+        """Log optimizer type and settings."""
         defaults_to_log = {k: v for k, v in optimizer.defaults.items() if k != "params"}
         LOGGER.info("Optimizer initialized: %s", type(optimizer).__name__)
         LOGGER.info("Optimizer settings: %s", defaults_to_log)
-
-        return optimizer
-
-    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
-        """Helper to create the cosine LR scheduler."""
-        scheduler = CosineLRScheduler(
-            optimizer,
-            lr_min=self.lr_min,
-            t_initial=self.lr_iterations,
-            warmup_t=self.lr_warmup,
-        )
-        return {"scheduler": scheduler, "interval": "step"}
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
