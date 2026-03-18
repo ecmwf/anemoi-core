@@ -211,7 +211,7 @@ class PlotEnsSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-    members: list[int] | None = Field(default=None)
+    members: list[int] | int | None = Field(default=None)
     "List of ensemble members to plot. If None, plots all members."
     focus_area: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
