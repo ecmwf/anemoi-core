@@ -202,6 +202,42 @@ def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge
     ), "block.edge_pre_mlp[1] is not an instance of layer_kernels.Activation"
 
 
+def test_GraphTransformerProcessorBlock_custom_attn_dim(init_proc):
+    (
+        in_channels,
+        hidden_dim,
+        out_channels,
+        edge_dim,
+        layer_kernels,
+        bias,
+        num_heads,
+        qk_norm,
+        graph_attention_backend,
+        _edge_pre_mlp,
+    ) = init_proc
+    attn_dim = 96
+
+    block = GraphTransformerProcessorBlock(
+        in_channels=in_channels,
+        hidden_dim=hidden_dim,
+        out_channels=out_channels,
+        attn_dim=attn_dim,
+        edge_dim=edge_dim,
+        layer_kernels=layer_kernels,
+        num_heads=num_heads,
+        bias=bias,
+        update_src_nodes=False,
+        qk_norm=qk_norm,
+        graph_attention_backend=graph_attention_backend,
+        edge_pre_mlp=False,
+    )
+
+    assert block.attn_dim == attn_dim
+    assert block.out_channels_conv == attn_dim // num_heads
+    assert block.projection.in_features == attn_dim
+    assert block.projection.out_features == out_channels
+
+
 def test_GraphTransformerProcessorBlock_shard_qkve_heads(init_proc, block):
     (
         in_channels,
@@ -421,6 +457,42 @@ def test_GraphTransformerMapperBlock_init(init_mapper, mapper_block):
     assert isinstance(
         block.edge_pre_mlp, torch.nn.Identity
     ), "block.edge_pre_mlp is not an instance of torch.nn.Identity"
+
+
+def test_GraphTransformerMapperBlock_custom_attn_dim(init_mapper):
+    (
+        in_channels,
+        hidden_dim,
+        out_channels,
+        edge_dim,
+        layer_kernels,
+        bias,
+        num_heads,
+        qk_norm,
+        graph_attention_backend,
+        _edge_pre_mlp,
+    ) = init_mapper
+    attn_dim = 96
+
+    block = GraphTransformerMapperBlock(
+        in_channels=in_channels,
+        hidden_dim=hidden_dim,
+        out_channels=out_channels,
+        attn_dim=attn_dim,
+        edge_dim=edge_dim,
+        layer_kernels=layer_kernels,
+        num_heads=num_heads,
+        bias=bias,
+        update_src_nodes=False,
+        qk_norm=qk_norm,
+        graph_attention_backend=graph_attention_backend,
+        edge_pre_mlp=False,
+    )
+
+    assert block.attn_dim == attn_dim
+    assert block.out_channels_conv == attn_dim // num_heads
+    assert block.projection.in_features == attn_dim
+    assert block.projection.out_features == out_channels
 
 
 def test_GraphTransformerMapperBlock_shard_qkve_heads(init_mapper, mapper_block):
