@@ -45,6 +45,7 @@ swa:
   lr: 1.e-4
 
 optimization:
+  lr: 1.e-4
   optimizer:
     _target_: torch.optim.AdamW
     weight_decay: 0.1
