@@ -286,10 +286,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             * config.training.lr.rate
             / config.system.hardware.num_gpus_per_model
         )
-        self.lr_iterations = config.training.lr.iterations
-        self.lr_warmup = config.training.lr.warmup
-        self.lr_min = config.training.lr.min
-        self.optimizer_settings = config.training.optimizer
 
         self.model_comm_group = None
         self.reader_groups = None
@@ -1081,24 +1077,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
     ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
+
         optimizer_config = self.config.training.optimizer
-        optimizer = instantiate(
-            optimizer_config,
-            params=filter(lambda p: p.requires_grad, self.parameters()),
-            lr=self.lr,
-        )
+        params = filter(lambda p: p.requires_grad, self.parameters())
+        optimizer = instantiate(optimizer_config, params=params, lr=self.lr)
         self.log_optimizer(optimizer)
 
         if not getattr(self.config.training, "lr_scheduler", None):
             return optimizer
 
         scheduler_config = self.config.training.lr_scheduler
-
-        scheduler = LRSchedulerConfig(
-            scheduler=instantiate(scheduler_config, optimizer=optimizer),
-            interval="step",
-        )
-
+        scheduler = LRSchedulerConfig(scheduler=instantiate(scheduler_config, optimizer=optimizer), interval="step")
         return [optimizer], [scheduler]
 
     @staticmethod
