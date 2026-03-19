@@ -51,6 +51,20 @@ The remapper module supports the following transformations:
 
 Several remappers can be applied one after the other in a chain. The order of the remappers is important, as the output of one remapper is the input to the next remapper. Remappers must be applied after the normalizer as normalizer relies on the computed statistics of the dataset.
 
+Example tranform functions:
+
+.. figure:: ../_static/preprocessing_remapper_power.png
+   :width: 70%
+   :align: center
+
+   Power remapper transform function examples.
+
+.. figure:: ../_static/preprocessing_remapper_atanh.png
+   :width: 70%
+   :align: center
+
+   Atanh remapper transform function examples.
+
 Example configuration:
 .. code:: yaml
 
