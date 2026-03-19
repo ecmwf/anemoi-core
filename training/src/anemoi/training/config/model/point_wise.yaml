@@ -36,8 +36,12 @@ processor:
 
 encoder:
   _target_: anemoi.models.layers.mapper.PointWiseForwardMapper
+  num_layers: 1
+  layer:
+    _target_: torch.nn.Linear
+    in_features: ${model.num_channels}
+    out_features: ${model.num_channels}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
@@ -45,8 +49,12 @@ encoder:
 
 decoder:
   _target_: anemoi.models.layers.mapper.PointWiseBackwardMapper
+  num_layers: 1
+  layer:
+    _target_: torch.nn.Linear
+    in_features: ${model.num_channels}
+    out_features: ${model.num_channels}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
   initialise_data_extractor_zero: False
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
