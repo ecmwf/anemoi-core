@@ -30,23 +30,23 @@ def inverse_affine_transform(x, scale=1.0, shift=0.0):
 #--------------------------------------------------------
 # Displace boundary atoms
 #--------------------------------------------------------
-def displace_boundary_atoms(x, low_atom=None, high_atom=None, low_target=None, high_target=None, eps=0.0):
+def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None, eps=0.0):
     """Displaces exact boundary values to target values (outside of the original range) to give model flexibility to model them as imprecise peaks, instead of delta functions. Reverse transform clamps the imprecise predicted values back to the original range to the original boundary values. Can be used on lower bound, upper bound, or both.
     
     Parameters
     ----------
     x : torch.Tensor
         Input tensor
-    low_atom : float, optional
+    lower_atom : float, optional
         Lower boundary atom
-    high_atom : float, optional
+    upper_atom : float, optional
         Upper boundary atom
-    low_target : float, optional
+    lower_target : float, optional
         Target value for lower boundary atom
-    high_target : float, optional
+    upper_target : float, optional
         Target value for upper boundary atom
     eps : float, optional
-        Epsilon value for numerical stability. Default is 0.0.
+        Epsilon value around the atoms for numerical stability. Default is 0.0.
         
     """
 
@@ -61,7 +61,7 @@ def displace_boundary_atoms(x, low_atom=None, high_atom=None, low_target=None, h
     return x
 
 
-def displace_boundary_atoms_inverse(x, low_atom=None, high_atom=None, low_target=None, high_target=None):
+def displace_boundary_atoms_inverse(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None):
     """Clamps the values back to the original range, to the original boundary values. Can be used on lower bound, upper bound, or both."""
 
     return x.clamp(low_atom, high_atom)
@@ -98,7 +98,7 @@ def boxcox_converter(x, lambd=0.5, clip_negative=False):
         assert x.gt(0.0).all(), "input x must be strictly positive for parameter lambd == 0"
     else:
         if clip_negative:
-            x = torch.clamp(x, min=0.0)
+            x = torch.clamp_(x, min=0.0)
         else:
             assert x.ge(
                 0.0
@@ -108,14 +108,14 @@ def boxcox_converter(x, lambd=0.5, clip_negative=False):
 
     # Apply transformation
     if lambd == 0:
-        return torch.log(x)
-    return (torch.pow(x, lambd) - 1) / lambd
+        return torch.log_(x)
+    return (torch.pow_(x, lambd).sub_(1.0)).div_(lambd)
 
 def inverse_boxcox_converter(x, lambd=0.5, clip_negative=None):
     """Convert back boxcox(var) to var."""
     if lambd == 0:
-        return torch.exp(x)
-    return torch.pow(torch.relu(x * lambd + 1, 1 / lambd))
+        return torch.exp_(x)
+    return torch.pow_(torch.clamp_(x.mul_(lambd).add_(1.0), min=0.0), 1 / lambd)
 
 #--------------------------------------------------------
 # power quantile transform / boxcox rescaled

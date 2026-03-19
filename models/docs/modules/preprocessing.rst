@@ -68,7 +68,7 @@ Example configuration:
            config:
              power: ["tp"]
              atanh: ["tcc"]
-             kwargs:
+             method_kwargs:
                power:
                  lambd: 0.1
                atanh:
@@ -79,12 +79,12 @@ Example configuration:
            config:
              affine: ["tp"]
              displace_boundary_atoms: ["tcc"]
-             kwargs:
+             method_kwargs:
                affine:
                  scale: 2.0
-               displace_boundary_atoms
+               displace_boundary_atoms:
                  lower_atom: -1.0
-                 lower_target:-1.5
+                 lower_target: -1.5
                  upper_atom: 1.0
                  upper_target: 1.5
                  eps: 1e-4
@@ -93,7 +93,7 @@ Example configuration:
            _convert_: all
            config:
              displace_boundary_atoms: ["tp"]
-             kwargs:
+             method_kwargs:
                displace_boundary_atoms:
                  lower_atom: 0
                  lower_target: -1

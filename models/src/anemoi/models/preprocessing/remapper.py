@@ -140,9 +140,9 @@ class Remapper(BasePreprocessor):
                 f"Input tensor ({x.shape[-1]}) does not match the training "
                 f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
             )
-        for i, remapper in zip(idx, self.remappers):
+        for i, remapper, kwargs in zip(idx, self.remappers, self.remapper_kwargs):
             if i is not None:
-                x[..., i] = remapper(x[..., i],**self.remapper_kwargs[i])
+                x[..., i] = remapper(x[..., i],**kwargs)
         return x
 
     def inverse_transform(self, x, in_place: bool = True) -> torch.Tensor:
@@ -157,7 +157,7 @@ class Remapper(BasePreprocessor):
                 f"Input tensor ({x.shape[-1]}) does not match the training "
                 f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
             )
-        for i, backmapper in zip(idx, self.backmappers):
+        for i, backmapper, kwargs in zip(idx, self.backmappers, self.remapper_kwargs):
             if i is not None:
-                x[..., i] = backmapper(x[..., i],**self.remapper_kwargs[i])
+                x[..., i] = backmapper(x[..., i],**kwargs)
         return x
