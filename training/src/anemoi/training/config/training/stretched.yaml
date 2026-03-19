@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: stretched
+  - optimization: default
 
 # resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
