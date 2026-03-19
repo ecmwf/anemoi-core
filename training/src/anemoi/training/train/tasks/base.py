@@ -1077,7 +1077,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
     ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
-
         optimization = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
         optimizer = instantiate(optimization.optimizer, params=params, lr=self.lr)
@@ -1099,7 +1098,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
-
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})

@@ -64,9 +64,6 @@ class Rollout(BaseModel):
     "Maximum number of rollouts."
 
 
-
-
-
 class OptimizerSchema(PydanticBaseModel):
     """Choosing the PydanticBaseModel to allow extra inputs."""
 
