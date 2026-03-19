@@ -17,9 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 @runtime_checkable
 class ModelInterface(Protocol):
-    """
-    Interface for Anemoi models.
-    """
+    """Interface for Anemoi models."""
 
     def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Apply pre-processing (e.g. normalisation) to model inputs."""

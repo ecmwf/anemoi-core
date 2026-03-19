@@ -44,7 +44,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
     def __init__(
         self,
         *,
-        model: "ModelInterface",
+        model: ModelInterface,
         config: DictConfig,
         graph_data: dict[str, HeteroData],
         statistics: dict,

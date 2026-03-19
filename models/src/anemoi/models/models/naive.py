@@ -14,8 +14,10 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
+from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
+
 
 class NaiveModel(torch.nn.Module):
     """Simplest possible baseline: independent linear layer per grid point.

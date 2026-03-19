@@ -38,7 +38,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
     def __init__(
         self,
         *,
-        model: "ModelInterface",
+        model: ModelInterface,
         config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,
@@ -263,7 +263,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     def __init__(
         self,
         *,
-        model: "ModelInterface",
+        model: ModelInterface,
         config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,
@@ -399,7 +399,9 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 )[dataset_name]
                 state_steps.append(state_step)
             out_dataset = torch.cat(state_steps, dim=1)
-            out_dataset = self.model.backbone._apply_imputer_inverse(self.model.post_processors, dataset_name, out_dataset)
+            out_dataset = self.model.backbone._apply_imputer_inverse(
+                self.model.post_processors, dataset_name, out_dataset,
+            )
             states[dataset_name] = out_dataset
         return states
 

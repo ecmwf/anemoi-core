@@ -249,4 +249,3 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             )
 
         return x_out_dict
-

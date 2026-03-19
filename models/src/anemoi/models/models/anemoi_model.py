@@ -17,6 +17,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.utils.config import DotDict
 
+
 class AnemoiModel(torch.nn.Module):
     """Standard implementation of :class:`ModelInterface`."""
 
@@ -61,6 +62,7 @@ class AnemoiModel(torch.nn.Module):
             graph_data=graph_data,
             _recursive_=False,
         )
+
     def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         return {name: self.pre_processors[name](x[name], in_place=False) for name in x}
 

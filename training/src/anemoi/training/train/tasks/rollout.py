@@ -40,7 +40,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
     def __init__(
         self,
         *,
-        model: "ModelInterface",
+        model: ModelInterface,
         config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,

@@ -38,7 +38,7 @@ class GraphAutoEncoder(BaseGraphModule):
     def __init__(
         self,
         *,
-        model: "ModelInterface",
+        model: ModelInterface,
         config: DictConfig,
         graph_data: HeteroData,
         statistics: dict,

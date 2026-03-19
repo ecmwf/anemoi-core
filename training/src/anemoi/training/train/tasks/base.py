@@ -53,7 +53,6 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-
 class BaseGraphModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 

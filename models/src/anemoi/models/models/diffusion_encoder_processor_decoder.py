@@ -747,7 +747,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         )
 
 
-
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     """Diffusion model for tendency prediction."""
 

@@ -314,4 +314,3 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         return x_out_dict
-

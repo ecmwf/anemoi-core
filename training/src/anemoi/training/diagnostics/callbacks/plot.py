@@ -800,7 +800,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         model = pl_module.model.module.backbone if hasattr(pl_module.model, "module") else pl_module.model.backbone
         node_trainable_tensors = self.get_node_trainable_tensors(model.node_attributes)
 
-
         for dataset_name in dataset_names:
             if dataset_name in node_trainable_tensors and node_trainable_tensors[dataset_name] is not None:
                 fig = plot_graph_node_features(

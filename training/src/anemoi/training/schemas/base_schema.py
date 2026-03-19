@@ -112,7 +112,6 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
         return self
 
 
-
 class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     data: Any
     """Data configuration."""

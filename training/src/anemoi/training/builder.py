@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 """Factory function for building ModelInterface via Hydra instantiate."""
+
 from __future__ import annotations
 
 import datetime
@@ -19,7 +20,6 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from anemoi.utils.provenance import gather_provenance_info
 
 from anemoi.models.interface import ModelInterface
 from anemoi.models.models import AnemoiModel
@@ -28,6 +28,7 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.utils.jsonify import map_config_to_primitives
+from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Processor-building helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_processor_pair(
     processors_configs: dict,
@@ -129,6 +131,7 @@ def _build_processors(
 # Main factory
 # ---------------------------------------------------------------------------
 
+
 def build_anemoi_model(
     *,
     backbone: DictConfig,
@@ -144,6 +147,7 @@ def build_anemoi_model(
     Called by Hydra instantiate(config.model) from train.py. All inputs come
     from OmegaConf interpolations in the model yaml — no kwargs from train.py.
     """
+
     def _to_container(v):
         if isinstance(v, DictConfig):
             return OmegaConf.to_container(v, resolve=True)
@@ -178,6 +182,7 @@ def build_anemoi_model(
 
     # Combine supporting arrays with output-mask arrays
     from anemoi.training.utils.supporting_arrays import build_combined_supporting_arrays
+
     supporting_arrays = build_combined_supporting_arrays(
         config=config,
         graph_data=graph_data,
@@ -205,6 +210,7 @@ def build_anemoi_model(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_graph(config: DotDict) -> dict:
     """Load or create graph data."""
@@ -237,8 +243,10 @@ def _build_graph(config: DotDict) -> dict:
             dataset_source = dataset_reader_config.get("dataset")
         else:
             dataset_source = dataset_reader_config
-        if dataset_source is not None and hasattr(graph_config.nodes, "data") and hasattr(
-            graph_config.nodes.data.node_builder, "dataset"
+        if (
+            dataset_source is not None
+            and hasattr(graph_config.nodes, "data")
+            and hasattr(graph_config.nodes.data.node_builder, "dataset")
         ):
             graph_config.nodes.data.node_builder.dataset = dataset_source
 
@@ -261,7 +269,7 @@ def _build_metadata(config: DotDict, datamodule: AnemoiDatasetsDataModule) -> di
     """Build inference/provenance metadata."""
     metadata_inference = {
         "dataset_names": None,  # populated by fill_metadata
-        "task": None,           # set by train.py after build
+        "task": None,  # set by train.py after build
     }
     md_dict = {
         "version": "2.0",

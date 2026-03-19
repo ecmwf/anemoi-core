@@ -354,5 +354,10 @@ class NaiveModelSchema(PydanticBaseModel):
 
 
 ModelSchema = Union[
-    NaiveModelSchema, BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, DiffusionTendModelSchema
+    NaiveModelSchema,
+    BaseModelSchema,
+    EnsModelSchema,
+    HierarchicalModelSchema,
+    DiffusionModelSchema,
+    DiffusionTendModelSchema,
 ]
