@@ -86,7 +86,6 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             y_non_residual_indices,
             persistent=True,
         )
-        self.training_approach = model_config.training.training_approach
 
         self.DEFAULT_LOW_NOISE_SCHEDULER_PARAMS = {
             "schedule_type": "karras",
