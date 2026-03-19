@@ -20,6 +20,8 @@ from anemoi.models.preprocessing.mappings import inverse_atanh_converter
 from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
 from anemoi.models.preprocessing.mappings import inverse_power_transform
 from anemoi.models.preprocessing.mappings import power_transform
+from anemoi.models.preprocessing.mappings import asinh_converter
+from anemoi.models.preprocessing.mappings import inverse_asinh_converter
 
 
 @pytest.mark.parametrize("lambd", [0.0, 0.25, 0.75, 1.5])
@@ -74,6 +76,14 @@ def test_atanh_roundtrip(rho: float) -> None:
 def test_atanh_negative_rho_raises() -> None:
     with pytest.raises(ValueError):
         atanh_converter(torch.tensor([0.2, 0.7], dtype=torch.float32), rho=-0.1)
+
+
+
+def test_asinh_roundtrip() -> None:
+    x = torch.tensor([0.0, 0.01, 0.1, 1.0, 3.0, 100.0], dtype=torch.float32)
+    y = asinh_converter(x.clone(), c=1.0)
+    x_back = inverse_asinh_converter(y.clone(), c=1.0)
+    assert torch.allclose(x_back, x, atol=1e-6, rtol=1e-5)
 
 
 def test_affine_roundtrip() -> None:

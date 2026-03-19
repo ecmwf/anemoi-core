@@ -62,7 +62,7 @@ def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=No
     return x
 
 
-def displace_boundary_atoms_inverse(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None):
+def inverse_displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None):
     """Clamps the values back to the original range, to the original boundary values. Can be used on lower bound, upper bound, or both."""
 
     return x.clamp(lower_atom, upper_atom)
@@ -196,6 +196,19 @@ def inverse_atanh_converter(y, rho=2.0):
         return y.clamp_(0.0, 1.0)
     return torch.clamp_(torch.tanh_(y.mul_(rho)).div_(math.tanh(rho)).add_(1.0).mul_(0.5), min=0.0, max=1.0)
 
+
+# --------------------------------------------------------
+# asinh transform
+# --------------------------------------------------------
+
+def asinh_converter(x, c=1.0):
+    """Apply an asinh transform"""
+    return torch.asinh_(x.mul_(c))
+
+
+def inverse_asinh_converter(x, c=1.0):
+    """Inverse asinh transform"""
+    return torch.sinh_(x).div_(c)
 
 # --------------------------------------------------------
 # log1p transform

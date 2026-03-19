@@ -46,6 +46,7 @@ The remapper module supports the following transformations:
 - ``boxcox``
 - ``power`` (x^lambda)
 - ``atanh``
+- ``asinh``
 - ``displace_boundary_atoms`` (shifts precise boundary peaks away from other
   values to give the model a bucket in which to accurately model them)
 
