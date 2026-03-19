@@ -1056,7 +1056,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return val_loss, *args
 
-    def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: None = None) -> None:
+    def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None = None) -> None:
         """Step the learning rate scheduler by Pytorch Lightning.
 
         Parameters
@@ -1067,8 +1067,16 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """
-        del metric
-        scheduler.step(epoch=self.trainer.global_step)
+        # Special-case timm-style schedulers that expect step_update(global_step)
+        if hasattr(scheduler, "step_update"):
+            scheduler.step_update(self.trainer.global_step)
+            return
+
+        # Fallback to standard Lightning semantics for other schedulers
+        if metric is not None:
+            scheduler.step(metric)
+        else:
+            scheduler.step()
 
     def on_train_epoch_end(self) -> None:
         pass
