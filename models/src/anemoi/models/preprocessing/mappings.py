@@ -51,7 +51,7 @@ def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=No
 
     """
 
-    if  lower_atom is not None:
+    if lower_atom is not None:
         assert lower_target is not None, "To displace lower boundary atom, lower_target must be specified"
         assert lower_target < lower_atom, "lower_target must be less than lower_atom"
         x.masked_fill_(x <= lower_atom + eps, lower_target)
