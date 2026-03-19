@@ -46,7 +46,6 @@ swa:
   lr: 1.e-4
 
 optimization:
-  lr: 1.e-4
   optimizer:
     _target_: torch.optim.AdamW
     weight_decay: 0.1
@@ -149,7 +148,6 @@ rollout:
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
 max_steps: 1000000
-
 
 submodules_to_freeze: []
 
