@@ -95,6 +95,15 @@ class BasePlotCallback(Callback, ABC):
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
+    @property
+    def artifact_subfolder(self) -> str:
+        """Return the artifact subfolder name for experiment logging.
+
+        Used by MLflow to organize artifacts into per-callback folders.
+        Derived automatically from the concrete callback class name.
+        """
+        return type(self).__name__
+
     @rank_zero_only
     def _output_figure(
         self,
@@ -122,7 +131,7 @@ class BasePlotCallback(Callback, ABC):
                 logger.experiment.log({exp_log_tag: wandb.Image(fig)})
             elif logger and logger.logger_name == "mlflow":
                 run_id = logger.run_id
-                logger.experiment.log_artifact(run_id, str(save_path))
+                logger.experiment.log_artifact(run_id, str(save_path), artifact_path=self.artifact_subfolder)
 
         plt.close(fig)  # cleanup
 
@@ -151,7 +160,7 @@ class BasePlotCallback(Callback, ABC):
 
             if self.config.diagnostics.log.mlflow.enabled:
                 run_id = logger.run_id
-                logger.experiment.log_artifact(run_id, str(save_path))
+                logger.experiment.log_artifact(run_id, str(save_path), artifact_path=self.artifact_subfolder)
 
         plt.close(fig)  # cleanup
 
@@ -725,15 +734,9 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         super().__init__(config, dataset_names=dataset_names, every_n_epochs=every_n_epochs)
         self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
 
-    def get_node_trainable_tensors(
-        self,
-        node_attributes: NamedNodesAttributes,
-        dataset_name: str,
-    ) -> dict[str, torch.Tensor]:
+    def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
         return {
-            name: tt.trainable
-            for name, tt in node_attributes[dataset_name].trainable_tensors.items()
-            if tt.trainable is not None
+            name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None
         }
 
     @staticmethod
@@ -774,8 +777,8 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         trainable_modules = {}
 
         provider_specs = (
-            ("encoder_graph_provider", (model._graph_name_data, model._graph_name_hidden)),
-            ("decoder_graph_provider", (model._graph_name_hidden, model._graph_name_data)),
+            ("encoder_graph_provider", (dataset_name, model._graph_name_hidden)),
+            ("decoder_graph_provider", (model._graph_name_hidden, dataset_name)),
             ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
         )
         for provider_name, edge_key in provider_specs:
@@ -795,10 +798,13 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         model = pl_module.model.module.backbone if hasattr(pl_module.model, "module") else pl_module.model.backbone
+        node_trainable_tensors = self.get_node_trainable_tensors(model.node_attributes)
+
+
         for dataset_name in dataset_names:
-            if len(node_trainable_tensors := self.get_node_trainable_tensors(model.node_attributes, dataset_name)):
+            if dataset_name in node_trainable_tensors and node_trainable_tensors[dataset_name] is not None:
                 fig = plot_graph_node_features(
-                    model.node_attributes[dataset_name],
+                    model.node_attributes,
                     node_trainable_tensors,
                     datashader=self.datashader_plotting,
                 )
@@ -821,7 +827,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
                 )
             elif len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
                 fig = plot_graph_edge_features(
-                    model.node_attributes[dataset_name],
+                    model.node_attributes,
                     edge_trainable_modules,
                     q_extreme_limit=self.q_extreme_limit,
                 )
@@ -1038,14 +1044,16 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
             for dataset in self.loss:
-                if (
-                    hasattr(self.loss[dataset].scaler, "nan_mask_weights")
-                    and self.loss[dataset].scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-                ):
-                    self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(
-                        self.loss[dataset].scaler.nan_mask_weights,
-                        dataset,
-                    )
+                for leaf_loss in self.loss[dataset].iter_leaf_losses():
+                    if (
+                        hasattr(leaf_loss, "scaler")
+                        and hasattr(leaf_loss.scaler, "nan_mask_weights")
+                        and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+                    ):
+                        leaf_loss.scaler.nan_mask_weights = pl_module.allgather_batch(
+                            leaf_loss.scaler.nan_mask_weights,
+                            dataset,
+                        )
 
             super().on_validation_batch_end(
                 trainer,

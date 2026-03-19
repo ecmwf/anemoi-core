@@ -17,6 +17,8 @@ keep_batch_sharded: True
 
 backbone:
   _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
+  hidden_nodes_name: "hidden"
+  latent_skip: True
 
 noise_injector:
   _target_: anemoi.models.layers.ensemble.NoiseConditioning
