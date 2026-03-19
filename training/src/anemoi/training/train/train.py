@@ -477,7 +477,7 @@ class AnemoiTrainer(ABC):
         )
         LOGGER.info(
             "Effective learning rate: %.3e",
-            int(total_number_of_model_instances) * self.config.training.lr.rate,
+            int(total_number_of_model_instances) * self.config.training.optimization.lr,
         )
 
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
@@ -487,7 +487,7 @@ class AnemoiTrainer(ABC):
                 "Learning rate scheduler will run for %d steps.",
                 self.config.training.max_epochs,
                 self.config.training.max_steps,
-                self.config.training.lr.iterations,
+                self.config.training.max_steps,
             )
 
     def _get_server2server_lineage(self) -> None:
