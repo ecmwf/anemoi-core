@@ -12,6 +12,7 @@ lr_scheduler:
   lr_min: 3e-7
   t_initial: ${training.max_steps} # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
   warmup_t: 1000
+  t_in_epochs: false # t_initial and warmup_t are in steps, not epochs (matches interval: step)
 
 # Lightning scheduler integration: controls how Lightning calls the scheduler
 # during training (step vs epoch, metric to monitor for ReduceLROnPlateau, etc.).
