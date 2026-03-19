@@ -77,7 +77,7 @@ def boxcox_converter(x, lambd=0.5, clip_negative=False):
 
     Special cases:
     - lambd == 0 -> log(x)
-    - lambd == 1 -> x-1 
+    - lambd == 1 -> x-1
 
     Notes
     -----
