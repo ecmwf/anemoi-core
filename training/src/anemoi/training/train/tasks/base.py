@@ -1077,7 +1077,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
     ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
-
         optimizer_config = self.config.training.optimizer
         params = filter(lambda p: p.requires_grad, self.parameters())
         optimizer = instantiate(optimizer_config, params=params, lr=self.lr)
