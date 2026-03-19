@@ -110,14 +110,14 @@ def boxcox_converter(x, lambd=0.5, clip_negative=False):
     # Apply transformation
     if lambd == 0:
         return torch.log_(x)
-    return (torch.pow_(x, lambd).sub_(1.0)).div_(lambd)
+    return x.pow_(lambd).sub_(1.0).div_(lambd)
 
 
 def inverse_boxcox_converter(x, lambd=0.5, clip_negative=None):
     """Convert back boxcox(var) to var."""
     if lambd == 0:
         return torch.exp_(x)
-    return torch.pow_(torch.clamp_(x.mul_(lambd).add_(1.0), min=0.0), 1 / lambd)
+    return torch.clamp_(x.mul_(lambd).add_(1.0), min=0.0).pow_(1 / lambd)
 
 
 # --------------------------------------------------------
@@ -148,9 +148,9 @@ def power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one
         )
     if tangent_linear_above_one:
         lin_branch = x.clone().mul_(lambd).add_(1.0 - lambd)
-        pow_branch = torch.pow_(x, lambd)
+        pow_branch = x.pow_(lambd)
         return torch.where(x > 1.0, lin_branch, pow_branch)
-    return torch.pow_(x, lambd)
+    return x.pow_(lambd)
 
 
 def inverse_power_transform(x, lambd=0.33, tangent_linear_above_one=False):
@@ -158,9 +158,9 @@ def inverse_power_transform(x, lambd=0.33, tangent_linear_above_one=False):
     assert lambd > 0, f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
     if tangent_linear_above_one:
         lin_branch = x.clone().sub_(1.0 - lambd).div_(lambd)
-        pow_branch = torch.pow_(torch.clamp_(x, min=0.0), 1 / lambd)
+        pow_branch = torch.clamp_(x, min=0.0).pow_(1 / lambd)
         return torch.where(x > 1.0, lin_branch, pow_branch)
-    return torch.pow_(torch.clamp_(x, min=0.0), 1 / lambd)
+    return torch.clamp_(x, min=0.0).pow_(1 / lambd)
 
 
 # --------------------------------------------------------
@@ -188,7 +188,7 @@ def atanh_converter(x, rho=2.0):
     if not (0 <= rho):
         raise ValueError(f"rho must satisfy 0 < rho , got {rho}")
 
-    return torch.atanh_((x.mul_(2.0).sub_(1.0)).mul_(torch.tanh(rho))).div_(rho)
+    return torch.atanh_((x.mul_(2.0).sub_(1.0)).mul_(math.tanh(rho))).div_(rho)
 
 
 def inverse_atanh_converter(y, rho=2.0):
