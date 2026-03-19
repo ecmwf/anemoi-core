@@ -50,6 +50,14 @@ def test_power_roundtrip(lambd: float) -> None:
     assert torch.allclose(x_back, x, atol=1e-6, rtol=1e-5)
 
 
+@pytest.mark.parametrize("lambd", [0.2, 0.5, 1.1, 2.0])
+def test_power_roundtrip_tangent_linear_above_one(lambd: float) -> None:
+    x = torch.tensor([0.0, 0.01, 0.1, 1.0, 1.5, 3.0], dtype=torch.float32)
+    y = power_transform(x.clone(), lambd=lambd, tangent_linear_above_one=True)
+    x_back = inverse_power_transform(y.clone(), lambd=lambd, tangent_linear_above_one=True)
+    assert torch.allclose(x_back, x, atol=1e-6, rtol=1e-5)
+
+
 def test_power_negative_input_raises() -> None:
     with pytest.raises(AssertionError):
         power_transform(torch.tensor([-0.1, 0.2], dtype=torch.float32), lambd=0.5)

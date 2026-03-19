@@ -120,17 +120,39 @@ def inverse_boxcox_converter(x, lambd=0.5, clip_negative=None):
 #--------------------------------------------------------
 # power quantile transform / boxcox rescaled
 #--------------------------------------------------------
-def power_transform(x, lambd=0.33, clip_negative=False):
-    """Applies x^lambd to the input tensor. A rescaled"""
+def power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one=False):
+    """Apply a power transform    
+    Parameters
+    ----------
+    x : torch.Tensor
+        Input tensor
+    lambd : float
+        Exponent for the power transform. Default is 0.33.
+    clip_negative : bool, optional
+        Whether to clip negative values to 0. Default is False.
+    tangent_linear_above_one : bool, optional
+        Whether to use a tangent-linear extension above 1 instead of the power transform. Useful for max-scaled variables where we still might want to predict values above max without clamping them to max and without blowing them up with the power-transform. Default is False.
+    """
     assert lambd > 0, f"For power transform, parameter lambd {lambd} must satisfy lambd > 0."
-    
-    assert x.ge(0.0).all(), "Power trasnform input x must satisfy x >= 0."
+
+    if clip_negative:
+        x = torch.clamp_(x, min=0.0)
+    else:
+        assert x.ge(0.0).all(), "Power transform input x must satisfy x >= 0, or use with clip_negative=True to clip negative values to 0."
+    if tangent_linear_above_one:
+        lin_branch = x.clone().mul_(lambd).add_(1.0 - lambd)
+        pow_branch = torch.pow_(x, lambd)
+        return torch.where(x > 1.0, lin_branch, pow_branch)
     return torch.pow_(x, lambd)
 
 
-def inverse_power_transform(x, lambd=0.33):
-    """inverse of power_transform , with a clamping of low values to zero"""
+def inverse_power_transform(x, lambd=0.33, tangent_linear_above_one=False):
+    """Inverse power transform with optional inverse tangent-linear branch above 1."""
     assert lambd > 0, f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
+    if tangent_linear_above_one:
+        lin_branch = x.clone().sub_(1.0 - lambd).div_(lambd)
+        pow_branch = torch.pow_(torch.clamp_(x, min=0.0), 1 / lambd)
+        return torch.where(x > 1.0, lin_branch, pow_branch)
     return torch.pow_(torch.clamp_(x, min=0.0), 1 / lambd)
 
 #--------------------------------------------------------

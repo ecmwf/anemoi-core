@@ -71,6 +71,7 @@ Example configuration:
              method_kwargs:
                power:
                  lambd: 0.1
+                 tangent_linear_above_one: true
                atanh:
                  rho: 3.0
          remapper2:
