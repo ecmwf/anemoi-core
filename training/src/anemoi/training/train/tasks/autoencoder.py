@@ -51,7 +51,6 @@ class GraphAutoEncoder(BaseGraphModule):
         Parameters
         ----------
         model : ModelInterface
-            Pre-built model
         config : DictConfig
             Job configuration
         graph_data : HeteroData

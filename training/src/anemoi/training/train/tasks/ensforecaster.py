@@ -52,7 +52,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         Parameters
         ----------
         model : ModelInterface
-            Pre-built model
         config : DictConfig
             Job configuration
         statistics : dict

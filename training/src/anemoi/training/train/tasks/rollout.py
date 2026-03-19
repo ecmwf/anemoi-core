@@ -53,7 +53,6 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         Parameters
         ----------
         model : ModelInterface
-            Pre-built model
         config : DictConfig
             Job configuration
         graph_data : HeteroData
@@ -83,15 +82,6 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
         self._plot_adapter = ForecasterPlotAdapter(self)
-
-        self.fill_metadata(self.metadata)
-
-    def fill_metadata(self, metadata: dict) -> None:
-        for dataset_name in self.dataset_names:
-            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
-            rel = ts["relative_date_indices_training"]
-            ts["input_relative_date_indices"] = rel[: self.n_step_input]
-            ts["output_relative_date_indices"] = rel[-self.n_step_output :]
 
     def _advance_dataset_input(
         self,

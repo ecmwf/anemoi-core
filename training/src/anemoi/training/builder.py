@@ -283,4 +283,13 @@ def _build_metadata(config: DotDict, datamodule: AnemoiDatasetsDataModule) -> di
         "uuid": None,
     }
     datamodule.fill_metadata(md_dict)
+
+    n_step_input = config.training.multistep_input
+    n_step_output = getattr(config.training, "multistep_output", 1)
+    for dataset_name in datamodule.dataset_names:
+        ts = md_dict["metadata_inference"][dataset_name]["timesteps"]
+        rel = ts["relative_date_indices_training"]
+        ts["input_relative_date_indices"] = rel[:n_step_input]
+        ts["output_relative_date_indices"] = rel[-n_step_output:]
+
     return map_config_to_primitives(md_dict)

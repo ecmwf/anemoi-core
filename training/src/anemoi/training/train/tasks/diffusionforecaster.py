@@ -63,15 +63,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         self._plot_adapter = DiffusionPlotAdapter(self)
 
-        self.fill_metadata(self.metadata)
-
-    def fill_metadata(self, metadata: dict) -> None:
-        for dataset_name in self.dataset_names:
-            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
-            rel = ts["relative_date_indices_training"]
-            ts["input_relative_date_indices"] = rel[: self.n_step_input]
-            ts["output_relative_date_indices"] = rel[-self.n_step_output :]
-
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
         x = {}

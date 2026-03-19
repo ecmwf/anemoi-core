@@ -57,7 +57,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         Parameters
         ----------
         model : ModelInterface
-            Pre-built model
         config : DictConfig
             Job configuration
         graph_data : dict[str, HeteroData]

@@ -149,8 +149,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        model : ModelInterface
-            Pre-built model
         config : DictConfig
             Job configuration
         graph_data : HeteroData
