@@ -70,14 +70,14 @@ def inverse_displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_t
 
 # --------------------------------------------------------
 # boxcox transform
-# (generalising powerlaw, identity and log relationship)
+# (generalising powerlaw, linear, and log relationship)
 # --------------------------------------------------------
 def boxcox_converter(x, lambd=0.5, clip_negative=False):
     """Convert positive var in to boxcox(var) = (x^lambd - 1) / lambd
 
     Special cases:
     - lambd == 0 -> log(x)
-    - lambd == 1 -> x
+    - lambd == 1 -> x-1 
 
     Notes
     -----
@@ -221,3 +221,16 @@ def log1p_converter(x):
 def expm1_converter(x):
     """Convert back log(1+var) to var."""
     return torch.expm1(x)
+
+
+# --------------------------------------------------------
+# sqrt transform
+# --------------------------------------------------------
+def sqrt_converter(x):
+    """Apply a sqrt transform"""
+    return power_transform(x, lambd=0.5)
+
+
+def inverse_sqrt_converter(x):
+    """Inverse sqrt transform"""
+    return inverse_power_transform(x, lambd=0.5)

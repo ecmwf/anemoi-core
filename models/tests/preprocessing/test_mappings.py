@@ -14,7 +14,7 @@ from anemoi.models.preprocessing.mappings import affine_transform
 from anemoi.models.preprocessing.mappings import atanh_converter
 from anemoi.models.preprocessing.mappings import boxcox_converter
 from anemoi.models.preprocessing.mappings import displace_boundary_atoms
-from anemoi.models.preprocessing.mappings import displace_boundary_atoms_inverse
+from anemoi.models.preprocessing.mappings import inverse_displace_boundary_atoms
 from anemoi.models.preprocessing.mappings import inverse_affine_transform
 from anemoi.models.preprocessing.mappings import inverse_atanh_converter
 from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
@@ -113,7 +113,7 @@ def test_displace_boundary_atoms_and_inverse() -> None:
     expected_displaced = torch.tensor([-1.0, -1.0, 0.25, 0.75, 2.0], dtype=torch.float32)
     assert torch.allclose(displaced, expected_displaced)
 
-    restored = displace_boundary_atoms_inverse(
+    restored = inverse_displace_boundary_atoms(
         displaced.clone(),
         lower_atom=0.0,
         lower_target=-1.0,
