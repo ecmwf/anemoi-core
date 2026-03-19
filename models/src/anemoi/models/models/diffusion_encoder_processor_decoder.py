@@ -46,6 +46,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
     ) -> None:
 
         model_config_local = DotDict(model_config)
+        self.training_approach = model_config_local.training.training_approach
 
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
@@ -53,7 +54,6 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         self.sigma_data = diffusion_config.sigma_data
         self.sigma_max = diffusion_config.sigma_max
         self.sigma_min = diffusion_config.sigma_min
-        
         self.inference_defaults = None
         if hasattr(diffusion_config, "inference_defaults"):
             self.inference_defaults = diffusion_config.inference_defaults

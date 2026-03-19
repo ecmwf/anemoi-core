@@ -86,7 +86,9 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             y_non_residual_indices,
             persistent=True,
         )
-        self.DEFAULT_NOISE_SCHEDULER_PARAMS = {
+        self.training_approach = model_config.training.training_approach
+
+        self.DEFAULT_LOW_NOISE_SCHEDULER_PARAMS = {
             "schedule_type": "karras",
             "sigma_max": 88,
             "sigma_min": 0.03,
@@ -94,50 +96,113 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             "num_steps": 40,
         }
 
-        self.DEFAULT_SAMPLER_PARAMS = {
+        self.DEFAULT_LOW_NOISE_SAMPLER_PARAMS = {
             "sampler": "heun",
             "S_churn": 2.5,
             "S_min": 0.75,
             "S_max": 88,
             "S_noise": 1.05,
         }
-    
+
+        self.DEFAULT_HIGH_NOISE_SCHEDULER_PARAMS = {
+          "schedule_type": "karras",
+          "sigma_max": 100000.0,
+          "sigma_min": 0.02,
+          "rho": 7.0,
+          "num_steps": 80,
+        }
+
+        self.DEFAULT_HIGH_NOISE_SAMPLER_PARAMS = {
+          "sampler": "heun",
+          "S_churn": 2.5,
+          "S_min": 0.75,
+          "S_max": 100000,
+          "S_noise": 1.05,
+        }
+
+    def _get_config_field_lists(self, model_config, input_field_name, out_field_names):
+
+        if isinstance(model_config['data'], dict):
+            is_residual_fields_attr = "residual_fields" in model_config['data']
+            is_direct_pred_attr = "direct_prediction_fields" in model_config['data']
+            residual_fields = model_config['data'].get("residual_fields", [])
+            direct_prediction_fields = model_config['data'].get("direct_prediction_fields", [])
+            in_hres_forcings_fields = model_config['data'].get("forcing", [])
+        else:
+            is_residual_fields_attr = hasattr(model_config['data'], "residual_fields")
+            is_direct_pred_attr = hasattr(model_config['data'], "direct_prediction_fields")
+            residual_fields = getattr(model_config['data'], "residual_fields", [])
+            direct_prediction_fields = getattr(model_config['data'], "direct_prediction_fields", [])
+            in_hres_forcings_fields = getattr(model_config['data'], "forcing", [])
+        undeclared_residuals = (not is_residual_fields_attr) or (residual_fields is None)
+        undeclared_direct_fields = (not is_direct_pred_attr) or (direct_prediction_fields is None)
+        empty_residuals = len(residual_fields) == 0
+        empty_direct_fields = len(direct_prediction_fields) == 0
+        out_diff_variables = set() # output variables not in direct_prediction_fields or residual_fields
+
+        if not undeclared_direct_fields:
+            assert set(direct_prediction_fields).issubset(set(out_field_names)), "config.data.direct_prediction_fields must be included in the list of output variables."
+        
+        if not undeclared_residuals:
+            assert set(residual_fields).issubset(set(out_field_names)), "config.data.residual_fields must be included in the list of output variables. "
+            assert set(residual_fields).issubset(set(input_field_name)), "config.data.residual_fields must be included in the list of input variables."
+
+        if undeclared_direct_fields:
+            if undeclared_residuals:  # all output vars are non residual
+                direct_prediction_fields = out_field_names
+                LOGGER.info(f"⚠️ config.data.residual_fields and config.data.direct_prediction_fields are both undeclared. "
+                            f"The model will assume that all output variables are non-residual.")
+            elif empty_residuals:  # all output vars are non residual
+                direct_prediction_fields = out_field_names
+                LOGGER.info(f"⚠️ config.data.direct_prediction_fields is undeclared and config.data.residual_fields is an empty list. "
+                            f"The model will assume that all output variables are non-residual.")
+            elif set(residual_fields) != set(out_field_names): # residual not equal to output variables # missing output vars from residual must be non-residual
+                out_diff_variables = set(out_field_names).difference(set(residual_fields))
+                direct_prediction_fields = list(out_diff_variables)
+                LOGGER.info(f"⚠️ config.data.direct_prediction_fields is undeclared and config.data.residual_fields is different from the list of output variables. "
+                            f"The model will assume that all output variables not in config.data.residual_fields are non-residual, that is {out_diff_variables}")
+            #else: output variables are all residual variables
+        elif undeclared_residuals:
+            if empty_direct_fields: # all output vars are residual
+                residual_fields = out_field_names
+                LOGGER.info(f"⚠️ config.data.residual_fields is undeclared and config.data.direct_prediction_fields is an empty list. "
+                            f"The model will assume that all output variables are residual.")
+            elif set(direct_prediction_fields) != set(out_field_names): # direct pred fields not equal to output variables # missing output vars from direct_pred must be residual
+                out_diff_variables = set(out_field_names).difference(set(direct_prediction_fields))
+                residual_fields = list(out_diff_variables)
+                LOGGER.info(f"⚠️ config.data.residual_fields is undeclared and config.data.direct_prediction_fields is different from the list of output variables. "
+                            f"The model will assume that all output variables not in config.data.direct_prediction_fields are residual, that is {out_diff_variables}")
+            #else: output variables are all non-residual variables
+        else: #both residual and non residual variables declared, checking if they match the output variables
+            res_non_res_common_variables = set(residual_fields).intersection(set(direct_prediction_fields))
+            assert len(res_non_res_common_variables)==0, f"config.data.residual_fields and config.data.direct_prediction_fields must not contain matching variables: {res_non_res_common_variables}."
+            res_and_non_res_fields = set(residual_fields).union(set(direct_prediction_fields))
+            out_diff_variables = res_and_non_res_fields.symmetric_difference(set(out_field_names))
+            assert len(out_diff_variables) == 0, (f"The variables listed config.data.residual_fields and config.data.direct_prediction_fields must add up to the list of output variables. "
+                                              f"These variables are different: {out_diff_variables}")
+
+        return residual_fields, direct_prediction_fields, in_hres_forcings_fields
+
+
     def _set_residual_channel_indices(self, data_indices, model_config):
         input_name_to_index = self.data_indices.data.input[0].name_to_index
-        input_hres_name_to_index = self.data_indices.data.input[1].name_to_index
+        # input_hres_name_to_index = self.data_indices.data.input[1].name_to_index # unused for now
         out_name_to_index = {
             k: v
             for k, v in self.data_indices.data.output.name_to_index.items()
             if v in self.data_indices.data.output.full
         }
 
-        common_channels = set(input_name_to_index.keys()) & set(out_name_to_index.keys())
+        (residual_fields, 
+        direct_prediction_fields, 
+        in_hres_forcings_fields, #unused for now
+        ) = self._get_config_field_lists(model_config, input_name_to_index.keys(), out_name_to_index.keys())
 
-        if isinstance(model_config['data'], dict):
-            residual_fields = model_config['data'].get("residual_fields", [])
-            in_hres_forcings_fields = model_config['data'].get("forcing", [])
-        else:
-            residual_fields = getattr(model_config['data'], "residual_fields", [])
-            in_hres_forcings_fields = getattr(model_config['data'], "forcing", [])
-     
-        x_in_res_indices = []
-        y_res_indices = []
-        common_residual_fields = []
-        for channel_name in residual_fields:
-            if channel_name in common_channels:
-                x_in_res_indices.append(input_name_to_index[channel_name])
-                y_res_indices.append(out_name_to_index[channel_name])
-                common_residual_fields.append(channel_name)
-            else:
-                if channel_name not in input_name_to_index.keys():
-                    LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in in_lres dataset. Using it as a non-residual variable.")
-                else:
-                    LOGGER.info(f"Field {channel_name} selected as residual variable doesn't exist in out_hres dataset. Using it as a non-residual variable.")
-        in_non_residual_fields = [field for field in input_name_to_index.keys() if field not in common_residual_fields]
-        out_non_residual_fields = [field for field in out_name_to_index.keys() if field not in common_residual_fields]
-        
+        in_non_residual_fields = [field for field in input_name_to_index.keys() if field not in residual_fields]
+        x_in_res_indices = [input_name_to_index[field] for field in residual_fields]
+        y_res_indices = [out_name_to_index[field] for field in residual_fields]
         x_in_non_res_indices = [input_name_to_index[channel] for channel in in_non_residual_fields]
-        y_non_res_indices = [out_name_to_index[channel] for channel in out_non_residual_fields]
+        y_non_res_indices = [out_name_to_index[channel] for channel in direct_prediction_fields]
 
         return (
             torch.tensor(x_in_res_indices).to(torch.int32), 
@@ -693,7 +758,13 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         if hasattr(self.inference_defaults, "noise_scheduler"):
             noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
         else:
-            noise_scheduler_config = dict(self.DEFAULT_NOISE_SCHEDULER_PARAMS)
+
+            if self.training_approach == "probabilistic_high_noise":
+                default_scheduler = self.DEFAULT_HIGH_NOISE_SCHEDULER_PARAMS
+            else:
+                default_scheduler = self.DEFAULT_LOW_NOISE_SCHEDULER_PARAMS
+            noise_scheduler_config = dict(default_scheduler)
+        print(f"default {noise_scheduler_config=}")
 
         # Override config with provided noise scheduler parameters
         if noise_scheduler_params is not None:
@@ -737,7 +808,13 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         if hasattr(self.inference_defaults, "diffusion_sampler"):
             diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
         else:
-            diffusion_sampler_config = dict(self.DEFAULT_SAMPLER_PARAMS)
+
+            if self.training_approach == "probabilistic_high_noise":
+                default_sampler = self.DEFAULT_HIGH_NOISE_SAMPLER_PARAMS
+            else:
+                default_sampler = self.DEFAULT_LOW_NOISE_SAMPLER_PARAMS
+            diffusion_sampler_config = dict(default_sampler)
+        print(f"default {diffusion_sampler_config=}")
         
         # Override config with provided sampler parameters
         if sampler_params is not None:
