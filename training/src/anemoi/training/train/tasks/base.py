@@ -283,7 +283,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
-            * config.training.lr.rate
+            * config.training.optimization.lr
             / config.system.hardware.num_gpus_per_model
         )
 
@@ -1077,17 +1077,18 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
     ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
-        optimizer_config = self.config.training.optimizer
+
+        optimization = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
-        optimizer = instantiate(optimizer_config, params=params, lr=self.lr)
+        optimizer = instantiate(optimization.optimizer, params=params, lr=self.lr)
         self.log_optimizer(optimizer)
 
-        if not getattr(self.config.training, "lr_scheduler", None):
+        if not getattr(optimization, "lr_scheduler", None):
             return optimizer
 
-        scheduler_config = self.config.training.lr_scheduler
-        scheduler = LRSchedulerConfig(scheduler=instantiate(scheduler_config, optimizer=optimizer), interval="step")
-        return [optimizer], [scheduler]
+        pl_scheduler = instantiate(optimization.lr_scheduler, optimizer=optimizer)
+        pl_lr_scheduler = LRSchedulerConfig(scheduler=pl_scheduler, **(optimization.pl_lr_scheduler or {}))
+        return [optimizer], [pl_lr_scheduler]
 
     @staticmethod
     def log_optimizer(optimizer: torch.optim.Optimizer) -> None:
@@ -1098,10 +1099,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
-        # The conditions should be separate, but are combined due to pre-commit hook
+
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
-            # Log hyperparameters on rank 0
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
-            # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)
