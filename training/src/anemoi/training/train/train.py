@@ -481,14 +481,24 @@ class AnemoiTrainer(ABC):
         )
 
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
-            LOGGER.info(
-                "Training limits: max_epochs=%d, max_steps=%d. "
-                "Training will stop when either limit is reached first. "
-                "Learning rate scheduler will run for %d steps.",
-                self.config.training.max_epochs,
-                self.config.training.max_steps,
-                self.config.training.max_steps,
-            )
+            lr_scheduler_cfg = getattr(self.config.training.optimization, "lr_scheduler", None)
+            if lr_scheduler_cfg is not None:
+                LOGGER.info(
+                    "Training limits: max_epochs=%d, max_steps=%d. "
+                    "Training will stop when either limit is reached first. "
+                    "Learning rate scheduler will run for %d steps.",
+                    self.config.training.max_epochs,
+                    self.config.training.max_steps,
+                    self.config.training.max_steps,
+                )
+            else:
+                LOGGER.info(
+                    "Training limits: max_epochs=%d, max_steps=%d. "
+                    "Training will stop when either limit is reached first. "
+                    "No learning rate scheduler is configured.",
+                    self.config.training.max_epochs,
+                    self.config.training.max_steps,
+                )
 
     def _get_server2server_lineage(self) -> None:
         """Get the server2server lineage."""
