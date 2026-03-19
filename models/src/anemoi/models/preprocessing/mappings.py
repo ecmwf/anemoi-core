@@ -201,6 +201,7 @@ def inverse_atanh_converter(y, rho=2.0):
 # asinh transform
 # --------------------------------------------------------
 
+
 def asinh_converter(x, c=1.0):
     """Apply an asinh transform"""
     return torch.asinh_(x.mul_(c))
@@ -209,6 +210,7 @@ def asinh_converter(x, c=1.0):
 def inverse_asinh_converter(x, c=1.0):
     """Inverse asinh transform"""
     return torch.sinh_(x).div_(c)
+
 
 # --------------------------------------------------------
 # log1p transform

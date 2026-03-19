@@ -11,17 +11,17 @@ import pytest
 import torch
 
 from anemoi.models.preprocessing.mappings import affine_transform
+from anemoi.models.preprocessing.mappings import asinh_converter
 from anemoi.models.preprocessing.mappings import atanh_converter
 from anemoi.models.preprocessing.mappings import boxcox_converter
 from anemoi.models.preprocessing.mappings import displace_boundary_atoms
 from anemoi.models.preprocessing.mappings import displace_boundary_atoms_inverse
 from anemoi.models.preprocessing.mappings import inverse_affine_transform
+from anemoi.models.preprocessing.mappings import inverse_asinh_converter
 from anemoi.models.preprocessing.mappings import inverse_atanh_converter
 from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
 from anemoi.models.preprocessing.mappings import inverse_power_transform
 from anemoi.models.preprocessing.mappings import power_transform
-from anemoi.models.preprocessing.mappings import asinh_converter
-from anemoi.models.preprocessing.mappings import inverse_asinh_converter
 
 
 @pytest.mark.parametrize("lambd", [0.0, 0.25, 0.75, 1.5])
@@ -76,7 +76,6 @@ def test_atanh_roundtrip(rho: float) -> None:
 def test_atanh_negative_rho_raises() -> None:
     with pytest.raises(ValueError):
         atanh_converter(torch.tensor([0.2, 0.7], dtype=torch.float32), rho=-0.1)
-
 
 
 def test_asinh_roundtrip() -> None:
