@@ -15,21 +15,21 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
+from anemoi.models.preprocessing.mappings import affine_transform
+from anemoi.models.preprocessing.mappings import atanh_converter
 from anemoi.models.preprocessing.mappings import boxcox_converter
+from anemoi.models.preprocessing.mappings import displace_boundary_atoms
+from anemoi.models.preprocessing.mappings import displace_boundary_atoms_inverse
 from anemoi.models.preprocessing.mappings import expm1_converter
+from anemoi.models.preprocessing.mappings import inverse_affine_transform
+from anemoi.models.preprocessing.mappings import inverse_atanh_converter
 from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
+from anemoi.models.preprocessing.mappings import inverse_power_transform
 from anemoi.models.preprocessing.mappings import log1p_converter
 from anemoi.models.preprocessing.mappings import noop
+from anemoi.models.preprocessing.mappings import power_transform
 from anemoi.models.preprocessing.mappings import sqrt_converter
 from anemoi.models.preprocessing.mappings import square_converter
-from anemoi.models.preprocessing.mappings import atanh_converter
-from anemoi.models.preprocessing.mappings import power_transform
-from anemoi.models.preprocessing.mappings import displace_boundary_atoms
-from anemoi.models.preprocessing.mappings import affine_transform
-from anemoi.models.preprocessing.mappings import inverse_atanh_converter
-from anemoi.models.preprocessing.mappings import inverse_power_transform
-from anemoi.models.preprocessing.mappings import displace_boundary_atoms_inverse
-from anemoi.models.preprocessing.mappings import inverse_affine_transform
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,8 +41,26 @@ class Remapper(BasePreprocessor):
         method: [f, inv]
         for method, f, inv in zip(
             ["log1p", "sqrt", "boxcox", "atanh", "power", "displace_boundary_atoms", "affine", "none"],
-            [log1p_converter, sqrt_converter, boxcox_converter, atanh_converter, power_transform, displace_boundary_atoms, affine_transform, noop],
-            [expm1_converter, square_converter, inverse_boxcox_converter, inverse_atanh_converter, inverse_power_transform, displace_boundary_atoms_inverse, inverse_affine_transform, noop],
+            [
+                log1p_converter,
+                sqrt_converter,
+                boxcox_converter,
+                atanh_converter,
+                power_transform,
+                displace_boundary_atoms,
+                affine_transform,
+                noop,
+            ],
+            [
+                expm1_converter,
+                square_converter,
+                inverse_boxcox_converter,
+                inverse_atanh_converter,
+                inverse_power_transform,
+                displace_boundary_atoms_inverse,
+                inverse_affine_transform,
+                noop,
+            ],
         )
     }
 
@@ -142,7 +160,7 @@ class Remapper(BasePreprocessor):
             )
         for i, remapper, kwargs in zip(idx, self.remappers, self.remapper_kwargs):
             if i is not None:
-                x[..., i] = remapper(x[..., i],**kwargs)
+                x[..., i] = remapper(x[..., i], **kwargs)
         return x
 
     def inverse_transform(self, x, in_place: bool = True) -> torch.Tensor:
@@ -159,5 +177,5 @@ class Remapper(BasePreprocessor):
             )
         for i, backmapper, kwargs in zip(idx, self.backmappers, self.remapper_kwargs):
             if i is not None:
-                x[..., i] = backmapper(x[..., i],**kwargs)
+                x[..., i] = backmapper(x[..., i], **kwargs)
         return x

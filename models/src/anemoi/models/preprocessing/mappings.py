@@ -27,12 +27,13 @@ def inverse_affine_transform(x, scale=1.0, shift=0.0):
     assert scale != 0, "scale must be non-zero for a reversible affine transform"
     return x.sub_(shift).div_(scale)
 
-#--------------------------------------------------------
+
+# --------------------------------------------------------
 # Displace boundary atoms
-#--------------------------------------------------------
+# --------------------------------------------------------
 def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None, eps=0.0):
     """Displaces exact boundary values to target values (outside of the original range) to give model flexibility to model them as imprecise peaks, instead of delta functions. Reverse transform clamps the imprecise predicted values back to the original range to the original boundary values. Can be used on lower bound, upper bound, or both.
-    
+
     Parameters
     ----------
     x : torch.Tensor
@@ -47,7 +48,7 @@ def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=No
         Target value for upper boundary atom
     eps : float, optional
         Epsilon value around the atoms for numerical stability. Default is 0.0.
-        
+
     """
 
     if low_atom is not None:
@@ -66,23 +67,23 @@ def displace_boundary_atoms_inverse(x, lower_atom=None, upper_atom=None, lower_t
 
     return x.clamp(low_atom, high_atom)
 
-#--------------------------------------------------------
-# boxcox transform 
+
+# --------------------------------------------------------
+# boxcox transform
 # (generalising powerlaw, identity and log relationship)
-#--------------------------------------------------------
+# --------------------------------------------------------
 def boxcox_converter(x, lambd=0.5, clip_negative=False):
     """Convert positive var in to boxcox(var) = (x^lambd - 1) / lambd
-    
+
     Special cases:
     - lambd == 0 -> log(x)
     - lambd == 1 -> x
-    
-    
+
     Notes
     -----
     - Choose lambd < 1 to create a real gap/endpoint basin.
     - If lambd == 1, this reduces to a bounded smooth transform with no gap.
-    
+
     Parameters
     ----------
     x : torch.Tensor
@@ -111,19 +112,21 @@ def boxcox_converter(x, lambd=0.5, clip_negative=False):
         return torch.log_(x)
     return (torch.pow_(x, lambd).sub_(1.0)).div_(lambd)
 
+
 def inverse_boxcox_converter(x, lambd=0.5, clip_negative=None):
     """Convert back boxcox(var) to var."""
     if lambd == 0:
         return torch.exp_(x)
     return torch.pow_(torch.clamp_(x.mul_(lambd).add_(1.0), min=0.0), 1 / lambd)
 
-#--------------------------------------------------------
+
+# --------------------------------------------------------
 # power quantile transform / boxcox rescaled
-#--------------------------------------------------------
+# --------------------------------------------------------
 def power_transform(x, lambd=0.33, clip_negative=False):
     """Applies x^lambd to the input tensor. A rescaled"""
     assert lambd > 0, f"For power transform, parameter lambd {lambd} must satisfy lambd > 0."
-    
+
     assert x.ge(0.0).all(), "Power trasnform input x must satisfy x >= 0."
     return torch.pow_(x, lambd)
 
@@ -133,9 +136,10 @@ def inverse_power_transform(x, lambd=0.33):
     assert lambd > 0, f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
     return torch.pow_(torch.clamp_(x, min=0.0), 1 / lambd)
 
-#--------------------------------------------------------
+
+# --------------------------------------------------------
 # atanh transform
-#--------------------------------------------------------
+# --------------------------------------------------------
 def atanh_converter(x, rho=2.0):
     """Encode x in [0, 1] to a single scalar value in [-1, 1]
 
@@ -145,7 +149,7 @@ def atanh_converter(x, rho=2.0):
         x == 1   -> +1
 
         (x == 0.5 -> 0)
-    
+
     Parameters
     ----------
     x : torch.Tensor
@@ -160,17 +164,16 @@ def atanh_converter(x, rho=2.0):
 
     return torch.atanh_((x.mul_(2.0).sub_(1.0)).mul_(torch.tanh(rho))).div_(rho)
 
+
 def inverse_atanh_converter(y, rho=2.0):
     if rho == 0:
         return y.clamp_(0.0, 1.0)
-    return torch.clamp_(
-        torch.tanh_(y.mul_(rho)).div_(math.tanh(rho)).add_(1.0).mul_(0.5),
-        min=0.0, max=1.0)
+    return torch.clamp_(torch.tanh_(y.mul_(rho)).div_(math.tanh(rho)).add_(1.0).mul_(0.5), min=0.0, max=1.0)
 
 
-#--------------------------------------------------------
+# --------------------------------------------------------
 # log1p transform
-#--------------------------------------------------------
+# --------------------------------------------------------
 def log1p_converter(x):
     """Convert positive var in to log(1+var)."""
     return torch.log1p(x)
