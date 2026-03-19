@@ -1,0 +1,41 @@
+lr: 0.625e-4 # local_lr — scaled by hardware config at runtime
+
+optimizer:
+  _target_: torch.optim.AdamW
+
+  # Learning rate (lr) is scaled by hardware config and injected at runtime
+  betas: [0.9, 0.95] # β₁, β₂ for Adam-style optimizers
+
+  # ---------------------------------------------------------------
+  # Optional: configuration for AdEMAMix (custom optimizer)
+  # Uncomment the lines below to enable it
+  # ---------------------------------------------------------------
+  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix
+  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
+  # alpha: 8.0                   # Mixing factor controlling EMA fusion
+  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
+  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
+  # weight_decay: 0.01
+
+  # Optional: configuration for ZeroRedundancyOptimizer
+  # _target_: torch.distributed.optim.ZeroRedundancyOptimizer
+  # optimizer_class:
+  #   _target_: torch.optim.AdamW
+  #   _partial_: true
+  # betas: [0.9, 0.95]
+
+# Scheduler algorithm: Hydra instantiation config for the LR scheduler class.
+# Set to null to disable the scheduler.
+lr_scheduler:
+  _target_: timm.scheduler.CosineLRScheduler
+  lr_min: 3e-7
+  t_initial: ${training.max_steps} # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
+  warmup_t: 1000
+
+# Lightning scheduler integration: controls how Lightning calls the scheduler
+# during training (step vs epoch, metric to monitor for ReduceLROnPlateau, etc.).
+# See https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
+# for all available options.
+# Set to null to use Lightning defaults (interval: epoch).
+pl_lr_scheduler:
+  interval: step

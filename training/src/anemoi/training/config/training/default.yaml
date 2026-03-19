@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: global
+  - optimization: default
 
 # resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
@@ -46,40 +47,6 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# =====================================================================
-# Optimizer configuration
-# =====================================================================
-optimizer:
-  # ---------------------------------------------------------------
-  # Choose optimizer type (_target_ approach)
-  # ---------------------------------------------------------------
-  # Default optimizer: AdamW
-  _target_: torch.optim.AdamW
-
-  # ---------------------------------------------------------------
-  # Common optimizer parameters
-  # ---------------------------------------------------------------
-  # Learning rate is defined elsewhere
-  #kwargs:
-  betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
-
-  # ---------------------------------------------------------------
-  # Optional: configuration for AdEMAMix (custom optimizer)
-  # Uncomment the lines below to enable it
-  # ---------------------------------------------------------------
-  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
-  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
-  # alpha: 8.0                   # Mixing factor controlling EMA fusion
-  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
-  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
-  # weight_decay: 0.01
-
-  # Optional: configuration for ZeroRedundancyOptimizer
-  # _target_: torch.distributed.optim.ZeroRedundancyOptimizer
-  # optimizer_class:
-  #   _target_: torch.optim.AdamW
-  #   _partial_: true
-  # betas: [0.9, 0.95]
 
 # select model
 model_task: anemoi.training.train.tasks.GraphForecaster
@@ -180,17 +147,7 @@ rollout:
 max_epochs: null
 max_steps: 150000
 
-lr:
-  warmup: 1000 # number of warmup iterations
-  rate: 0.625e-4 #local_lr
-  iterations: ${training.max_steps} # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
-  min: 3e-7 #Not scaled by #GPU
 
-lr_scheduler:
-  _target_: timm.scheduler.CosineLRScheduler
-  lr_min: ${training.lr.min}
-  t_initial: ${training.lr.iterations}
-  warmup_t: ${training.lr.warmup}
 
 # Changes in per-gpu batch_size should come with a rescaling of the local_lr
 # in order to keep a constant global_lr
