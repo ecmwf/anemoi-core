@@ -53,7 +53,10 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         self.sigma_data = diffusion_config.sigma_data
         self.sigma_max = diffusion_config.sigma_max
         self.sigma_min = diffusion_config.sigma_min
-        self.inference_defaults = diffusion_config.inference_defaults
+        
+        self.inference_defaults = None
+        if hasattr(diffusion_config, "inference_defaults"):
+            self.inference_defaults = diffusion_config.inference_defaults
 
         super().__init__(
             model_config=model_config,
