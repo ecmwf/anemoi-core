@@ -85,7 +85,11 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             * config.training.optimization.lr
             / num_gpus_per_ensemble
         )
-        LOGGER.info("Base (config) learning rate: %e -- Effective learning rate: %e", config.training.optimization.lr, self.effective_lr)
+        LOGGER.info(
+            "Base (config) learning rate: %e -- Effective learning rate: %e",
+            config.training.optimization.lr,
+            self.effective_lr,
+        )
 
         self.nens_per_device = config.training.ensemble_size_per_device
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
