@@ -214,6 +214,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             scalers=self.scalers,
             data_indices=self.data_indices,
         )
+        print("self loss ", self.loss)
         self._scaling_values_log = print_variable_scaling(
             self.loss,
             data_indices,
@@ -300,6 +301,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_slice = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        print("forwardde basegraphmodule")
+        print("loss ", self.loss)
         return self.model(
             x,
             model_comm_group=self.model_comm_group,

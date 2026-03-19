@@ -41,6 +41,15 @@ from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
+import omegaconf
+
+torch.serialization.add_safe_globals([
+    omegaconf.listconfig.ListConfig,
+    omegaconf.dictconfig.DictConfig,
+])
+
+
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -476,8 +485,6 @@ class AnemoiTrainer(ABC):
     def train(self) -> None:
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
-        print('JE SUIS ACCELERATOR, DEVICES',self.accelerator,self.config.hardware.num_gpus_per_node
-              )
         import os 
         print ('RANK=', os.environ.get("RANK"))
         print('WORLD SIZE', os.environ.get("WORLD_SIZE"))

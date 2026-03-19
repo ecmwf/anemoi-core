@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from pytorch_lightning.utilities.rank_zero import rank_zero_info
 
 import logging
 import os
@@ -262,29 +263,40 @@ class NativeGridDataset(IterableDataset):
             )[self.chunk_index_range]
         else:
             shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
-
-        LOGGER.debug(
-            (
-                "Worker pid %d, label %s, worker id %d, global_rank %d, "
-                "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
-            ),
-            os.getpid(),
-            self.label,
-            self.worker_id,
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            self.sample_comm_group_id,
-            shuffled_chunk_indices[:10],
-        )
+        ##################### overfit ################""
+        # shuffled_chunk_indices = [self.valid_date_indices[0]]
+        ###############################################""
+        # LOGGER.debug(
+        #     (
+        #         "Worker pid %d, label %s, worker id %d, global_rank %d, "
+        #         "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
+        #     ),
+        #     os.getpid(),
+        #     self.label,
+        #     self.worker_id,
+        #     self.global_rank,
+        #     self.model_comm_group_id,
+        #     self.model_comm_group_rank,
+        #     self.sample_comm_group_id,
+        #     shuffled_chunk_indices[:10],
+        # )
+        fixed_i = self.valid_date_indices[0]
 
         for i in shuffled_chunk_indices:
+          
+            # i = fixed_i
+            start = i + self.relative_date_indices[0]
+            end = i + self.relative_date_indices[-1] + 1
+            
+            
             start = i + self.relative_date_indices[0]
             end = i + self.relative_date_indices[-1] + 1
             timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
             # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
             # data[start...] will be replaced with data[self.relative_date_indices + i]
-
+            rank_zero_info(f"dates used: { self.data.dates[start:end:timeincrement]}")
+            rank_zero_info(f"t-6h : { self.data.dates[start]}")
+            rank_zero_info(f"date end { self.data.dates[end]}")
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
             if isinstance(grid_shard_indices, slice):
                 # Load only shards into CPU memory
@@ -298,7 +310,8 @@ class NativeGridDataset(IterableDataset):
                 x = x[..., grid_shard_indices]  # select the grid shard
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
-
+            print("type x :", type(x))
+            np.save("overfit_samples.npy", x)
             yield torch.from_numpy(x)
 
     def __repr__(self) -> str:

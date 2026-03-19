@@ -6,6 +6,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+from pytorch_lightning.utilities.rank_zero import rank_zero_info
 
 
 import functools
@@ -99,7 +100,7 @@ class BaseLoss(nn.Module, ABC):
         -------
         torch.Tensor
             Scaled error tensor
-        """
+        """       
         if subset_indices is None:
             subset_indices = [Ellipsis]
 

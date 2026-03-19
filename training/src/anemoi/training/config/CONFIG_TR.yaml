@@ -1,0 +1,112 @@
+defaults:
+- data: zarr_bon #to change to our own config
+- dataloader: native_grid #to change to our own config
+- diagnostics: enrichment
+- datamodule: single
+- hardware: example
+- graph: existing_graph
+- model: graphtransformer_diffusionuncond
+- training: diffusion_uncond
+- _self_
+
+# set to true to switch on config validation
+config_validation: False
+diagnostics:
+  log:
+    mlflow:
+      enabled: True
+      offline: False
+      experiment_name: 'uncond_diffusion_mean_sigmax1000_250k'
+      project_name: 'uncond_diffusion_mean_sigmax1000_250k'
+      run_name: 'nb_channels=1024'
+      tracking_uri: 'https://mlflow.ecmwf.int'
+      authentication: True
+      terminal: False
+      on_resume_create_child: False
+
+    wandb:
+      enabled: False
+      entity: "none"
+  plot:
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+        every_n_epochs: 1
+  checkpoint:
+    every_n_epochs:
+      save_frequency: 1
+      num_models_saved: -1
+  check_val_every_n_epoch: 1
+
+data:
+    diagnostic: ["tp"] #variables que le modèle ne prendra pas en input mais va sortir en output : tp est la pluie, on ne la prend pas en input 
+    # ça peut perturber en input les variables et tout le modne fait comme ça.
+    forcing:
+      - "z"
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "insolation"
+      - "lsm"
+    normalizer:
+      std: null
+      max: null
+      none: null
+    frequency: 1h
+    timestep: 6h
+dataloader:
+    dataset:
+        - dataset: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
+    grid_indices:
+        _target_: anemoi.training.data.grid_indices.MaskedGrid
+        nodes_name: data
+        node_attribute_name: indices_connected_nodes
+    training:
+        start: "2020-01-01"
+        end: "2023-03-31"
+        select: ['10u', '10v', '2d', '2t', 'msl', 'sp', 'skt', 'z', 'tp', 'q_50', 'q_100', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_700', 'q_850', 'q_925', 'q_1000', 't_50', 't_100', 't_150', 't_200', 't_250', 't_300', 't_400', 't_500', 't_700', 't_850', 't_925', 't_1000', 'u_50', 'u_100', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_500', 'u_700', 'u_850', 'u_925', 'u_1000', 'v_50', 'v_100', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_500', 'v_700', 'v_850', 'v_925', 'v_1000', 'z_50', 'z_100', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_500', 'z_700', 'z_850', 'z_925', 'z_1000', lsm, insolation, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, sin_julian_day, sin_latitude, sin_local_time, sin_longitude]
+        # select: ['10u', '10v','2t','z','tp']
+    validation:
+        start: "2023-04-01"
+        end: "2023-04-02"
+        # select: ['10u', '10v','2t','z','tp']
+        select: ['10u', '10v', '2d', '2t', 'msl', 'sp', 'skt', 'z', 'tp', 'q_50', 'q_100', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_700', 'q_850', 'q_925', 'q_1000', 't_50', 't_100', 't_150', 't_200', 't_250', 't_300', 't_400', 't_500', 't_700', 't_850', 't_925', 't_1000', 'u_50', 'u_100', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_500', 'u_700', 'u_850', 'u_925', 'u_1000', 'v_50', 'v_100', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_500', 'v_700', 'v_850', 'v_925', 'v_1000', 'z_50', 'z_100', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_500', 'z_700', 'z_850', 'z_925', 'z_1000', lsm, insolation, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, sin_julian_day, sin_latitude, sin_local_time, sin_longitude]
+    test:
+        start: "2024-04-02"
+        end: "2024-04-03"
+        # select: ['10u', '10v','2t','z','tp']
+        select: ['10u', '10v', '2d', '2t', 'msl', 'sp', 'skt', 'z', 'tp', 'q_50', 'q_100', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_700', 'q_850', 'q_925', 'q_1000', 't_50', 't_100', 't_150', 't_200', 't_250', 't_300', 't_400', 't_500', 't_700', 't_850', 't_925', 't_1000', 'u_50', 'u_100', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_500', 'u_700', 'u_850', 'u_925', 'u_1000', 'v_50', 'v_100', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_500', 'v_700', 'v_850', 'v_925', 'v_1000', 'z_50', 'z_100', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_500', 'z_700', 'z_850', 'z_925', 'z_1000', lsm, insolation, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, sin_julian_day, sin_latitude, sin_local_time, sin_longitude]
+    batch_size:
+      training: 1
+      validation: 1
+      test: 1
+model:
+  num_channels: 1024
+  model:
+    _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDecUnconditional
+    diffusion:
+      sigma_max: 1000
+  processor:
+    num_layers: 16
+
+hardware:
+  paths:
+    data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
+    output: /project/home/p200177/DE_371/avritj/experiments_anemoi/training/uncond_diffusion_mean_sigmax1000/
+  files:
+    dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
+    graph: /project/home/p200177/DE_371/avritj/multi_scale_res9.pt
+  num_gpus_per_node: 4
+  num_gpus_per_model: 1
+  num_nodes: 8
+training:
+  # Set max_epochs or max_steps. Training stops at the first limit reached.
+  max_steps: 200000
+  model_task: anemoi.training.train.tasks.GraphUnconditionalDiffusionForecaster
+  training_approach: probabilistic_high_noise 
+  multistep_input: 2
+  run_id: 234c1e21c5df4eeba50805d2f0a9ca16

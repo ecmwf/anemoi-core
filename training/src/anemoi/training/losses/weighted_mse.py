@@ -7,7 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from pytorch_lightning.utilities.rank_zero import rank_zero_info
 
+import numpy as np
 import logging
 
 import torch
@@ -67,8 +69,63 @@ class WeightedMSELoss(MSELoss):
         """
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
+        # self.plot_step(target, [0,1,2,3], ["u", "v", "t","tp"], 0, 0)
         if weights is not None:
             out = out * weights
-        
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        # print("out shape dans loss : ", out.shape, out)
         return self.reduce(out, squash, group=group if is_sharded else None)
+
+
+    def plot_step(self, y_denoise, idx_var, vars, denoising_step, sigma) -> None:
+        """Write a step of the state.
+
+        Parameters
+        ----------
+        state : State
+            The state dictionary.
+        """
+        import earthkit.data as ekd
+        import earthkit.plots as ekp
+
+        print("plotting step ...")
+        
+        latitudes = np.load("/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/latitudes.npy")
+        longitudes = np.load("/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/longitudes.npy")
+        
+        plotting_fields = []
+
+        for i in range(len(vars)):
+            idx = idx_var[i]
+            variable = vars[i]
+            plotting_fields.append(
+                ekd.ArrayField(
+                    y_denoise[0,0,:,idx].detach().cpu().numpy(),
+                    {
+                        "param": variable,
+                        "shortName": variable,
+                        "variable_name": variable,
+                        "latitudes": latitudes,
+                        "longitudes": longitudes,
+                    },
+                )
+            )
+        fig = ekp.quickplot(
+            ekd.FieldList.from_fields(plotting_fields), mode="subplots", domain=None
+        )
+
+        title = f"sigma = {sigma: .2f}"
+
+        fig.title(title)
+        fname = f'/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/plot_step_during_inf/x=0_1_image_sdedit/target_{denoising_step}_sigma={sigma: .2f}.png'
+        # mpl_fig = getattr(fig, "figure", None)
+        
+        # mpl_fig = getattr(fig, "figure", None)
+        # if mpl_fig is None:
+        #     mpl_fig = getattr(fig, "_fig", None)
+
+        # if mpl_fig is not None:
+        #     mpl_fig.suptitle(title, fontsize=14)
+            
+        fig.save(fname)
+        del fig

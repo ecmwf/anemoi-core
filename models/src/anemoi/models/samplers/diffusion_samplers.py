@@ -210,9 +210,10 @@ class EDMHeunSampler(DiffusionSampler):
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
+        loss_fn=None,
+        y_clean=None,
         **kwargs,
     ) -> torch.Tensor:
-        print("3) : dans sampler heun")
         print("x dans edm sampler", x, "de shape ", x.shape, "mean : ", x.mean, "std : ", x.std)
         # Override instance defaults with any kwargs
         S_churn = kwargs.get("S_churn", self.S_churn)
@@ -221,7 +222,6 @@ class EDMHeunSampler(DiffusionSampler):
         S_noise = kwargs.get("S_noise", self.S_noise)
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
-        print('JE PASSE PAR SAMPLER HEUN')
         batch_size, ensemble_size = x.shape[0], x.shape[2]
 
         num_steps = len(sigmas) - 1
@@ -229,11 +229,9 @@ class EDMHeunSampler(DiffusionSampler):
         # Heun sampling loop
         for i in range(num_steps):
             
-            y_array = y.detach().cpu().numpy()
             print(f'step {i}')
             sigma_i = sigmas[i]
             sigma_next = sigmas[i + 1]
-            # plot_step(y,[0,1,3, 42, 53, 30],["10u", "10v", "2t", "U_850", "V_850", "T_850"], i, sigma_i)
 
             apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
             # print("apply_churn", apply_churn)
@@ -255,11 +253,13 @@ class EDMHeunSampler(DiffusionSampler):
                 model_comm_group,
                 grid_shard_shapes,
             ).to(dtype)
-                      
+            # plot_step(y_clean,[0,1,2,3],["10u", "10v", "2t", "tp"], i, sigma_i)
+            # loss = loss_fn(D1,y_clean)
+            # print("loss dans sampler : ", loss)
             d = (y - D1) / (sigma_effective + eps_prec)
-            print(f"sigma next : {sigma_next} et sigma effective {sigma_effective} ")
+            # print(f"sigma next : {sigma_next} et sigma effective {sigma_effective} ")
             y_next = y + (sigma_next - sigma_effective) * d
-            print(" eps prec adns heun sampler ", eps_prec)
+            # print(" eps prec adns heun sampler ", eps_prec)
             if sigma_next > eps_prec:
                 D2 = denoising_fn(
                     x,
@@ -393,7 +393,7 @@ def plot_step(y_denoise, idx_var, vars, denoising_step, sigma) -> None:
     title = f"sigma = {sigma: .2f}"
 
     fig.title(title)
-    fname = f'/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/plot_step_during_inf/plot_step_model_cond/denoising_step_{denoising_step}_sigma={sigma: .2f}.png'
+    fname = f'/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/plot_step_during_inf/x=0_1_image_sdedit/y_clean_{denoising_step}_sigma={sigma: .2f}.png'
     # mpl_fig = getattr(fig, "figure", None)
     
     # mpl_fig = getattr(fig, "figure", None)

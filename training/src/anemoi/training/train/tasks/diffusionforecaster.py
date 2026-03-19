@@ -146,7 +146,7 @@ class GraphDiffusionForecaster(GraphForecaster):
         assert batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
-
+            print("rollout step :", rollout_step)
             # get noise level and associated loss weights
 
             sigma, noise_weights = self._get_noise_level(
@@ -239,9 +239,7 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         
         rank_zero_info("[DEBUG] : unconditional diffusion ")
 
-    # -------------------------------------------------------------------------
-    # FORWARD : identical to conditional version
-    # -------------------------------------------------------------------------
+   
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
 
         return self.model.model.fwd_with_preconditioning(
@@ -250,6 +248,7 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
             sigma,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
+            loss_fn=self.loss
         )
 
 
@@ -265,18 +264,18 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         - No rollout loop
         - Single-step prediction from noisy target
         """
-        nvars_input = len(self.data_indices.data.input.full)
         # Ground-truth output (only the target step, no multistep)
+        print('batch shape : ', batch.shape)
+        x = batch[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.data.input.full,
+        ]
+        y= batch[:, self.multi_step, ..., self.data_indices.data.output.full]
 
-       
-        y= batch[:, 0, ..., self.data_indices.data.output.full]
-
-        x= torch.zeros(
-                (y.shape[0], self.multi_step, *y.shape[1:-1], nvars_input),
-                device=y.device,
-                dtype=y.dtype,
-            )
-
+        print("self data input full ", self.data_indices.data.input.full)
+        
        # Sample noise level
         sigma, noise_weights = self._get_noise_level(
                 shape=(x.shape[0],) + (1,) * (x.ndim - 2),
