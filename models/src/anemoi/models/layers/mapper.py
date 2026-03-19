@@ -1065,6 +1065,179 @@ class GNNBackwardMapper(GNNBaseMapper):
         return x_dst
 
 
+class PointWiseMapper(BaseMapper, ABC):
+    """PointWise Mapper from hidden -> data or data -> hidden."""
+
+    def __init__(self, in_channels_src, in_channels_dst, hidden_dim, out_channels_dst=None, num_chunks=1, cpu_offload=False, layer_kernels=None):
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+        )
+
+        # TODO: Replace by MLP or other. Allow empty.
+        self.proc = nn.Linear(hidden_dim, hidden_dim)
+
+        self.offload_layers(cpu_offload)
+
+        self.emb_nodes_src = nn.Linear(self.in_channels_src, self.hidden_dim)
+        self.emb_nodes_dst = nn.Linear(self.in_channels_dst, self.hidden_dim)
+
+    def mapper_forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+    ) -> PairTensor:
+
+        x_src, _, shapes_src, _ = self.pre_process(
+            x=x,
+            shard_shapes=shard_shapes,
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=x_src_is_sharded,
+            x_dst_is_sharded=x_dst_is_sharded,
+        )
+
+        x_dst = self.proc(x_src)
+
+        x_dst = self.post_process(
+            x_dst=x_dst, shapes_dst=shapes_src, model_comm_group=model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded
+        )
+
+        return x_dst
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
+        **kwargs,
+    ) -> PairTensor:
+        return maybe_checkpoint(
+            self.mapper_forward,
+            self.gradient_checkpointing,
+            x=x,
+            batch_size=batch_size,
+            shard_shapes=shard_shapes,
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=x_src_is_sharded,
+            x_dst_is_sharded=x_dst_is_sharded,
+            keep_x_dst_sharded=keep_x_dst_sharded,
+            **kwargs,
+        )
+
+
+class PointWiseForwardMapper(PointWiseMapper):
+    """PointWise Mapper from data -> hidden."""
+
+    def __init__(self, in_channels_src, in_channels_dst, hidden_dim, out_channels_dst=None, num_chunks=1, cpu_offload=False, layer_kernels=None, **kwargs):
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+        )
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        shapes_src, shapes_dst = shard_shapes
+        x_src, x_dst = x
+        if not x_src_is_sharded:
+            x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
+        if not x_dst_is_sharded:
+            x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
+        x_src = self.emb_nodes_src(x_src)
+        x_dst = self.emb_nodes_dst(x_dst)
+        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
+        shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
+        return x_src, x_dst, shapes_src, shapes_dst
+
+    def post_process(self, x_dst, **kwargs):
+        return x_dst
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[list[list[int]], list[list[int]], list[list[int]]],
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
+        **kwargs,
+    ) -> PairTensor:
+        x_dst = super().forward(
+            x,
+            batch_size,
+            shard_shapes,
+            edge_attr,
+            edge_index,
+            model_comm_group,
+            x_src_is_sharded,
+            x_dst_is_sharded,
+            keep_x_dst_sharded,
+            edge_shard_shapes,
+            **kwargs,
+        )
+        return x[0], x_dst
+
+class PointWiseBackwardMapper(PointWiseMapper):
+    """PointWise Mapper from hidden -> data."""
+
+    def __init__(self, in_channels_src, in_channels_dst, hidden_dim, out_channels_dst=None, num_chunks=1, cpu_offload=False, layer_kernels=None, **kwargs):
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+        )
+
+        self.node_data_extractor = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+        )
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        shapes_src, shapes_dst = shard_shapes
+        x_src, x_dst = x
+        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
+        if not x_dst_is_sharded:
+            x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
+        x_dst = self.emb_nodes_dst(x_dst)
+        shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
+        return x_src, x_dst, shapes_src, shapes_dst
+
+    def post_process(self, x_dst, shapes_dst, model_comm_group=None, keep_x_dst_sharded=False):
+        x_dst = self.node_data_extractor(x_dst)
+        if not keep_x_dst_sharded:
+            x_dst = gather_tensor(
+                x_dst, 0, change_channels_in_shape(shapes_dst, self.out_channels_dst), model_comm_group
+            )
+        return x_dst
+
+
 class TransformerBaseMapper(BaseMapper, ABC):
     """Transformer Base Mapper from hidden -> data or data -> hidden."""
 

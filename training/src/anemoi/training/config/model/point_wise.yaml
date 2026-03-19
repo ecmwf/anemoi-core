@@ -5,7 +5,7 @@ keep_batch_sharded: True
 
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
-  hidden_nodes_name: "hidden"
+  hidden_nodes_name: "data"
   latent_skip: True
 
 layer_kernels:
@@ -35,27 +35,19 @@ processor:
   layer_kernels: ${model.layer_kernels}
 
 encoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-  trainable_size: ${model.trainable_parameters.data2hidden}
+  _target_: anemoi.models.layers.mapper.PointWiseForwardMapper
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: False
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
 
 decoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-  trainable_size: ${model.trainable_parameters.hidden2data}
+  _target_: anemoi.models.layers.mapper.PointWiseBackwardMapper
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
   initialise_data_extractor_zero: False
-  qk_norm: False
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
