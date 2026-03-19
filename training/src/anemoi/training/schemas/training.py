@@ -64,21 +64,7 @@ class Rollout(BaseModel):
     "Maximum number of rollouts."
 
 
-class LR(BaseModel):
-    """Learning rate configuration.
 
-    Changes in per-gpu batch_size should come with a rescaling of the local_lr,
-    in order to keep a constant global_lr global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model.
-    """
-
-    rate: NonNegativeFloat = Field(example=0.625e-4)  # TODO(Helen): Could be computed by pydantic
-    "Initial learning rate. Is adjusteed according to the hardware configuration"
-    iterations: NonNegativeInt = Field(example=300000)
-    "Number of iterations."
-    min: NonNegativeFloat = Field(example=3e-7)
-    "Minimum learning rate."
-    warmup: NonNegativeInt = Field(example=1000)
-    "Number of warm up iteration. Default to 1000."
 
 
 class OptimizerSchema(PydanticBaseModel):
@@ -88,6 +74,19 @@ class OptimizerSchema(PydanticBaseModel):
 
     target_: str = Field(..., alias="_target_")
     """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
+
+
+class OptimizationSchema(BaseModel):
+    """Optimizer and LR scheduler configuration."""
+
+    lr: NonNegativeFloat = Field(example=0.625e-4)
+    "Base learning rate per GPU. Scaled by hardware config at runtime."
+    optimizer: OptimizerSchema
+    """Hydra instantiation config for the optimizer."""
+    lr_scheduler: OptimizerSchema | None = None
+    """Hydra instantiation config for the LR scheduler. If None, no scheduler is used."""
+    pl_lr_scheduler: dict[str, Any] | None = None
+    """PyTorch Lightning LRSchedulerConfig wrapper fields (interval, monitor, etc.)."""
 
 
 class ExplicitTimes(BaseModel):
@@ -447,12 +446,8 @@ class BaseTrainingSchema(BaseModel):
     "Maximum number of epochs, stops earlier if max_steps is reached first."
     max_steps: PositiveInt = 150000
     "Maximum number of steps, stops earlier if max_epochs is reached first."
-    lr: LR = Field(default_factory=LR)
-    "Learning rate configuration."
-    optimizer: OptimizerSchema = Field(default_factory=OptimizerSchema)
-    "Optimizer configuration."
-    lr_scheduler: dict[str, Any] | None = None
-    "LR scheduler configuration. If None, no scheduler is used."
+    optimization: OptimizationSchema
+    "Optimizer and LR scheduler configuration."
     recompile_limit: PositiveInt = 32
     "How many times torch.compile will recompile a function for a given input shape."
     metrics: DatasetDict[list[str]]
