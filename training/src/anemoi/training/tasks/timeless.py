@@ -25,10 +25,10 @@ class BaseTimelessTask(BaseSingleStepTask):
 class DownscalingTask(BaseTimelessTask):
     """Downscaling task implementation."""
 
-    name: str = "downscaling"
+    name: str = "downscaler"
 
 
 class AutoencodingTask(BaseTimelessTask):
     """Autoencoding task implementation."""
 
-    name: str = "autoencoding"
+    name: str = "autoencoder"

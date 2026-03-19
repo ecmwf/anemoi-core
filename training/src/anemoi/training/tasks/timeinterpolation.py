@@ -22,7 +22,7 @@ class TimeInterpolationTask(BaseSingleStepTask):
     (e.g. ``["0H", "6H"]`` and ``["1H", "2H", "3H", "4H", "5H"]``).
     """
 
-    name: str = "timeinterpolation"
+    name: str = "time-interpolator"
 
     def __init__(
         self,

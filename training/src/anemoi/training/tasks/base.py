@@ -222,10 +222,6 @@ class BaseTask(ABC):
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information."""
         md_dict["task"] = self.name
-        md_dict["input_offsets"] = [frequency_to_string(o) for o in self.inputs_offsets]
-        md_dict["output_offsets"] = [frequency_to_string(o) for o in self.outputs_offsets]
-        md_dict["num_input_timesteps"] = self.num_input_timesteps
-        md_dict["num_output_timesteps"] = self.num_output_timesteps
 
 
 class BaseSingleStepTask(BaseTask):

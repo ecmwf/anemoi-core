@@ -31,7 +31,7 @@ class ForecastingTask(BaseTask):
     ``rollout`` value which grows via ``on_train_epoch_end``.
     """
 
-    name: str = "forecasting"
+    name: str = "forecaster"
 
     def __init__(
         self,
