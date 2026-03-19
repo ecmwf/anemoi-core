@@ -486,10 +486,10 @@ class AnemoiTrainer(ABC):
                 LOGGER.info(
                     "Training limits: max_epochs=%d, max_steps=%d. "
                     "Training will stop when either limit is reached first. "
-                    "Learning rate scheduler will run for %d steps.",
+                    "Learning rate scheduler: %s.",
                     self.config.training.max_epochs,
                     self.config.training.max_steps,
-                    self.config.training.max_steps,
+                    lr_scheduler_cfg,
                 )
             else:
                 LOGGER.info(
