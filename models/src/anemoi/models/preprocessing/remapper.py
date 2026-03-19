@@ -22,6 +22,14 @@ from anemoi.models.preprocessing.mappings import log1p_converter
 from anemoi.models.preprocessing.mappings import noop
 from anemoi.models.preprocessing.mappings import sqrt_converter
 from anemoi.models.preprocessing.mappings import square_converter
+from anemoi.models.preprocessing.mappings import atanh_converter
+from anemoi.models.preprocessing.mappings import power_transform
+from anemoi.models.preprocessing.mappings import displace_boundary_atoms
+from anemoi.models.preprocessing.mappings import affine_transform
+from anemoi.models.preprocessing.mappings import inverse_atanh_converter
+from anemoi.models.preprocessing.mappings import inverse_power_transform
+from anemoi.models.preprocessing.mappings import displace_boundary_atoms_inverse
+from anemoi.models.preprocessing.mappings import inverse_affine_transform
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,9 +40,9 @@ class Remapper(BasePreprocessor):
     supported_methods = {
         method: [f, inv]
         for method, f, inv in zip(
-            ["log1p", "sqrt", "boxcox", "none"],
-            [log1p_converter, sqrt_converter, boxcox_converter, noop],
-            [expm1_converter, square_converter, inverse_boxcox_converter, noop],
+            ["log1p", "sqrt", "boxcox", "atanh", "power", "displace_boundary_atoms", "affine", "none"],
+            [log1p_converter, sqrt_converter, boxcox_converter, atanh_converter, power_transform, displace_boundary_atoms, affine_transform, noop],
+            [expm1_converter, square_converter, inverse_boxcox_converter, inverse_atanh_converter, inverse_power_transform, displace_boundary_atoms_inverse, inverse_affine_transform, noop],
         )
     }
 
@@ -82,7 +90,9 @@ class Remapper(BasePreprocessor):
             self.index_training_out,
             self.index_inference_input,
             self.index_inference_output,
+            self.remapper_kwargs,
         ) = (
+            [],
             [],
             [],
             [],
@@ -111,6 +121,10 @@ class Remapper(BasePreprocessor):
                 else:
                     # this is a forcing variable. It is not in the inference output.
                     self.index_inference_output.append(None)
+                if method in self.method_kwargs:
+                    self.remapper_kwargs.append(self.method_kwargs[method])
+                else:
+                    self.remapper_kwargs.append({})
             else:
                 raise KeyError(f"Unknown remapping method for {name}: {method}")
 
@@ -128,7 +142,7 @@ class Remapper(BasePreprocessor):
             )
         for i, remapper in zip(idx, self.remappers):
             if i is not None:
-                x[..., i] = remapper(x[..., i])
+                x[..., i] = remapper(x[..., i],**self.remapper_kwargs[i])
         return x
 
     def inverse_transform(self, x, in_place: bool = True) -> torch.Tensor:
@@ -145,5 +159,5 @@ class Remapper(BasePreprocessor):
             )
         for i, backmapper in zip(idx, self.backmappers):
             if i is not None:
-                x[..., i] = backmapper(x[..., i])
+                x[..., i] = backmapper(x[..., i],**self.remapper_kwargs[i])
         return x

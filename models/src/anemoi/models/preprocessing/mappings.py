@@ -74,7 +74,7 @@ def boxcox_converter(x, lambd=0.5, clip_negative=False):
         return torch.log(x)
     return (torch.pow(x, lambd) - 1) / lambd
 
-def inverse_boxcox_converter(x, lambd=0.5):
+def inverse_boxcox_converter(x, lambd=0.5, clip_negative=None):
     """Convert back boxcox(var) to var."""
     if lambd == 0:
         return torch.exp(x)
@@ -99,8 +99,6 @@ def inverse_power_transform(x, lambd=0.33):
     """
     assert lambd > 0, f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
     return torch.pow_(torch.clamp_(x, min=0.0), 1 / lambd)
-
-
 
 
 def atanh_converter(x, rho=0.9, a=1):
@@ -128,23 +126,19 @@ def atanh_converter(x, rho=0.9, a=1):
     return a * torch.atanh(rho * (2.0 * x - 1.0)) / math.atanh(rho)
 
 
-
 def inverse_atanh_converter(y, rho=0.9, a=1):
     if rho==0:
         return y.clamp_(0.0, 1.0)
     return torch.clamp_(0.5 * (1.0 + torch.tanh((y / a) * math.atanh(rho)) / rho), 0.0, 1.0)
 
-
 # sqrt/ sqr
 def sqrt_converter(x):
     """Convert positive var in to sqrt(var)."""
-    return torch.sqrt(x)
-
+    return power_transform(x, lambd=0.5)
 
 def square_converter(x):
     """Convert back sqrt(var) to var."""
-    return x**2
-
+    return inverse_power_transform(x, lambd=0.5)
 
 ## log1p and back
 def log1p_converter(x):
