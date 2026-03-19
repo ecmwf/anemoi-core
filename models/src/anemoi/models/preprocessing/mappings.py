@@ -51,21 +51,21 @@ def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=No
 
     """
 
-    if low_atom is not None:
-        assert low_target is not None, "To displace lower boundary atom, low_target must be specified"
-        assert low_target < low_atom, "low_target must be less than low_atom"
-        x.masked_fill_(x <= low_atom + eps, low_target)
-    if high_atom is not None:
-        assert high_target is not None, "To displace upper boundary atom, high_target must be specified"
-        assert high_target > high_atom, "high_target must be greater than high_atom"
-        x.masked_fill_(x >= high_atom - eps, high_target)
+    if  lower_atom is not None:
+        assert lower_target is not None, "To displace lower boundary atom, lower_target must be specified"
+        assert lower_target < lower_atom, "lower_target must be less than lower_atom"
+        x.masked_fill_(x <= lower_atom + eps, lower_target)
+    if upper_atom is not None:
+        assert upper_target is not None, "To displace upper boundary atom, upper_target must be specified"
+        assert upper_target > upper_atom, "upper_target must be greater than upper_atom"
+        x.masked_fill_(x >= upper_atom - eps, upper_target)
     return x
 
 
 def displace_boundary_atoms_inverse(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None):
     """Clamps the values back to the original range, to the original boundary values. Can be used on lower bound, upper bound, or both."""
 
-    return x.clamp(low_atom, high_atom)
+    return x.clamp(lower_atom, upper_atom)
 
 
 # --------------------------------------------------------
