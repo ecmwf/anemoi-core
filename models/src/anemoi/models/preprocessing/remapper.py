@@ -29,6 +29,7 @@ from anemoi.models.preprocessing.mappings import inverse_asinh_converter
 from anemoi.models.preprocessing.mappings import inverse_atanh_converter
 from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
 from anemoi.models.preprocessing.mappings import inverse_displace_boundary_atoms
+from anemoi.models.preprocessing.mappings import inverse_power_transform
 from anemoi.models.preprocessing.mappings import inverse_sqrt_converter
 from anemoi.models.preprocessing.mappings import expm1_converter
 
