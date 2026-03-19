@@ -15,8 +15,6 @@ from typing import Literal
 from typing import Self
 
 from pydantic import AfterValidator
-from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict
 from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -64,23 +62,14 @@ class Rollout(BaseModel):
     "Maximum number of rollouts."
 
 
-class OptimizerSchema(PydanticBaseModel):
-    """Choosing the PydanticBaseModel to allow extra inputs."""
-
-    model_config = ConfigDict(extra="allow")
-
-    target_: str = Field(..., alias="_target_")
-    """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
-
-
 class OptimizationSchema(BaseModel):
     """Optimizer and LR scheduler configuration."""
 
     lr: NonNegativeFloat = Field(example=0.625e-4)
     "Base learning rate per GPU. Scaled by hardware config at runtime."
-    optimizer: OptimizerSchema
+    optimizer: dict[str, Any]
     """Hydra instantiation config for the optimizer."""
-    lr_scheduler: OptimizerSchema | None = None
+    lr_scheduler: dict[str, Any] | None = None
     """Hydra instantiation config for the LR scheduler. If None, no scheduler is used."""
     pl_lr_scheduler: dict[str, Any] | None = None
     """PyTorch Lightning LRSchedulerConfig wrapper fields (interval, monitor, etc.)."""
