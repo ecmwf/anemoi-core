@@ -148,13 +148,14 @@ def test_ensemble_plot_mixin_process():
     assert result_output_tensor is not None
 
     # data: (n_steps, latlon, nvar) with n_steps = 1 + total_targets = 5
-    # result_output_tensor equas to(output_times, latlon, nvar) = (3, 100, 5)
+    # result_output_tensor equals to(output_times, latlon, ens, nvar) = (3, 100, 1, 5)
     assert data.shape[1:] == (100, 5), f"Expected data shape (..., 100, 5), got {data.shape}"
     assert result_output_tensor.shape == (
         3,
         100,
+        1,
         5,
-    ), f"Expected output_tensor shape (3, 100, 5), got {result_output_tensor.shape}"
+    ), f"Expected output_tensor shape (3, 100, 1, 5), got {result_output_tensor.shape}"
 
 
 def test_ensemble_plot_callbacks_instantiation():
