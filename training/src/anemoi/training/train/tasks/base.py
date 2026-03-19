@@ -280,7 +280,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.n_step_input = config.training.multistep_input
         self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
-        self.lr = (
+        self.effective_lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
             * config.training.optimization.lr
@@ -1087,7 +1087,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """Create optimizer and LR scheduler based on Hydra config."""
         optimization = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
-        optimizer = instantiate(optimization.optimizer, params=params, lr=self.lr)
+        optimizer = instantiate(optimization.optimizer, params=params, lr=self.effective_lr)
         self.log_optimizer(optimizer)
 
         if not getattr(optimization, "lr_scheduler", None):

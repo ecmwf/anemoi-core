@@ -15,7 +15,7 @@ def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
     """Create a lightweight mock BaseGraphModule instance with real methods bound."""
     module = mocker.MagicMock(spec=BaseGraphModule)
 
-    module.lr = 0.001
+    module.effective_lr = 0.001
     module.parameters.return_value = [torch.nn.Parameter(torch.randn(2, 2))]
 
     # Default config: no scheduler
@@ -39,7 +39,7 @@ def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
 
     assert isinstance(result, torch.optim.Adam)
     param_group = result.param_groups[0]
-    assert param_group["lr"] == pytest.approx(mocked_module.lr)
+    assert param_group["lr"] == pytest.approx(mocked_module.effective_lr)
     assert param_group["weight_decay"] == pytest.approx(0.1)
     assert result.defaults["betas"] == (0.9, 0.95)
 
@@ -57,7 +57,7 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -
 
     assert isinstance(result, torch.optim.Optimizer)
     param_group = result.param_groups[0]
-    assert param_group["lr"] == pytest.approx(mocked_module.lr)
+    assert param_group["lr"] == pytest.approx(mocked_module.effective_lr)
     assert param_group["weight_decay"] == pytest.approx(0.1)
     assert result.defaults["betas"] == (0.9, 0.95, 0.9999)
 
