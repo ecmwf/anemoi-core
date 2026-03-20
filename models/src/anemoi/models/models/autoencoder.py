@@ -18,7 +18,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
@@ -45,8 +47,9 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
     ) -> tuple[Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
-        if grid_shard_shapes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        if grid_shard_sizes is not None:
+            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
         x_input = x[:, : self.n_step_input, ...]
         # normalize and add data positional info (lat/lon)
@@ -58,7 +61,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             dim=-1,  # feature dimension
         )
 
-        return x_data_latent, grid_shard_shapes
+        return x_data_latent, grid_shard_sizes
 
     def _assemble_output(
         self,
@@ -96,8 +99,9 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
     ) -> tuple[Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_target = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
-        if grid_shard_shapes is not None:
-            node_attributes_target = shard_tensor(node_attributes_target, 0, grid_shard_shapes, model_comm_group)
+        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        if grid_shard_sizes is not None:
+            node_attributes_target = shard_tensor(node_attributes_target, 0, grid_shard_sizes, model_comm_group)
 
         x_forcing = x[:, : self.n_step_output, ...]
         # normalize and add data positional info (lat/lon)
@@ -111,7 +115,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        return x_target_latent, grid_shard_shapes
+        return x_target_latent, grid_shard_sizes
 
     def forward(
         self,
@@ -146,14 +150,16 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
 
-        in_out_sharded = grid_shard_shapes is not None and all(
-            [grid_shard_shapes[dataset_name] is not None for dataset_name in dataset_names]
+        in_out_sharded = self._resolve_in_out_sharded(
+            dataset_names=dataset_names,
+            grid_shard_sizes=grid_shard_sizes,
         )
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
         shard_sizes_data_dict = {}
+        shard_sizes_hidden_dict = {}
 
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
@@ -162,10 +168,10 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             x_data_latent, shard_sizes_data = self._assemble_input(
                 x[dataset_name], batch_size, grid_shard_sizes, model_comm_group, dataset_name
             )
-            shard_shapes_data_dict[dataset_name] = shard_shapes_data
+            shard_sizes_data_dict[dataset_name] = shard_sizes_data
             x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
-            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
-            x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_shapes_hidden_dict[dataset_name], model_comm_group)
+            shard_sizes_hidden_dict[dataset_name] = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
+            x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden_dict[dataset_name], model_comm_group)
 
             encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
                 dataset_name
@@ -174,9 +180,9 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
             )
             enc_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_shapes_data,  # None if not sharded
-                dst_nodes=shard_shapes_hidden_dict[dataset_name],
-                edges=enc_edge_shard_shapes,
+                src_nodes=shard_sizes_data,  # None if not sharded
+                dst_nodes=shard_sizes_hidden_dict[dataset_name],
+                edges=enc_edge_shard_sizes,
             )
 
             # Encoder for this dataset
@@ -194,6 +200,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 
         # Combine all dataset latents
         x_latent = sum(dataset_latents.values())
+        shard_sizes_hidden = shard_sizes_hidden_dict[dataset_names[0]]
 
         # Decoder
         x_out_dict = {}
@@ -212,9 +219,9 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 
             dec_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_shapes_hidden,
-                dst_nodes=shard_shapes_target,  # None if not sharded
-                edges=dec_edge_shard_shapes,
+                src_nodes=shard_sizes_hidden,
+                dst_nodes=shard_sizes_target,  # None if not sharded
+                edges=dec_edge_shard_sizes,
             )
 
             x_out = self.decoder[dataset_name](

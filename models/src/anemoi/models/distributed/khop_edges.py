@@ -20,7 +20,7 @@ from torch_geometric.utils import bipartite_subgraph
 from torch_geometric.utils import k_hop_subgraph
 from torch_geometric.utils import mask_to_index
 
-from anemoi.models.distributed.shapes import ShardShapes
+from anemoi.models.distributed.shapes import ShardSizes
 
 
 def get_k_hop_edges(
@@ -65,7 +65,7 @@ def sort_edges_1hop_sharding(
     edge_index: Adj,
     mgroup: Optional[ProcessGroup] = None,
     relabel_dst_nodes: bool = False,
-) -> tuple[Adj, Tensor, ShardShapes]:
+) -> tuple[Adj, Tensor, ShardSizes]:
     """Rearanges edges into 1 hop neighbourhoods for sharding across GPUs.
 
     Parameters
@@ -94,9 +94,9 @@ def sort_edges_1hop_sharding(
             num_nodes, edge_attr, edge_index, num_chunks, relabel_dst_nodes=relabel_dst_nodes
         )
 
-        edge_shard_shapes = [e.shape[0] for e in edge_attr_list]
+        edge_shard_sizes = [e.shape[0] for e in edge_attr_list]
 
-        return torch.cat(edge_attr_list, dim=0), torch.cat(edge_index_list, dim=1), edge_shard_shapes
+        return torch.cat(edge_attr_list, dim=0), torch.cat(edge_index_list, dim=1), edge_shard_sizes
 
     return edge_attr, edge_index, []
 
@@ -107,7 +107,7 @@ def shard_edges_1hop(
     src_size: int,
     dst_size: int,
     model_comm_group: Optional[ProcessGroup],
-) -> tuple[Tensor, Adj, ShardShapes]:
+) -> tuple[Tensor, Adj, ShardSizes]:
     """Sort and shard edges for 1-hop sharding.
 
     Parameters
@@ -126,18 +126,18 @@ def shard_edges_1hop(
     Returns
     -------
     tuple[Tensor, Adj, list[int]]
-        Sharded edge_attr, sharded edge_index, and list of edge_shard_shapes
+        Sharded edge_attr, sharded edge_index, and list of edge_shard_sizes
     """
     from anemoi.models.distributed.graph import shard_tensor
 
     num_nodes = (src_size, dst_size)
-    edge_attr, edge_index, edge_shard_shapes = sort_edges_1hop_sharding(
+    edge_attr, edge_index, edge_shard_sizes = sort_edges_1hop_sharding(
         num_nodes, edge_attr, edge_index, model_comm_group
     )
-    edge_index = shard_tensor(edge_index, 1, edge_shard_shapes, model_comm_group)
-    edge_attr = shard_tensor(edge_attr, 0, edge_shard_shapes, model_comm_group)
+    edge_index = shard_tensor(edge_index, 1, edge_shard_sizes, model_comm_group)
+    edge_attr = shard_tensor(edge_attr, 0, edge_shard_sizes, model_comm_group)
 
-    return edge_attr, edge_index, edge_shard_shapes
+    return edge_attr, edge_index, edge_shard_sizes
 
 
 def sort_edges_1hop_chunks(

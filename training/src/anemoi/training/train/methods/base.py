@@ -574,8 +574,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
-            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_shapes, self.model_comm_group)
-            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_shapes, self.model_comm_group)
+            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_sizes, self.model_comm_group)
+            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_sizes, self.model_comm_group)
             final_grid_shard_slice = None
         else:
             y_pred_full, y_full = y_pred, y
@@ -917,7 +917,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return gather_tensor(
             batch,
             self.grid_dim,
-            grid_shard_shapes,
+            grid_shard_sizes,
             self.reader_groups[self.reader_group_id],
         )
 
@@ -960,13 +960,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
-            # Validation now compares the model output tensor with the full target tensor.
-            # Those can contain different variables, so the metric needs to know how to
-            # line them up before computing the score. Other metrics do not have this information.
-            assert isinstance(
-                metric,
-                BaseLoss,
-            ), f"Validation metric {metric_name!r} must inherit BaseLoss, got {type(metric)}"
+            if not isinstance(metric, BaseLoss):
+                # If not a loss, we cannot feature scale, so call normally
+                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(
+                    y_pred_postprocessed,
+                    y_postprocessed,
+                    grid_shard_slice=grid_shard_slice,
+                    model_comm_group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_sizes=self.grid_shard_sizes,
+                )
+                continue
 
             for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
@@ -977,22 +982,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     )
                     raise ValueError(exception_msg)
 
-                metric_kwargs = {
-                    "scaler_indices": (..., indices),
-                    "grid_shard_slice": grid_shard_slice,
-                    "group": self.model_comm_group,
-                }
-                if pred_layout is not None:
-                    metric_kwargs["pred_layout"] = pred_layout
-                if target_layout is not None:
-                    metric_kwargs["target_layout"] = target_layout
-                if getattr(metric, "needs_shard_layout_info", False):
-                    metric_kwargs.update(
-                        grid_dim=self.grid_dim,
-                        grid_shard_sizes=self.grid_shard_sizes[dataset_name],
-                    )
-
-                metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
+                metrics[metric_step_name] = metric(
+                    y_pred_postprocessed,
+                    y_postprocessed,
+                    scaler_indices=(..., indices),
+                    grid_shard_slice=grid_shard_slice,
+                    group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_sizes=self.grid_shard_sizes,
+                )
 
         return metrics
 

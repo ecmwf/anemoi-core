@@ -182,6 +182,8 @@ class EnsembleTraining(BaseTrainingModule):
             y_pred_ens,
             y,
             grid_shard_slice=self.grid_shard_slice[dataset_name],
+            grid_dim=self.grid_dim,
+            grid_shard_shape=self.grid_shard_sizes,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
             target_layout=target_layout,
