@@ -33,6 +33,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.training.diagnostics.callbacks.context import PlotRuntimeSettings
 from anemoi.training.diagnostics.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
@@ -68,7 +69,8 @@ class BasePlotCallback(Callback, ABC):
         """
         super().__init__()
         self.config = config
-        self.save_basedir = config.system.output.plots
+        self.runtime = PlotRuntimeSettings.from_context(config)
+        self.save_basedir = self.runtime.save_basedir
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
         self.post_processors = None
@@ -79,15 +81,25 @@ class BasePlotCallback(Callback, ABC):
         self.plot = self._plot
         self._executor = None
         self._error: BaseException = None
-        self.datashader_plotting = config.diagnostics.plot.datashader
-        self.projection_kind = getattr(config.diagnostics.plot, "projection_kind", "equirectangular")
+        self.backend = self.runtime.backend
+        self.datashader_plotting = self.runtime.datashader
+        self.projection_kind = self.runtime.projection_kind
+        self.plot_asynchronous = self.runtime.asynchronous
+        self.log_wandb_enabled = self.runtime.log_wandb_enabled
+        self.log_mlflow_enabled = self.runtime.log_mlflow_enabled
+        self.async_with_read_group_risk = self.runtime.async_with_read_group_risk
+        self.global_diagnostic = self.runtime.global_diagnostic
+        self.dataset_diagnostics = self.runtime.dataset_diagnostics
 
-        if self.config.diagnostics.plot.asynchronous:
+        if self.plot_asynchronous:
             LOGGER.info("Setting up asynchronous plotting ...")
             self.plot = self._async_plot
             self._executor = ThreadPoolExecutor(max_workers=1)
             self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
             self.loop_thread.start()
+
+    def _dataset_diagnostics(self, dataset_name: str) -> list[str]:
+        return self.dataset_diagnostics.get(dataset_name, [])
 
     def start_event_loop(self) -> None:
         """Start the event loop in a separate thread."""
@@ -155,10 +167,10 @@ class BasePlotCallback(Callback, ABC):
             save_path.parent.mkdir(parents=True, exist_ok=True)
             anim.save(save_path, writer="pillow", fps=8)
 
-            if self.config.diagnostics.log.wandb.enabled:
+            if self.log_wandb_enabled:
                 LOGGER.warning("Saving gif animations not tested for wandb.")
 
-            if self.config.diagnostics.log.mlflow.enabled:
+            if self.log_mlflow_enabled:
                 run_id = logger.run_id
                 logger.experiment.log_artifact(run_id, str(save_path), artifact_path=self.artifact_subfolder)
 
@@ -259,9 +271,9 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 
         """
         super().__init__(config, dataset_names=dataset_names)
-        self.every_n_batches = every_n_batches or self.config.diagnostics.plot.frequency.batch
+        self.every_n_batches = every_n_batches or self.runtime.frequency_batch
 
-        if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
+        if self.async_with_read_group_risk:
             LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
 
     def on_validation_batch_end(
@@ -340,7 +352,7 @@ class BasePerEpochPlotCallback(BasePlotCallback):
             If not given, uses default from config at `diagnostics.plot.frequency.epoch`
         """
         super().__init__(config, dataset_names=dataset_names)
-        self.every_n_epochs = every_n_epochs or self.config.diagnostics.plot.frequency.epoch
+        self.every_n_epochs = every_n_epochs or self.runtime.frequency_epoch
 
     @rank_zero_only
     def on_validation_epoch_end(
@@ -455,7 +467,7 @@ class LongRolloutPlots(BasePlotCallback):
             every_n_epochs,
         )
 
-        if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
+        if self.async_with_read_group_risk:
             LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
 
     def _plot(
@@ -475,7 +487,7 @@ class LongRolloutPlots(BasePlotCallback):
         plot_parameters_dict = {
             pl_module.data_indices.model.output.name_to_index[name]: (
                 name,
-                name in self.config.data.get("diagnostic", []),
+                name in self.global_diagnostic,
             )
             for name in self.parameters
         }
@@ -706,7 +718,7 @@ class LongRolloutPlots(BasePlotCallback):
             dtype = precision_mapping.get(prec)
             context = torch.autocast(device_type=batch.device.type, dtype=dtype) if dtype is not None else nullcontext()
 
-            if self.config.diagnostics.plot.asynchronous:
+            if self.plot_asynchronous:
                 LOGGER.warning("Asynchronous plotting not supported for long rollout plots.")
 
             with context:
@@ -1235,11 +1247,7 @@ class PlotSample(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            diagnostics = self._dataset_diagnostics(dataset_name)
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
@@ -1368,11 +1376,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            diagnostics = self._dataset_diagnostics(dataset_name)
             plot_parameters_dict_spectrum = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
@@ -1483,11 +1487,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            diagnostics = self._dataset_diagnostics(dataset_name)
             # Apply spatial mask
             _, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,

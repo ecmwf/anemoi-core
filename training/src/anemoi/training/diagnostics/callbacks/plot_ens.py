@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from typing import Union
 
     import pytorch_lightning as pl
-    from omegaconf import DictConfig
 
 
 LOGGER = logging.getLogger(__name__)
@@ -149,11 +148,7 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
         batch_idx: int,
         **kwargs,
     ) -> None:
-        if (
-            self.config.diagnostics.plot.asynchronous
-            and self.config.dataloader.read_group_size > 1
-            and pl_module.local_rank == 0
-        ):
+        if self.async_with_read_group_risk and pl_module.local_rank == 0:
             LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
 
         if batch_idx % self.every_n_batches == 0:
@@ -218,7 +213,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
+        context: Any,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -235,7 +230,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         # Initialize PlotSample first
         _PlotSample.__init__(
             self,
-            config,
+            context,
             sample_idx,
             parameters,
             accumulation_levels_plot,
@@ -268,11 +263,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         for dataset_name in dataset_names:
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            diagnostics = self._dataset_diagnostics(dataset_name)
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
                 for name in self.parameters
@@ -361,7 +352,7 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
 
     def __init__(
         self,
-        config: DictConfig,
+        context: Any,
         sample_idx: int,
         parameters: list[str],
         output_steps: int,
@@ -373,7 +364,7 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         """Initialise the PlotSpectrum callback."""
         _PlotSpectrum.__init__(
             self,
-            config,
+            context,
             sample_idx,
             parameters,
             output_steps,
@@ -389,7 +380,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
+        context: Any,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -405,7 +396,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         """Initialise the PlotSample callback."""
         _PlotSample.__init__(
             self,
-            config,
+            context,
             sample_idx,
             parameters,
             accumulation_levels_plot,
@@ -425,7 +416,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
 
     def __init__(
         self,
-        config: DictConfig,
+        context: Any,
         sample_idx: int,
         parameters: list[str],
         output_steps: int,
@@ -438,7 +429,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         """Initialise the PlotHistogram callback."""
         _PlotHistogram.__init__(
             self,
-            config,
+            context,
             sample_idx,
             parameters,
             output_steps,
@@ -455,9 +446,9 @@ class GraphTrainableFeaturesPlot(_GraphTrainableFeaturesPlot):
 
     def __init__(
         self,
-        config: DictConfig,
+        context: Any,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback."""
-        _GraphTrainableFeaturesPlot.__init__(self, config, dataset_names, every_n_epochs)
+        _GraphTrainableFeaturesPlot.__init__(self, context, dataset_names, every_n_epochs)

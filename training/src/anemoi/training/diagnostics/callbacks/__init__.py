@@ -9,62 +9,37 @@
 
 
 import logging
-from collections.abc import Callable
-from collections.abc import Iterable
 from datetime import timedelta
 from typing import Any
 
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from pydantic import BaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
+from anemoi.training.diagnostics.callbacks.context import CallbackContext
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.checkpoint import RegisterMigrations
 
 LOGGER = logging.getLogger(__name__)
 
 
-def nestedget(config: DictConfig, key: str, default: Any) -> Any:
-    """Get a nested key from a DictConfig object.
-
-    E.g.
-    >>> nestedget(config, "diagnostics.log.wandb.enabled", False)
-    """
-    keys = key.split(".")
-    for k in keys:
-        config = getattr(config, k, default)
-        if not isinstance(config, BaseModel | dict | DictConfig):
-            break
-    return config
-
-
-# Callbacks to add according to flags in the config
-# Can be function to check status from config
-CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bool], type[Callback]]] = [
-    ("training.swa.enabled", StochasticWeightAveraging),
-    (
-        lambda config: nestedget(config, "diagnostics.log.wandb.enabled", False)
-        or nestedget(config, "diagnostics.log.mlflow.enabled", False),
-        LearningRateMonitor,
-    ),
-]
-
-
-def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
+def _get_checkpoint_callback(
+    enable_checkpointing: bool,
+    checkpoint_config: Any,
+    checkpoint_paths: Any,
+) -> list[AnemoiCheckpoint]:
     """Get checkpointing callbacks."""
-    if not config.diagnostics.enable_checkpointing:
+    if not enable_checkpointing:
         return []
 
     checkpoint_settings = {
-        "dirpath": config.system.output.checkpoints.root,
+        "dirpath": checkpoint_paths.root,
         "verbose": False,
         # save weights, optimizer states, LR-schedule states, hyperparameters etc.
         # https://pytorch-lightning.readthedocs.io/en/stable/common/checkpointing_basic.html#contents-of-a-checkpoint
@@ -77,7 +52,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
 
     ckpt_frequency_save_dict = {}
 
-    for key, frequency_dict in config.diagnostics.checkpoint.items():
+    for key, frequency_dict in checkpoint_config.items():
         frequency = frequency_dict.save_frequency
         n_saved = frequency_dict.num_models_saved
         if key == "every_n_minutes" and frequency_dict.save_frequency is not None:
@@ -86,7 +61,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         else:
             target = key
         ckpt_frequency_save_dict[target] = (
-            config.system.output.checkpoints[key],
+            checkpoint_paths[key],
             frequency,
             n_saved,
         )
@@ -119,28 +94,28 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
     return checkpoint_callbacks
 
 
-def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
-    """Get callbacks that are enabled in the config as according to CONFIG_ENABLED_CALLBACKS."""
+def _get_config_enabled_callbacks(
+    training_config: Any,
+    log_config: Any,
+) -> list[Callback]:
+    """Get callbacks that are enabled in the callback context."""
     callbacks = []
 
-    def check_key(config: dict, key: str | Iterable[str] | Callable[[DictConfig], bool]) -> bool:
-        """Check key in config."""
-        if isinstance(key, Callable):
-            return key(config)
-        if isinstance(key, str):
-            return nestedget(config, key, False)
-        if isinstance(key, Iterable):
-            return all(nestedget(config, k, False) for k in key)
-        return nestedget(config, key, False)
+    if getattr(training_config.swa, "enabled", False):
+        callbacks.append(
+            StochasticWeightAveraging(
+                max_epochs=training_config.max_epochs,
+                default_swa_lr=training_config.swa.lr,
+            ),
+        )
 
-    for enable_key, callback_list in CONFIG_ENABLED_CALLBACKS:
-        if check_key(config, enable_key):
-            callbacks.append(callback_list(config))
+    if getattr(log_config.wandb, "enabled", False) or getattr(log_config.mlflow, "enabled", False):
+        callbacks.append(LearningRateMonitor())
 
     return callbacks
 
 
-def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
+def _get_progress_bar_callback(enable_progress_bar: bool, progress_bar_cfg: Any) -> list[Callback]:
     """Get progress bar callback.
 
     Instantiated from `config.diagnostics.progress_bar`. If not set, defaults to TQDMProgressBar.
@@ -161,11 +136,10 @@ def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
     list[Callback]
         List containing the progress bar callback, or empty list if disabled.
     """
-    if not config.diagnostics.enable_progress_bar:
+    if not enable_progress_bar:
         LOGGER.info("Progress bar disabled.")
         return []
 
-    progress_bar_cfg = nestedget(config, "diagnostics.progress_bar", None)
     if progress_bar_cfg is not None:
         try:
             progress_bar = instantiate(progress_bar_cfg)
@@ -180,7 +154,7 @@ def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
     return [progress_bar]
 
 
-def get_callbacks(config: DictConfig) -> list[Callback]:
+def get_callbacks(context: CallbackContext | DictConfig) -> list[Callback]:
     """Setup callbacks for PyTorch Lightning trainer.
 
     Set `config.diagnostics.callbacks` to a list of callback configurations
@@ -197,16 +171,15 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     Set `config.diagnostics.plot.callbacks` to a list of plot callback configurations
     will only be added if `config.diagnostics.plot.enabled` is set to True.
 
-    A callback must take a `DictConfig` in its `__init__` method as the first argument,
-    which will be the complete configuration object.
+    A callback should take a callback context in its `__init__` method as the first argument.
+    During migration, passing a full `DictConfig` is still supported.
 
-    Some callbacks are added by default, depending on the configuration.
-    See CONFIG_ENABLED_CALLBACKS for more information.
+    Some callbacks are added automatically depending on SWA and logger settings.
 
     Parameters
     ----------
-    config : DictConfig
-        Job configuration
+    context : CallbackContext | DictConfig
+        Callback context. A DictConfig is accepted for backward compatibility.
 
     Returns
     -------
@@ -214,29 +187,48 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
         A list of PyTorch Lightning callbacks
 
     """
+    if isinstance(context, DictConfig):
+        context = CallbackContext.from_config(context)
+
     trainer_callbacks: list[Callback] = []
 
-    # Get Checkpoint callback
-    trainer_callbacks.extend(_get_checkpoint_callback(config))
+    # Get checkpoint callback
+    trainer_callbacks.extend(
+        _get_checkpoint_callback(
+            enable_checkpointing=context.diagnostics.enable_checkpointing,
+            checkpoint_config=context.diagnostics.checkpoint,
+            checkpoint_paths=context.system.output.checkpoints,
+        ),
+    )
 
     # Base callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.callbacks)
+    trainer_callbacks.extend(instantiate(callback, context) for callback in context.diagnostics.callbacks)
 
     # Plotting callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+    trainer_callbacks.extend(instantiate(callback, context) for callback in context.diagnostics.plot.callbacks)
 
     # Extend with config enabled callbacks
-    trainer_callbacks.extend(_get_config_enabled_callbacks(config))
+    trainer_callbacks.extend(
+        _get_config_enabled_callbacks(
+            training_config=context.training,
+            log_config=context.diagnostics.log,
+        ),
+    )
 
     # Progress bar callback
-    trainer_callbacks.extend(_get_progress_bar_callback(config))
+    trainer_callbacks.extend(
+        _get_progress_bar_callback(
+            enable_progress_bar=context.diagnostics.enable_progress_bar,
+            progress_bar_cfg=context.diagnostics.progress_bar,
+        ),
+    )
 
     # Parent UUID callback
     # Check variable order callback
     # Register Migrations callback
     trainer_callbacks.extend(
         (
-            ParentUUIDCallback(config),
+            ParentUUIDCallback(),
             CheckVariableOrder(),
             RegisterMigrations(),
         ),

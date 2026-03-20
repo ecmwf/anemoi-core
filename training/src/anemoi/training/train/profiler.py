@@ -276,14 +276,26 @@ class AnemoiProfiler(AnemoiTrainer):
             ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
         )
         callbacks = super().callbacks
-        if self.config.diagnostics.benchmark_profiler.snapshot.enabled:
+        snapshot_cfg = self.config.diagnostics.benchmark_profiler.snapshot
+        if snapshot_cfg.enabled:
             from anemoi.training.diagnostics.callbacks.profiler import MemorySnapshotRecorder
             from anemoi.training.diagnostics.profilers import check_torch_version
 
-            available = check_torch_version()
+            num_steps = snapshot_cfg.steps + snapshot_cfg.warmup
 
-            if available:  # if torch is below 2.1.0, the callback will not be added
-                callbacks.append(MemorySnapshotRecorder(self.config))
+            assert (
+                num_steps % self.config.dataloader.batch_size.training == 0
+            ), "Snapshot steps is not a multiple of batch size"
+            assert (
+                snapshot_cfg.warmup % self.config.dataloader.batch_size.training == 0
+            ), "Snapshot Warmup steps is not a multiple of batch size"
+
+            available = check_torch_version()
+            if not available:
+                LOGGER.warning("Snapshot recorder disabled: requires torch>=2.1.0.")
+                return callbacks
+
+            callbacks.append(MemorySnapshotRecorder(self.config))
         return callbacks
 
     def get_example_input_array(self) -> dict[str, torch.Tensor]:

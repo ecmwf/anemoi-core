@@ -11,7 +11,6 @@
 
 
 import logging
-from pathlib import Path
 from typing import Any
 
 import pytorch_lightning as pl
@@ -20,31 +19,22 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
+from anemoi.training.diagnostics.callbacks.context import ProfilerRuntimeSettings
+
 LOGGER = logging.getLogger(__name__)
 
 
 class MemorySnapshotRecorder(Callback):
     """Record memory snapshot using torch.cuda._record_memory_history()."""
 
-    def __init__(self, config):
+    def __init__(self, context):
         super().__init__()
-        self.config = config
-        self.dirpath = Path(self.config.system.output.profiler)
+        runtime = ProfilerRuntimeSettings.from_context(context)
+        self.dirpath = runtime.profiler_dirpath
 
-        self.warmup = self.config.diagnostics.benchmark_profiler.snapshot.warmup
-        if not self.warmup:
-            self.warmup = 0
-        self.num_steps = (
-            self.config.diagnostics.benchmark_profiler.snapshot.steps + self.warmup
-        )  # be consistent with profiler scheduler
+        self.warmup = runtime.snapshot_warmup
+        self.num_steps = runtime.snapshot_steps + self.warmup  # be consistent with profiler scheduler
         self.status = False
-
-        assert (
-            self.num_steps % self.config.dataloader.batch_size.training == 0
-        ), "Snapshot steps is not a multiple of batch size"
-        assert (
-            self.warmup % self.config.dataloader.batch_size.training == 0
-        ), "Snapshot Warmup steps is not a multiple of batch size"
 
     @rank_zero_only
     def _start_snapshot_recording(self) -> None:

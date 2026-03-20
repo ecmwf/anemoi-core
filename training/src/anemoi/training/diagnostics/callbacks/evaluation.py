@@ -27,13 +27,13 @@ class RolloutEval(Callback):
     distributed synchronization.
     """
 
-    def __init__(self, config: OmegaConf, rollout: int, every_n_batches: int) -> None:
+    def __init__(self, _context: OmegaConf, rollout: int, every_n_batches: int) -> None:
         """Initialize RolloutEval callback.
 
         Parameters
         ----------
-        config : dict
-            Dictionary with configuration settings
+        _context : dict
+            Callback context (unused in this callback).
         rollout : int
             Rollout length for evaluation
         every_n_batches : int
@@ -41,7 +41,6 @@ class RolloutEval(Callback):
 
         """
         super().__init__()
-        self.config = config
 
         LOGGER.debug(
             "Setting up RolloutEval callback with rollout = %d, every_n_batches = %d ...",
@@ -64,7 +63,7 @@ class RolloutEval(Callback):
 
         assert batch_tensor.shape[1] >= self.rollout * pl_module.n_step_output + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
-            f"Set `dataloader.validation_rollout` to at least {max(self.rollout)}"
+            f"Set `dataloader.validation_rollout` to at least {self.rollout}"
         )
 
         with torch.no_grad():
@@ -139,7 +138,8 @@ class RolloutEval(Callback):
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
-            context = torch.autocast(device_type=batch.device.type, dtype=dtype) if dtype is not None else nullcontext()
+            batch_device = next(iter(batch.values())).device if isinstance(batch, dict) else batch.device
+            context = torch.autocast(device_type=batch_device.type, dtype=dtype) if dtype is not None else nullcontext()
 
             with context:
                 self._eval(pl_module, batch)
