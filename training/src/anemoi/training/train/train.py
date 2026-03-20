@@ -30,6 +30,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.training.builder import ModelRuntimeArtifacts
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -244,20 +245,20 @@ class AnemoiTrainer(ABC):
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
         model_task = get_class(self.config.training.model_task)
+        runtime_artifacts = self.runtime_artifacts
+        model = instantiate(self.config.model, runtime_artifacts=runtime_artifacts)
 
-        model = instantiate(self.config.model)
-
-        self.metadata["metadata_inference"]["task"] = model_task.task_type
+        runtime_artifacts.metadata["metadata_inference"]["task"] = model_task.task_type
 
         kwargs = {
             "model": model,
             "config": self.config,
-            "data_indices": self.data_indices,
-            "graph_data": self.graph_data,
-            "metadata": self.metadata,
-            "supporting_arrays": self.supporting_arrays,
-            "statistics": self.datamodule.statistics,
-            "statistics_tendencies": self.datamodule.statistics_tendencies,
+            "data_indices": runtime_artifacts.data_indices,
+            "graph_data": runtime_artifacts.graph_data,
+            "metadata": runtime_artifacts.metadata,
+            "supporting_arrays": runtime_artifacts.supporting_arrays,
+            "statistics": runtime_artifacts.statistics,
+            "statistics_tendencies": runtime_artifacts.statistics_tendencies,
         }
 
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
@@ -280,9 +281,9 @@ class AnemoiTrainer(ABC):
                     weights_only=False,  # required for Pytorch Lightning 2.6
                 )
 
-            model.data_indices = self.data_indices
+            model.data_indices = runtime_artifacts.data_indices
             # Validate data indices between checkpoint and current config
-            self._validate_transfer_learning_datasets(model, self.data_indices)
+            self._validate_transfer_learning_datasets(model, runtime_artifacts.data_indices)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -391,6 +392,18 @@ class AnemoiTrainer(ABC):
         from anemoi.training.utils.supporting_arrays import build_combined_supporting_arrays
 
         return build_combined_supporting_arrays(self.config, self.graph_data, self.datamodule.supporting_arrays)
+
+    @cached_property
+    def runtime_artifacts(self) -> ModelRuntimeArtifacts:
+        """Runtime-built artifacts passed to model constructors."""
+        return ModelRuntimeArtifacts(
+            graph_data=self.graph_data,
+            statistics=self.datamodule.statistics,
+            statistics_tendencies=self.datamodule.statistics_tendencies,
+            data_indices=self.data_indices,
+            metadata=self.metadata,
+            supporting_arrays=self.supporting_arrays,
+        )
 
     @cached_property
     def _logger_kwargs(self) -> dict:

@@ -82,6 +82,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
         self._plot_adapter = ForecasterPlotAdapter(self)
+        self.fill_metadata(self.metadata)
 
     def _advance_dataset_input(
         self,

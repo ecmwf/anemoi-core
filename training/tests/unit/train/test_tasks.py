@@ -1,3 +1,4 @@
+import inspect
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -19,6 +20,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
+from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionTendForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
@@ -149,6 +151,18 @@ class DummyDiffusionModel(DummyModel):
             y_noised = y_noised.unsqueeze(1)
         return y_noised + 0.1 * pred
 
+    def get_diffusion_parameters(self) -> tuple[float, float, float]:
+        return self.sigma_max, self.sigma_min, self.sigma_data
+
+    def forward_with_preconditioning(
+        self,
+        x: torch.Tensor | dict[str, torch.Tensor],
+        y_noised: torch.Tensor | dict[str, torch.Tensor],
+        sigma: torch.Tensor | dict[str, torch.Tensor],
+        **kwargs,
+    ) -> torch.Tensor:
+        return self.fwd_with_preconditioning(x, y_noised, sigma, **kwargs)
+
 
 def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
     cfg = DictConfig({"forcing": [], "diagnostic": [], "target": []})
@@ -273,24 +287,20 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
 _CFG_DIFFUSION = DictConfig(
     {
         "training": {"multistep_input": 1, "multistep_output": 1},
-        "model": {"model": {"diffusion": {"rho": 7.0}}},
+        "model": {"backbone": {"diffusion": {"rho": 7.0}}},
     },
 )
 
 
 def test_graphdiffusionforecaster() -> None:
-    class DummyDiffusion:
-        def __init__(self, model: DummyDiffusionModel) -> None:
-            self.model = model
-
     data_indices = _data_indices_single()
     forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
     pl.LightningModule.__init__(forecaster)
     _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
-    forecaster.model = DummyDiffusion(
-        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    forecaster.model = DummyDiffusionModel(
+        num_output_variables=len(next(iter(data_indices.values())).model.output),
     )
-    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.rho = _CFG_DIFFUSION.model.backbone.diffusion.rho
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
     forecaster.target_dataset_names = forecaster.dataset_names
@@ -308,6 +318,13 @@ def test_graphdiffusionforecaster() -> None:
     y_pred = y_preds[0]["data"]
     assert y_pred.ndim == 5
     assert y_pred.shape == (b, 1, e, g, v)
+
+
+def test_forecaster_task_classes_are_concrete() -> None:
+    assert not inspect.isabstract(GraphForecaster)
+    assert not inspect.isabstract(GraphDiffusionForecaster)
+    assert not inspect.isabstract(GraphDiffusionTendForecaster)
+    assert not inspect.isabstract(GraphEnsForecaster)
 
 
 def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:

@@ -12,6 +12,9 @@ cpu_offload: False
 
 keep_batch_sharded: True
 
+wrapper:
+  _target_: anemoi.models.models.AnemoiDiffusionModel
+
 backbone:
   _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
   hidden_nodes_name: "hidden"

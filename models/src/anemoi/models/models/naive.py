@@ -56,9 +56,11 @@ class NaiveModel(torch.nn.Module):
         out = {}
         for name, x_ds in x.items():
             bs, t, ens, grid, nv = x_ds.shape
-            x_flat = x_ds.reshape(bs * grid, t * nv)
+            x_flat = x_ds.permute(0, 2, 3, 1, 4).reshape(bs * ens * grid, t * nv)
             y_flat = self.linear(x_flat)
-            out[name] = y_flat.to(x_ds.dtype).reshape(bs, self.n_step_output, ens, grid, self._n_output)
+            out[name] = (
+                y_flat.to(x_ds.dtype).reshape(bs, ens, grid, self.n_step_output, self._n_output).permute(0, 3, 1, 2, 4)
+            )
         return out
 
     def predict_step(

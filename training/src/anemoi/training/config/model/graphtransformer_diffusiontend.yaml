@@ -13,6 +13,9 @@ cpu_offload: False
 
 keep_batch_sharded: True
 
+wrapper:
+  _target_: anemoi.models.models.AnemoiDiffusionTendencyModel
+
 backbone:
   _target_: anemoi.models.models.AnemoiDiffusionTendModelEncProcDec
   hidden_nodes_name: "hidden"

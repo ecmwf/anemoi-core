@@ -29,7 +29,6 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.interface import ModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -48,6 +47,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import ModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -263,7 +263,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.is_first_step = True
         self.n_step_input = config.training.multistep_input
         self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
-        LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
+        LOGGER.info(
+            "GraphModule with n_step_input=%s and n_step_output=%s",
+            self.n_step_input,
+            self.n_step_output,
+        )
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -409,7 +413,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if update_states:
             processor_prefixes += ("model.pre_processors.", "model.post_processors.")
         if update_tendencies:
-            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+            processor_prefixes += (
+                "model.pre_processors_tendencies.",
+                "model.post_processors_tendencies.",
+            )
 
         if not processor_prefixes:
             return
@@ -816,9 +823,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
         return
 
-    @abstractmethod
     def fill_metadata(self, metadata: dict) -> None:
-        """Fill inference metadata with task-specific timestep indices."""
+        """Fill inference metadata with default input/output timestep indices."""
+        for dataset_name in self.dataset_names:
+            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
+            rel = ts["relative_date_indices_training"]
+            ts["input_relative_date_indices"] = rel[: self.n_step_input]
+            ts["output_relative_date_indices"] = rel[-self.n_step_output :]
 
     @abstractmethod
     def _step(
@@ -1038,7 +1049,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+    def configure_optimizers(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
         scheduler = self._create_scheduler(optimizer)

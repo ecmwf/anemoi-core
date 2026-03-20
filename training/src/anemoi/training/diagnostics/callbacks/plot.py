@@ -50,6 +50,22 @@ from anemoi.training.schemas.base_schema import BaseSchema
 LOGGER = logging.getLogger(__name__)
 
 
+def _get_plot_backbone(pl_module: pl.LightningModule) -> object:
+    """Return the graph model used by plotting callbacks.
+
+    The current training path wraps graph backbones in ``AnemoiModel`` and
+    exposes them under ``.backbone``.
+    """
+    model = pl_module.model.module if hasattr(pl_module.model, "module") else pl_module.model
+    return model.backbone
+
+
+def _get_dataset_latlons(pl_module: pl.LightningModule, dataset_name: str) -> torch.Tensor:
+    """Return lat/lon node coordinates for one dataset."""
+    backbone = _get_plot_backbone(pl_module)
+    return backbone._graph_data[dataset_name].x.detach()
+
+
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
@@ -480,7 +496,7 @@ class LongRolloutPlots(BasePlotCallback):
             for name in self.parameters
         }
         if self.latlons is None:
-            self.latlons = pl_module.model.backbone._graph_data[pl_module.model.backbone._graph_name_data].x.detach()
+            self.latlons = _get_dataset_latlons(pl_module, self.dataset_names[0])
             self.latlons = np.rad2deg(self.latlons.cpu().numpy())
 
         assert batch.shape[1] >= self.max_rollout + pl_module.n_step_input, (
@@ -1116,9 +1132,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.backbone._graph_data[dataset_name][
-                pl_module.model.backbone._graph_name_data
-            ].x.detach()
+            self.latlons[dataset_name] = _get_dataset_latlons(pl_module, dataset_name)
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
