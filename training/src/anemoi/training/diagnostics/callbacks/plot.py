@@ -81,15 +81,13 @@ class BasePlotCallback(Callback, ABC):
         self.plot = self._plot
         self._executor = None
         self._error: BaseException = None
+        self._setup_checked = False
         self.backend = self.runtime.backend
         self.datashader_plotting = self.runtime.datashader
         self.projection_kind = self.runtime.projection_kind
         self.plot_asynchronous = self.runtime.asynchronous
         self.log_wandb_enabled = self.runtime.log_wandb_enabled
         self.log_mlflow_enabled = self.runtime.log_mlflow_enabled
-        self.async_with_read_group_risk = self.runtime.async_with_read_group_risk
-        self.global_diagnostic = self.runtime.global_diagnostic
-        self.dataset_diagnostics = self.runtime.dataset_diagnostics
 
         if self.plot_asynchronous:
             LOGGER.info("Setting up asynchronous plotting ...")
@@ -98,8 +96,28 @@ class BasePlotCallback(Callback, ABC):
             self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
             self.loop_thread.start()
 
-    def _dataset_diagnostics(self, dataset_name: str) -> list[str]:
-        return self.dataset_diagnostics.get(dataset_name, [])
+    @staticmethod
+    def _build_plot_parameters_dict(output_indices: Any, parameters: list[str]) -> dict[int, tuple[str, bool]]:
+        prognostic_indices = set(output_indices.prognostic)
+        return {
+            output_indices.name_to_index[name]: (name, output_indices.name_to_index[name] not in prognostic_indices)
+            for name in parameters
+        }
+
+    def _setup_checks(self, trainer: pl.Trainer) -> None:
+        if self._setup_checked:
+            return
+        self._setup_checked = True
+
+        # Evaluate async/read-group risk from runtime strategy state, not config context.
+        if self.plot_asynchronous and getattr(trainer, "global_rank", 0) == 0:
+            read_group_size = getattr(trainer.strategy, "read_group_size", None)
+            if read_group_size is not None and read_group_size > 1:
+                LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
+
+    def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        del pl_module
+        self._setup_checks(trainer)
 
     def start_event_loop(self) -> None:
         """Start the event loop in a separate thread."""
@@ -272,9 +290,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         """
         super().__init__(config, dataset_names=dataset_names)
         self.every_n_batches = every_n_batches or self.runtime.frequency_batch
-
-        if self.async_with_read_group_risk:
-            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
 
     def on_validation_batch_end(
         self,
@@ -467,9 +482,6 @@ class LongRolloutPlots(BasePlotCallback):
             every_n_epochs,
         )
 
-        if self.async_with_read_group_risk:
-            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
-
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -484,13 +496,7 @@ class LongRolloutPlots(BasePlotCallback):
         logger = trainer.logger
 
         # Initialize required variables for plotting
-        plot_parameters_dict = {
-            pl_module.data_indices.model.output.name_to_index[name]: (
-                name,
-                name in self.global_diagnostic,
-            )
-            for name in self.parameters
-        }
+        plot_parameters_dict = self._build_plot_parameters_dict(pl_module.data_indices.model.output, self.parameters)
         if self.latlons is None:
             for dataset_name in self.dataset_names:
                 self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
@@ -1247,14 +1253,10 @@ class PlotSample(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = self._dataset_diagnostics(dataset_name)
-            plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name in diagnostics,
-                )
-                for name in self.parameters
-            }
+            plot_parameters_dict = self._build_plot_parameters_dict(
+                pl_module.data_indices[dataset_name].model.output,
+                self.parameters,
+            )
 
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
@@ -1376,14 +1378,10 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = self._dataset_diagnostics(dataset_name)
-            plot_parameters_dict_spectrum = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name in diagnostics,
-                )
-                for name in self.parameters
-            }
+            plot_parameters_dict_spectrum = self._build_plot_parameters_dict(
+                pl_module.data_indices[dataset_name].model.output,
+                self.parameters,
+            )
 
             for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
@@ -1487,7 +1485,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = self._dataset_diagnostics(dataset_name)
             # Apply spatial mask
             _, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
@@ -1496,13 +1493,10 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            plot_parameters_dict_histogram = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name in diagnostics,
-                )
-                for name in self.parameters
-            }
+            plot_parameters_dict_histogram = self._build_plot_parameters_dict(
+                pl_module.data_indices[dataset_name].model.output,
+                self.parameters,
+            )
 
             for item in pl_module.plot_adapter.iter_plot_samples(
                 data,

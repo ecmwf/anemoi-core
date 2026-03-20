@@ -52,12 +52,9 @@ class PlotRuntimeSettings:
     datashader: bool
     frequency_batch: int | None
     frequency_epoch: int | None
-    async_with_read_group_risk: bool
     save_basedir: Any
     log_wandb_enabled: bool
     log_mlflow_enabled: bool
-    global_diagnostic: list[str]
-    dataset_diagnostics: dict[str, list[str]]
 
     @classmethod
     def from_config(cls, config: Any) -> PlotRuntimeSettings:
@@ -87,15 +84,6 @@ class PlotRuntimeSettings:
         if freq_epoch is None:
             freq_epoch = getattr(frequency, "epoch", None)
 
-        data_cfg = config.data
-        global_diag = list(data_cfg.get("diagnostic", []))
-
-        dataset_diags: dict[str, list[str]] = {}
-        for dataset_name, dataset_cfg in data_cfg.datasets.items():
-            diagnostics = getattr(dataset_cfg, "diagnostic", None)
-            dataset_diags[dataset_name] = [] if diagnostics is None else list(diagnostics)
-
-        read_group_size = config.dataloader.read_group_size
         return cls(
             asynchronous=bool(asynchronous),
             projection_kind=str(projection_kind),
@@ -103,12 +91,9 @@ class PlotRuntimeSettings:
             datashader=datashader,
             frequency_batch=freq_batch,
             frequency_epoch=freq_epoch,
-            async_with_read_group_risk=bool(asynchronous) and read_group_size > 1,
             save_basedir=config.system.output.plots,
             log_wandb_enabled=config.diagnostics.log.wandb.enabled,
             log_mlflow_enabled=config.diagnostics.log.mlflow.enabled,
-            global_diagnostic=global_diag,
-            dataset_diagnostics=dataset_diags,
         )
 
     @classmethod

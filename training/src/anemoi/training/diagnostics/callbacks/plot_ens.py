@@ -148,9 +148,6 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
         batch_idx: int,
         **kwargs,
     ) -> None:
-        if self.async_with_read_group_risk and pl_module.local_rank == 0:
-            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
-
         if batch_idx % self.every_n_batches == 0:
             processed_batch, processed_output = self._handle_ensemble_batch_and_output(pl_module, output, batch)
             # When running in Async mode, it might happen that in the last epoch these tensors
@@ -263,11 +260,10 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         for dataset_name in dataset_names:
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = self._dataset_diagnostics(dataset_name)
-            plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
-                for name in self.parameters
-            }
+            plot_parameters_dict = self._build_plot_parameters_dict(
+                pl_module.data_indices[dataset_name].model.output,
+                self.parameters,
+            )
 
             data, output_tensor = self.process(
                 pl_module,
