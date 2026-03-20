@@ -56,7 +56,7 @@ Several remappers can be applied one after the other in a chain. The order of th
 
 Example tranform functions:
 
-.. figure:: ../_static/preprocessing_remapper_power.png
+.. figure:: ../_static/preprocessing_remapper_boxcox.png
    :width: 100%
    :align: center
 
