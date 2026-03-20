@@ -10,27 +10,23 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from operator import itemgetter
 from typing import TYPE_CHECKING
 
 import torch
-from omegaconf import DictConfig
 from omegaconf import open_dict
 from torch.utils.checkpoint import checkpoint
-from torch_geometric.data import HeteroData
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from omegaconf import DictConfig
-    from torch_geometric.data import HeteroData
-
-    from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.models.interface import ModelInterface
+    from anemoi.training.config_bundle import TaskConfigBundle
+    from anemoi.training.runtime import TaskRuntimeArtifacts
 
 
 LOGGER = logging.getLogger(__name__)
@@ -45,11 +41,8 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         self,
         *,
         model: ModelInterface,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: dict[str, IndexCollection],
+        config_bundle: TaskConfigBundle,
+        runtime_artifacts: TaskRuntimeArtifacts,
         **kwargs,
     ) -> None:
         """Initialize graph neural network interpolator.
@@ -57,30 +50,25 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         Parameters
         ----------
         model : ModelInterface
-        config : DictConfig
-            Job configuration
-        graph_data : HeteroData
-            Graph object
-        statistics : dict
-            Statistics of the training data
-        data_indices : dict[str, IndexCollection]
-            Indices of the training data
+        config_bundle : TaskConfigBundle
+            Parts of the config used by this task.
+        runtime_artifacts : TaskRuntimeArtifacts
+            Data prepared by the trainer for this task.
 
         """
+        config = config_bundle.to_dictconfig()
         with open_dict(config.training):
             config.training.multistep_output = len(config.training.explicit_times.target)
+        config_bundle = replace(config_bundle, training=config.training)
         super().__init__(
             model=model,
-            config=config,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
+            config_bundle=config_bundle,
+            runtime_artifacts=runtime_artifacts,
             **kwargs,
         )
 
-        self.boundary_times = config.training.explicit_times.input
-        self.interp_times = config.training.explicit_times.target
+        self.boundary_times = self.config.training.explicit_times.input
+        self.interp_times = self.config.training.explicit_times.target
         self.n_step_output = len(self.interp_times)
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}

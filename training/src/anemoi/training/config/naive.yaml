@@ -4,11 +4,9 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: multi_scale
-- model_builder: anemoi
-- model: graphtransformer_diffusion
-- training: diffusion
+- model_builder: direct
+- model: naive
+- training: default
 - _self_
 
-
-# set to true to switch on config validation
 config_validation: True

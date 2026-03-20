@@ -4,6 +4,7 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: multi_scale
+- model_builder: anemoi
 - model: gnn
 - training: default
 - _self_

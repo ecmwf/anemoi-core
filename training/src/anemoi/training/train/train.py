@@ -30,11 +30,14 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
-from anemoi.training.builder import ModelRuntimeArtifacts
+from anemoi.training.config_bundle import ModelConfigBundle
+from anemoi.training.config_bundle import TaskConfigBundle
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
+from anemoi.training.runtime import ModelRuntimeArtifacts
+from anemoi.training.runtime import TaskRuntimeArtifacts
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -245,20 +248,20 @@ class AnemoiTrainer(ABC):
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
         model_task = get_class(self.config.training.model_task)
-        runtime_artifacts = self.runtime_artifacts
-        model = instantiate(self.config.model, runtime_artifacts=runtime_artifacts)
+        model_runtime_artifacts = self.runtime_artifacts
+        task_runtime_artifacts = self.task_runtime_artifacts
+        model = instantiate(
+            self.config.model_builder,
+            config_bundle=self.model_config_bundle,
+            runtime_artifacts=model_runtime_artifacts,
+        )
 
-        runtime_artifacts.metadata["metadata_inference"]["task"] = model_task.task_type
+        task_runtime_artifacts.metadata["metadata_inference"]["task"] = model_task.task_type
 
         kwargs = {
             "model": model,
-            "config": self.config,
-            "data_indices": runtime_artifacts.data_indices,
-            "graph_data": runtime_artifacts.graph_data,
-            "metadata": runtime_artifacts.metadata,
-            "supporting_arrays": runtime_artifacts.supporting_arrays,
-            "statistics": runtime_artifacts.statistics,
-            "statistics_tendencies": runtime_artifacts.statistics_tendencies,
+            "config_bundle": self.task_config_bundle,
+            "runtime_artifacts": task_runtime_artifacts,
         }
 
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
@@ -271,9 +274,6 @@ class AnemoiTrainer(ABC):
                 model = transfer_learning_loading(model, self.last_checkpoint)
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                # pop data_indices so that the data indices on the checkpoint do not get overwritten
-                # by the data indices from the new config
-                kwargs.pop("data_indices")
                 model = model_task.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
@@ -281,9 +281,9 @@ class AnemoiTrainer(ABC):
                     weights_only=False,  # required for Pytorch Lightning 2.6
                 )
 
-            model.data_indices = runtime_artifacts.data_indices
+            model.data_indices = task_runtime_artifacts.data_indices
             # Validate data indices between checkpoint and current config
-            self._validate_transfer_learning_datasets(model, runtime_artifacts.data_indices)
+            self._validate_transfer_learning_datasets(model, task_runtime_artifacts.data_indices)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -395,7 +395,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def runtime_artifacts(self) -> ModelRuntimeArtifacts:
-        """Runtime-built artifacts passed to model constructors."""
+        """Data prepared by the trainer and passed when creating the model."""
         return ModelRuntimeArtifacts(
             graph_data=self.graph_data,
             statistics=self.datamodule.statistics,
@@ -404,6 +404,21 @@ class AnemoiTrainer(ABC):
             metadata=self.metadata,
             supporting_arrays=self.supporting_arrays,
         )
+
+    @cached_property
+    def task_runtime_artifacts(self) -> TaskRuntimeArtifacts:
+        """Data prepared by the trainer and passed to the task."""
+        return self.runtime_artifacts.to_task_runtime_artifacts()
+
+    @cached_property
+    def model_config_bundle(self) -> ModelConfigBundle:
+        """Parts of the config used to create the model."""
+        return ModelConfigBundle.from_root_config(self.config)
+
+    @cached_property
+    def task_config_bundle(self) -> TaskConfigBundle:
+        """Parts of the config used by the training task."""
+        return TaskConfigBundle.from_root_config(self.config)
 
     @cached_property
     def _logger_kwargs(self) -> dict:

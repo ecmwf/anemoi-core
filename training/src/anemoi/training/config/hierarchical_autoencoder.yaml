@@ -5,6 +5,7 @@ defaults:
 - datamodule: single
 - hardware: example
 - graph: hierarchical_2level_encoder_decoder_only
+- model_builder: anemoi
 - model: graphtransformer
 - training: autoencoder
 - _self_

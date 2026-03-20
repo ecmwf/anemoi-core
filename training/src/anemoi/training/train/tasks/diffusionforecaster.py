@@ -24,15 +24,15 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
+    from omegaconf import DictConfig
 
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.config_bundle import TaskConfigBundle
+    from anemoi.training.runtime import TaskRuntimeArtifacts
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _get_diffusion_config(config: BaseSchema) -> Any:
+def _get_diffusion_config(config: DictConfig) -> Any:
     backbone_config = config.model.get("backbone")
     if backbone_config is not None and "diffusion" in backbone_config:
         return backbone_config.diffusion
@@ -50,28 +50,22 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         model: DiffusionModelInterface,
-        config: BaseSchema,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: dict[str, IndexCollection],
+        config_bundle: TaskConfigBundle,
+        runtime_artifacts: TaskRuntimeArtifacts,
         **kwargs,
     ) -> None:
-
+        """Initialize the diffusion forecaster."""
         super().__init__(
             model=model,
-            config=config,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
+            config_bundle=config_bundle,
+            runtime_artifacts=runtime_artifacts,
             **kwargs,
         )
         if not isinstance(model, DiffusionModelInterface):
             msg = f"{self.__class__.__name__} requires a diffusion-capable model interface."
             raise TypeError(msg)
 
-        self.rho = _get_diffusion_config(config).rho
+        self.rho = _get_diffusion_config(self.config).rho
 
         from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 
@@ -271,20 +265,14 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         self,
         *,
         model: DiffusionTendencyModelInterface,
-        config: BaseSchema,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: dict[str, IndexCollection],
+        config_bundle: TaskConfigBundle,
+        runtime_artifacts: TaskRuntimeArtifacts,
         **kwargs,
     ) -> None:
         super().__init__(
             model=model,
-            config=config,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
+            config_bundle=config_bundle,
+            runtime_artifacts=runtime_artifacts,
             **kwargs,
         )
         if not isinstance(model, DiffusionTendencyModelInterface):

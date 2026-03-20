@@ -7,17 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Factory function for building ModelInterface via Hydra instantiate."""
+"""Factory functions for building ModelInterface instances via Hydra."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from typing import Any
 
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.preprocessing import Processors
@@ -25,22 +22,10 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
-
     from anemoi.models.interface import ModelInterface
+    from anemoi.training.config_bundle import ModelConfigBundle
+    from anemoi.training.runtime import ModelRuntimeArtifacts
     from anemoi.utils.config import DotDict
-
-
-@dataclass(frozen=True)
-class ModelRuntimeArtifacts:
-    """Runtime-built artifacts required to assemble a model."""
-
-    graph_data: HeteroData
-    statistics: dict
-    statistics_tendencies: dict | None
-    data_indices: dict
-    metadata: dict
-    supporting_arrays: dict
 
 
 # ---------------------------------------------------------------------------
@@ -149,41 +134,17 @@ def _build_processors(
 
 def build_anemoi_model(
     *,
-    wrapper: DictConfig | None = None,
-    backbone: DictConfig,
-    training_config: DictConfig,
-    data_config: DictConfig,
-    dataloader_config: DictConfig,
-    graph_config: DictConfig,
-    system_config: DictConfig,
+    config_bundle: ModelConfigBundle,
     runtime_artifacts: ModelRuntimeArtifacts,
-    **model_arch_kwargs,
+    **_kwargs,
 ) -> ModelInterface:
-    """Build and return a fully constructed ModelInterface.
+    """Create an Anemoi model.
 
-    Called by Hydra instantiate(config.model, runtime_artifacts=...) from
-    train.py. The builder is a pure assembler: runtime-built artifacts are
-    supplied explicitly by the trainer through ``ModelRuntimeArtifacts``.
+    train.py calls this through Hydra. The trainer prepares the extra data
+    first and passes it in here, together with the parts of the config the
+    model needs.
     """
-
-    def _to_container(v: Any) -> Any:
-        if isinstance(v, DictConfig):
-            return OmegaConf.to_container(v, resolve=True)
-        return v
-
-    full_config_dict = {
-        "training": _to_container(training_config),
-        "data": _to_container(data_config),
-        "dataloader": _to_container(dataloader_config),
-        "graph": _to_container(graph_config),
-        "system": _to_container(system_config),
-        "model": {
-            **({"wrapper": _to_container(wrapper)} if wrapper is not None else {}),
-            "backbone": _to_container(backbone),
-            **{k: _to_container(v) for k, v in model_arch_kwargs.items()},
-        },
-    }
-    config = OmegaConf.create(full_config_dict)
+    config = config_bundle.to_dictconfig()
 
     # Build processors
     (
@@ -198,7 +159,7 @@ def build_anemoi_model(
         statistics_tendencies=runtime_artifacts.statistics_tendencies,
     )
 
-    wrapper_config = wrapper or OmegaConf.create({"_target_": "anemoi.models.models.AnemoiModel"})
+    wrapper_config = config.model.get("wrapper") or OmegaConf.create({"_target_": "anemoi.models.models.AnemoiModel"})
 
     return instantiate(
         wrapper_config,
@@ -214,3 +175,13 @@ def build_anemoi_model(
         pre_processors_tendencies=pre_processors_tendencies,
         post_processors_tendencies=post_processors_tendencies,
     )
+
+
+def build_direct_model(
+    *,
+    config_bundle: ModelConfigBundle,
+    runtime_artifacts: ModelRuntimeArtifacts,
+    **_kwargs,
+) -> ModelInterface:
+    """Create a model directly from ``config.model``."""
+    return instantiate(config_bundle.model, runtime_artifacts=runtime_artifacts)
