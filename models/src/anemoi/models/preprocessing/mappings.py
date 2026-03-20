@@ -62,7 +62,7 @@ def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=No
     return x
 
 
-def inverse_displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None):
+def inverse_displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None,eps=None):
     """Clamps the values back to the original range, to the original boundary values. Can be used on lower bound, upper bound, or both."""
 
     return x.clamp(lower_atom, upper_atom)
