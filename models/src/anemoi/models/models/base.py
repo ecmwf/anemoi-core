@@ -21,8 +21,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import ShardShapes
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.utils.config import DotDict
@@ -201,14 +201,14 @@ class BaseGraphModel(nn.Module):
     def _resolve_in_out_sharded(
         self,
         dataset_names: list[str],
-        grid_shard_shapes: dict[str, Optional[list]] | None,
+        grid_shard_sizes: DatasetShardSizes | None,
     ) -> dict[str, bool]:
         in_out_sharded: dict[str, bool] = {}
         for dataset_name in dataset_names:
-            if grid_shard_shapes is None:
+            if grid_shard_sizes is None:
                 in_out_sharded[dataset_name] = False
             else:
-                in_out_sharded[dataset_name] = grid_shard_shapes[dataset_name] is not None
+                in_out_sharded[dataset_name] = grid_shard_sizes[dataset_name] is not None
 
         return in_out_sharded
 
@@ -225,7 +225,13 @@ class BaseGraphModel(nn.Module):
         pass
 
     @abstractmethod
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
+    def _assemble_input(
+        self,
+        x,
+        batch_size,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        model_comm_group: ProcessGroup | None = None,
+    ):
         pass
 
     @abstractmethod
@@ -240,27 +246,29 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def forward(
         self,
-        x: Tensor,
+        x: dict[str, Tensor],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: ShardShapes = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, Tensor]:
         """Forward pass of the model.
 
         Parameters
         ----------
-        x : Tensor
+        x : dict[str, Tensor]
             Input data
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
-        grid_shard_shapes : ShardShapes, optional
-            Shard shapes of the grid, by default None
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset shard sizes for the grid dimension. ``None`` means the
+            corresponding dataset is replicated, not sharded.
 
         Returns
         -------
-        Tensor
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+        dict[str, Tensor]
+            Output of the model, with the same shape as the input (sharded if
+            the corresponding input dataset is sharded)
         """
         pass
 
@@ -273,7 +281,7 @@ class BaseGraphModel(nn.Module):
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
 
         Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
@@ -298,7 +306,7 @@ class BaseGraphModel(nn.Module):
 
         Returns
         -------
-        Tensor
+        dict[str, torch.Tensor]
             Model output (after post-processing)
         """
         with torch.no_grad():
@@ -317,22 +325,22 @@ class BaseGraphModel(nn.Module):
                 ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
-            grid_shard_shapes = None
+            grid_shard_sizes: DatasetShardSizes | None = None
             if model_comm_group is not None:
-                grid_shard_shapes = {}
+                grid_shard_sizes = {}
                 for dataset_name in dataset_names:
-                    grid_shard_shapes[dataset_name] = get_shard_shapes(
+                    grid_shard_sizes[dataset_name] = get_shard_sizes(
                         x[dataset_name], -2, model_comm_group=model_comm_group
                     )
                     x[dataset_name] = shard_tensor(
-                        x[dataset_name], -2, grid_shard_shapes[dataset_name], model_comm_group
+                        x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )
 
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
 
             # Perform forward pass
-            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
+            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_sizes=grid_shard_sizes, **kwargs)
 
             # Apply post-processing
             for dataset_name in dataset_names:
@@ -340,9 +348,10 @@ class BaseGraphModel(nn.Module):
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
+                assert grid_shard_sizes is not None
                 for dataset_name in dataset_names:
                     y_hat[dataset_name] = gather_tensor(
-                        y_hat[dataset_name], -2, grid_shard_shapes[dataset_name], model_comm_group
+                        y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )
 
         return y_hat

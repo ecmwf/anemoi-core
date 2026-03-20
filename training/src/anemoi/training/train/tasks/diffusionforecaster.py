@@ -102,7 +102,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_sizes=self.grid_shard_sizes,
         )
 
     def _compute_loss(
@@ -486,7 +486,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         x_ref = self.model.model.apply_reference_state_truncation(
             x,
-            self.grid_shard_shapes,
+            self.grid_shard_sizes,
             self.model_comm_group,
         )
         # x_ref is normalized model.input.prognostic (subset), aligned to output steps

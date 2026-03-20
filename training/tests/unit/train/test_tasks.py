@@ -42,14 +42,14 @@ class DummyModel:
         x: torch.Tensor,
         model_comm_group: Any | None = None,
         grid_shard_slice: Any | None = None,
-        grid_shard_shapes: Any | None = None,
+        grid_shard_sizes: Any | None = None,
     ) -> torch.Tensor:
         x_input = einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
         self.called_with = {
             "x_shape": tuple(x_input.shape),
             "model_comm_group": model_comm_group,
             "grid_shard_slice": grid_shard_slice,
-            "grid_shard_shapes": grid_shard_shapes,
+            "grid_shard_sizes": grid_shard_sizes,
         }
         bs, _, e, g, v = x.shape
         output_vars = self.num_output_variables or v
@@ -61,7 +61,7 @@ class DummyModel:
         x: torch.Tensor | dict[str, torch.Tensor],
         model_comm_group: Any | None = None,
         grid_shard_slice: Any | None = None,
-        grid_shard_shapes: Any | None = None,
+        grid_shard_sizes: Any | None = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         del kwargs
@@ -71,7 +71,7 @@ class DummyModel:
                     x_tensor,
                     model_comm_group=model_comm_group,
                     grid_shard_slice=grid_shard_slice,
-                    grid_shard_shapes=grid_shard_shapes,
+                    grid_shard_sizes=grid_shard_sizes,
                 )
                 for dataset_name, x_tensor in x.items()
             }
@@ -80,7 +80,7 @@ class DummyModel:
             x,
             model_comm_group=model_comm_group,
             grid_shard_slice=grid_shard_slice,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
         )
 
 
@@ -181,7 +181,7 @@ def _set_base_task_attrs(
     obj.grid_dim = -2
     obj.model_comm_group = None
     obj.model_comm_group_size = 1
-    obj.grid_shard_shapes = {"data": None}
+    obj.grid_shard_sizes = {"data": None}
     obj.grid_shard_slice = {"data": None}
 
 
@@ -294,7 +294,7 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
     forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
     forecaster.model_comm_group = None
     forecaster.model_comm_group_size = 1
-    forecaster.grid_shard_shapes = {"data": None}
+    forecaster.grid_shard_sizes = {"data": None}
     forecaster.grid_shard_slice = {"data": None}
     forecaster.output_mask = {"data": NoOutputMask()}
     forecaster.data_indices = {"data": data_indices}

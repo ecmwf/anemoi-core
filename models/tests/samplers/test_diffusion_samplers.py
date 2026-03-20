@@ -42,7 +42,7 @@ class MockDenoisingFunction:
         y: dict[str, torch.Tensor],
         sigma: torch.Tensor | dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict[str, Optional[list]]] = None,
+        grid_shard_sizes: Optional[dict[str, Optional[list]]] = None,
     ) -> dict[str, torch.Tensor]:
         """Mock denoising function that reduces noise proportionally to sigma."""
         self.call_count += 1
@@ -260,8 +260,8 @@ class TestEDMHeunSampler:
         sigmas = torch.linspace(1.0, 0.0, 4, dtype=torch.float64)
 
         class SigmaDtypeCheckingDenoiser:
-            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
-                del model_comm_group, grid_shard_shapes
+            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_sizes=None):
+                del model_comm_group, grid_shard_sizes
                 for dataset_name in y:
                     assert sigma[dataset_name].dtype == x[dataset_name].dtype == y[dataset_name].dtype
                     assert sigma[dataset_name].shape[1] == 1
@@ -410,8 +410,8 @@ class TestDPMPP2MSampler:
         sigmas = torch.linspace(1.0, 0.0, 4, dtype=torch.float64)
 
         class SigmaShapeCheckingDenoiser:
-            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
-                del model_comm_group, grid_shard_shapes
+            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_sizes=None):
+                del model_comm_group, grid_shard_sizes
                 for dataset_name in y:
                     assert sigma[dataset_name].shape[1] == 1
                     assert sigma[dataset_name].dtype == x[dataset_name].dtype == y[dataset_name].dtype
@@ -471,8 +471,8 @@ class TestSamplerComparison:
 
         # Create device-aware mock function
         class DeviceMockDenoisingFunction(MockDenoisingFunction):
-            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
-                result = super().__call__(x, y, sigma, model_comm_group, grid_shard_shapes)
+            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_sizes=None):
+                result = super().__call__(x, y, sigma, model_comm_group, grid_shard_sizes)
                 for dataset_name in result:
                     result[dataset_name] = result[dataset_name].to(device)
                 return result
@@ -596,9 +596,9 @@ class TestSamplerMultiDataset:
                 y_in: dict[str, torch.Tensor],
                 sigma_in: torch.Tensor | dict[str, torch.Tensor],
                 model_comm_group: Optional[ProcessGroup] = None,
-                grid_shard_shapes: Optional[dict[str, Optional[list]]] = None,
+                grid_shard_sizes: Optional[dict[str, Optional[list]]] = None,
             ) -> dict[str, torch.Tensor]:
-                del model_comm_group, grid_shard_shapes
+                del model_comm_group, grid_shard_sizes
                 assert isinstance(sigma_in, dict)
                 for dataset_name, y_data in y_in.items():
                     sigma_data = sigma_in[dataset_name]

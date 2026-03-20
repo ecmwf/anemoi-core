@@ -55,12 +55,12 @@ class DummyResidual(torch.nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
         model_comm_group=None,
         n_step_output: int = 1,
     ) -> torch.Tensor:
         del model_comm_group, n_step_output
-        assert grid_shard_shapes is None
+        assert grid_shard_sizes is None
         return x
 
 
@@ -295,7 +295,7 @@ def test_apply_reference_state_truncation_without_shards() -> None:
     model.residual = torch.nn.ModuleDict({"data": DummyResidual()})
 
     x = {"data": torch.arange(1 * 1 * 1 * 2 * 4, dtype=torch.float32).reshape(1, 1, 1, 2, 4)}
-    out = model.apply_reference_state_truncation(x, grid_shard_shapes=None, model_comm_group=None)
+    out = model.apply_reference_state_truncation(x, grid_shard_sizes=None, model_comm_group=None)
 
     indices = model.data_indices["data"].model.input.prognostic
     expected = x["data"][..., indices]
@@ -308,14 +308,14 @@ def test_before_sampling_keeps_reference_time_dimension() -> None:
     batch = {"data": torch.randn(2, 4, 3, 2)}
     pre_processors = {"data": IdentityProcessor()}
 
-    (xs, x_t0s), grid_shard_shapes = model._before_sampling(
+    (xs, x_t0s), grid_shard_sizes = model._before_sampling(
         batch,
         pre_processors,
         n_step_input=3,
         model_comm_group=None,
     )
 
-    assert grid_shard_shapes is None
+    assert grid_shard_sizes is None
     assert xs["data"].shape == (2, 3, 1, 3, 2)
     assert x_t0s["data"].shape == (2, 1, 1, 3, 2)
 
@@ -354,7 +354,7 @@ def test_after_sampling_uses_single_step_reference_per_output_step() -> None:
         post_processors,
         before_sampling_data,
         model_comm_group=None,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
         gather_out=False,
         post_processors_tendencies={"data": post_tend},
     )
@@ -402,7 +402,7 @@ def test_after_sampling_reinserts_nans() -> None:
         post_processors,
         before_sampling_data,
         model_comm_group=None,
-        grid_shard_shapes={"data": None},
+        grid_shard_sizes={"data": None},
         gather_out=False,
         post_processors_tendencies={"data": Processors([["imputer", imputer]], inverse=True)},
     )["data"]

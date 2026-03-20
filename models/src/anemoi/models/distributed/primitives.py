@@ -15,12 +15,12 @@ import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.shapes import ShardShapes
-from anemoi.models.distributed.shapes import expand_shard_shapes
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import expand_shard_sizes_to_shapes
 from anemoi.models.distributed.utils import get_memory_format
 
 
-def _split(input_: Tensor, dim_: int, shapes_: ShardShapes, group: Optional[ProcessGroup] = None) -> Tensor:
+def _split(input_: Tensor, dim_: int, sizes_: ShardSizes, group: Optional[ProcessGroup] = None) -> Tensor:
     """Split the tensor along dim and keep the relevant slice."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -48,7 +48,7 @@ def _split(input_: Tensor, dim_: int, shapes_: ShardShapes, group: Optional[Proc
     # sanity checks
     assert dim_ < input_.dim(), f"Error, cannot split along {dim_} for tensor with {input_.dim()} dimensions."
 
-    input_list = torch.split(input_, shapes_, dim=dim_)
+    input_list = torch.split(input_, sizes_, dim=dim_)
 
     rank = dist.get_rank(group=group)
     output = input_list[rank].contiguous(memory_format=input_format)
@@ -59,14 +59,14 @@ def _split(input_: Tensor, dim_: int, shapes_: ShardShapes, group: Optional[Proc
 def _gather_into_tensor(
     input_: Tensor,
     dim_: int,
-    shapes: ShardShapes,
+    sizes: ShardSizes,
     group: ProcessGroup,
 ) -> Tensor:
     input_format = get_memory_format(input_)
     input_ = input_.contiguous(memory_format=input_format)
 
     out_shape = list(input_.shape)
-    out_shape[dim_] = sum(shapes)  # expand shapes in dim_ to summed shape
+    out_shape[dim_] = sum(sizes)  # expand shard sizes in dim_ to summed shape
 
     output = torch.empty(
         out_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
@@ -80,14 +80,14 @@ def _gather_into_tensor(
 def _gather_with_padding(
     input_: Tensor,
     dim_: int,
-    shapes: ShardShapes,
+    sizes: ShardSizes,
     group: ProcessGroup,
 ) -> Tensor:
     input_format = get_memory_format(input_)
     input_ = input_.contiguous(memory_format=input_format)
     dim = dim_ % input_.dim()
 
-    max_shape_dim = max(shapes)
+    max_shape_dim = max(sizes)
     padded_shape = list(input_.shape)
     padded_shape[dim] = max_shape_dim
 
@@ -95,7 +95,7 @@ def _gather_with_padding(
         torch.empty(
             padded_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
         )
-        for _ in range(len(shapes))
+        for _ in range(len(sizes))
     ]
 
     # pad input_ to match max size in dim_
@@ -108,7 +108,7 @@ def _gather_with_padding(
     dist.all_gather(tensor_list, input_, group=group)
 
     # remove padding
-    tensor_list = [torch.narrow(t, dim, 0, shape) for t, shape in zip(tensor_list, shapes)]
+    tensor_list = [torch.narrow(t, dim, 0, size) for t, size in zip(tensor_list, sizes)]
 
     return torch.cat(tensor_list, dim=dim).contiguous(memory_format=input_format)
 
@@ -116,13 +116,13 @@ def _gather_with_padding(
 def _gather_default(
     input_: Tensor,
     dim_: int,
-    shapes: ShardShapes,
+    sizes: ShardSizes,
     group: ProcessGroup,
 ) -> Tensor:
     """Gather using all_gather with pre-allocated buffers."""
     input_format = get_memory_format(input_)
     input_ = input_.contiguous(memory_format=input_format)
-    full_shard_shapes = expand_shard_shapes(input_, dim_, shapes)
+    full_shard_shapes = expand_shard_sizes_to_shapes(input_, dim_, sizes)
 
     tensor_list = [
         torch.empty(
@@ -143,7 +143,7 @@ def _gather_default(
 def _gather(
     input_: Tensor,
     dim_: int,
-    shapes: ShardShapes,
+    sizes: ShardSizes,
     group: Optional[ProcessGroup] = None,
 ) -> Tensor:
     """Gather tensors and concatenate along the last dimension."""
@@ -171,15 +171,15 @@ def _gather(
         -input_.dim() <= dim_ < input_.dim()
     ), f"Error, cannot gather along {dim_} for tensor with {input_.dim()} dimensions."
 
-    all_shards_equal_shape = all(shape == shapes[0] for shape in shapes)
+    all_shards_equal_shape = all(size == sizes[0] for size in sizes)
     if dim_ == 0 and all_shards_equal_shape:  # requirement for all_gather_into_tensor
-        return _gather_into_tensor(input_, dim_, shapes, group)
+        return _gather_into_tensor(input_, dim_, sizes, group)
 
     requires_pad = dist.get_backend(group) == "gloo" and not all_shards_equal_shape
     if requires_pad:
-        return _gather_with_padding(input_, dim_, shapes, group)
+        return _gather_with_padding(input_, dim_, sizes, group)
 
-    return _gather_default(input_, dim_, shapes, group)
+    return _gather_default(input_, dim_, sizes, group)
 
 
 def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
@@ -273,11 +273,11 @@ def _alltoall_transpose(
         Input tensor
     dim_split : int
         Dimension along which to split the input (can be negative)
-    split_sizes : ShardShapes
+    split_sizes : ShardSizes
         Size of each chunk along `dim_split`, one per rank
     dim_concat : int
         Dimension along which to concatenate the received chunks (can be negative)
-    concat_sizes : ShardShapes
+    concat_sizes : ShardSizes
         Size of each received chunk along `dim_concat`, one per rank
     group : ProcessGroup, optional
         Process group

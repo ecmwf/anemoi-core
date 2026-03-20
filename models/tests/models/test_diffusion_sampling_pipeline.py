@@ -30,14 +30,14 @@ def test_before_sampling_non_sharded_returns_none_grid_shapes() -> None:
     batch = {"data": torch.randn(2, 4, 3, 2)}
     pre_processors = {"data": IdentityProcessor()}
 
-    (xs,), grid_shard_shapes = model._before_sampling(
+    (xs,), grid_shard_sizes = model._before_sampling(
         batch,
         pre_processors,
         n_step_input=3,
         model_comm_group=None,
     )
 
-    assert grid_shard_shapes is None
+    assert grid_shard_sizes is None
     assert xs["data"].shape == (2, 3, 1, 3, 2)
 
 
@@ -65,7 +65,7 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
         _post_processors,
         _before_sampling_data,
         _model_comm_group,
-        _grid_shard_shapes,
+        _grid_shard_sizes,
         _gather_out,
         **_kwargs,
     ):
@@ -108,10 +108,10 @@ def test_sample_initialization_uses_per_dataset_schedule_tensor(monkeypatch: pyt
             sigmas: torch.Tensor,
             denoising_fn,
             model_comm_group=None,
-            grid_shard_shapes=None,
+            grid_shard_sizes=None,
             **kwargs,
         ):
-            del denoising_fn, model_comm_group, grid_shard_shapes, kwargs
+            del denoising_fn, model_comm_group, grid_shard_sizes, kwargs
             assert isinstance(sigmas, torch.Tensor)
             for dataset_name, y_data in y.items():
                 assert y_data.dtype == sigmas.dtype
@@ -168,9 +168,9 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
         y: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
     ) -> dict[str, torch.Tensor]:
-        del model_comm_group, grid_shard_shapes
+        del model_comm_group, grid_shard_sizes
         out = {}
         for dataset_name, y_data in y.items():
             sigma_data = sigma[dataset_name]
