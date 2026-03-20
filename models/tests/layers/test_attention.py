@@ -53,8 +53,9 @@ def test_multi_head_self_attention_init(
 
     assert isinstance(mhsa, nn.Module)
     assert mhsa.num_heads == num_heads
-    assert mhsa.embed_dim == embed_dim
     assert mhsa.head_dim == embed_dim // num_heads
+    assert mhsa.lin_q.in_features == embed_dim
+    assert mhsa.projection.out_features == embed_dim
     assert dropout_p == mhsa.dropout_p
     assert mhsa.q_norm.bias is None
     assert mhsa.k_norm.bias is None
