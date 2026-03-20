@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric.data import HeteroData
+from torch_geometric.nn import radius
 
 from anemoi.graphs import EARTH_RADIUS
 
@@ -35,9 +36,9 @@ class RadiusAreaMaskBuilder:
         self._ref_vectors: torch.Tensor | None = None
 
     @property
-    def _cos_threshold(self) -> float:
-        """Cosine similarity threshold equivalent to margin_radius_km on the Earth's surface."""
-        return float(np.cos(self.margin_radius_km / EARTH_RADIUS))
+    def _chord_threshold(self) -> float:
+        """Euclidean chord length threshold equivalent to margin_radius_km."""
+        return float(2 * np.sin(self.margin_radius_km / (2 * EARTH_RADIUS)))
     
     @staticmethod
     def _to_unit_sphere(coords_rad: torch.Tensor) -> torch.Tensor:
@@ -122,7 +123,7 @@ class RadiusAreaMaskBuilder:
             reference_mask_str,
         )
 
-    def get_mask(self, coords_rad: torch.Tensor, memory_fraction: float = 0.8) -> torch.Tensor:
+    def get_mask(self, coords_rad: torch.Tensor) -> torch.Tensor:
         """Compute a mask based on the distance to the reference nodes.
 
         For each query node, checks whether it lies within margin_radius_km of
@@ -132,8 +133,7 @@ class RadiusAreaMaskBuilder:
         ----------
         coords_rad : torch.Tensor of shape (N_query, 2)
             Latitude and longitude of the query nodes in radians.
-        memory_fraction : float, optional
-                Fraction of available GPU memory to use for processing chunks. Defaults to 0.8.
+
         Returns
         -------
         torch.Tensor of shape (N_query,)
@@ -151,22 +151,19 @@ class RadiusAreaMaskBuilder:
         # The coords_rad from the query (typically the processor/hidden nodes) are produced on the CPU as numpy.ndarray.
         # Need to convert them to torch.Tensor and move them to the correct device.  
         query_vectors = self._to_unit_sphere(
-            torch.from_numpy(coords_rad).to(self._ref_vectors.device)   
-        )  # (N_query, 3)   
+            torch.from_numpy(coords_rad)#.to(self._ref_vectors.device)   
+        ).cpu()  # (N_query, 3)   
 
 
-        free_memory = torch.cuda.mem_get_info(self._ref_vectors.device)[0]
-        bytes_per_row = self._ref_vectors.shape[0] * self._ref_vectors.element_size()
-        chunk_size = int(free_memory * memory_fraction / bytes_per_row)
-        LOGGER.debug(f"chunksize: {chunk_size}")
-        LOGGER.debug(f"number of chunks: {len(query_vectors) // chunk_size + 1}")
+        edge_index = radius(
+            x=self._ref_vectors.cpu(),    # reference points
+            y=query_vectors,        # query points
+            r=self._chord_threshold,
+            max_num_neighbors=1
+    )
 
-        # Calculate dot-product in chunks to fit in GPU memory
-        mask = torch.empty(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
-        for i, chunk in enumerate(query_vectors.split(chunk_size)):
-            cos_sim = chunk @ self._ref_vectors.T                            # (chunk_size, N_ref)
-            mask[i * chunk_size : i * chunk_size + len(chunk)] = cos_sim.amax(dim=1) >= self._cos_threshold
-            del cos_sim
+        mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
+        mask[edge_index[0]] = True
 
         t1 = time.time()
         LOGGER.debug("Time to get mask from (%s): %.2f s", self.__class__.__name__, t1 - t0)
