@@ -16,13 +16,15 @@ from typing import Optional
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.shapes import DatasetShardSizes
+
 DenoisingFunction = Callable[
     [
         dict[str, torch.Tensor],
         dict[str, torch.Tensor],
         dict[str, torch.Tensor],
         Optional[ProcessGroup],
-        dict[str, Optional[list]],
+        DatasetShardSizes | None,
     ],
     dict[str, torch.Tensor],
 ]
@@ -314,9 +316,9 @@ class DiffusionSampler(ABC):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Perform diffusion sampling.
 
         Parameters
@@ -331,14 +333,15 @@ class DiffusionSampler(ABC):
             Function that performs denoising
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
-        grid_shard_shapes : dict[str, Optional[list]]
-            Grid shard shapes for distributed processing
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset shard sizes for the grid dimension. ``None`` means the
+            corresponding dataset is replicated, not sharded.
         **kwargs
             Additional sampler-specific parameters
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Sampled output with shape (batch, time, ensemble, grid, vars)
         """
         pass
@@ -371,7 +374,7 @@ class EDMHeunSampler(DiffusionSampler):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         # Override instance defaults with any kwargs
@@ -419,7 +422,7 @@ class EDMHeunSampler(DiffusionSampler):
                 y,
                 sigma_dict,
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
 
             for dataset_name in D1:
@@ -442,7 +445,7 @@ class EDMHeunSampler(DiffusionSampler):
                     y_next,
                     sigma_next_dict,
                     model_comm_group,
-                    grid_shard_shapes,
+                    grid_shard_sizes,
                 )
 
                 for dataset_name in D2:
@@ -471,8 +474,7 @@ class DPMpp2MSampler(DiffusionSampler):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
-        dtype: Optional[torch.dtype] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         dtype = dtype if dtype is not None else kwargs.get("dtype", self.dtype)
@@ -494,10 +496,9 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = sigma.view(1, 1, 1, 1, 1).expand(batch_size, time_size, ensemble_size, 1, 1)
-            sigma_dict = {key: sigma_expanded for key in y.keys()}
-
-            denoised = denoising_fn(x, y, sigma_dict, model_comm_group, grid_shard_shapes)
+            sigma_expanded = _expand_sigma(sigma, y)
+            denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_sizes)
+            denoised_solver = {dataset_name: den.to(dtype) for dataset_name, den in denoised.items()}
 
             if sigma_next == 0:
                 y = denoised

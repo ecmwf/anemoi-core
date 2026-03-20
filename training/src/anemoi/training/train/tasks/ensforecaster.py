@@ -146,7 +146,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             y,
             grid_shard_slice=self.grid_shard_slice[dataset_name],
             grid_dim=self.grid_dim,
-            grid_shard_shape=self.grid_shard_shapes,
+            grid_shard_shape=self.grid_shard_sizes,
             dataset_name=dataset_name,
         )
 

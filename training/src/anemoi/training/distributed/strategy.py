@@ -135,18 +135,56 @@ class DDPGroupStrategy(DDPStrategy):
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
+        self.shard_sizes: dict | None = None
+
+    @abstractmethod
+    def _setup_communication_groups(self) -> int:
+        """Set up communication groups for distributed training.
+
+        Returns
+        -------
+        int
+            The model communication group ID for this rank.
+        """
+        raise NotImplementedError
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
 
         super().setup(trainer)
 
+        self.shard_sizes = self._setup_shard_sizes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
         """Configure DDP with custom gradient hooks."""
         self.register_parameter_hooks()
         super().configure_ddp()
+
+    def _setup_shard_sizes(self, trainer: pl.Trainer) -> dict:
+        """Set up shard sizes for the dataloader.
+
+        Parameters
+        ----------
+        trainer : pl.Trainer
+            The PyTorch Lightning trainer.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the shard sizes for each dataset.
+        """
+        shard_sizes = trainer.model.module.shard_sizes
+        assert shard_sizes is not None, "Shard shapes should be set after setup"
+        return shard_sizes
+
+    def register_parameter_hooks(self) -> None:
+        """Register parameter hooks for gradient reduction."""
+        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
+
+
+class DDPGroupStrategy(BaseDDPStrategy):
+    """Distributed Data Parallel strategy with group communication."""
 
     def _setup_communication_groups(self) -> int:
         """Set up model and reader communication groups.
@@ -261,6 +299,7 @@ class DDPGroupStrategy(DDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
+            self.shard_sizes,
         )
 
         return dataloader
@@ -496,6 +535,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
+            self.shard_sizes,
         )
 
         dataloader.dataset.set_ens_comm_group_info(
