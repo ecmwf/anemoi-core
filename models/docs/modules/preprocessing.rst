@@ -43,8 +43,8 @@ The remapper module supports the following transformations:
 - ``affine`` (x -> scale * x + shift)
 - ``log1p`` (log(1+x))
 - ``sqrt``
-- ``boxcox`` ((x^lambd - 1) / lambd) or (log(x) if lambd == 0)
-- ``power`` (x^lambd) `wiki`_
+- ``boxcox`` ((x^lambd - 1) / lambd) or (log(x) if lambd == 0)  `wiki`_
+- ``power`` (x^lambd)
 - ``atanh`` (atanh(rho * (2x - 1)) / rho)
 - ``asinh`` (asinh(x))
 - ``displace_boundary_atoms`` (shifts precise boundary peaks away from other
