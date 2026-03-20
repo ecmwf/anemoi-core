@@ -16,6 +16,8 @@ import torch.nn as nn
 from hypothesis import given
 from hypothesis import settings
 
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.utils import load_layer_kernels
@@ -80,8 +82,8 @@ def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim
     )
 
     x = torch.randn(batch_size * 2, embed_dim)
-    shapes = [list(x.shape)]
-    output = mhsa.forward(x, shapes, batch_size)
+    shard_info = GraphShardInfo(nodes=[2])
+    output = mhsa.forward(x, shard_info, batch_size)
 
     assert output.shape == x.shape
 
@@ -106,8 +108,8 @@ def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_di
     )
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
-    shapes = [list(x.shape)]
-    output = mhsa.forward(x, shapes, batch_size)
+    shard_info = GraphShardInfo(nodes=[2])
+    output = mhsa.forward(x, shard_info, batch_size)
 
     # Dummy loss
     loss = output.sum()
@@ -138,8 +140,8 @@ def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_di
     )
 
     x = torch.randn(batch_size * 2, embed_dim)
-    shapes = [list(x.shape)]
-    output = mhsa.forward((x, x), shapes, batch_size)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2], dst_nodes=[2])
+    output = mhsa.forward((x, x), shard_info, batch_size)
 
     assert output.shape == x.shape
 
@@ -165,8 +167,8 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
     )
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
-    shapes = [list(x.shape)]
-    output = mhsa.forward((x, x), shapes, batch_size)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2], dst_nodes=[2])
+    output = mhsa.forward((x, x), shard_info, batch_size)
 
     # Dummy loss
     loss = output.sum()
@@ -196,8 +198,8 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     )
 
     x = torch.randn(batch_size * grid, embed_dim, device=device)
-    shapes = [list(x.shape)]
-    output = mhsa.forward(x, shapes, batch_size)
+    shard_info = GraphShardInfo(nodes=[grid])
+    output = mhsa.forward(x, shard_info, batch_size)
     if device == "cuda":
         peak_alloc_memory_after_sliding_window_mb = torch.cuda.max_memory_allocated() / (1024**2)
     else:
@@ -217,7 +219,7 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     )
     # Copy weights so the only difference is the window mask
     mhsa_global.load_state_dict(mhsa.state_dict())
-    output_global = mhsa_global.forward(x, shapes, batch_size)
+    output_global = mhsa_global.forward(x, shard_info, batch_size)
 
     if device == "cuda":
         peak_alloc_memory_after_global_mb = torch.cuda.max_memory_allocated() / (1024**2)
@@ -251,6 +253,6 @@ def test_multi_head_self_attention_forward_sdpa_rejects_softcap(layer_kernels):
     )
 
     x = torch.randn(batch_size * 2, embed_dim)
-    shapes = [list(x.shape)]
+    shard_info = GraphShardInfo(nodes=[2])
     with pytest.raises(NotImplementedError, match="Softcap not supported"):
-        mhsa.forward(x, shapes, batch_size)
+        mhsa.forward(x, shard_info, batch_size)
