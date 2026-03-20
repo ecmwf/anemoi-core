@@ -78,6 +78,7 @@ Example tranform functions:
 Example configuration:
 
 .. code:: yaml
+
    data:
       processors:
          normalizer:
