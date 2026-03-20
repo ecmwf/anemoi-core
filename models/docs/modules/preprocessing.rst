@@ -29,11 +29,11 @@ the following classes:
 Remapper
 **********
 
-The remapper module is used to do online transformations of the data using a set of predefined transformations and their inverses. This is crucial for variables with pathological distributions, such as variables with a sharp peaks, long tails or other non-Gaussian distributions. This is especially important for diffusion models where the data distribution interacts with the noise distribution.
+The remapper module is used to do online transformations of the data using a set of predefined transforms and their inverses. This process is crucial for variables with pathological distributions, such as variables with a sharp peaks, long tails or other non-Gaussian shapes. It is especially important for diffusion models where the data distribution interacts with the noise distribution.
 
 .. note::
-   The remapper module enables only single variable transformations.
-   Multiple variable transformations (such as (ws wdir) -> (u v)) are
+   The remapper module enables only single-variable transformations.
+   Multi-variable transformations (such as ``(ws wdir) -> (u v)``) are
    not supported for memory reasons and must be performed at the level
    of the datasets.
 
@@ -43,12 +43,12 @@ The remapper module supports the following transformations:
 - ``affine`` (x -> scale * x + shift)
 - ``log1p`` (log(1+x))
 - ``sqrt``
-- ``boxcox``
+- ``boxcox`` ((x^lambda - 1) / lambda) or (log(x) if lambda == 0) [wikipedia](https://en.wikipedia.org/wiki/Power_transform#Box%E2%80%93Cox_transformation)
 - ``power`` (x^lambda)
-- ``atanh``
-- ``asinh``
+- ``atanh`` (atanh(rho * (2x - 1)) / rho)
+- ``asinh`` (asinh(x))
 - ``displace_boundary_atoms`` (shifts precise boundary peaks away from other
-  values to give the model a bucket in which to accurately model them)
+  values to give the model a non-zero width bucket to model them)
 
 Several remappers can be applied one after the other in a chain. The order of the remappers is important, as the output of one remapper is the input to the next remapper. Remappers must be applied after the normalizer as normalizer relies on the computed statistics of the dataset.
 
@@ -68,7 +68,6 @@ Example tranform functions:
 
 Example configuration:
 .. code:: yaml
-
    data:
       processors:
          normalizer:
@@ -115,7 +114,9 @@ Example configuration:
                  lower_target: -1
                  eps: 1e-7
 
+
 The module contains the following classes:
+
 .. automodule:: anemoi.models.preprocessing.remapper
    :members:
    :no-undoc-members:
