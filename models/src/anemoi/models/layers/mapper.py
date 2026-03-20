@@ -15,7 +15,6 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
@@ -77,8 +76,6 @@ class BaseMapper(nn.Module, ABC):
         self.activation = self.layer_factory.Activation()
 
         self.proc = NotImplemented
-
-        self.offload_layers(cpu_offload)
 
     def offload_layers(self, cpu_offload):
         if cpu_offload:
@@ -1071,12 +1068,12 @@ class PointWiseMapper(BaseMapper, ABC):
 
     def __init__(
         self,
+        *,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        layer: dict,
-        num_layers: int = 1,
         cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
         layer_kernels: dict | None = None,
     ):
         super().__init__(
@@ -1084,16 +1081,15 @@ class PointWiseMapper(BaseMapper, ABC):
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
             cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
         )
 
-        self.proc = nn.Sequential(*tuple([instantiate(layer) for _ in range(num_layers)]))
-
-        self.offload_layers(cpu_offload)
-
-        self.emb_nodes_src = nn.Linear(self.in_channels_src, self.hidden_dim)
-
-        # emb_nodes_dst is not used. The destination node features are not used by PointWiseMapper
+    @staticmethod
+    def _node_partition(shapes: list[list[int]] | list[int]) -> list[int]:
+        if shapes and isinstance(shapes[0], int):
+            return [shapes[0]]
+        return [shape[0] for shape in shapes]
 
     def mapper_forward(
         self,
@@ -1105,11 +1101,13 @@ class PointWiseMapper(BaseMapper, ABC):
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
     ) -> PairTensor:
-        assert (
-            x[0].shape[0] == x[1].shape[0]
-        ), f"Source and destination must have same number of nodes for {self.__class__.__name__}, but got src={x[0].shape[0]} and dst={x[1].shape[0]}."
+        shapes_src, shapes_dst = shard_shapes
+        assert self._node_partition(shapes_src) == self._node_partition(shapes_dst), (
+            f"Source and destination must have the same node partition for {self.__class__.__name__}, "
+            f"but got src={self._node_partition(shapes_src)} and dst={self._node_partition(shapes_dst)}."
+        )
 
-        x_src, shapes_src = self.pre_process(
+        x_dst, shapes_dst = self.pre_process(
             x=x,
             shard_shapes=shard_shapes,
             model_comm_group=model_comm_group,
@@ -1117,10 +1115,11 @@ class PointWiseMapper(BaseMapper, ABC):
             x_dst_is_sharded=x_dst_is_sharded,
         )
 
-        x_src = self.proc(x_src)
-
         x_dst = self.post_process(
-            x_dst=x_src, shapes_dst=shapes_src, model_comm_group=model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded
+            x_dst=x_dst,
+            shapes_dst=shapes_dst,
+            model_comm_group=model_comm_group,
+            keep_x_dst_sharded=keep_x_dst_sharded,
         )
 
         return x_dst
@@ -1158,12 +1157,12 @@ class PointWiseForwardMapper(PointWiseMapper):
 
     def __init__(
         self,
+        *,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        layer: dict,
-        num_layers: int = 1,
         cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
         layer_kernels: dict | None = None,
         **kwargs,
     ):
@@ -1171,36 +1170,37 @@ class PointWiseForwardMapper(PointWiseMapper):
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
-            layer=layer,
-            num_layers=num_layers,
             cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
         )
+        self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
 
     def pre_process(
         self,
         x: tuple[torch.Tensor, torch.Tensor],
-        shard_shapes: tuple[list[list[int]], list[list[int]], list[list[int]]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group=None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
     ):
-        shapes_src = shard_shapes[0]
+        shapes_src, shapes_dst = shard_shapes
         x_src = x[0]
         if not x_src_is_sharded:
             x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
         x_src = self.emb_nodes_src(x_src)
-        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
-        return x_src, shapes_src
+        return x_src, change_channels_in_shape(shapes_dst, self.hidden_dim)
 
-    def post_process(self, x_dst: torch.Tensor, **kwargs):
+    def post_process(
+        self, x_dst: torch.Tensor, shapes_dst=None, model_comm_group=None, keep_x_dst_sharded: bool = False
+    ):
         return x_dst
 
     def forward(
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[list[list[int]], list[list[int]], list[list[int]]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         edge_attr: Optional[Tensor] = None,
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -1231,13 +1231,14 @@ class PointWiseBackwardMapper(PointWiseMapper):
 
     def __init__(
         self,
+        *,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
         out_channels_dst: int,
-        layer: dict,
-        num_layers: int = 1,
+        initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
         layer_kernels: dict | None = None,
         **kwargs,
     ):
@@ -1245,36 +1246,44 @@ class PointWiseBackwardMapper(PointWiseMapper):
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
-            layer=layer,
-            num_layers=num_layers,
             cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
         )
         self.out_channels_dst = out_channels_dst
 
+        LayerNorm = self.layer_factory.LayerNorm
+        Linear = self.layer_factory.Linear
         self.node_data_extractor = nn.Sequential(
-            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+            LayerNorm(normalized_shape=self.hidden_dim),
+            Linear(self.hidden_dim, self.out_channels_dst),
         )
+        if initialise_data_extractor_zero:
+            for module in self.node_data_extractor.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.constant_(module.weight, 0.0)
+                    if module.bias is not None:
+                        nn.init.constant_(module.bias, 0.0)
 
     def pre_process(
         self,
         x: tuple[torch.Tensor, torch.Tensor],
-        shard_shapes: tuple[list[list[int]], list[list[int]], list[list[int]]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group=None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
     ):
-        shapes_src = shard_shapes[0]
-        x_src = x[0]
+        shapes_src, shapes_dst = shard_shapes
         shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
-        return x_src, shapes_src
+        x_src = x[0]
+        if not x_src_is_sharded:
+            x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
+        return x_src, change_channels_in_shape(shapes_dst, self.out_channels_dst)
 
     def post_process(self, x_dst: torch.Tensor, shapes_dst, model_comm_group=None, keep_x_dst_sharded: bool = False):
         x_dst = self.node_data_extractor(x_dst)
         if not keep_x_dst_sharded:
-            x_dst = gather_tensor(
-                x_dst, 0, change_channels_in_shape(shapes_dst, self.out_channels_dst), model_comm_group
-            )
+            x_dst = gather_tensor(x_dst, 0, shapes_dst, model_comm_group)
         return x_dst
 
 
