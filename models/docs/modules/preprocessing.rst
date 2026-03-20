@@ -43,12 +43,14 @@ The remapper module supports the following transformations:
 - ``affine`` (x -> scale * x + shift)
 - ``log1p`` (log(1+x))
 - ``sqrt``
-- ``boxcox`` ((x^lambda - 1) / lambda) or (log(x) if lambda == 0) [wikipedia](https://en.wikipedia.org/wiki/Power_transform#Box%E2%80%93Cox_transformation)
-- ``power`` (x^lambda)
+- ``boxcox`` ((x^lambda - 1) / lambda) or (log(x) if lambda == 0) 
+- ``power`` (x^lambda) `wiki`_
 - ``atanh`` (atanh(rho * (2x - 1)) / rho)
 - ``asinh`` (asinh(x))
 - ``displace_boundary_atoms`` (shifts precise boundary peaks away from other
   values to give the model a non-zero width bucket to model them)
+
+.. _wiki: https://en.wikipedia.org/wiki/Power_transform#Box%E2%80%93Cox_transformation
 
 Several remappers can be applied one after the other in a chain. The order of the remappers is important, as the output of one remapper is the input to the next remapper. Remappers must be applied after the normalizer as normalizer relies on the computed statistics of the dataset.
 
