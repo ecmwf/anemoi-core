@@ -55,6 +55,13 @@ Several remappers can be applied one after the other in a chain. The order of th
 Example tranform functions:
 
 .. figure:: ../_static/preprocessing_remapper_power.png
+   :width: 100%
+   :align: center
+
+   Box-cox remapper transform function examples with λ = [-2, -1.8, … , 2]. Negative λ is blue, λ=0 red, 0<λ<1 purple, λ=1=linear dashed black, and λ>1 green. Input Values must be positive.
+
+
+.. figure:: ../_static/preprocessing_remapper_power.png
    :width: 70%
    :align: center
 
@@ -67,6 +74,7 @@ Example tranform functions:
    Atanh remapper transform function examples.
 
 Example configuration:
+
 .. code:: yaml
    data:
       processors:
