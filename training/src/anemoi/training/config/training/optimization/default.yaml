@@ -1,9 +1,11 @@
+defaults:
+  - optimizer: adamw
+  - _self_
+
 lr: 0.625e-4 # local_lr — scaled by hardware config at runtime
 
-# Default optimizer. For alternatives see training/optimization/optimizer/
-optimizer:
-  _target_: torch.optim.AdamW
-  betas: [0.9, 0.95] # β₁, β₂
+# Default optimizer is selected via the defaults list above.
+# Override it with e.g. `training/optimization/optimizer=zero`.
 
 # Scheduler algorithm: Hydra instantiation config for the LR scheduler class.
 # Set to null to disable the scheduler.

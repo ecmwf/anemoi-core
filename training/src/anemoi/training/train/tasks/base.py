@@ -286,6 +286,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             * config.training.optimization.lr
             / config.system.hardware.num_gpus_per_model
         )
+        self._lr_scheduler_interval = "epoch"
 
         self.model_comm_group = None
         self.reader_groups = None
@@ -1067,9 +1068,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """
-        # Special-case timm-style schedulers that expect step_update(global_step)
+        # timm schedulers have both step(epoch) and step_update(update)
+        # -> respect the normalized runtime interval chosen in configure_optimizers.
         if hasattr(scheduler, "step_update"):
-            scheduler.step_update(self.trainer.global_step)
+            if self._lr_scheduler_interval == "step":
+                scheduler.step_update(self.trainer.global_step, metric)
+            else:
+                scheduler.step(self.current_epoch + 1, metric)
             return
 
         # Fallback to standard Lightning semantics for other schedulers
@@ -1091,10 +1096,18 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.log_optimizer(optimizer)
 
         if not getattr(optimization, "lr_scheduler", None):
+            self._lr_scheduler_interval = "epoch"
             return optimizer
 
         pl_scheduler = instantiate(optimization.lr_scheduler, optimizer=optimizer)
-        pl_lr_scheduler = LRSchedulerConfig(scheduler=pl_scheduler, **(optimization.pl_lr_scheduler or {}))
+        pl_lr_scheduler_cfg = optimization.pl_lr_scheduler or {}
+        pl_lr_scheduler = LRSchedulerConfig(scheduler=pl_scheduler, **pl_lr_scheduler_cfg)
+        if "interval" in pl_lr_scheduler_cfg:
+            self._lr_scheduler_interval = pl_lr_scheduler.interval
+        elif hasattr(pl_scheduler, "step_update"):
+            self._lr_scheduler_interval = "step"
+        else:
+            self._lr_scheduler_interval = pl_lr_scheduler.interval
         return [optimizer], [pl_lr_scheduler]
 
     @staticmethod
