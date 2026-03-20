@@ -125,13 +125,17 @@ Example configuration:
                  eps: 1e-7
 
 
-The module contains the following classes:
+The module contains the following classes and functions:
 
 .. automodule:: anemoi.models.preprocessing.remapper
    :members:
    :no-undoc-members:
    :show-inheritance:
 
+.. automodule:: anemoi.models.preprocessing.mappings
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
 
 
 *********
