@@ -10,10 +10,12 @@
 import torch
 from omegaconf import DictConfig
 
+from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 
 
 def test_filtered_loss() -> None:
@@ -78,3 +80,15 @@ def test_filtered_loss() -> None:
 
     assert isinstance(loss, FilteringLossWrapper)
     assert isinstance(loss.loss, FunctionalLoss)
+
+
+def test_filtered_loss_propagates_needs_shard_layout_info() -> None:
+    loss = FilteringLossWrapper(
+        loss=MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0],
+            keep_batch_sharded=True,
+        ),
+    )
+
+    assert loss.needs_shard_layout_info is True
