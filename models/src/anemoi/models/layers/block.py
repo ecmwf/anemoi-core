@@ -112,6 +112,7 @@ class TransformerProcessorBlock(BaseBlock):
         num_heads: int,
         window_size: Optional[int],
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
@@ -128,6 +129,7 @@ class TransformerProcessorBlock(BaseBlock):
         self.attention = MultiHeadSelfAttention(
             num_heads=num_heads,
             embed_dim=num_channels,
+            attn_channels=attn_channels,
             window_size=window_size,
             qkv_bias=False,
             is_causal=False,
@@ -186,6 +188,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         num_heads: int,
         window_size: Optional[int],
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
@@ -197,6 +200,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         super().__init__(
             num_channels=num_channels,
             hidden_dim=hidden_dim,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             window_size=window_size,
             layer_kernels=layer_kernels,
@@ -212,6 +216,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         self.attention = MultiHeadCrossAttention(
             num_heads=num_heads,
             embed_dim=num_channels,
+            attn_channels=attn_channels,
             window_size=window_size,
             qkv_bias=False,
             qk_norm=qk_norm,
@@ -462,6 +467,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
         **kwargs,
@@ -474,6 +480,9 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Number of input channels.
         out_channels : int
             Number of output channels.
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to out_channels.
         num_heads : int,
             Number of heads
         edge_dim : int,
@@ -496,7 +505,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.update_src_nodes = update_src_nodes
 
-        self.out_channels_conv = out_channels // num_heads
+        self.attn_channels = out_channels if attn_channels is None else attn_channels
+        if self.attn_channels <= 0:
+            raise ValueError(f"attn_channels must be > 0, got {self.attn_channels}")
+        if self.attn_channels % num_heads != 0:
+            raise ValueError(
+                f"attn_channels ({self.attn_channels}) must be divisible by num_heads ({num_heads}) in {self.__class__.__name__}."
+            )
+
+        self.out_channels_conv = self.attn_channels // num_heads
         self.num_heads = num_heads
         self.qk_norm = qk_norm
 
@@ -508,7 +525,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
 
-        self.projection = Linear(out_channels, out_channels)
+        self.projection = Linear(self.attn_channels, out_channels)
 
         if self.qk_norm:
             self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)

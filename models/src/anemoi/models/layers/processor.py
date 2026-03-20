@@ -213,6 +213,7 @@ class TransformerProcessor(BaseProcessor):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
+        attn_channels: Optional[int] = None,
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
@@ -238,6 +239,11 @@ class TransformerProcessor(BaseProcessor):
             Number of heads in transformer
         mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to num_channels. This allows reducing the number of
+            channels used for the attention computation without changing the
+            width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -275,6 +281,7 @@ class TransformerProcessor(BaseProcessor):
             TransformerProcessorBlock,
             num_channels=num_channels,
             hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
+            attn_channels=attn_channels,
             num_heads=num_heads,
             qk_norm=qk_norm,
             window_size=window_size,
@@ -423,6 +430,7 @@ class GraphTransformerProcessor(BaseProcessor):
         num_heads: int,
         mlp_hidden_ratio: float,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
@@ -447,6 +455,11 @@ class GraphTransformerProcessor(BaseProcessor):
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to num_channels. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         mlp_implementation: MLPImplementation
@@ -476,6 +489,7 @@ class GraphTransformerProcessor(BaseProcessor):
             in_channels=num_channels,
             hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             out_channels=num_channels,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
