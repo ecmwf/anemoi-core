@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import inspect
 import logging
 from typing import Optional
 
@@ -129,9 +130,18 @@ class BasePreprocessor(nn.Module):
         """
         if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
             kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
-        if inverse:
-            return self.inverse_transform(x, in_place=in_place, **kwargs)
-        return self.transform(x, in_place=in_place, **kwargs)
+
+        fn = self.inverse_transform if inverse else self.transform
+        if kwargs:
+            signature = inspect.signature(fn)
+            accepts_var_kwargs = any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
+            )
+            if not accepts_var_kwargs:
+                kwargs = {key: value for key, value in kwargs.items() if key in signature.parameters}
+
+        return fn(x, in_place=in_place, **kwargs)
 
     def transform(self, x, in_place: bool = True, **kwargs) -> Tensor:
         """Process the input tensor."""

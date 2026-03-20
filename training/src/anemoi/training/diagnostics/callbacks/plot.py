@@ -298,9 +298,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
             for dataset_name in self.post_processors:
                 for post_processor in self.post_processors[dataset_name].processors.values():
-                    print(f"post_processor {post_processor} has attribute nan_locations: {hasattr(post_processor, 'nan_locations')}")
-                    if hasattr(post_processor, "nan_locations"):
-                        print("Nan location", post_processor.nan_locations.sum())
+                    if hasattr(post_processor, "nan_locations") and post_processor.nan_locations.numel() > 0:
                         post_processor.nan_locations = pl_module.allgather_batch(
                             post_processor.nan_locations,
                             pl_module.grid_indices[dataset_name],

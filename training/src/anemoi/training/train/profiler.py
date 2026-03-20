@@ -21,6 +21,7 @@ import pandas as pd
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
+from omegaconf import open_dict
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
 
@@ -272,9 +273,16 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        self.config.diagnostics.progress_bar["_target_"] = (
-            ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
-        )
+        with open_dict(self.config.diagnostics):
+            if self.config.diagnostics.get("progress_bar", None) is None:
+                self.config.diagnostics.progress_bar = {
+                    "_target_": ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__,
+                    "refresh_rate": 1,
+                }
+            else:
+                self.config.diagnostics.progress_bar["_target_"] = (
+                    ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
+                )
         callbacks = super().callbacks
         if self.config.diagnostics.benchmark_profiler.snapshot.enabled:
             from anemoi.training.diagnostics.callbacks.profiler import MemorySnapshotRecorder

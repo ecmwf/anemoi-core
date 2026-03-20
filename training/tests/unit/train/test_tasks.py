@@ -14,6 +14,7 @@ from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForeca
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
+from anemoi.training.train.tasks.nowcaster import GraphNowcaster
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -581,3 +582,146 @@ def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyP
     loss, _, y_preds = task._step(batch, validation_mode=False)
 
     _assert_step_return_format(loss, y_preds, expected_len=1)
+
+
+def test_graphnowcaster_build_decoder_context_time_only() -> None:
+    """Nowcaster time-only decoder conditioning builds a single time-fraction channel."""
+
+    task = GraphNowcaster.__new__(GraphNowcaster)
+    pl.LightningModule.__init__(task)
+    task.dataset_names = ["opera"]
+    task.decoder_context_sources = {"opera": ["meps"]}
+    task.decoder_context_time_only = True
+    task.n_step_output = 3
+    task.interp_times = [6, 8, 11]
+    task.imap = {idx: idx for idx in range(13)}
+    task.dataset_time_maps = {
+        "opera": {idx: idx for idx in range(13)},
+        "meps": {idx: idx for idx in range(13)},
+    }
+
+    batch = {
+        "opera": torch.zeros(2, 13, 1, 4, 3, dtype=torch.float32),
+        "meps": torch.ones(2, 13, 1, 2, 3, dtype=torch.float32),
+    }
+
+    ctx = task._build_decoder_context(batch, decode_dataset_names=("opera",))
+
+    cond = ctx["opera"]["cond"]
+    assert cond.shape == (2, 3, 1, 4, 1)
+    expected = torch.tensor([(6 - 6) / (11 - 6), (8 - 6) / (11 - 6), (11 - 6) / (11 - 6)], dtype=cond.dtype)
+    assert torch.allclose(cond[:, :, 0, 0, 0], expected.unsqueeze(0).expand(2, -1))
+
+
+def test_graphnowcaster_required_target_time_must_exist() -> None:
+    """Nowcaster requires exact target-time availability for decoded datasets."""
+
+    task = GraphNowcaster.__new__(GraphNowcaster)
+    pl.LightningModule.__init__(task)
+    task.imap = {0: 0, 1: 1}
+    task.dataset_time_maps = {"opera": {0: 0, 2: 1}}
+
+    with pytest.raises(ValueError, match="missing exact target time 1"):
+        task._lookup_required_time_indices(
+            dataset_name="opera",
+            relative_times=[1],
+            usage="target",
+        )
+
+
+def test_graphnowcaster_step_uses_configured_input_times(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nowcaster selects encoder inputs from configured model-relative input times."""
+
+    task = GraphNowcaster.__new__(GraphNowcaster)
+    pl.LightningModule.__init__(task)
+    data_indices = _data_indices_single()
+    _set_base_task_attrs(task, data_indices=data_indices, config=_CFG_INTERP_STEP, n_step_input=2, n_step_output=1)
+    task.target_dataset_names = ["data"]
+    task.dataset_names = ["data"]
+    task.input_times = [2, 4]
+    task.interp_times = [5]
+    task.dataset_time_maps = {"data": {2: 0, 4: 1, 5: 2}}
+    task.decoder_context_time_only = True
+    task._timing_rank0_only = True
+    task._timing_step_enabled = False
+    task._timing_step_every = 1
+    task._timing_model_enabled = False
+    task._timing_model_every = 1
+    task._timing_step_counters = {"train": 0, "val": 0}
+    task._timing_model_counters = {"train": 0, "val": 0}
+
+    captured: dict[str, torch.Tensor] = {}
+
+    class _Model:
+        def __call__(self, x: dict[str, torch.Tensor], **_kwargs):
+            captured["x"] = x["data"].detach().clone()
+            b, _t, e, g, v = x["data"].shape
+            return {"data": torch.zeros((b, 1, e, g, v), dtype=x["data"].dtype)}
+
+    task.model = _Model()
+    task.loss = {"data": DummyLoss()}
+
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    monkeypatch.setattr(
+        task,
+        "compute_loss_metrics",
+        lambda *args, **_kwargs: (torch.tensor(0.0), {}, args[0] if args else None),
+    )
+
+    batch = {"data": torch.zeros((1, 3, 1, 1, 2), dtype=torch.float32)}
+    batch["data"][:, 0, ...] = 10.0
+    batch["data"][:, 1, ...] = 20.0
+    batch["data"][:, 2, ...] = 30.0
+
+    _loss, _metrics, _y_pred = task._step(batch, validation_mode=False)
+
+    assert "x" in captured
+    assert captured["x"].shape == (1, 2, 1, 1, 2)
+    assert torch.allclose(captured["x"][:, 0, ...], torch.full((1, 1, 1, 2), 10.0))
+    assert torch.allclose(captured["x"][:, 1, ...], torch.full((1, 1, 1, 2), 20.0))
+
+
+def test_graphnowcaster_available_target_time_indices() -> None:
+    """Nowcaster selects only available target times for sparse per-dataset supervision."""
+
+    task = GraphNowcaster.__new__(GraphNowcaster)
+    pl.LightningModule.__init__(task)
+    task.imap = {0: 0, 1: 1, 2: 2}
+    task.interp_times = [1, 2, 3]
+    task.dataset_time_maps = {"opera": {1: 0, 3: 1}}
+
+    pred_indices, batch_indices = task._lookup_available_target_time_indices(dataset_name="opera")
+
+    assert pred_indices == [0, 2]
+    assert batch_indices == [0, 1]
+
+
+def test_graphnowcaster_build_decoder_context_time_fraction_only() -> None:
+    """Decoder context is always time-fraction-only, regardless of source sparsity."""
+
+    task = GraphNowcaster.__new__(GraphNowcaster)
+    pl.LightningModule.__init__(task)
+    task.dataset_names = ["opera", "meps"]
+    task.decoder_context_sources = {"opera": ["meps"]}
+    task.decoder_context_time_only = True
+    task.n_step_output = 2
+    task.interp_times = [1, 2]
+    task.imap = {0: 0, 1: 1, 2: 2, 4: 3}
+    task.dataset_time_maps = {
+        "opera": {0: 0, 1: 1, 2: 2, 4: 3},
+        "meps": {0: 0, 2: 1},  # No exact value at relative time 1.
+    }
+
+    opera = torch.zeros(1, 4, 1, 2, 1, dtype=torch.float32)
+    meps = torch.zeros(1, 2, 1, 2, 1, dtype=torch.float32)
+    meps[:, 0, ...] = 10.0
+    meps[:, 1, ...] = 20.0
+    batch = {"opera": opera, "meps": meps}
+
+    ctx = task._build_decoder_context(batch, decode_dataset_names=("opera",))
+    cond = ctx["opera"]["cond"]
+
+    # Time-fraction channel is always the only conditioning channel.
+    assert cond.shape == (1, 2, 1, 2, 1)
+    expected_time_fraction = torch.tensor([0.0, 1.0], dtype=cond.dtype)
+    assert torch.allclose(cond[0, :, 0, 0, 0], expected_time_fraction)

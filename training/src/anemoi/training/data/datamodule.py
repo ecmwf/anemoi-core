@@ -115,12 +115,54 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         timestep = frequency_to_timedelta(self.config.data.timestep)
         return frequency_to_string(timestep * step)
 
-    def relative_date_indices(self, val_rollout: int = 1) -> list:
-        """Determine a list of relative time indices to load for each batch."""
-        if hasattr(self.config.training, "explicit_times"):
-            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
+    def _dataset_time_indices_config(self) -> dict[str, dict[str, list[int]]] | None:
+        cfg = getattr(self.config.training, "dataset_time_indices", None)
+        if cfg is None:
+            return None
 
-        # Calculate indices using n_step_input, n_step_output and rollout
+        if hasattr(cfg, "get"):
+            cfg = cfg.get("datasets", cfg)
+
+        if not hasattr(cfg, "items"):
+            msg = "`training.dataset_time_indices` must be a mapping, optionally under key `datasets`."
+            raise ValueError(msg)
+
+        parsed: dict[str, dict[str, list[int]]] = {}
+        for dataset_name, dataset_cfg in cfg.items():
+            if not hasattr(dataset_cfg, "get"):
+                raise ValueError(
+                    f"`training.dataset_time_indices[{dataset_name}]` must define `input` and `target` lists."
+                )
+
+            raw_input = dataset_cfg.get("input", None)
+            raw_target = dataset_cfg.get("target", None)
+            if raw_input is None or raw_target is None:
+                raise ValueError(
+                    f"`training.dataset_time_indices[{dataset_name}]` must define both `input` and `target`."
+                )
+
+            input_indices = [int(value) for value in raw_input]
+            target_indices = [int(value) for value in raw_target]
+            if len(input_indices) == 0:
+                raise ValueError(
+                    f"`training.dataset_time_indices[{dataset_name}]` requires a non-empty `input` list."
+                )
+
+            parsed[str(dataset_name)] = {"input": input_indices, "target": target_indices}
+
+        return parsed if len(parsed) > 0 else None
+
+    def _default_relative_date_indices(self, val_rollout: int = 1) -> list[int]:
+        if hasattr(self.config.training, "explicit_times"):
+            input_times = [int(v) for v in self.config.training.explicit_times.input]
+            if len(input_times) == 0:
+                raise ValueError("`training.explicit_times.input` cannot be empty.")
+
+            target_offsets = [int(v) for v in self.config.training.explicit_times.target]
+            anchor = max(input_times)
+            target_times = [anchor + offset for offset in target_offsets]
+            return sorted(set(input_times + target_times))
+
         rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
 
         rollout_max = getattr(rollout_cfg, "max", None)
@@ -135,9 +177,22 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         rollout = max(rollout_value, val_rollout)
         n_step_input = self.config.training.multistep_input
-        n_step_output = self.config.training.multistep_output  # defaults to 1
+        n_step_output = self.config.training.multistep_output
         time_range = n_step_input + rollout * n_step_output
         return list(range(time_range))
+
+    def relative_date_indices(self, val_rollout: int = 1) -> list:
+        """Determine a list of relative time indices to load for each batch."""
+        relative_indices = set(self._default_relative_date_indices(val_rollout))
+        dataset_time_indices = self._dataset_time_indices_config()
+        if dataset_time_indices is None:
+            return sorted(relative_indices)
+
+        for dataset_cfg in dataset_time_indices.values():
+            relative_indices.update(int(value) for value in dataset_cfg["input"])
+            relative_indices.update(int(value) for value in dataset_cfg["target"])
+
+        return sorted(relative_indices)
 
     @cached_property
     def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
@@ -176,10 +231,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> MultiDataset:
         debug_cfg = getattr(self.config.dataloader, "debug", {})
+        time_index_mode = getattr(debug_cfg, "time_index_mode", "dense")
+        time_index_anchor_dataset = getattr(debug_cfg, "time_index_anchor_dataset", None)
         return MultiDataset(
             data_readers=datasets,
             relative_date_indices=self.relative_date_indices(val_rollout),
             timestep=self.config.data.timestep,
+            multistep_window=getattr(self.config.training, "multistep_window", None),
+            explicit_time_indices_by_dataset=self._dataset_time_indices_config(),
+            time_index_mode=time_index_mode,
+            time_index_anchor_dataset=time_index_anchor_dataset,
             shuffle=shuffle,
             label=label,
             debug=debug_cfg,
@@ -188,26 +249,17 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
-
-        extra = {}
-
-        if self.config.dataloader.get("multiprocessing_context", None) is not None:
-            import multiprocessing
-
-            ctx = self.config.dataloader.multiprocessing_context
-            extra["multiprocessing_context"] = multiprocessing.get_context(ctx)
-
-            LOGGER.info("Using multiprocessing context '%s' for dataloader workers.", ctx)
-
+        num_workers = int(self.config.dataloader.num_workers[stage])
+        prefetch_factor = self.config.dataloader.prefetch_factor if num_workers > 0 else None
+        persistent_workers = num_workers > 0
         return DataLoader(
             ds,
             batch_size=self.config.dataloader.batch_size[stage],
-            num_workers=self.config.dataloader.num_workers[stage],
+            num_workers=num_workers,
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
-            prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=True,
-            **extra,
+            prefetch_factor=prefetch_factor,
+            persistent_workers=persistent_workers,
         )
 
     def train_dataloader(self) -> DataLoader:
@@ -232,7 +284,31 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
         timesteps = {
-            "relative_date_indices_training": self.relative_date_indices(),
+            "relative_date_indices_training": [int(v) for v in self.relative_date_indices()],
+            "relative_date_input_indices_training_by_dataset": {
+                name: [int(v) for v in self.ds_train.input_model_relative_date_indices_by_dataset[name].tolist()]
+                for name in self.dataset_names
+            },
+            "relative_date_input_indices_training_native_by_dataset": {
+                name: [int(v) for v in self.ds_train.input_data_relative_date_indices_by_dataset[name].tolist()]
+                for name in self.dataset_names
+            },
+            "relative_date_indices_training_by_dataset": {
+                name: [int(v) for v in self.ds_train.model_relative_date_indices_by_dataset[name].tolist()]
+                for name in self.dataset_names
+            },
+            "relative_date_indices_training_native_by_dataset": {
+                name: [int(v) for v in self.ds_train.data_relative_date_indices_by_dataset[name].tolist()]
+                for name in self.dataset_names
+            },
+            "relative_date_target_indices_training_by_dataset": {
+                name: [int(v) for v in self.ds_train.target_model_relative_date_indices_by_dataset[name].tolist()]
+                for name in self.dataset_names
+            },
+            "relative_date_target_indices_training_native_by_dataset": {
+                name: [int(v) for v in self.ds_train.target_data_relative_date_indices_by_dataset[name].tolist()]
+                for name in self.dataset_names
+            },
             "timestep": self.config.data.timestep,
         }
         for dataset_name in self.dataset_names:

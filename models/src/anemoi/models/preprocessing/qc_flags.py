@@ -85,6 +85,17 @@ class QCFeaturizer(nn.Module):
         super().__init__()
         if qc_cfg is None:
             raise ValueError("qc_cfg must be provided")
+
+        invalid_bit_indices = qc_cfg.get("invalid_bit_indices", None)
+        if invalid_bit_indices is not None:
+            self.mask = QCValidMask(invalid_bit_indices)
+
+        if method == "valid_mask":
+            if invalid_bit_indices is None:
+                raise ValueError("valid_mask requires invalid_bit_indices")
+            self.feat = None
+            return
+
         if "bit_indices" in qc_cfg and "num_bits" in qc_cfg:
             raise ValueError("qc_cfg cannot have both bit_indices and num_bits")
         if "bit_indices" in qc_cfg and "num_bits" not in qc_cfg:
@@ -97,9 +108,6 @@ class QCFeaturizer(nn.Module):
         else:
             raise ValueError("qc_cfg needs either bit_indices or num_bits")
 
-        if "invalid_bit_indices" in qc_cfg:
-            self.mask = QCValidMask(qc_cfg["invalid_bit_indices"])
-
         if method == "decode_bits":
             self.feat = QCDecodeBits(bit_indices)
         elif method == "embed_bits":
@@ -111,8 +119,12 @@ class QCFeaturizer(nn.Module):
             raise ValueError(f"Unknown QC featurizer method: {method}")
 
     def forward(self, qc_flags: torch.Tensor) -> torch.Tensor:
-        qc_features = self.feat(qc_flags)
+        qc_features = self.feat(qc_flags) if self.feat is not None else None
         if hasattr(self, "mask"):
             valid_mask = self.mask(qc_flags)
+            if qc_features is None:
+                return valid_mask
             qc_features = torch.cat([qc_features, valid_mask], dim=-1)
+        if qc_features is None:
+            raise ValueError("QCFeaturizer produced no features. Configure either method features or invalid_bit_indices.")
         return qc_features

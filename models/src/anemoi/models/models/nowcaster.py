@@ -63,15 +63,9 @@ class Nowcaster(AnemoiModelEncProcDec):
                 self.qc_var[ds_name] = str(cfg.get("qc_var", "qc_flags"))
                 self.qc[str(ds_name)] = QCFeaturizer(method=cfg.get("method", "decode_bits"), qc_cfg=cfg)
         datasets = list(model_config.training.scalers.datasets)
-        known_future_variables = {d: [] for d in datasets}
         if model_config.training.get("known_future_variables", None) is not None:
-            kfv_dic = model_config.training.known_future_variables["datasets"]
-            LOGGER.info("Known future variables: %s", model_config.training.known_future_variables)
-            for d in datasets:
-                if d in kfv_dic:
-                    known_future_variables[d] = kfv_dic[d] if isinstance(kfv_dic[d], list) else [kfv_dic[d]]
-
-        self.known_future_variables = known_future_variables
+            LOGGER.info("Ignoring known_future_variables for Nowcaster: decoder conditioning is time-fraction-only.")
+        self.known_future_variables = {str(dataset_name): [] for dataset_name in datasets}
         self.num_channels = model_config.model.num_channels
         super().__init__(
             model_config=model_config,
@@ -86,7 +80,7 @@ class Nowcaster(AnemoiModelEncProcDec):
             self._cond_xdst[str(ds_name)] = build_decoder_conditioner(
                 method="film",
                 x_dim=xdst_dim,
-                cond_dim=1+len(self.known_future_variables[ds_name]),
+                cond_dim=1,
                 cfg=dec_cfg,
             )
 
@@ -115,8 +109,7 @@ class Nowcaster(AnemoiModelEncProcDec):
         return self.num_output_channels[dataset_name]
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        boundings = len(self.known_future_variables[dataset_name])
-        base = 2 * boundings if boundings > 0 else self.n_step_input * self.num_input_channels[dataset_name]
+        base = self.n_step_input * self.num_input_channels[dataset_name]
         qc_extra = 0
         if self._qc_enabled and dataset_name in self.qc:
             # Derived: bits(K) | emb(D)

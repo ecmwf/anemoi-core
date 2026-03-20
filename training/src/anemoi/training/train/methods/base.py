@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
@@ -283,11 +282,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.n_step_input = config.training.multistep_input
         self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
-        debug_cfg = getattr(getattr(self.config, "dataloader", None), "debug", None)
-        self._timing_step_enabled = bool(getattr(debug_cfg, "timing_step_enabled", False))
-        self._timing_step_every = max(1, int(getattr(debug_cfg, "timing_step_every", 50)))
-        self._timing_rank0_only = bool(getattr(debug_cfg, "timing_rank0_only", True))
-        self._last_step_end_time: float | None = None
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -394,13 +388,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
-
-    def _should_log_step_timing(self) -> bool:
-        if not self._timing_step_enabled:
-            return False
-        if self._timing_rank0_only and self.trainer is not None and not self.trainer.is_global_zero:
-            return False
-        return int(self.global_step) % self._timing_step_every == 0
 
     def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
@@ -844,7 +831,29 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         for dataset_name in batch:
-            batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
+            processor_kwargs = {}
+            input_relative_by_dataset = getattr(self, "dataset_input_relative_time_indices", None)
+            time_map_by_dataset = getattr(self, "dataset_time_maps", None)
+            if isinstance(input_relative_by_dataset, dict) and isinstance(time_map_by_dataset, dict):
+                dataset_input_times = input_relative_by_dataset.get(dataset_name, None)
+                dataset_time_map = time_map_by_dataset.get(dataset_name, None)
+                if isinstance(dataset_input_times, (list, tuple)) and isinstance(dataset_time_map, dict):
+                    input_time_indices = sorted(
+                        {
+                            int(batch_index)
+                            for relative_time in dataset_input_times
+                            for batch_index in [dataset_time_map.get(int(relative_time), None)]
+                            if batch_index is not None
+                        }
+                    )
+                    if input_time_indices:
+                        processor_kwargs["input_time_indices"] = input_time_indices
+                        processor_kwargs["anchor_time_index"] = input_time_indices[-1]
+
+            batch[dataset_name] = self.model.pre_processors[dataset_name](
+                batch[dataset_name],
+                **processor_kwargs,
+            )  # normalized in-place
         return batch
 
     def _prepare_loss_scalers(self) -> None:
@@ -969,12 +978,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
-        t_start = time.perf_counter()
-        wait_ms = 0.0 if self._last_step_end_time is None else (t_start - self._last_step_end_time) * 1e3
-
         train_loss, *_ = self._step(batch)
         train_loss = train_loss.sum()
-        t_after_step = time.perf_counter()
 
         self.log(
             "train_" + self._get_loss_name() + "_loss",
@@ -986,17 +991,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             batch_size=batch_size,
             sync_dist=True,
         )
-        t_end = time.perf_counter()
-        if self._should_log_step_timing():
-            LOGGER.info(
-                "Timing train_step global_step=%d wait_ms=%.1f compute_ms=%.1f log_ms=%.1f total_ms=%.1f",
-                int(self.global_step),
-                wait_ms,
-                (t_after_step - t_start) * 1e3,
-                (t_end - t_after_step) * 1e3,
-                (t_end - t_start) * 1e3,
-            )
-        self._last_step_end_time = t_end
 
         self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
 

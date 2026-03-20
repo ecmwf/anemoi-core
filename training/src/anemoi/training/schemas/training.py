@@ -168,7 +168,20 @@ class NaNMaskScalerSchema(BaseModel):
     "Flag to include processors for tendencies when building the loss mask."
 
 
-class TendencyScalerTargets(StrEnum):
+class QCFlagsLossScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.QCFlagsLossScaler"] = Field(..., alias="_target_")
+    qc_var_name: str = Field(default="qc_flags")
+    bit_weights: dict[int, float] | None = Field(default=None)
+    bit_names: dict[int, str] | None = Field(default=None)
+    invalid_bit_indices: list[int] | None = Field(default=None)
+    invalid_weight: float = Field(default=0.0)
+    default_weight: float = Field(default=1.0)
+    min_weight: float = Field(default=0.0)
+    max_weight: float = Field(default=1.0)
+    source_attribute: str = Field(default="last_qc_flags")
+
+
+class TendencyScalerTargets(str, Enum):
     stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
     var = "anemoi.training.losses.scalers.VarTendencyScaler"
 
@@ -262,6 +275,7 @@ ScalerSchema = (
     | VariableMaskingScalerSchema
     | TendencyScalerSchema
     | NaNMaskScalerSchema
+    | QCFlagsLossScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
     | UniformTimeStepScalerSchema

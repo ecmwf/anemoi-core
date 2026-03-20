@@ -308,7 +308,7 @@ class BenchmarkProfiler(Profiler):
 
     @rank_zero_only
     def create_output_path(self) -> None:
-        self.dirpath = Path(self.config.system.output.profiler)
+        self.dirpath = Path(self.config.system.output.root) / self.config.system.output.profiler
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def broadcast_profiler_path(self, string_var: str, src_rank: int) -> str:
@@ -516,9 +516,23 @@ class BenchmarkProfiler(Profiler):
                 col_width=16,
                 col_names=["trainable", "input_size", "output_size", "num_params", "params_percent", "mult_adds"],
                 row_settings=["var_names"],
-                verbose=0,
+                verbose=1,
             ),
         )
+
+        # Torchinfo can collapse complex dict-driven models to a coarse view.
+        # Append an explicit per-module parameter breakdown for guaranteed detail.
+        module_lines = ["", "Per-module Parameters (own, recurse=False):"]
+        for module_name, module_obj in model.named_modules():
+            own_total = sum(p.numel() for p in module_obj.parameters(recurse=False))
+            if own_total == 0:
+                continue
+            own_trainable = sum(p.numel() for p in module_obj.parameters(recurse=False) if p.requires_grad)
+            label = module_name if module_name else "<root>"
+            module_lines.append(
+                f"{label}: trainable={own_trainable:,} total={own_total:,} type={module_obj.__class__.__name__}",
+            )
+        summary_str = summary_str + "\n" + "\n".join(module_lines)
         self.model_summary_fname = self.dirpath / "model_summary.txt"
         self._save_model_summary(summary_str, self.model_summary_fname)
         return summary_str

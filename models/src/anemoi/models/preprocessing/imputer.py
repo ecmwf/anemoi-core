@@ -745,7 +745,8 @@ class InputOnlyImputer(BasePreprocessor):
         """Impute NaNs in input tensor ONLY, with special handling for forcing variables.
         Handles dynamic NaN locations that can change per-sample, per-batch,
 
-        - Prognostic/diagnostic variables: imputed only in first `multi_step` timesteps
+        - Prognostic/diagnostic variables: imputed up to an anchor-aware input cutoff
+          (or first `multi_step` timesteps as fallback)
         - Forcing variables: imputed across ALL timesteps (needed for rollout)
         - Target timesteps keep NaNs in prognostic variables for loss to ignore
 
@@ -790,6 +791,29 @@ class InputOnlyImputer(BasePreprocessor):
         # Detect NaNs - only compute mask once
         nan_mask = torch.isnan(x)
 
+        # Optional anchor-aware cutoff from training task metadata.
+        # - input_time_indices: batch-time positions used as model inputs
+        # - anchor_time_index: explicit latest input batch-time position
+        # If provided, impute all non-forcing timesteps up to that anchor index.
+        input_time_indices = kwargs.get("input_time_indices", None)
+        anchor_time_index = kwargs.get("anchor_time_index", None)
+        resolved_input_indices: list[int] = []
+        if isinstance(input_time_indices, torch.Tensor):
+            input_time_indices = input_time_indices.detach().cpu().tolist()
+        if isinstance(input_time_indices, (list, tuple)):
+            for value in input_time_indices:
+                try:
+                    resolved_input_indices.append(int(value))
+                except (TypeError, ValueError):
+                    continue
+        if anchor_time_index is None and len(resolved_input_indices) > 0:
+            anchor_time_index = max(resolved_input_indices)
+        if anchor_time_index is not None:
+            try:
+                anchor_time_index = int(anchor_time_index)
+            except (TypeError, ValueError):
+                anchor_time_index = None
+
         # Determine which timesteps to impute for non-forcing variables
         # In training, we only impute the first multi_step timesteps for non-forcing variables
         # In inference, the tensor typically has only the input timesteps
@@ -808,13 +832,17 @@ class InputOnlyImputer(BasePreprocessor):
 
         if len(non_forcing_indices) > 0:
             if is_training_rollout:
-                # Impute non-forcing variables only in first multi_step timesteps
-                non_forcing_slice = x[:, : self.multi_step, ..., non_forcing_indices]
-                non_forcing_mask = nan_mask[:, : self.multi_step, ..., non_forcing_indices]
+                # Impute non-forcing variables up to the anchor-aware input cutoff.
+                # Fallback for legacy behavior uses the first `multi_step` timesteps.
+                cutoff_idx = self.multi_step - 1 if anchor_time_index is None else anchor_time_index
+                cutoff_idx = max(0, min(int(cutoff_idx), x.shape[1] - 1))
+
+                non_forcing_slice = x[:, : cutoff_idx + 1, ..., non_forcing_indices]
+                non_forcing_mask = nan_mask[:, : cutoff_idx + 1, ..., non_forcing_indices]
                 non_forcing_values = imputation_values[non_forcing_indices]
                 # Broadcast imputation values to match tensor shape
                 non_forcing_values = non_forcing_values.view(*([1] * (non_forcing_slice.ndim - 1)), -1)
-                x[:, : self.multi_step, ..., non_forcing_indices] = torch.where(
+                x[:, : cutoff_idx + 1, ..., non_forcing_indices] = torch.where(
                     non_forcing_mask, non_forcing_values, non_forcing_slice
                 )
             else:
@@ -830,4 +858,81 @@ class InputOnlyImputer(BasePreprocessor):
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """No-op: outputs are not modified, NaNs handled by loss function."""
+        return x
+
+
+class NoMaskImputer(ConstantImputer):
+    """Constant imputer that fills NaNs but does not create loss masking.
+
+    This is intended for workflows where NaNs must be replaced (e.g. with 0)
+    and loss weighting is handled by dedicated scalers (such as QC-driven scalers)
+    rather than by imputer-generated masks.
+    """
+
+    supports_skip_imputation = True
+
+    def __init__(
+        self,
+        config=None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
+    ) -> None:
+        super().__init__(config=config, data_indices=data_indices, statistics=statistics)
+        self.register_buffer("last_qc_flags", torch.empty(0, dtype=torch.int64), persistent=False)
+
+    def _store_qc_flags(self, x: torch.Tensor, *, training_input: bool) -> None:
+        name_to_index = (
+            self.data_indices.data.input.name_to_index if training_input else self.data_indices.model.input.name_to_index
+        )
+        qc_idx = name_to_index.get("qc_flags", None)
+        if qc_idx is None:
+            self.last_qc_flags = torch.empty(0, dtype=torch.int64, device=x.device)
+            return
+
+        # Keep one representative QC map per batch item.
+        # x is expected to be (batch, time, ..., grid, var).
+        qc_flags = x[:, 0, ..., qc_idx]
+        while qc_flags.ndim > 2:
+            qc_flags = qc_flags.select(1, 0)
+
+        self.last_qc_flags = qc_flags.to(torch.int64)
+
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
+        if not in_place:
+            x = x.clone()
+        if skip_imputation:
+            return x
+
+        nan_locations = self.get_nans(x)
+
+        if x.shape[-1] == self.num_training_input_vars:
+            index = self.index_training_input
+            self._store_qc_flags(x, training_input=True)
+            n_outputs = len(self.data_indices.model.output.name_to_index)
+            self.loss_mask_training = torch.ones((x.shape[0], x.shape[-2], n_outputs), device=x.device)
+        elif x.shape[-1] == self.num_inference_input_vars:
+            index = self.index_inference_input
+            self._store_qc_flags(x, training_input=False)
+        else:
+            raise ValueError(
+                f"Input tensor ({x.shape[-1]}) does not match the training "
+                f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
+            )
+
+        return self.fill_with_value(x, index, nan_locations, index)
+
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
+        del in_place, skip_imputation
         return x

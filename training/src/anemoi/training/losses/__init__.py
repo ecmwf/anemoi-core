@@ -17,12 +17,14 @@ from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
 from .rmse import RMSELoss
+from .rolling_accumulation import RollingAccumulationHuberLoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
 from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
 from .weighted_mse import WeightedMSELoss
+from .wet_area_loss import WeightedSoftWetAreaLoss
 
 __all__ = [
     "AlmostFairKernelCRPS",
@@ -37,8 +39,10 @@ __all__ = [
     "MSELoss",
     "MultiscaleLossWrapper",
     "RMSELoss",
+    "RollingAccumulationHuberLoss",
     "SpectralCRPSLoss",
     "SpectralL2Loss",
     "WeightedMSELoss",
+    "WeightedSoftWetAreaLoss",
     "get_loss_function",
 ]

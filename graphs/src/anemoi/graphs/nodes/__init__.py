@@ -24,6 +24,7 @@ from .builders.from_refined_icosahedron import StretchedTriNodes
 from .builders.from_refined_icosahedron import TriNodes
 from .builders.from_vectors import LatLonNodes
 from .builders.regional_tri_mesh import RegionalTriMeshNodes
+from .builders.union_mesh import UnionMeshNodes
 
 __all__ = [
     "AnemoiDatasetNodes",
@@ -33,6 +34,7 @@ __all__ = [
     "HEALPixNodes",
     "LatLonNodes",
     "RegionalTriMeshNodes",
+    "UnionMeshNodes",
     "LimitedAreaHEALPixNodes",
     "LimitedAreaNPZFileNodes",
     "LimitedAreaTriNodes",

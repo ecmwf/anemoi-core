@@ -127,6 +127,33 @@ class BaseAnemoiReader:
             x = self.data[time_indices, :, :, :]
             x = x[..., grid_shard_indices]  # select the grid shard
 
+        x = np.asarray(x)
+        n_variables = len(self.variables)
+
+        if x.ndim == 4:
+            pass
+        elif x.ndim == 3:
+            if x.shape[0] == n_variables:
+                # Scalar date selection can squeeze the leading dates axis.
+                x = np.expand_dims(x, axis=0)
+            elif x.shape[1] == n_variables:
+                # Some datasets have no explicit ensemble axis.
+                x = np.expand_dims(x, axis=2)
+            else:
+                msg = f"Unsupported 3D sample shape {x.shape} for dataset sample loading."
+                raise ValueError(msg)
+        elif x.ndim == 2:
+            if x.shape[0] == n_variables:
+                # Scalar date selection with no ensemble axis.
+                x = np.expand_dims(x, axis=0)
+                x = np.expand_dims(x, axis=2)
+            else:
+                msg = f"Unsupported 2D sample shape {x.shape} for dataset sample loading."
+                raise ValueError(msg)
+        else:
+            msg = f"Unsupported sample shape {x.shape} for dataset sample loading."
+            raise ValueError(msg)
+
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
 

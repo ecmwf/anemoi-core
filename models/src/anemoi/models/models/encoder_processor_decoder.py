@@ -111,26 +111,56 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
         # Decoder hidden -> data
+        decoder_sel_cfg = DotDict(model_config.model.get("decoder_graph_selection", {}))
+        decoder_provider_cfg = DotDict(decoder_sel_cfg.get("provider_datasets", {}))
+        self.decoder_provider_by_dataset = {
+            dataset_name: str(decoder_provider_cfg.get(dataset_name, dataset_name))
+            for dataset_name in self.dataset_names
+        }
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
+        self.decoder_template_dataset_by_provider: dict[str, str] = {}
         for dataset_name in self.dataset_names:
-            self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
+            provider_name = self.decoder_provider_by_dataset[dataset_name]
+            if provider_name not in self.node_attributes.num_nodes:
+                raise KeyError(
+                    f"Decoder provider '{provider_name}' for dataset '{dataset_name}' is not a graph node type. "
+                    f"Available node types: {list(self.node_attributes.num_nodes.keys())}"
+                )
+            provider_input_dim = (
+                self.input_dim[provider_name]
+                if provider_name in self.input_dim
+                else self.node_attributes.attr_ndims[provider_name]
+            )
+            if provider_name in self.decoder:
+                template_dataset = self.decoder_template_dataset_by_provider[provider_name]
+                if int(self.output_dim[dataset_name]) != int(self.output_dim[template_dataset]):
+                    raise ValueError(
+                        "Datasets mapped to the same decoder provider must share output dimensions: "
+                        f"{dataset_name}={self.output_dim[dataset_name]}, "
+                        f"{template_dataset}={self.output_dim[template_dataset]}, "
+                        f"provider={provider_name}"
+                    )
+                continue
+
+            self.decoder_graph_provider[provider_name] = create_graph_provider(
+                graph=self._graph_data[(self._graph_name_hidden, "to", provider_name)],
                 edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_size=self.node_attributes.num_nodes[dataset_name],
+                dst_size=self.node_attributes.num_nodes[provider_name],
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
+            self.decoder[provider_name] = instantiate(
                 model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
-                in_channels_dst=self.input_dim[dataset_name],
+                in_channels_dst=provider_input_dim,
                 hidden_dim=self.num_channels,
                 out_channels_dst=self.output_dim[dataset_name],
-                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+                edge_dim=self.decoder_graph_provider[provider_name].edge_dim,
             )
+            self.decoder_template_dataset_by_provider[provider_name] = dataset_name
 
     def _assemble_input(
         self,
@@ -248,10 +278,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
-        encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider.get_edges(
-            batch_size=batch_size,
-            model_comm_group=model_comm_group,
-        )
+            x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
             encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
                 dataset_name

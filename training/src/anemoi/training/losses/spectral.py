@@ -43,19 +43,41 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def _ensure_without_scalers_has_grid_dimension(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
-    """Temporary fix for https://github.com/ecmwf/anemoi-core/issues/725.
+def _resolve_spectral_without_scalers(
+    scaler,
+    without_scalers: list[str] | list[int] | None,
+    *,
+    keep_grid_scalers: set[str] | None = None,
+) -> list[str]:
+    """Resolve spectral loss scaler exclusions by scaler name.
 
-    Some pipelines pass numeric scaler indices and rely on excluding scaler index 2
-    by default. Ensure this exclusion is present for numeric lists.
+    Spectral losses generally exclude grid-dimension scalers to avoid inconsistent
+    weighting across transformed modes. This helper keeps that behavior while
+    allowing selected grid scalers (e.g. ``qc_scaler``) to remain active.
     """
-    if without_scalers is None:
-        return [TensorDim.GRID.value]
-    if len(without_scalers) == 0:
-        return [TensorDim.GRID.value]
-    if not isinstance(without_scalers[0], str) and TensorDim.GRID.value not in without_scalers:
-        without_scalers.append(TensorDim.GRID.value)  # type: ignore[arg-type]
-    return without_scalers
+    keep_grid_scalers = keep_grid_scalers or set()
+    excluded_names: set[str] = set()
+
+    dims_to_exclude: list[int] = []
+    if without_scalers is None or len(without_scalers) == 0:
+        dims_to_exclude = [TensorDim.GRID.value]
+    elif isinstance(without_scalers[0], str):
+        excluded_names.update(str(name) for name in without_scalers)
+    else:
+        dims_to_exclude = [int(dim) for dim in without_scalers]
+        if TensorDim.GRID.value not in dims_to_exclude:
+            dims_to_exclude.append(TensorDim.GRID.value)
+
+    if len(dims_to_exclude) > 0:
+        for name, (dims, _tensor) in scaler.tensors.items():
+            dims_tuple = tuple(int(d) for d in dims)
+            if not any(dim in dims_tuple for dim in dims_to_exclude):
+                continue
+            if TensorDim.GRID.value in dims_tuple and name in keep_grid_scalers:
+                continue
+            excluded_names.add(name)
+
+    return sorted(excluded_names)
 
 
 class SpectralLoss(BaseLoss):
@@ -173,7 +195,11 @@ class SpectralL2Loss(SpectralLoss):
         result = self.scale(
             diff,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_resolve_spectral_without_scalers(
+                self.scaler,
+                without_scalers,
+                keep_grid_scalers={"qc_scaler"},
+            ),
             grid_shard_slice=grid_shard_slice,
         )
         result /= n_modes
@@ -211,7 +237,11 @@ class LogSpectralDistance(SpectralLoss):
         result = self.scale(
             log_diff**2,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_resolve_spectral_without_scalers(
+                self.scaler,
+                without_scalers,
+                keep_grid_scalers={"qc_scaler"},
+            ),
             grid_shard_slice=grid_shard_slice,
         )
         result /= n_modes
@@ -252,7 +282,11 @@ class FourierCorrelationLoss(SpectralLoss):
         result = self.scale(
             result,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_resolve_spectral_without_scalers(
+                self.scaler,
+                without_scalers,
+                keep_grid_scalers={"qc_scaler"},
+            ),
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group)
@@ -351,7 +385,11 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         scaled = self.scale(
             crps,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_2(without_scalers),
+            without_scalers=_resolve_spectral_without_scalers(
+                self.scaler,
+                without_scalers,
+                keep_grid_scalers={"qc_scaler"},
+            ),
             grid_shard_slice=grid_shard_slice,
         )
         scaled /= n_modes
