@@ -39,6 +39,15 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
+def _match_tensor_channels(input_name_to_index: dict, output_name_to_index: dict) -> torch.Tensor:
+    common_channels = set(input_name_to_index.keys()) & set(output_name_to_index.keys())
+    channel_mapping = []
+    for channel_name in output_name_to_index.keys():
+        if channel_name in common_channels:
+            channel_mapping.append(input_name_to_index[channel_name])
+    return torch.tensor(channel_mapping)
+
+
 class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
     """Downscaling Model."""
 
@@ -364,7 +373,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             x_in_hres = shard_tensor(x_in_hres, -2, hres_shard_shapes, model_comm_group)
             hres_grid_shard_shapes = [shape[-2] for shape in hres_shard_shapes]
 
-        x_in_interp_to_hres = self.apply_interpolate_to_high_res(
+        x_in_interp_to_hres_raw = self.apply_interpolate_to_high_res(
             x_in[:, 0, ...],
             grid_shard_shapes=lres_grid_shard_shapes,
             model_comm_group=model_comm_group,
@@ -374,14 +383,15 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             LOGGER.info(
                 "Interpolated tensor statistics for index %d: mean=%f, std=%f",
                 i,
-                x_in_interp_to_hres[..., i].mean().item(),
-                x_in_interp_to_hres[..., i].std().item(),
+                x_in_interp_to_hres_raw[..., i].mean().item(),
+                x_in_interp_to_hres_raw[..., i].std().item(),
             )
 
+        x_in_interp_to_hres = x_in_interp_to_hres_raw
         x_in_interp_to_hres = pre_processors(x_in_interp_to_hres, dataset="input_lres", in_place=False)
         x_in_hres = pre_processors(x_in_hres, dataset="input_hres", in_place=False)
 
-        return (x_in_interp_to_hres, x_in_hres), hres_grid_shard_shapes
+        return (x_in_interp_to_hres, x_in_hres, x_in_interp_to_hres_raw), hres_grid_shard_shapes
 
     def predict_step(
         self,
@@ -435,21 +445,65 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
 
         LOGGER.info("Starting predict_step in downscaling model.", kwargs)
 
-        noise_scheduler_params = {
-            "schedule_type": kwargs.get("schedule_type", "karras"),
-            "sigma_max": kwargs.get("sigma_max", 100000),
-            "sigma_min": kwargs.get("sigma_min", 0.03),
-            "rho": kwargs.get("rho", 7.0),
-            "num_steps": kwargs.get("num_steps", 80),
-        }
+        num_steps = kwargs.get("num_steps", kwargs.get("nsteps", 80))
 
-        sampler_params = {
-            "sampler": kwargs.get("sampler", "heun"),
-            "S_churn": kwargs.get("S_churn", 2.5),
-            "S_min": kwargs.get("S_min", 0.75),
-            "S_max": kwargs.get("S_max", 100000),
-            "S_noise": kwargs.get("S_noise", 1.05),
-        }
+        noise_scheduler_params = dict(noise_scheduler_params or {})
+        noise_scheduler_params.update(
+            {
+                "schedule_type": kwargs.get(
+                    "schedule_type",
+                    noise_scheduler_params.get("schedule_type", "karras"),
+                ),
+                "sigma_max": kwargs.get(
+                    "sigma_max",
+                    noise_scheduler_params.get("sigma_max", 100000),
+                ),
+                "sigma_min": kwargs.get(
+                    "sigma_min",
+                    noise_scheduler_params.get("sigma_min", 0.03),
+                ),
+                "rho": kwargs.get(
+                    "rho",
+                    noise_scheduler_params.get("rho", 7.0),
+                ),
+                "num_steps": num_steps,
+            }
+        )
+        for piecewise_key in (
+            "sigma_transition",
+            "high_schedule_type",
+            "low_schedule_type",
+            "num_steps_high",
+            "num_steps_low",
+        ):
+            if piecewise_key in kwargs:
+                noise_scheduler_params[piecewise_key] = kwargs[piecewise_key]
+
+        sampler_params = dict(sampler_params or {})
+        sampler_params.update(
+            {
+                "sampler": kwargs.get(
+                    "sampler",
+                    sampler_params.get("sampler", "heun"),
+                ),
+                "S_churn": kwargs.get(
+                    "S_churn",
+                    sampler_params.get("S_churn", 2.5),
+                ),
+                "S_min": kwargs.get(
+                    "S_min",
+                    sampler_params.get("S_min", 0.75),
+                ),
+                "S_max": kwargs.get(
+                    "S_max",
+                    sampler_params.get("S_max", 100000),
+                ),
+                "S_noise": kwargs.get(
+                    "S_noise",
+                    sampler_params.get("S_noise", 1.05),
+                ),
+            }
+        )
 
         LOGGER.info("noise_scheduler_params: %s", noise_scheduler_params)
         LOGGER.info("sampler_params: %s", sampler_params)
@@ -494,7 +548,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 noise_scheduler_params=noise_scheduler_params,
                 sampler_params=sampler_params,
                 **kwargs,
-            ).to(x_in_interp_to_hres.dtype)
+            )
 
             # After sampling hook
             out = self._after_sampling(
@@ -578,6 +632,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             grid_size,
             self.num_output_channels,
         )
+        step_callback = kwargs.get("step_callback")
+        capture_init_state = bool(kwargs.get("capture_init_state", False))
         # seed = 42
         # torch.manual_seed(seed)
         # if torch.cuda.is_available():
@@ -585,6 +641,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         print("sample, sigmas", sigmas)
         y_init = torch.randn(shape, device=x_in_interp_to_hres.device) * sigmas[0]  # , dtype=sigmas.dtype)
         print("sample, y val", y_init.mean(dim=-1).std())
+        if step_callback is not None and capture_init_state:
+            step_callback(-1, y_init)
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
 
@@ -611,6 +669,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             self.fwd_with_preconditioning,
             grid_shard_shapes=grid_shard_shapes,
             model_comm_group=model_comm_group,
+            **kwargs,
         )
 
     def add_interp_to_state(
@@ -626,7 +685,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         Parameters
         ----------
         state_inp : torch.Tensor
-            The normalized input state tensor with full input variables.
+            The raw interpolated input state tensor with full input variables.
         residuals : torch.Tensor
             The normalized residuals tensor output from model.
         post_processors_state : callable
@@ -654,7 +713,19 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 denorm_residuals[..., i].std().item(),
             )
 
-        denorm_state_inp = post_processors_state(state_inp, dataset="input_lres", in_place=False)
+        if not hasattr(self, "_output_input_matching_indices"):
+            output_name_to_index = {
+                key: value
+                for key, value in self.data_indices.data.output.name_to_index.items()
+                if value in self.data_indices.data.output.full
+            }
+            self._output_input_matching_indices = _match_tensor_channels(
+                self.data_indices.data.input[0].name_to_index,
+                output_name_to_index,
+            )
+
+        matching_channel_indices = self._output_input_matching_indices.to(state_inp.device)
+        denorm_state_inp = state_inp[..., matching_channel_indices]
         for i in range(6):
             LOGGER.info(
                 "Input tensor statistics for index %d: mean=%f, std=%f",
@@ -697,15 +768,14 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
 
         Override to convert tendency to state using x_t0.
         """
-        if isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 2:
-            x_in_interp = before_sampling_data[0]
+        if isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 3:
+            x_in_interp_raw = before_sampling_data[2]
         else:
             raise ValueError("Expected before_sampling_data to contain x_in_interp")
 
         # Convert tendency to state
-        residuals = out.clone()
         out = self.add_interp_to_state(
-            x_in_interp,
+            x_in_interp_raw,
             out,
             post_processors,
             post_processors_tendencies,

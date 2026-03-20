@@ -15,6 +15,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.samplers.diffusion_samplers import DPMpp2MSampler
 from anemoi.models.samplers.diffusion_samplers import EDMHeunSampler
+from anemoi.models.samplers.diffusion_samplers import ExperimentalSamplerScheduler
+from anemoi.models.samplers.diffusion_samplers import NOISE_SCHEDULERS
 
 
 class MockDenoisingFunction:
@@ -490,3 +492,68 @@ class TestSamplerEdgeCases:
         assert result_dpmpp.shape == y.shape
         assert torch.isfinite(result_heun).all()
         assert torch.isfinite(result_dpmpp).all()
+
+
+class TestExperimentalSamplerScheduler:
+    """Test suite for the piecewise experimental scheduler."""
+
+    def test_piecewise_schedule_shape_and_endpoints(self):
+        scheduler = ExperimentalSamplerScheduler(
+            sigma_max=1e5,
+            sigma_min=0.03,
+            sigma_transition=10.0,
+            num_steps=40,
+            num_steps_high=20,
+            num_steps_low=20,
+        )
+
+        sigmas = scheduler.get_schedule()
+
+        assert sigmas.shape == (41,)
+        assert torch.isclose(sigmas[0], torch.tensor(1e5, dtype=sigmas.dtype))
+        assert torch.isclose(sigmas[20], torch.tensor(10.0, dtype=sigmas.dtype))
+        assert torch.isclose(sigmas[-2], torch.tensor(0.03, dtype=sigmas.dtype))
+        assert torch.isclose(sigmas[-1], torch.tensor(0.0, dtype=sigmas.dtype))
+
+    def test_piecewise_schedule_is_monotone(self):
+        scheduler = ExperimentalSamplerScheduler(
+            sigma_max=1e5,
+            sigma_min=0.03,
+            sigma_transition=20.0,
+            num_steps=40,
+            num_steps_high=20,
+            num_steps_low=20,
+        )
+
+        sigmas = scheduler.get_schedule()
+
+        assert torch.all(sigmas[:-1] >= sigmas[1:])
+        assert torch.all(sigmas[:-2] > 0.0)
+
+    def test_piecewise_schedule_respects_even_split_default(self):
+        scheduler = ExperimentalSamplerScheduler(
+            sigma_max=1e5,
+            sigma_min=0.03,
+            sigma_transition=10.0,
+            num_steps=40,
+        )
+
+        sigmas = scheduler.get_schedule()
+
+        assert sigmas.shape == (41,)
+        assert torch.isclose(sigmas[20], torch.tensor(10.0, dtype=sigmas.dtype))
+
+    def test_piecewise_schedule_registry_name(self):
+        scheduler_cls = NOISE_SCHEDULERS["experimental_sampler"]
+        scheduler = scheduler_cls(
+            sigma_max=1e5,
+            sigma_min=0.03,
+            sigma_transition=10.0,
+            num_steps=40,
+            num_steps_high=20,
+            num_steps_low=20,
+        )
+
+        sigmas = scheduler.get_schedule()
+
+        assert sigmas.shape == (41,)
