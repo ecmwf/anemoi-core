@@ -1,7 +1,4 @@
-"""Gate sources-g2: LocalSource + sources-g5 additions.
-
-CANONICAL GATE TEST — DO NOT MODIFY.
-"""
+"""Tests for LocalSource."""
 
 from pathlib import Path
 
@@ -61,9 +58,6 @@ async def test_local_source_uses_cpu_map_location(sample_checkpoint: Path) -> No
     # Verify tensor is on CPU
     weight = result.checkpoint_data["state_dict"]["layer.weight"]
     assert weight.device == torch.device("cpu")
-
-
-# ── sources-g5 additions ──────────────────────────────────────────
 
 
 @pytest.mark.asyncio

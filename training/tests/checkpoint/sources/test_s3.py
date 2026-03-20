@@ -1,7 +1,4 @@
-"""Gate sources-g4: S3Source.
-
-CANONICAL GATE TEST — DO NOT MODIFY.
-"""
+"""Tests for S3Source."""
 
 from pathlib import Path
 from unittest.mock import MagicMock

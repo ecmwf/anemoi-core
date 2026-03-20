@@ -1,7 +1,4 @@
-"""Gate sources-g3: HTTPSource.
-
-CANONICAL GATE TEST — DO NOT MODIFY.
-"""
+"""Tests for HTTPSource."""
 
 from pathlib import Path
 from unittest.mock import patch

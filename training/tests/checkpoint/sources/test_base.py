@@ -1,8 +1,4 @@
-"""Gate sources-g1: Base Classes + Directory Structure.
-
-CANONICAL GATE TEST — DO NOT MODIFY.
-These tests define the acceptance criteria for the gate.
-"""
+"""Tests for CheckpointSource base class."""
 
 import pytest
 
