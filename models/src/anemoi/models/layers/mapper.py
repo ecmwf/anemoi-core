@@ -180,7 +180,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Edge feature dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v and edge projections. If
-            None, defaults to the hidden dimension.
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
@@ -536,7 +538,9 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Edge feature dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v and edge projections. If
-            None, defaults to the hidden dimension.
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool
@@ -662,7 +666,9 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Edge feature dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v and edge projections. If
-            None, defaults to the hidden dimension.
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         initialise_data_extractor_zero : bool, default False:
@@ -1120,7 +1126,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Ratio of mlp hidden dimension to embedding dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v projections. If None,
-            defaults to the hidden dimension.
+            defaults to the hidden dimension. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -1270,7 +1278,9 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Ratio of mlp hidden dimension to embedding dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v projections. If None,
-            defaults to the hidden dimension.
+            defaults to the hidden dimension. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -1399,7 +1409,9 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Ratio of mlp hidden dimension to embedding dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v projections. If None,
-            defaults to the hidden dimension.
+            defaults to the hidden dimension. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
