@@ -80,7 +80,6 @@ version_file = "src/anemoi/models/_version.py"
 fallback_version = "0.0.0"
 
 [tool.ruff]
-# Ban anemoi-training imports from anemoi-models
-flake8-tidy-imports.banned-modules = [ "anemoi-training" ]
-# You can select the checks you want; E,F,I are standard
-select = [ "I" ]
+line-length = 120
+lint.extend-select = [ "I", "TID251" ]  # import-related checks + banned API usage
+lint.flake8-tidy-imports.banned-api."anemoi.training".msg = "Do not import from anemoi-training in anemoi-models."
