@@ -78,3 +78,9 @@ git_describe_command = "git describe --dirty --tags --long --match 'models-*[0-9
 tag_regex = "^models-(?P<version>[vV]?[0-9]+[^-]*)"
 version_file = "src/anemoi/models/_version.py"
 fallback_version = "0.0.0"
+
+[tool.ruff]
+# Ban anemoi-training imports from anemoi-models
+flake8-tidy-imports.banned-modules = [ "anemoi-training" ]
+# You can select the checks you want; E,F,I are standard
+select = [ "I" ]
