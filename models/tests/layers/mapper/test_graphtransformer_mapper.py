@@ -44,7 +44,7 @@ class MapperConfig:
     num_chunks: int = 2
     num_heads: int = 16
     mlp_hidden_ratio: int = 7
-    attn_dim: int | None = None
+    attn_channels: int | None = None
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
@@ -240,14 +240,14 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             out_heads, out_edges, atol=1e-4
         ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
 
-    def test_custom_attn_dim(self, mapper_init, graph_provider, pair_tensor, device):
+    def test_custom_attn_channels(self, mapper_init, graph_provider, pair_tensor, device):
         config = asdict(mapper_init)
         config["edge_dim"] = graph_provider.edge_dim
-        config["attn_dim"] = 112
+        config["attn_channels"] = 112
 
         mapper = GraphTransformerForwardMapper(**config).to(device)
 
-        assert mapper.proc.attn_dim == 112
+        assert mapper.proc.attn_channels == 112
         assert mapper.proc.projection.in_features == 112
         assert mapper.proc.projection.out_features == mapper_init.hidden_dim
 

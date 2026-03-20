@@ -149,7 +149,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
-        attn_dim: Optional[int] = None,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -178,6 +178,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
@@ -210,7 +213,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             in_channels=hidden_dim,
             hidden_dim=mlp_hidden_ratio * hidden_dim,
             out_channels=hidden_dim,
-            attn_dim=attn_dim,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             edge_dim=edge_dim,
             qk_norm=qk_norm,
@@ -504,7 +507,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
-        attn_dim: Optional[int] = None,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -531,6 +534,9 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool
@@ -555,7 +561,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
-            attn_dim=attn_dim,
+            attn_channels=attn_channels,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
@@ -624,7 +630,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
-        attn_dim: Optional[int] = None,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
@@ -654,6 +660,9 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         initialise_data_extractor_zero : bool, default False:
@@ -681,7 +690,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
-            attn_dim=attn_dim,
+            attn_channels=attn_channels,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
@@ -1084,7 +1093,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        attn_dim: Optional[int] = None,
+        attn_channels: Optional[int] = None,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
@@ -1109,6 +1118,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Output channels of the destination node, by default None
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to the hidden dimension.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -1141,7 +1153,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         self.proc = TransformerMapperBlock(
             num_channels=hidden_dim,
             hidden_dim=mlp_hidden_ratio * hidden_dim,
-            attn_dim=attn_dim,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             window_size=window_size,
             layer_kernels=self.layer_factory,
@@ -1230,7 +1242,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        attn_dim: Optional[int] = None,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
@@ -1256,6 +1268,9 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Output channels of the destination node, by default None
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to the hidden dimension.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -1285,7 +1300,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             cpu_offload=cpu_offload,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            attn_dim=attn_dim,
+            attn_channels=attn_channels,
             window_size=window_size,
             dropout_p=dropout_p,
             qk_norm=qk_norm,
@@ -1356,7 +1371,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        attn_dim: Optional[int] = None,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
@@ -1382,6 +1397,9 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Output channels of the destination node, by default None
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to the hidden dimension.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -1411,7 +1429,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             cpu_offload=cpu_offload,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            attn_dim=attn_dim,
+            attn_channels=attn_channels,
             window_size=window_size,
             dropout_p=dropout_p,
             qk_norm=qk_norm,

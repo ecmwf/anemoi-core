@@ -30,7 +30,7 @@ class MapperConfig:
     num_chunks: int = 2
     num_heads: int = 8
     mlp_hidden_ratio: int = 4
-    attn_dim: Optional[int] = None
+    attn_channels: Optional[int] = None
     qk_norm: bool = True
     dropout_p: float = 0.0
     attention_implementation: str = "scaled_dot_product_attention"
@@ -123,13 +123,13 @@ class TestTransformerForwardMapper:
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
         )
 
-    def test_custom_attn_dim(self, mapper_init, pair_tensor, device):
+    def test_custom_attn_channels(self, mapper_init, pair_tensor, device):
         config = asdict(mapper_init)
-        config["attn_dim"] = 96
+        config["attn_channels"] = 96
 
         mapper = TransformerForwardMapper(**config).to(device)
 
-        assert mapper.proc.attention.attn_dim == 96
+        assert mapper.proc.attention.attn_channels == 96
         assert mapper.proc.attention.projection.in_features == 96
         assert mapper.proc.attention.projection.out_features == mapper_init.hidden_dim
 
@@ -174,16 +174,16 @@ class TestTransformerBackwardMapper:
             out_channels_dst=self.OUT_CHANNELS_DST,
         ).to(device)
 
-    def test_custom_attn_dim(self, mapper_init, device):
+    def test_custom_attn_channels(self, mapper_init, device):
         config = asdict(mapper_init)
-        config["attn_dim"] = 96
+        config["attn_channels"] = 96
 
         mapper = TransformerBackwardMapper(
             **config,
             out_channels_dst=self.OUT_CHANNELS_DST,
         ).to(device)
 
-        assert mapper.proc.attention.attn_dim == 96
+        assert mapper.proc.attention.attn_channels == 96
         assert mapper.proc.attention.projection.in_features == 96
         assert mapper.proc.attention.projection.out_features == mapper_init.hidden_dim
 

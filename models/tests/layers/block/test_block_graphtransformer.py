@@ -202,7 +202,7 @@ def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge
     ), "block.edge_pre_mlp[1] is not an instance of layer_kernels.Activation"
 
 
-def test_GraphTransformerProcessorBlock_custom_attn_dim(init_proc):
+def test_GraphTransformerProcessorBlock_custom_attn_channels(init_proc):
     (
         in_channels,
         hidden_dim,
@@ -215,13 +215,13 @@ def test_GraphTransformerProcessorBlock_custom_attn_dim(init_proc):
         graph_attention_backend,
         _edge_pre_mlp,
     ) = init_proc
-    attn_dim = 96
+    attn_channels = 96
 
     block = GraphTransformerProcessorBlock(
         in_channels=in_channels,
         hidden_dim=hidden_dim,
         out_channels=out_channels,
-        attn_dim=attn_dim,
+        attn_channels=attn_channels,
         edge_dim=edge_dim,
         layer_kernels=layer_kernels,
         num_heads=num_heads,
@@ -232,9 +232,9 @@ def test_GraphTransformerProcessorBlock_custom_attn_dim(init_proc):
         edge_pre_mlp=False,
     )
 
-    assert block.attn_dim == attn_dim
-    assert block.out_channels_conv == attn_dim // num_heads
-    assert block.projection.in_features == attn_dim
+    assert block.attn_channels == attn_channels
+    assert block.out_channels_conv == attn_channels // num_heads
+    assert block.projection.in_features == attn_channels
     assert block.projection.out_features == out_channels
 
 
@@ -459,7 +459,7 @@ def test_GraphTransformerMapperBlock_init(init_mapper, mapper_block):
     ), "block.edge_pre_mlp is not an instance of torch.nn.Identity"
 
 
-def test_GraphTransformerMapperBlock_custom_attn_dim(init_mapper):
+def test_GraphTransformerMapperBlock_custom_attn_channels(init_mapper):
     (
         in_channels,
         hidden_dim,
@@ -472,13 +472,13 @@ def test_GraphTransformerMapperBlock_custom_attn_dim(init_mapper):
         graph_attention_backend,
         _edge_pre_mlp,
     ) = init_mapper
-    attn_dim = 96
+    attn_channels = 96
 
     block = GraphTransformerMapperBlock(
         in_channels=in_channels,
         hidden_dim=hidden_dim,
         out_channels=out_channels,
-        attn_dim=attn_dim,
+        attn_channels=attn_channels,
         edge_dim=edge_dim,
         layer_kernels=layer_kernels,
         num_heads=num_heads,
@@ -489,9 +489,9 @@ def test_GraphTransformerMapperBlock_custom_attn_dim(init_mapper):
         edge_pre_mlp=False,
     )
 
-    assert block.attn_dim == attn_dim
-    assert block.out_channels_conv == attn_dim // num_heads
-    assert block.projection.in_features == attn_dim
+    assert block.attn_channels == attn_channels
+    assert block.out_channels_conv == attn_channels // num_heads
+    assert block.projection.in_features == attn_channels
     assert block.projection.out_features == out_channels
 
 

@@ -39,8 +39,8 @@ class TransformerModelComponent(PydanticBaseModel):
     "Ratio of mlp hidden dimension to embedding dimension. Default to 4."
     num_heads: NonNegativeInt = Field(example=16)
     "Number of attention heads. Default to 16."
-    attn_dim: Union[PositiveInt, None] = Field(default=None)
-    "Attention model dimension used for q/k/v projections. Default to None, which keeps the embedding dimension."
+    attn_channels: Union[PositiveInt, None] = Field(default=None)
+    "Internal attention width used for q/k/v projections. Default to None, which keeps the embedding dimension."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 

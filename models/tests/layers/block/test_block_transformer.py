@@ -123,15 +123,15 @@ class TestTransformerProcessorBlock:
         assert isinstance(output[0], torch.Tensor)
         assert output[0].shape == (batch_size, num_channels)
 
-    def test_custom_attn_dim(self):
+    def test_custom_attn_channels(self):
         num_channels = 128
         num_heads = 8
-        attn_dim = 96
+        attn_channels = 96
 
         block = TransformerProcessorBlock(
             num_channels=num_channels,
             hidden_dim=256,
-            attn_dim=attn_dim,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             window_size=None,
             dropout_p=0.0,
@@ -141,20 +141,20 @@ class TestTransformerProcessorBlock:
             qk_norm=False,
         )
 
-        assert block.attention.attn_dim == attn_dim
-        assert block.attention.projection.in_features == attn_dim
+        assert block.attention.attn_channels == attn_channels
+        assert block.attention.projection.in_features == attn_channels
         assert block.attention.projection.out_features == num_channels
 
         x = torch.randn((4, num_channels))
         output = block.forward(x, [[4, num_channels]], batch_size=1)
         assert output[0].shape == (4, num_channels)
 
-    def test_custom_attn_dim_must_be_divisible_by_num_heads(self):
-        with pytest.raises(ValueError, match="attn_dim"):
+    def test_custom_attn_channels_must_be_divisible_by_num_heads(self):
+        with pytest.raises(ValueError, match="attn_channels"):
             TransformerProcessorBlock(
                 num_channels=128,
                 hidden_dim=256,
-                attn_dim=100,
+                attn_channels=100,
                 num_heads=8,
                 window_size=None,
                 dropout_p=0.0,
