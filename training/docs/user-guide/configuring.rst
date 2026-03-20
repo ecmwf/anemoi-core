@@ -502,32 +502,25 @@ Configuration
    training:
       model_modifier:
          modifiers:
-            - _target_: "anemoi.training.train.modify.FreezingModelModifier"
+            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
               submodules_to_freeze: ["encoder", "processor.0"]
 
 Available Modifiers
 ===================
 
-**FreezingModelModifier**
-   Freeze specific submodules to exclude them from training
-
-**TransferLearningModelModifier**
-   Load weights from checkpoints with automatic mismatch handling.
-   Supports multi-source loading (local, S3, HTTP, GCS, Azure).
+**FreezingModifierStage**
+   Freeze specific submodules to exclude them from training.
+   Supports dot notation for nested modules (e.g., ``processor.0``).
 
 Combined Fine-tuning Workflow
 =============================
 
-Transfer learning with parameter freezing:
+Parameter freezing with multiple layers:
 
 .. code:: yaml
 
    training:
       model_modifier:
          modifiers:
-            - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-              checkpoint_path: "s3://bucket/pretrained.ckpt"
-              strict: false
-              skip_mismatched: true
-            - _target_: "anemoi.training.train.modify.FreezingModelModifier"
+            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
               submodules_to_freeze: ["encoder"]

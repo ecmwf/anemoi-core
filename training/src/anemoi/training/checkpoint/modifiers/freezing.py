@@ -1,7 +1,4 @@
-"""FreezingModifierStage — native PipelineStage for freezing model submodules.
-
-Ported from ``anemoi.training.train.modify.FreezingModelModifier``.
-"""
+"""FreezingModifierStage — native PipelineStage for freezing model submodules."""
 
 from __future__ import annotations
 

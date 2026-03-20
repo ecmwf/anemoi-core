@@ -37,7 +37,6 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.train.modify import ModelModifierApplier
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -87,7 +86,6 @@ class AnemoiTrainer(ABC):
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 
         self.load_weights_only = self.config.training.load_weights_only
-        self.model_modifier = ModelModifierApplier()
         self.parent_uuid = None
 
         self.config.training.run_id = self.run_id
@@ -303,7 +301,7 @@ class AnemoiTrainer(ABC):
                 freeze_submodule_by_name(model, submodule_name)
                 LOGGER.info("%s frozen successfully.", submodule_name.upper())
 
-        return self.model_modifier.process(model, self.config)
+        return model
 
     @cached_property
     def run_id(self) -> str:

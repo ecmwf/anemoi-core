@@ -535,30 +535,6 @@ of hydra, you can also reuse ``config.training.run_id`` or
 Composable model modifications for transfer learning and parameter
 control.
 
-Transfer Learning
-=================
-
-Load pretrained weights with automatic mismatch handling. Uses the
-multi-source checkpoint loading system to support local files, S3, HTTP,
-GCS, and Azure sources:
-
-.. code:: yaml
-
-   training:
-      model_modifier:
-         modifiers:
-            - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-              checkpoint_path: "s3://bucket/pretrained.ckpt"  # Any source
-              strict: false
-              skip_mismatched: true
-
-The TransferLearningModelModifier automatically:
-
--  Detects source type from URL format
--  Handles authentication for cloud sources
--  Loads only compatible parameters
--  Logs mismatched parameters for debugging
-
 Parameter Freezing
 ==================
 
@@ -569,23 +545,28 @@ Freeze specific layers during fine-tuning:
    training:
       model_modifier:
          modifiers:
-            - _target_: "anemoi.training.train.modify.FreezingModelModifier"
+            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
               submodules_to_freeze:
                  - "encoder"        # freeze encoder
                  - "processor.0"    # freeze first processor
 
-Combined Example
-================
+The ``FreezingModifierStage`` supports:
 
-Transfer learning + parameter freezing:
+-  Dot notation for nested modules (e.g., ``processor.0``, ``encoder.attention``)
+-  Strict mode to raise errors on missing modules
+-  Gradient validation to verify frozen parameters
+
+Example
+=======
+
+Parameter freezing with multiple layers:
 
 .. code:: yaml
 
    training:
       model_modifier:
          modifiers:
-            - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
-              checkpoint_path: "s3://bucket/pretrained.ckpt"
+            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+              submodules_to_freeze: ["encoder", "processor.0"]
               strict: false
-            - _target_: "anemoi.training.train.modify.FreezingModelModifier"
-              submodules_to_freeze: ["encoder"]
+              validate_gradients: true

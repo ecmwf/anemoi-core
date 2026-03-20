@@ -1,3 +1,0 @@
-modifiers:
-  - _target_: "anemoi.training.train.modify.FreezingModelModifier"
-    submodules_to_freeze: ...
