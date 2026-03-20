@@ -7,24 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytorch_lightning as pl
 import torch
 import torchinfo
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.training.utils.checkpoint import check_classes
 from anemoi.utils.checkpoints import save_metadata
-
-if TYPE_CHECKING:
-    import pytorch_lightning as pl
-    from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,20 +28,17 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiCheckpoint(ModelCheckpoint):
     """A checkpoint callback that saves the model after every validation epoch."""
 
-    def __init__(self, config: OmegaConf, **kwargs: dict) -> None:
+    def __init__(self, **kwargs: dict) -> None:
         """Initialise the AnemoiCheckpoint callback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
         kwargs : dict
             Additional keyword arguments for Pytorch ModelCheckpoint
 
         """
         super().__init__(**kwargs)
 
-        self.config = config
         self.start = time.time()
         self._model_metadata = None
         self._tracker_metadata = None
@@ -108,8 +101,8 @@ class AnemoiCheckpoint(ModelCheckpoint):
         if self._tracker_metadata is not None:
             return {self._tracker_name: self._tracker_metadata}
 
-        if self.config.diagnostics.log.wandb.enabled:
-            self._tracker_name = "wand"
+        self._tracker_name = trainer.logger.logger_name if trainer.logger else None
+        if self._tracker_name == "wandb":
             import wandb
 
             run = wandb.run
@@ -120,16 +113,11 @@ class AnemoiCheckpoint(ModelCheckpoint):
                     "url": run.url,
                     "project": run.project,
                 }
-            return {self._tracker_name: self._tracker_metadata}
 
-        if self.config.diagnostics.log.mlflow.enabled:
-            self._tracker_name = "mlflow"
+        if self._tracker_name == "mlflow":
 
-            from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
-
-            mlflow_logger = next(logger for logger in trainer.loggers if isinstance(logger, AnemoiMLflowLogger))
-            run_id = mlflow_logger.run_id
-            run = mlflow_logger._mlflow_client.get_run(run_id)
+            run_id = trainer.logger.run_id
+            run = trainer.logger._mlflow_client.get_run(run_id)
 
             if run is not None:
                 self._tracker_metadata = {
@@ -138,9 +126,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
                     "url": run.info.artifact_uri,
                     "project": run.info.experiment_id,
                 }
-            return {self._tracker_name: self._tracker_metadata}
-
-        return {}
+        return {self._tracker_name: self._tracker_metadata}
 
     def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         """Calls the strategy to remove the checkpoint file."""
@@ -150,6 +136,14 @@ class AnemoiCheckpoint(ModelCheckpoint):
     def _get_inference_checkpoint_filepath(self, filepath: str) -> str:
         """Defines the filepath for the inference checkpoint."""
         return Path(filepath).parent / Path("inference-" + str(Path(filepath).name))
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Check that model's metadata does not contain Pydantic schemas references."""
+        del pl_module
+
+        if trainer.is_global_zero:
+            model = self._torch_drop_down(trainer)
+            check_classes(model)
 
     def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
         if trainer.is_global_zero:

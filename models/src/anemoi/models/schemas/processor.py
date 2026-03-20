@@ -9,15 +9,22 @@
 
 from typing import Any
 from typing import Literal
+from typing import Union
 
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
-from pydantic import ValidationError
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import PointWiseModelComponent
 from .common_components import TransformerModelComponent
+
+
+class NoOpProcessorSchema(PydanticBaseModel):
+    target_: Literal["anemoi.models.layers.processor.NoOpProcessor"] = Field(..., alias="_target_")
+    "No-op processor, used for ablations."
 
 
 class GNNProcessorSchema(GNNModelComponent):
@@ -43,16 +50,30 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
 
+    @model_validator(mode="after")
+    def check_valid_extras(self) -> Any:
+        # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
+        allowed_extras = {"graph_attention_backend": str, "edge_pre_mlp": bool, "gradient_checkpointing": bool}
+        extras = getattr(self, "__pydantic_extra__", {}) or {}
+        for extra_field, value in extras.items():
+            if extra_field not in allowed_extras:
+                msg = f"Extra field '{extra_field}' is not allowed. Allowed fields are: {list(allowed_extras.keys())}."
+                raise ValueError(msg)
+            if not isinstance(value, allowed_extras[extra_field]):
+                msg = f"Extra field '{extra_field}' must be of type {allowed_extras[extra_field].__name__}."
+                raise TypeError(msg)
+
+        return self
+
 
 class TransformerProcessorSchema(TransformerModelComponent):
-
     target_: Literal["anemoi.models.layers.processor.TransformerProcessor"] = Field(..., alias="_target_")
     "Transformer processor object from anemoi.models.layers.processor."
     num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of Transformer processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
-    window_size: NonNegativeInt = Field(example=512)
+    window_size: Union[NonNegativeInt, None] = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"
@@ -69,13 +90,25 @@ class TransformerProcessorSchema(TransformerModelComponent):
     def check_valid_extras(self) -> Any:
         # Check for valid extra fields related to MultiHeadSelfAttention and MultiHeadCrossAttention
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"use_rotary_embeddings": bool}
-        for extra_field in self.__pydantic_extra__:
+        allowed_extras = {"use_rotary_embeddings": bool, "gradient_checkpointing": bool}
+        extras = getattr(self, "__pydantic_extra__", {}) or {}
+        for extra_field, value in extras.items():
             if extra_field not in allowed_extras:
-                msg = f"Extra field {extra_field} not allowed for TransformerProcessorSchema."
-                raise ValidationError(msg)
-            if isinstance(extra_field, allowed_extras[extra_field]):
-                msg = f"Extra field {extra_field} should be of type {allowed_extras[extra_field]}."
-                raise ValidationError(msg)
+                msg = f"Extra field '{extra_field}' is not allowed. Allowed fields are: {list(allowed_extras.keys())}."
+                raise ValueError(msg)
+            if not isinstance(value, allowed_extras[extra_field]):
+                msg = f"Extra field '{extra_field}' must be of type {allowed_extras[extra_field].__name__}."
+                raise TypeError(msg)
 
         return self
+
+
+class PointWiseMLPProcessorSchema(PointWiseModelComponent):
+    target_: Literal["anemoi.models.layers.processor.PointWiseMLPProcessor"] = Field(..., alias="_target_")
+    "Transformer processor object from anemoi.models.layers.processor."
+    num_layers: NonNegativeInt = Field(example=16)
+    "Number of layers of Transformer processor."
+    num_channels: NonNegativeInt = Field(example=128)
+    "Number of channels."
+    dropout_p: NonNegativeFloat = Field(example=0.1)
+    "Dropout probability, default 0.0"

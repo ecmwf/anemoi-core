@@ -8,17 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import logging
-from typing import TYPE_CHECKING
 
 import torch
+from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.mse import MSELoss
-
-if TYPE_CHECKING:
-    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +32,7 @@ class RMSELoss(MSELoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,  # noqa: ARG002
     ) -> torch.Tensor:
         """Calculates the RMSE loss.
 

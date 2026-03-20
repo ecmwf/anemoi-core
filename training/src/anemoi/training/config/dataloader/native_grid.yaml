@@ -10,7 +10,7 @@ pin_memory: True
 #   The number of GPUs per model must be divisible by read_group_size.
 #   To disable, set to 1.
 # ============
-read_group_size: ${hardware.num_gpus_per_model}
+read_group_size: ${system.hardware.num_gpus_per_model}
 
 num_workers:
   training: 8
@@ -37,12 +37,6 @@ limit_batches:
   validation: null
   test: 20
 
-# set a custom mask for grid points.
-# Useful for LAM (dropping unconnected nodes from forcing dataset)
-grid_indices:
-  _target_: anemoi.training.data.grid_indices.FullGrid
-  nodes_name: ${graph.data}
-
 # ============
 # Dataloader definitions
 # These follow the anemoi-datasets patterns
@@ -50,27 +44,41 @@ grid_indices:
 # See https://anemoi-datasets.readthedocs.io
 # ============
 
-dataset: ${hardware.paths.data}/${hardware.files.dataset}
+# Pointers to datasets and model run info
+dataset: ${system.input.dataset}
+model_run_info: null  # Add for non-analysis training
 
 training:
-  dataset: ${dataloader.dataset}
-  start: null
-  end: 2020
-  frequency: ${data.frequency}
-  drop:  []
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
+      start: null
+      end: 2020
+      trajectory: ${dataloader.model_run_info}
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
 
 validation:
-  dataset: ${dataloader.dataset}
-  start: 2021
-  end: 2021
-  frequency: ${data.frequency}
-  drop:  []
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
+      start: 2021
+      end: 2021
+      trajectory: ${dataloader.model_run_info}
 
 test:
-  dataset: ${dataloader.dataset}
-  start: 2022
-  end: null
-  frequency: ${data.frequency}
-  drop:  []
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
+      start: 2022
+      end: null
+      trajectory: ${dataloader.model_run_info}

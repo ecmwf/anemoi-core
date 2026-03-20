@@ -8,13 +8,11 @@
 #
 
 
-from __future__ import annotations
-
 import logging
 from pathlib import Path  # noqa: TC003
 from typing import Annotated
 from typing import Literal
-from typing import Union
+from typing import Optional
 
 from pydantic import Field
 from pydantic import PositiveFloat
@@ -30,7 +28,7 @@ class AnemoiDatasetNodeSchema(BaseModel):
         ..., alias="_target_"
     )
     "Nodes from Anemoi dataset class implementation from anemoi.graphs.nodes."
-    dataset: Union[str, list, dict]  # TODO(Helen): Discuss schema with Baudouin
+    dataset: str | list | dict  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
 
 
@@ -48,7 +46,7 @@ class NPZnodeSchema(BaseModel):
 class TextNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.TextNodes"] = Field(..., alias="_target_")
     "Nodes from text file class implementation from anemoi.graphs.nodes."
-    dataset: Union[str, Path]
+    dataset: str | Path
     "The path to text file containing the coordinates of the nodes."
     idx_lon: int
     "The index of the longitude in the dataset."
@@ -59,7 +57,7 @@ class TextNodeSchema(BaseModel):
 class XArrayNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.XArrayNodes"] = Field(..., alias="_target_")
     "Nodes from xarray dataset class implementation from anemoi.graphs.nodes."
-    dataset: Union[str, Path]
+    dataset: str | Path
     "The path to xarray dataset containing the coordinates of the nodes."
     lon_key: str
     "The key name of the longitude field."
@@ -74,30 +72,19 @@ class ReducedGaussianGridNodeSchema(BaseModel):
     "Reduced gaussian grid."
 
 
-class ICONNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.ICONNodes"] = Field(..., alias="_target_")
-    "ICON grid object from anemoi.graphs.nodes."
-    name: str
-    "Name of ICON grid."
-    grid_filename: str
-    "Name of NetCDF ICON grid file."
-    max_level_multimesh: int
-    "Maximum refinement level of the multi mesh."
-    max_level_dataset: int
-    "Maximum refinement level of the cell grid."
-
-
 class ICONMeshNodeSchema(BaseModel):
     target_: Literal[
-        "anemoi.graphs.nodes.ICONMultimeshNodes",
+        "anemoi.graphs.nodes.ICONMultiMeshNodes",
         "anemoi.graphs.nodes.ICONCellGridNodes",
     ] = Field(
         ...,
         alias="_target_",
     )
     "Mesh based on ICON grid class implementation from anemoi.graphs.nodes."
-    icon_mesh: str
-    "Key corresponding to the ICON mesh (cells and vertices)."
+    grid_filename: str
+    "Name of NetCDF ICON grid file."
+    max_level: int
+    "Maximum refinement level of the multi mesh / cell grid."
 
 
 class LimitedAreaNPZFileNodesSchema(BaseModel):
@@ -109,7 +96,7 @@ class LimitedAreaNPZFileNodesSchema(BaseModel):
     "The grid resolution."
     reference_node_name: str  # TODO(Helen): Check that reference nodes exists in the config
     "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: str  # TODO(Helen): Check that mask_attr_name exists in the dataset config
+    mask_attr_name: Optional[str]  # TODO(Helen): Check that mask_attr_name exists in the dataset config
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
@@ -137,7 +124,7 @@ class LimitedAreaIcosahedralandHealPixNodeSchema(BaseModel):
     "Refinement level of the mesh."
     reference_node_name: str  # TODO(Helen): Discuss check that reference nodes exists in the config
     "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: str  # TODO(Helen): Discuss check that mask_attr_name exists in the dataset config
+    mask_attr_name: Optional[str]  # TODO(Helen): Discuss check that mask_attr_name exists in the dataset config
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
@@ -152,24 +139,21 @@ class StretchedIcosahdralNodeSchema(BaseModel):
     "Refinement level of the mesh on the local area."
     reference_node_name: str
     "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: str
+    mask_attr_name: Optional[str]
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
 NodeBuilderSchemas = Annotated[
-    Union[
-        AnemoiDatasetNodeSchema,
-        NPZnodeSchema,
-        TextNodeSchema,
-        ICONNodeSchema,
-        ICONMeshNodeSchema,
-        LimitedAreaNPZFileNodesSchema,
-        ReducedGaussianGridNodeSchema,
-        IcosahedralandHealPixNodeSchema,
-        LimitedAreaIcosahedralandHealPixNodeSchema,
-        StretchedIcosahdralNodeSchema,
-    ],
+    AnemoiDatasetNodeSchema
+    | NPZnodeSchema
+    | TextNodeSchema
+    | ICONMeshNodeSchema
+    | LimitedAreaNPZFileNodesSchema
+    | ReducedGaussianGridNodeSchema
+    | IcosahedralandHealPixNodeSchema
+    | LimitedAreaIcosahedralandHealPixNodeSchema
+    | StretchedIcosahdralNodeSchema,
     Field(discriminator="target_"),
 ]

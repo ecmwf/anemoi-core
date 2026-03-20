@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 
@@ -19,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 def worker_init_func(worker_id: int) -> None:
     """Configures each dataset worker process.
 
-    Calls WeatherBenchDataset.per_worker_init() on each dataset object.
+    Calls per_worker_init() on each dataset object.
 
     Parameters
     ----------

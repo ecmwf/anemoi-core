@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import time
@@ -19,6 +18,7 @@ import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import get_grid_reference_distance
 from anemoi.utils.config import DotDict
 
@@ -43,6 +43,7 @@ class BaseNodeBuilder(ABC):
     def __init__(self, name: str) -> None:
         self.name = name
         self.area_mask_builder = None
+        self.device = get_distributed_device()
 
     def register_nodes(self, graph: HeteroData) -> HeteroData:
         """Register nodes in the graph.
@@ -57,7 +58,7 @@ class BaseNodeBuilder(ABC):
         HeteroData
             The graph with the registered nodes.
         """
-        graph[self.name].x = self.get_coordinates().to(torch.float32)
+        graph[self.name].x = self.get_coordinates().to(dtype=torch.float32, device=self.device)
         graph[self.name].node_type = type(self).__name__
 
         if graph[self.name].num_nodes >= 2:

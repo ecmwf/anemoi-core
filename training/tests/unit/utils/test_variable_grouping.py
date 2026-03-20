@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import pytest
@@ -62,6 +60,11 @@ LARGE_GROUPS = {
     "pl": ["q", "z"],
     "sfc": ["tp"],
 }
+COMPLEX_METADATA_LESS_GROUPS = {
+    "default": "default",
+    "pl": {"param": ["q", "z"]},
+}
+
 
 FILTERED_GROUPS = {
     "default": "default",
@@ -90,6 +93,12 @@ FILTERED_GROUPS = {
         (FILTERED_GROUPS, "z_500", "z_pl"),
         (FILTERED_GROUPS, "z_ml_500", "z_ml"),
         (FILTERED_GROUPS, "tp", "sfc"),
+        # Complex metadata-less groups
+        (COMPLEX_METADATA_LESS_GROUPS, "q_100", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "q_500", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "z_500", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "z_123", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "2t", "default"),
     ],
 )
 def test_group_matching(
@@ -118,6 +127,12 @@ def mocked_variable_lacking_metadata() -> dict[str, Variable]:
         (SIMPLE_GROUPS, "z_500", "default"),
         (SIMPLE_GROUPS, "2t", "default"),
         (SIMPLE_GROUPS, "tp", "sfc"),
+        # Complex metadata-less groups
+        (COMPLEX_METADATA_LESS_GROUPS, "q_100", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "q_500", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "z_500", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "z_123", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "2t", "default"),
     ],
 )
 def test_group_matching_without_metadata(

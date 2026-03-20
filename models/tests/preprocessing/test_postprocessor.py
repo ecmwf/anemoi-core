@@ -15,6 +15,7 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.preprocessing.postprocessor import ConditionalNaNPostprocessor
 from anemoi.models.preprocessing.postprocessor import ConditionalZeroPostprocessor
 from anemoi.models.preprocessing.postprocessor import NormalizedReluPostprocessor
 from anemoi.models.preprocessing.postprocessor import Postprocessor
@@ -33,7 +34,7 @@ def postprocessor():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return Postprocessor(config=config.data.postprocessor, data_indices=data_indices)
 
 
@@ -70,7 +71,7 @@ def normmrelupostprocessor():
         "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0]),
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
     }
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
 
     return NormalizedReluPostprocessor(
         config=config.data.normmrelupostprocessor,
@@ -106,7 +107,7 @@ def conditionalzeropostprocessor():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return ConditionalZeroPostprocessor(config=config.data.conditionalzeropostprocessor, data_indices=data_indices)
 
 
@@ -124,6 +125,37 @@ def conditionalzero_inference_output_data():
     return base, expected
 
 
+@pytest.fixture()
+def conditionalnanpostprocessor():
+    config = DictConfig(
+        {
+            "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
+            "data": {
+                "conditionalnanpostprocessor": {"default": "none", "nan": ["other", "y"], "remap": "x"},
+                "forcing": ["z"],
+                "diagnostic": ["other"],
+            },
+        },
+    )
+    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    return ConditionalNaNPostprocessor(config=config.data.conditionalnanpostprocessor, data_indices=data_indices)
+
+
+@pytest.fixture()
+def conditionalnan_output_data():
+    base = torch.Tensor([[[1.0, 0.0, 3.0, -1, 5.0], [torch.nan, 1, 8.0, 9.0, 10.0]]])
+    expected = torch.Tensor([[[1.0, 0.0, 3.0, -1, 5.0], [torch.nan, torch.nan, 8.0, 9.0, torch.nan]]])
+    return base, expected
+
+
+@pytest.fixture()
+def conditionalnan_inference_output_data():
+    base = torch.Tensor([[[1.0, 0.0, -1, 5.0], [torch.nan, 1, 9.0, 10.0]]])
+    expected = torch.Tensor([[[1.0, 0.0, -1, 5.0], [torch.nan, torch.nan, 9.0, torch.nan]]])
+    return base, expected
+
+
 fixture_combinations = (
     ("postprocessor", "output_data"),
     ("postprocessor", "inference_output_data"),
@@ -131,6 +163,8 @@ fixture_combinations = (
     ("normmrelupostprocessor", "normmrelupostprocessor_inference_output_data"),
     ("conditionalzeropostprocessor", "conditionalzero_output_data"),
     ("conditionalzeropostprocessor", "conditionalzero_inference_output_data"),
+    ("conditionalnanpostprocessor", "conditionalnan_output_data"),
+    ("conditionalnanpostprocessor", "conditionalnan_inference_output_data"),
 )
 
 
@@ -139,7 +173,7 @@ fixture_combinations = (
     fixture_combinations,
 )
 def test_postprocessor_not_inplace(postprocessor_fixture, data_fixture, request) -> None:
-    """Check that the imputer does not modify the input tensor when in_place=False."""
+    """Check that the postprocessor does not modify the input tensor when in_place=False."""
     x, _ = request.getfixturevalue(data_fixture)
     postprocessor = request.getfixturevalue(postprocessor_fixture)
     x_old = x.clone()
@@ -152,7 +186,7 @@ def test_postprocessor_not_inplace(postprocessor_fixture, data_fixture, request)
     fixture_combinations,
 )
 def test_postprocessor_inplace(postprocessor_fixture, data_fixture, request) -> None:
-    """Check that the imputer does not modify the input tensor when in_place=False and whether output is correct."""
+    """Check that the postprocessor does not modify the input tensor when in_place=False and whether output is correct."""
     x, x_processed = request.getfixturevalue(data_fixture)
     postprocessor = request.getfixturevalue(postprocessor_fixture)
     x_old = x.clone()
@@ -189,7 +223,7 @@ def input_normalizer_postprocessor():
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return (
         InputNormalizer(config=config.data.normalizer, data_indices=data_indices, statistics=statistics),
         NormalizedReluPostprocessor(
@@ -232,7 +266,7 @@ fixture_combinations = (
     fixture_combinations,
 )
 def test_chained_postprocessor_inplace(postprocessor_fixture, data_fixture, request) -> None:
-    """Check that the imputer does not modify the input tensor when in_place=False."""
+    """Check that the postprocessor does not modify the input tensor when in_place=False."""
     x, x_norm, out = request.getfixturevalue(data_fixture)
     postprocessors = request.getfixturevalue(postprocessor_fixture)
     for postprocessor in postprocessors:

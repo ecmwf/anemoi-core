@@ -1,0 +1,9 @@
+nodes:
+  data:
+    node_builder: ...
+    attributes:
+      weights:
+        _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights
+        mask_node_attr_name: node_attribute_name
+        norm: unit-max # options: unit-max, unit-sum, unit-std
+  hidden: ...

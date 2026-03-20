@@ -12,6 +12,7 @@ import pytest
 import torch
 import xarray as xr
 import yaml
+from nodes.test_icon_nodes import DatasetMock
 from torch_geometric.data import HeteroData
 
 lats = [-0.15, 0, 0.15]
@@ -112,6 +113,16 @@ def graph_with_nodes() -> HeteroData:
 
 
 @pytest.fixture
+def graph_with_rectilinear_nodes() -> HeteroData:
+    graph = HeteroData()
+    num_lons, num_lats = 10, 10
+    lat_grid, lon_grid = np.meshgrid(np.linspace(-np.pi / 2, np.pi / 2, num_lats), np.linspace(0, 2 * np.pi, num_lons))
+    coords = torch.tensor(np.array([lat_grid.ravel(), lon_grid.ravel()]).T)
+    graph["test_nodes"].x = coords
+    return graph
+
+
+@pytest.fixture
 def graph_with_isolated_nodes() -> HeteroData:
     graph = HeteroData()
     graph["test_nodes"].x = torch.tensor([[1], [2], [3], [4], [5], [6]])
@@ -142,6 +153,12 @@ def graph_long_and_short_edges() -> HeteroData:
     graph["test_nodes"]["southern_hemisphere_mask"] = torch.tensor([[1], [0], [1], [0]], dtype=torch.bool)
     graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[0, 0, 1, 3], [1, 3, 2, 2]])
     return graph
+
+
+@pytest.fixture(scope="session")
+def icon_dataset_mock():
+    """AICON graph dataset mock."""
+    return DatasetMock
 
 
 @pytest.fixture

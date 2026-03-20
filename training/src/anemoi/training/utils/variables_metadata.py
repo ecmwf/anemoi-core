@@ -7,11 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Union
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -19,7 +17,7 @@ from omegaconf import OmegaConf
 from anemoi.transform.variables import Variable
 
 LOG = logging.getLogger(__name__)
-GROUP_SPEC = Union[str, list[str], bool]
+GROUP_SPEC = str | list[str] | bool
 
 
 @lru_cache
@@ -101,14 +99,8 @@ class ExtractVariableGroupAndLevel:
         group : str
             Group of the variable
         """
-        if variable_name not in self.metadata_variables and any(
-            isinstance(x, dict) for x in self.variable_groups.values()
-        ):
-            error_msg = (f"Variable {variable_name} not found in metadata and variable_groups are not simple lists.",)
-            raise ValueError(error_msg)
-
         for group_name, group_spec in self.variable_groups.items():
-            if isinstance(group_spec, (list, str)):
+            if isinstance(group_spec, list | str):
                 # simple group
                 if self.get_param(variable_name) in (group_spec if isinstance(group_spec, list) else [group_spec]):
                     LOG.debug(
@@ -120,18 +112,38 @@ class ExtractVariableGroupAndLevel:
 
             elif isinstance(group_spec, dict):
                 # complex group
-                var_metadata = self.metadata_variables.get(variable_name)
-                if all(
-                    getattr(var_metadata, key) in (val if isinstance(val, list) else [val])
-                    for key, val in group_spec.items()
-                ):
-                    LOG.debug(
-                        "Variable %r is in group %r through specification : %r.",
-                        variable_name,
-                        group_name,
-                        group_spec,
-                    )
-                    return group_name
+                if variable_name not in self.metadata_variables:
+                    if group_spec.keys() != {"param"}:
+                        error_msg = (
+                            f"Variable {variable_name} not found in metadata and `variable_groups` "
+                            " must be a simple list or a dictionary with only the `param` key."
+                            "\nPlease either provide metadata for the variable or simplify the `variable_groups`."
+                        )
+                        raise ValueError(error_msg)
+
+                    if self.get_param(variable_name) in (
+                        group_spec["param"] if isinstance(group_spec["param"], list) else [group_spec["param"]]
+                    ):
+                        LOG.debug(
+                            "Variable %r is in group %r through specification : %r.",
+                            variable_name,
+                            group_name,
+                            group_spec,
+                        )
+                        return group_name
+                else:
+                    var_metadata = self.metadata_variables.get(variable_name)
+                    if all(
+                        getattr(var_metadata, key) in (val if isinstance(val, list) else [val])
+                        for key, val in group_spec.items()
+                    ):
+                        LOG.debug(
+                            "Variable %r is in group %r through specification : %r.",
+                            variable_name,
+                            group_name,
+                            group_spec,
+                        )
+                        return group_name
 
         return self.default_group
 

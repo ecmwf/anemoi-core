@@ -81,6 +81,34 @@ To set up experiment tracking:
 #. Start the experiment tracking server and monitor your training runs
    in real-time.
 
+****************************
+ Reproducibility and Seeding
+****************************
+
+Anemoi Training seeds the random number generators used during training
+to control stochastic parts of a run. This helps repeat experiments, but
+it does not guarantee exact reproducibility across hardware, software
+versions, or distributed executions because floating-point numerics and
+parallel reductions can still differ slightly.
+
+-  Set ``ANEMOI_BASE_SEED`` explicitly if you want a fixed base seed for
+   a run.
+-  If ``ANEMOI_BASE_SEED`` is not set, Anemoi Training uses
+   ``SLURM_JOB_ID`` when running inside a SLURM job.
+-  If neither value is available, Anemoi Training falls back to ``42``.
+
+When restarting from a checkpoint, avoid reusing the same manual base
+seed. Checkpoints restore model and optimizer state, but not the
+random-number streams used during training and data loading, so the same
+seed can replay the same sequence of random choices after restart. This
+is usually not a concern when the seed comes from ``SLURM_JOB_ID``,
+because a new SLURM job normally gets a new job ID.
+
+Seeds below ``1000`` are multiplied by ``1000`` before use, so a
+fallback seed of ``42`` appears in logs as an effective seed of
+``42000``. This normalized base seed is logged during training and
+stored in checkpoint metadata.
+
 Step 5: Execute Training
 ========================
 
@@ -135,8 +163,9 @@ inputs.
 ``Prognostic`` variables are the variables like temperature or humidity
 that we want to predict and appear as both inputs and outputs.
 
-The user can specify the routing of the data by setting the
-``config.data.forcings`` and ``config.data.diagnostics``. These are
+The user can specify the routing of the data for each dataset separately
+by setting the ``config.data.datasets.your_dataset_name.forcings`` and
+``config.data.datasets.your_dataset_name.diagnostics``. These are
 named strings, as Anemoi datasets enables us to address variables by
 name. Any variable in the dataset which is not listed as either forcing
 or diagnostic (or dropped, see :ref:`Dataloader <Dataloader>` below),
@@ -145,11 +174,13 @@ will be classed as a prognostic variable.
 .. code:: yaml
 
    data:
-      forcings:
-         - solar_insolation
-         - land_sea_mask
-      diagnostics:
-         - total_precipitation
+      datasets:
+         your_dataset_name:
+            forcings:
+               - solar_insolation
+               - land_sea_mask
+            diagnostics:
+               - total_precipitation
 
 **************
  Data Modules
@@ -191,18 +222,6 @@ and the batch size. ``num_workers`` relates to model parallelisation.
       validation: null
       test: 20
 
-The grid points being modelled are also defined. In many cases this will
-be the full grid. For limited area modelling, you may want to define a
-set of target indices which mask/remove some grid points, leaving only
-the area being modelled.
-
-.. code:: yaml
-
-   # set a custom mask for grid points.
-   # Useful for LAM (dropping unconnected nodes from forcing dataset)
-   grid_indices:
-      _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: ${graph.data}
 
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we
@@ -213,12 +232,16 @@ version of the model. Best practice is to separate the data in time,
 ensuring the validation and test data are suitably independent from the
 training data.
 
-We define the start and end time of each section of the data. This can
-be given as a full date, or just the year, or year and month, in these
-cases the first of the month/first of the year is used.
+For each dataset `your_dataset_name`, we define the start and end
+time of each section of the data.
+This can be given as a full date, or just the year, or year and month,
+in these cases the first of the month/first of the year is used.
 
-The dataset used, and the frequency can be set spearately for the
-different parts of the dataset, for example, if test data is stored in a
+We also define the dataset reader options under ``dataset_config``.
+This includes the dataset source (``dataset``) and optional keys such as
+``frequency``, ``drop``, ``select`` and ``statistics``. These can be set
+separately for the different training/validation/test parts of the
+dataset `your_dataset_name`, for example, if test data is stored in a
 different file.
 
 By default, every variable within the dataset is used. If this is not
@@ -262,7 +285,7 @@ and the proportional distance from this point is retained,
 
 The user can specify the normalisation strategy by choosing a default
 method, and additionally specifying specific cases for certain variables
-within ``config.data.normaliser``:
+within ``config.data.datasets.your_dataset_name.normaliser``:
 
 .. code:: yaml
 
@@ -296,27 +319,26 @@ cause the model to predict only NaNs. For fields which contain missing
 values, we provide options to replace these values via an "imputer".
 During training NaN values are replaced with the specified value for the
 field. The default imputer is "none", which means no imputation is
-performed. The user can specify the imputer by setting
-``processors.imputer`` under the ``data/zarr.yaml`` file. It is comon to
-impute with the mean value, ensuring that the variable value over NaNs
-becomes zero after mean-std normalisation. Another option is to impute
-with a given constant.
+performed. The user can specify the imputer for each dataset by setting
+``datasets.your_dataset_name.processors.imputer`` under the
+``data/zarr.yaml`` file. It is common to impute with the mean value,
+ensuring that the variable value over NaNs becomes zero after mean-std
+normalisation. Another option is to impute with a given constant.
 
-The ``DynamicInputImputer`` can be used for fields where the NaN
-locations change in time.
 
 .. code:: yaml
 
-   imputer:
-      default: "none"
-      mean:
-         - 2t
+   datasets:
+      your_dataset_name:
+         imputer:
+            default: "none"
+            mean:
+               - 2t
 
-   processors:
-   imputer:
-      _target_: anemoi.models.preprocessing.imputer.InputImputer
-      _convert_: all
-      config: ${data.imputer}
+         processors:
+            imputer:
+               _target_: anemoi.models.preprocessing.imputer.InputImputer
+               config: ${data.datasets.your_dataset_name.imputer}
 
 ****************
  Loss Functions
@@ -328,11 +350,13 @@ tasks and easily allows for custom loss functions to be added.
 .. code:: yaml
 
    training_loss:
-      _target_: anemoi.training.losses.mse.WeightedMSELoss
-      # class kwargs
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.mse.WeightedMSELoss
+            # class kwargs
 
 The choice of loss function depends on the model task and the desired
-properties of the forecast.
+properties of the forecast and is configured for each dataset separately.
 
 For ensemble training, the following loss functions are available:
 
@@ -340,6 +364,8 @@ For ensemble training, the following loss functions are available:
    density estimation
 -  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
    the number of ensemble members used.
+
+.. _loss-function-scaling:
 
 ***********************
  Loss function scaling
@@ -363,48 +389,42 @@ level has a weighting less than 0.2), defined in class
 
 .. code:: yaml
 
-   general_variable:
-      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-      weights:
-         default: 1
-         t: 6
-         z: 12
-         10u: 0.1
-         10v: 0.1
-         2d: 0.5
-         tp: 0.025
-         cp: 0.0025
+   datasets:
+      your_dataset_name:
+         general_variable:
+            _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+            weights:
+               default: 1
+               t: 6
+               z: 12
+               10u: 0.1
+               10v: 0.1
+               2d: 0.5
+               tp: 0.025
+               cp: 0.0025
 
 .. code:: yaml
-
-   pressure_level:
-      # Variable level scaler to be used
-      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-      group: pl
-      y_intercept: 0.2
-      slope: 0.001
+   datasets:
+      your_dataset_name:
+         pressure_level:
+            # Variable level scaler to be used
+            _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+            group: pl
+            y_intercept: 0.2
+            slope: 0.001
 
 The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
 an attribute in the graph object. The configuration option
-``config.training.node_loss_weights`` is used to specify the node
-attribute used as weights in the loss function. By default
+``config.training.datasets.your_dataset_name.node_weights`` is used to
+specify the node attribute used as weights in the loss function. By default
 anemoi-training uses area weighting, where each node is weighted
 according to the size of the geographical area it represents.
 
 It is also possible to rescale the weight of a subset of nodes after
-they are loaded from the graph. For instance, for a stretched grid setup
-we can rescale the weight of nodes in the limited area such that their
-sum equals 0.25 of the sum of all node weights with the following config
-setup
+they are loaded from the graph using the class
+`anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler`.
 
-.. code:: yaml
-
-   node_loss_weights:
-      _target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute
-      target_nodes: data
-      scaled_attribute: cutout
-      weight_frac_of_total: 0.25
 
 ***************
  Learning rate
@@ -497,10 +517,16 @@ run_id. The user might want to do this if they want to start multiple
 new runs from 1 old run.
 
 The above will restart the model training from where the old run
-finished training. However if the user wants to restart the model from a
-specific point they can do this by setting
-``config.hardware.files.warm_start`` to be the checkpoint they want to
-restart from..
+finished training. It's also possible to restart the model training from
+a specific checkpoint. This can either be a checkpoint from the same run
+or a checkpoint from a different run that you have run in the past or
+that you using for transfer learning. To do this, set
+``config.system.input.warm_start`` to be the path to the checkpoint they
+want to restart from.
+
+The above can be adapted depending on the use case and taking advantage
+of hydra, you can also reuse ``config.training.run_id`` or
+``config.training.fork_run_id`` to define the path to the checkpoint.
 
 *****************
  Model Modifiers

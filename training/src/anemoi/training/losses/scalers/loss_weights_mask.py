@@ -7,27 +7,24 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
-import numpy as np
+import torch
 
-from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
+from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
-
-if TYPE_CHECKING:
-    from anemoi.models.interface import AnemoiModelInterface
 
 LOGGER = logging.getLogger(__name__)
 
 
-class NaNMaskScaler(BaseDelayedScaler):
+class NaNMaskScaler(BaseUpdatingScaler):
 
-    scale_dims: tuple[TensorDim] = (TensorDim.GRID, TensorDim.VARIABLE)
+    scale_dims: tuple[TensorDim] = (TensorDim.BATCH_SIZE, TensorDim.GRID, TensorDim.VARIABLE)
 
-    def __init__(self, norm: str | None = None, **kwargs) -> None:
+    def __init__(self, norm: str | None = None, use_processors_tendencies: bool = False, **kwargs) -> None:
         """Initialise NanMaskScaler.
 
         Parameters
@@ -36,23 +33,53 @@ class NaNMaskScaler(BaseDelayedScaler):
             Type of normalisation to apply. Options are None, unit-sum, unit-mean and l1.
         """
         super().__init__(norm=norm)
+        self.use_processors_tendencies = use_processors_tendencies
         del kwargs
 
-    def get_scaling_values(self) -> np.ndarray:
-        return np.ones(tuple([1] * len(self.scale_dims)))
+    def on_batch_start(self, model: AnemoiModelInterface, dataset_name: str | None = None) -> torch.Tensor | None:
+        """Update loss scaling.
 
-    def get_delayed_scaling_values(self, model: AnemoiModelInterface) -> np.ndarray:
-        """Get loss scaling.
-
-        Get  mask multiplying NaN locations with zero.
+        Get mask multiplying NaN locations with zero.
         At this stage, returns a loss slicing mask with all values set to 1.
-        When calling the imputer for the first time, the NaN positions are available.
-        Before first application of loss function, the mask is replaced.
+        Always when calling the imputer, the NaN positions are updated.
+        Before every application of training loss function, the mask is replaced.
+
+        Parameters
+        ----------
+        model : AnemoiModelInterface
+            The model.
+        dataset_name : str, optional
+            The dataset name for multi-dataset scenarios.
         """
-        loss_weights_mask = np.ones((1, 1))
+        loss_weights_mask = None
+        processors = []
+
+        # Handle pre_processors
+        if hasattr(model, "pre_processors"):
+            assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+            # Multi-dataset case: get pre_processors for specific dataset
+            if dataset_name in model.pre_processors:
+                processors.append(model.pre_processors[dataset_name])
+
+        # Handle pre_processors_tendencies
+        if self.use_processors_tendencies and hasattr(model, "pre_processors_tendencies"):
+            # Multi-dataset case: get pre_processors_tendencies for specific dataset
+            assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+            if dataset_name in model.pre_processors_tendencies:
+                tendency_processors = model.pre_processors_tendencies[dataset_name]
+                if isinstance(tendency_processors, StepwiseProcessors):
+                    processors.extend(proc for proc in tendency_processors if proc is not None)
+                else:
+                    processors.append(tendency_processors)
+
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
-        for pre_processor in model.pre_processors.processors.values():
-            if hasattr(pre_processor, "loss_mask_training"):
-                loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training.cpu().numpy()
+        for pre_processors in processors:
+            for pre_processor in pre_processors.processors.values():
+                if hasattr(pre_processor, "loss_mask_training"):
+                    if loss_weights_mask is None:
+                        loss_weights_mask = pre_processor.loss_mask_training
+                    else:
+                        # multiply the masks together
+                        loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
 
         return loss_weights_mask

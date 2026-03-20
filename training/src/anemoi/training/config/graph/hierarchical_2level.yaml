@@ -1,18 +1,13 @@
 ---
 overwrite: True
 
-data: "data"
-hidden:
- - "hidden_1"
- - "hidden_2"
-
 
 nodes:
   # Data nodes
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.dataset}
+      dataset: ${dataloader.training.datasets.data.dataset_config}
     attributes: ${graph.attributes.nodes}
   hidden_1:
     node_builder:
@@ -100,3 +95,5 @@ attributes:
     edge_length:
       _target_: anemoi.graphs.edges.attributes.EdgeLength
       norm: unit-std
+
+post_processors: []

@@ -8,25 +8,20 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import functools
 import logging
 from abc import ABC
 from abc import abstractmethod
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
 
 import torch
 from torch import nn
+from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
-
-if TYPE_CHECKING:
-    from torch.distributed.distributed_c10d import ProcessGroup
-
-    from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,12 +56,13 @@ class BaseLoss(nn.Module, ABC):
         """
         super().__init__()
 
-        self.scaler = ScaleTensor()
+        self.add_module("scaler", ScaleTensor())
 
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
 
         self.supports_sharding = True
+        self.num_scales = 1
 
     @functools.wraps(ScaleTensor.add_scaler)
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
@@ -107,12 +103,13 @@ class BaseLoss(nn.Module, ABC):
             Scaled error tensor
         """
         if subset_indices is None:
-            subset_indices = [Ellipsis]
+            subset_indices = (Ellipsis,)
+        elif not isinstance(subset_indices, tuple):
+            msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
+            raise TypeError(msg)
 
         if len(self.scaler) == 0:
             return x[subset_indices]
-
-        self.scaler.to(x.device)
 
         if TensorDim.GRID not in self.scaler:
             error_msg = (
@@ -158,6 +155,8 @@ class BaseLoss(nn.Module, ABC):
             Mode to use for squashing the variable dimension, by default "avg"
             If "avg", the last dimension is averaged.
             If "sum", the last dimension is summed.
+        group : ProcessGroup | None, optional
+            Distributed group to reduce over, by default None
 
         Returns
         -------
@@ -171,29 +170,52 @@ class BaseLoss(nn.Module, ABC):
         """
         if squash:
             if squash_mode == "avg":
-                out = self.avg_function(out, dim=TensorDim.VARIABLE)
+                out = self.avg_function(out, dim=TensorDim.VARIABLE, keepdim=True)
             elif squash_mode == "sum":
-                out = self.sum_function(out, dim=TensorDim.VARIABLE)
+                out = self.sum_function(out, dim=TensorDim.VARIABLE, keepdim=True)
             else:
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
 
-        # here the grid dimension is summed because the normalisation is handled in the node weighting
-        grid_summed = self.sum_function(out, dim=(TensorDim.GRID))
+        # here the grid and time dimension are summed because
+        # 1. the normalisation over grid points is handled in the node weighting
+        # 2. the normalization over output steps is handled by the time_step scaler
+        space_time_summed = self.sum_function(
+            out,
+            dim=(
+                TensorDim.TIME,
+                TensorDim.GRID,
+            ),
+            keepdim=True,
+        )
         out = self.avg_function(
-            grid_summed,
+            space_time_summed,
             dim=(
                 TensorDim.BATCH_SIZE,
+                TensorDim.TIME,
                 TensorDim.ENSEMBLE_DIM,
             ),
-        )
+        ).squeeze()
 
         return out if group is None else reduce_tensor(out, group)
+
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """Yield all leaf loss modules.
+
+        For simple losses, yields self. For composite losses (e.g. CombinedLoss),
+        recursively yields the underlying leaf losses.
+        """
+        yield self
 
     @property
     def name(self) -> str:
         """Used for logging identification purposes."""
         return self.__class__.__name__.lower()
+
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Whether the loss needs explicit shard-layout metadata beyond grid_shard_slice/group."""
+        return False
 
     @abstractmethod
     def forward(
@@ -206,15 +228,16 @@ class BaseLoss(nn.Module, ABC):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, output_times, ensemble, lat*lon, n_outputs)
         squash : bool, optional
             Average last dimension, by default True
         scaler_indices: tuple[int,...], optional
@@ -226,6 +249,8 @@ class BaseLoss(nn.Module, ABC):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group to reduce over, by default None
+        **kwargs
+            Additional keyword arguments
 
         Returns
         -------
@@ -263,6 +288,7 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -283,12 +309,15 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
+        **kwargs
+            Additional keyword arguments
 
         Returns
         -------
         torch.Tensor
             Weighted loss
         """
+        del kwargs  # not used in this base implementation, but may be used in child classes
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)

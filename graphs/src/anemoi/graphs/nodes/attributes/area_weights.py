@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from abc import ABC
@@ -20,6 +19,8 @@ from scipy.spatial import SphericalVoronoi
 from scipy.spatial import Voronoi
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.datasets import open_dataset
+from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
@@ -79,35 +80,6 @@ class UniformWeights(BaseAreaWeights):
             Ones.
         """
         return np.ones(latlons.shape[0])
-
-
-class AreaWeights(BaseNodeAttribute):
-    """Implements the area of the nodes as the weights.
-
-    Attributes
-    ----------
-    flat: bool
-        If True, the area is computed in 2D, otherwise in 3D.
-    **other: Any
-        Additional keyword arguments, see PlanarAreaWeights and SphericalAreaWeights
-        for details.
-
-    Methods
-    -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
-    """
-
-    def __new__(cls, flat: bool = False, **kwargs):
-        logging.warning(
-            "Creating %s with flat=%s and kwargs=%s. In a future release, AreaWeights will be deprecated: please use directly PlanarAreaWeights or SphericalAreaWeights.",
-            cls.__name__,
-            flat,
-            kwargs,
-        )
-        if flat:
-            return PlanarAreaWeights(**kwargs)
-        return SphericalAreaWeights(**kwargs)
 
 
 class PlanarAreaWeights(BaseAreaWeights):
@@ -336,3 +308,136 @@ class SphericalAreaWeights(BaseAreaWeights):
             result.sum(),
         )
         return result
+
+
+class BaseLatWeightedAttribute(BaseAreaWeights, ABC):
+    """Base class for latitude-weigthed area weights."""
+
+    @abstractmethod
+    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray: ...
+
+    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
+        return self.compute_latitude_weight(latlons[:, 0])
+
+
+class CosineLatWeightedAttribute(BaseLatWeightedAttribute):
+    """Latitude-weighting of the node attributes for rectilinear grids.
+
+    Attributes
+    ----------
+    min_value : float
+        Minimum value of the weights when the latitude is -pi/2 or pi/2 radians.
+    max_value : float
+        Maximum value of the weights when the latitude is 0 radians.
+    norm : str
+        Normalisation of the weights.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+    """
+
+    def __init__(
+        self,
+        min_value: float = 1e-3,
+        max_value: float = 1,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm, dtype)
+        self.min_value = min_value
+        self.max_value = max_value
+
+    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray:
+        return (self.max_value - self.min_value) * np.cos(latitudes) + self.min_value
+
+
+class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
+    """Latitude-weighted area weights for rectilinear grids.
+
+    Attributes
+    ----------
+    norm : str
+        Normalisation of the weights.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+
+    Notes
+    ------
+    The area of a latitude band is
+    .. math::
+        A = 2\pi R(\sin(lat_2) - \sin(lat_1))
+    where R is the earth radius and lat_1, lat_2 are in radians.
+    """
+
+    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray:
+        # Get the latitudes defining the bands
+        unique_lats = np.sort(np.unique(latitudes))
+        divisory_lats = (unique_lats[1:] + unique_lats[:-1]) / 2
+        divisory_lats = np.concatenate([[-np.pi / 2], divisory_lats, [np.pi / 2]])
+
+        # Compute the latitude band area
+        lat_1 = divisory_lats[1:]
+        lat_2 = divisory_lats[:-1]
+        assert np.all(lat_1 >= lat_2), "Nodes should be sorted by latitude."
+        ring_area_km = 2 * np.pi * EARTH_RADIUS * (np.sin(lat_1) - np.sin(lat_2))
+
+        # Compute the number of points/nodes at each latitude band
+        lat_to_ring = {lat: idx for idx, lat in enumerate(unique_lats)}
+        lat_rings = np.array([lat_to_ring[lat] for lat in latitudes])
+        lat_counts = np.bincount(lat_rings, minlength=len(unique_lats))
+
+        # Compute the area of each node
+        area_km = dict(zip(unique_lats, ring_area_km / lat_counts))
+        return np.array([area_km[lat] for lat in latitudes])
+
+
+class AnemoiDatasetVariableWeights(BaseNodeAttribute):
+    """Load area weights from a variable in the dataset.
+
+    Attributes
+    ----------
+    variable : str
+        Name of the variable to use as weights.
+    norm : str, optional
+        Method to use to normalise the weights.
+
+    Methods
+    -------
+    get_raw_values(self, nodes)
+        Extract the data and convert it to a Torch tensor object.
+    """
+
+    def __init__(self, variable: str, norm: str | None = None, dtype: str = "float32") -> None:
+        super().__init__(norm, dtype)
+        self.variable = variable
+
+    def _read_data(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+        """Read the weighting variable from the dataset."""
+        return open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        """Extract the data and convert it to a Torch tensor object.
+
+        Parameters
+        ----------
+        nodes : NodeStorage
+            Nodes of the graph.
+        kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        torch.Tensor
+            Area weights for the nodes.
+        """
+        assert nodes["node_type"] in [
+            "ZarrDatasetNodes",
+            "AnemoiDatasetNodes",
+        ], f"{self.__class__.__name__} can only be used with AnemoiDatasetNodes."
+        data = torch.from_numpy(self._read_data(nodes))
+        return self.post_process(data)

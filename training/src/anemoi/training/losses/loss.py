@@ -6,33 +6,30 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from __future__ import annotations
+
 
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
-
-if TYPE_CHECKING:
-    import numpy as np
-
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.models.data_indices.tensor import OutputTensorIndex
-    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
+
+NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
-    scalers: dict[str, tuple[tuple[int] | np.ndarray]] | None = None,
+    scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: dict | None = None,
     **kwargs,
 ) -> BaseLoss:
@@ -44,12 +41,12 @@ def get_loss_function(
     ----------
     config : DictConfig
         Loss function configuration, should include `scalers` if scalers are to be added to the loss function.
-    scalers : dict[str, tuple[int | tuple[int, ...] | torch.Tensor]], optional
+    scalers : TENSOR_SPEC, optional,
         Scalers which can be added to the loss function. Defaults to None., by default None
         If a scaler is to be added to the loss, ensure it is in `scalers` in the loss config.
         For instance, if `scalers: ['variable']` is set in the config, and `variable` in `scalers`
         `variable` will be added to the scaler of the loss function.
-    data_indices : dict
+    data_indices : dict, optional
         Indices of the training data
     kwargs : Any
         Additional arguments to pass to the loss function
@@ -69,15 +66,34 @@ def get_loss_function(
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
 
+    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
+        per_scale_loss_config = loss_config.pop("per_scale_loss")
+        per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
+        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
+
+    if scalers is None:
+        scalers = {}
+
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    # Instantiate the loss function with the loss_init_config
     loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
+    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
+
+    return loss_function
+
+
+def _apply_scalers(
+    loss_function: BaseLoss,
+    scalers_to_include: list,
+    scalers: dict[str, TENSOR_SPEC] | None,
+    data_indices: dict | None,
+) -> None:
+    """Attach scalers to a loss function and set data indices if needed."""
     for key in scalers_to_include:
         if key not in scalers or []:
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
@@ -94,10 +110,8 @@ def get_loss_function(
         if hasattr(loss_function, "set_data_indices"):
             loss_function.set_data_indices(data_indices)
 
-    return loss_function
 
-
-def _get_metric_ranges(
+def get_metric_ranges(
     extract_variable_group_and_level: ExtractVariableGroupAndLevel,
     output_data_indices: OutputTensorIndex,
     metrics_to_log: list,
@@ -117,18 +131,3 @@ def _get_metric_ranges(
     # Add the full list of output indices
     metric_ranges["all"] = output_data_indices.full.tolist()
     return metric_ranges
-
-
-def get_metric_ranges(
-    config: DictConfig,
-    data_indices: IndexCollection,
-    metadata_extractor: ExtractVariableGroupAndLevel,
-) -> tuple[METRIC_RANGE_DTYPE, METRIC_RANGE_DTYPE]:
-
-    metrics_to_log = config.training.metrics or []
-
-    return _get_metric_ranges(
-        metadata_extractor,
-        data_indices.model.output,
-        metrics_to_log,
-    )
