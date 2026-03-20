@@ -21,7 +21,7 @@ from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.shapes import ShardShapes
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.dataset import create_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
@@ -98,7 +98,7 @@ class MultiDataset(IterableDataset):
         self.ens_comm_num_groups = 1
         self.ens_comm_group_id = 0
 
-        self.shard_shapes = None
+        self.shard_sizes = None
 
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
@@ -235,7 +235,7 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
-        shard_shapes: dict[str, ShardShapes],
+        shard_sizes: dict[str, ShardSizes],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -253,7 +253,7 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
-        shard_shapes : dict[str, ShardShapes]
+        shard_sizes : dict[str, ShardSizes]
             Shard shapes for all datasets
         """
         self.global_rank = global_rank
@@ -266,7 +266,7 @@ class MultiDataset(IterableDataset):
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
 
-        self.shard_shapes = shard_shapes
+        self.shard_sizes = shard_sizes
 
         assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 
@@ -372,7 +372,7 @@ class MultiDataset(IterableDataset):
 
         x = {}
         for name, dataset in self.datasets.items():
-            start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+            start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
             x[name] = dataset.get_sample(time_indices, slice(start, end))
 
         return x

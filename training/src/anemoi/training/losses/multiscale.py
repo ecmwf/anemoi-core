@@ -16,7 +16,7 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
@@ -119,7 +119,7 @@ class MultiscaleLossWrapper(BaseLoss):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
         model_comm_group: ProcessGroup,
-        grid_shard_shapes: list[int],
+        grid_shard_sizes: list[int],
     ) -> tuple[torch.Tensor, torch.Tensor, list[int], list[int]]:
         """Prepare tensors for smoothing.
 
@@ -128,19 +128,19 @@ class MultiscaleLossWrapper(BaseLoss):
 
         Returns
         -------
-            y_pred_ens_interp, y_interp, channel_shard_shapes
+            y_pred_ens_interp, y_interp, channel_shard_sizes
         """
         batch_size, out_times, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1], y_pred_ens.shape[2]
         y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) g (c t)")
 
         # grid-sharded -> channel-sharded: split along channels (dim_split=-1), concat along grid (dim_concat=-2)
-        channel_shard_shapes = get_shard_shapes(y_pred_ens_interp, -1, model_comm_group)
+        channel_shard_sizes = get_shard_sizes(y_pred_ens_interp, -1, model_comm_group)
         y_pred_ens_interp = all_to_all_transpose(
             y_pred_ens_interp,
             -1,
-            channel_shard_shapes,
+            channel_shard_sizes,
             -2,
-            grid_shard_shapes,
+            grid_shard_sizes,
             model_comm_group,
         )
         y_pred_ens_interp = einops.rearrange(
@@ -154,13 +154,13 @@ class MultiscaleLossWrapper(BaseLoss):
         y_interp = all_to_all_transpose(
             y,
             -1,
-            channel_shard_shapes,
+            channel_shard_sizes,
             -2,
-            grid_shard_shapes,
+            grid_shard_sizes,
             model_comm_group,
         )
 
-        return y_pred_ens_interp, y_interp, channel_shard_shapes
+        return y_pred_ens_interp, y_interp, channel_shard_sizes
 
     def _apply_projector(self, batch: torch.Tensor, provider: ProjectionGraphProvider) -> torch.Tensor:
         """Apply sparse projector to a batch, handling multi-dimensional inputs."""
@@ -185,18 +185,18 @@ class MultiscaleLossWrapper(BaseLoss):
         grid_shard_slice: tuple | None = None,
         model_comm_group: ProcessGroup | None = None,
         model_comm_group_size: int | None = None,
-        grid_shard_shapes: list[int] | None = None,
+        grid_shard_sizes: list[int] | None = None,
         **_kwargs,
     ) -> list[torch.Tensor]:
 
-        channel_shard_shapes = None
+        channel_shard_sizes = None
         if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
             # go to full sequence dimension for smoothing
-            y_pred_ens_for_smooth, y_for_smooth, channel_shard_shapes = self._prepare_for_smoothing(
+            y_pred_ens_for_smooth, y_for_smooth, channel_shard_sizes = self._prepare_for_smoothing(
                 y_pred_ens,
                 y,
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
         else:
             y_pred_ens_for_smooth = y_pred_ens
@@ -220,17 +220,17 @@ class MultiscaleLossWrapper(BaseLoss):
                 y_pred_ens_tmp = all_to_all_transpose(
                     y_pred_ens_tmp,
                     -2,
-                    grid_shard_shapes,
+                    grid_shard_sizes,
                     -1,
-                    channel_shard_shapes,
+                    channel_shard_sizes,
                     model_comm_group,
                 )
                 y_tmp = all_to_all_transpose(
                     y_tmp,
                     -2,
-                    grid_shard_shapes,
+                    grid_shard_sizes,
                     -1,
-                    channel_shard_shapes,
+                    channel_shard_sizes,
                     model_comm_group,
                 )
 

@@ -21,7 +21,7 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
@@ -368,10 +368,10 @@ class GNNProcessor(BaseProcessor):
         if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             target_nodes = sum(shard_info.nodes)
-            edge_attr, edge_index, edge_shard_shapes = shard_edges_1hop(
+            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
                 edge_attr, edge_index, target_nodes, target_nodes, model_comm_group
             )
-            shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_shapes)
+            shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
         x, edge_attr = self.run_layers((x, edge_attr), edge_index, shard_info, model_comm_group, **kwargs)
 
@@ -469,9 +469,9 @@ class GraphTransformerProcessor(BaseProcessor):
             edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
         else:
             # Edges not pre-sharded, shard edge_attr here (edge_index stays full)
-            edge_shard_shapes = get_shard_shapes(edge_attr, 0, model_comm_group)
-            edge_attr = shard_tensor(edge_attr, 0, edge_shard_shapes, model_comm_group)
-            shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_shapes)
+            edge_shard_sizes = get_shard_sizes(edge_attr, 0, model_comm_group)
+            edge_attr = shard_tensor(edge_attr, 0, edge_shard_sizes, model_comm_group)
+            shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),
