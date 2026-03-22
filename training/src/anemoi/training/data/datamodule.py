@@ -170,9 +170,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         extra = {}
         if self.config.dataloader.multiprocessing_context is not None:
             import multiprocessing
-            LOGGER.info(f"Using multiprocessing context '{self.config.dataloader.multiprocessing_context}' for dataloader workers.")
-            extra['multiprocessing_context'] = multiprocessing.get_context(self.config.dataloader.multiprocessing_context,)
 
+            ctx = self.config.dataloader.multiprocessing_context
+            extra["multiprocessing_context"] = multiprocessing.get_context(ctx)
+
+            LOGGER.info("Using multiprocessing context '%s' for dataloader workers.", ctx)
 
         return DataLoader(
             ds,
