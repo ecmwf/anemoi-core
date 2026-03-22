@@ -166,6 +166,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
+
+        extra = {}
+        if self.config.dataloader.multiprocessing_context is not None:
+            import multiprocessing
+            LOGGER.info(f"Using multiprocessing context '{self.config.dataloader.multiprocessing_context}' for dataloader workers.")
+            extra['multiprocessing_context'] = multiprocessing.get_context(self.config.dataloader.multiprocessing_context,)
+
+
         return DataLoader(
             ds,
             batch_size=self.config.dataloader.batch_size[stage],
@@ -174,6 +182,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
             persistent_workers=True,
+            **extra,
         )
 
     def train_dataloader(self) -> DataLoader:

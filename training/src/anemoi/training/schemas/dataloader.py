@@ -136,3 +136,5 @@ class DataLoaderSchema(PydanticBaseModel):
     # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
+    multiprocessing_context: str | None = Field(example=None)
+    "Multiprocessing context to use for dataloader workers. Must be one of 'spawn', 'fork', or 'forkserver'. If None, the default context will be used"
