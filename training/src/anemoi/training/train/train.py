@@ -34,9 +34,10 @@ from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.base_schema import build_schema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.schemas.schema_utils import build_runtime_system
+from anemoi.training.schemas.schema_utils import resolve_lineage_run
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -65,25 +66,7 @@ class AnemoiTrainer(ABC):
         torch.set_float32_matmul_precision("high")
         # Resolve the config to avoid shenanigans with lazy loading
 
-        if config.config_validation:
-            OmegaConf.resolve(config)
-            self.config = BaseSchema(**config)
-
-            LOGGER.info("Config validated.")
-        else:
-            config = OmegaConf.to_object(config)
-            self.config = UnvalidatedBaseSchema(**DictConfig(config))
-
-            LOGGER.info("Skipping config validation.")
-
-        self.config = convert_to_omegaconf(self.config)
-
-        self.start_from_checkpoint = (
-            bool(self.config.training.run_id)
-            or bool(self.config.training.fork_run_id)
-            or bool(self.config.system.input.warm_start)
-        )
-        LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
+        self.config = convert_to_omegaconf(build_schema(config))
 
         self.load_weights_only = self.config.training.load_weights_only
         self.parent_uuid = None
@@ -94,8 +77,25 @@ class AnemoiTrainer(ABC):
         # Get the server2server lineage
         self._get_server2server_lineage()
 
-        # Update paths to contain the run ID
-        self._update_paths()
+        self.lineage_run = resolve_lineage_run(
+            run_id=self.run_id,
+            fork_run_id=self.config.training.fork_run_id,
+            parent_run_server2server=self.parent_run_server2server,
+        )
+        self.system = build_runtime_system(
+            self.config.system,
+            run_id=self.run_id,
+            fork_run_id=self.config.training.fork_run_id,
+            parent_run_server2server=self.parent_run_server2server,
+        )
+        self.start_from_checkpoint = (
+            bool(self.config.training.run_id)
+            or bool(self.config.training.fork_run_id)
+            or bool(self.system.input.warm_start)
+        )
+        LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
+        LOGGER.info("Checkpoints path: %s", self.system.output.checkpoints)
+        LOGGER.info("Plots path: %s", self.system.output.plots)
 
         # Update dry_run attribute, check if checkpoint exists
         self._check_dry_run()
@@ -152,7 +152,7 @@ class AnemoiTrainer(ABC):
     def graph_data(self) -> HeteroData:
         """Graph data. Always uses dataset paths from dataloader config."""
         # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
+        if (graph_filename := self.system.input.graph) is not None:
             graph_filename = Path(graph_filename)
 
             # Try loading existing
@@ -327,7 +327,7 @@ class AnemoiTrainer(ABC):
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
-        raw_path = self.config.system.input.warm_start
+        raw_path = self.system.input.warm_start
         if not raw_path:
             return None
 
@@ -340,7 +340,7 @@ class AnemoiTrainer(ABC):
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
         """Returns the directory where checkpoints are stored."""
-        return Path(self.config.system.output.checkpoints.root.parent, fork_id or self.lineage_run) / "last.ckpt"
+        return Path(self.system.output.checkpoints.root.parent, fork_id or self.lineage_run) / "last.ckpt"
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
@@ -363,7 +363,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        return get_callbacks(self.config)
+        return get_callbacks(self.config, self.system)
 
     @cached_property
     def metadata(self) -> dict:
@@ -403,6 +403,8 @@ class AnemoiTrainer(ABC):
     @cached_property
     def _logger_kwargs(self) -> dict:
         """Shared keyword arguments for all loggers."""
+        # Logger setup can happen while resolving `run_id`, before `self.system`
+        # has been assigned, so this path source must stay on `self.config`.
         return {
             "run_id": self.config.training.run_id,
             "fork_run_id": self.config.training.fork_run_id,
@@ -440,17 +442,17 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def accelerator(self) -> str:
-        assert self.config.system.hardware.accelerator in {
+        assert self.system.hardware.accelerator in {
             "auto",
             "cpu",
             "gpu",
             "cuda",
             "tpu",
-        }, f"Invalid accelerator ({self.config.system.hardware.accelerator}) in system.hardware config."
+        }, f"Invalid accelerator ({self.system.hardware.accelerator}) in system.hardware config."
 
-        if self.config.system.hardware.accelerator == "cpu":
+        if self.system.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
-        return self.config.system.hardware.accelerator
+        return self.system.hardware.accelerator
 
     def _log_information(self) -> None:
         # Log number of variables (features) per dataset
@@ -466,9 +468,9 @@ class AnemoiTrainer(ABC):
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node
         total_number_of_model_instances = (
-            self.config.system.hardware.num_nodes
-            * self.config.system.hardware.num_gpus_per_node
-            / self.config.system.hardware.num_gpus_per_model
+            self.system.hardware.num_nodes
+            * self.system.hardware.num_gpus_per_node
+            / self.system.hardware.num_gpus_per_model
         )
 
         LOGGER.info(
@@ -500,30 +502,6 @@ class AnemoiTrainer(ABC):
             self.fork_run_server2server = self.mlflow_logger._fork_run_server2server
             LOGGER.info("Fork run server2server: %s", self.fork_run_server2server)
 
-    def _update_paths(self) -> None:
-        """Update the paths in the configuration."""
-        self.lineage_run = None
-        if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
-            # Multi-gpu new runs or forked runs - only rank 0
-            # Multi-gpu resumed runs - all ranks
-            self.lineage_run = self.parent_run_server2server or self.run_id
-            self.config.system.output.checkpoints.root = Path(
-                self.config.system.output.checkpoints.root,
-                self.lineage_run,
-            )
-            self.config.system.output.plots = Path(self.config.system.output.plots, self.lineage_run)
-        elif self.config.training.fork_run_id:
-            # WHEN USING MANY NODES/GPUS
-            self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
-            # Only rank non zero in the forked run will go here
-            self.config.system.output.checkpoints.root = Path(
-                self.config.system.output.checkpoints.root,
-                self.lineage_run,
-            )
-
-        LOGGER.info("Checkpoints path: %s", self.config.system.output.checkpoints)
-        LOGGER.info("Plots path: %s", self.config.system.output.plots)
-
     @rank_zero_only
     def _check_dry_run(self) -> None:
         """Check if the run ID is dry, e.g. without a checkpoint.
@@ -535,7 +513,7 @@ class AnemoiTrainer(ABC):
         if self.logger and self.logger.logger_name == "mlflow":
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
-                self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints.root).is_dir()
+                self.mlflow_logger._parent_dry_run and not Path(self.system.output.checkpoints.root).is_dir()
             )
             self.start_from_checkpoint = (
                 False if (self.dry_run and not bool(self.config.training.fork_run_id)) else self.start_from_checkpoint
@@ -590,8 +568,8 @@ class AnemoiTrainer(ABC):
             deterministic=self.config.training.deterministic,
             detect_anomaly=self.config.diagnostics.debug.anomaly_detection,
             strategy=self.strategy,
-            devices=self.config.system.hardware.num_gpus_per_node,
-            num_nodes=self.config.system.hardware.num_nodes,
+            devices=self.system.hardware.num_gpus_per_node,
+            num_nodes=self.system.hardware.num_nodes,
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,

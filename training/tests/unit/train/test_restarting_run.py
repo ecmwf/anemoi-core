@@ -83,6 +83,8 @@ def build_mock_config(
 def trainer_factory() -> AnemoiTrainer:
     def _make_trainer(mock_config: MagicMock) -> AnemoiTrainer:
         with (
+            patch("anemoi.training.train.train.build_schema", return_value=mock_config),
+            patch("anemoi.training.train.train.convert_to_omegaconf", return_value=mock_config),
             patch(
                 "anemoi.training.train.train.LOGGER",
             ),

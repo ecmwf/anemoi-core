@@ -17,6 +17,7 @@ from typing import Any
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import BaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
@@ -180,7 +181,7 @@ def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
     return [progress_bar]
 
 
-def get_callbacks(config: DictConfig) -> list[Callback]:
+def get_callbacks(config: DictConfig, system: DictConfig) -> list[Callback]:
     """Setup callbacks for PyTorch Lightning trainer.
 
     Set `config.diagnostics.callbacks` to a list of callback configurations
@@ -207,6 +208,8 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     ----------
     config : DictConfig
         Job configuration
+    system : DictConfig
+        Finalized system configuration to expose to callbacks
 
     Returns
     -------
@@ -214,29 +217,30 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
         A list of PyTorch Lightning callbacks
 
     """
+    runtime_config = OmegaConf.merge(config, {"system": system})
     trainer_callbacks: list[Callback] = []
 
     # Get Checkpoint callback
-    trainer_callbacks.extend(_get_checkpoint_callback(config))
+    trainer_callbacks.extend(_get_checkpoint_callback(runtime_config))
 
     # Base callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.callbacks)
+    trainer_callbacks.extend(instantiate(callback, runtime_config) for callback in runtime_config.diagnostics.callbacks)
 
     # Plotting callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+    trainer_callbacks.extend(instantiate(callback, runtime_config) for callback in runtime_config.diagnostics.plot.callbacks)
 
     # Extend with config enabled callbacks
-    trainer_callbacks.extend(_get_config_enabled_callbacks(config))
+    trainer_callbacks.extend(_get_config_enabled_callbacks(runtime_config))
 
     # Progress bar callback
-    trainer_callbacks.extend(_get_progress_bar_callback(config))
+    trainer_callbacks.extend(_get_progress_bar_callback(runtime_config))
 
     # Parent UUID callback
     # Check variable order callback
     # Register Migrations callback
     trainer_callbacks.extend(
         (
-            ParentUUIDCallback(config),
+            ParentUUIDCallback(runtime_config),
             CheckVariableOrder(),
             RegisterMigrations(),
         ),
