@@ -10,6 +10,7 @@
 
 import logging
 
+import pytest
 import torch
 from hypothesis import given
 from hypothesis import settings
@@ -81,25 +82,21 @@ class TestTransformerProcessorBlock:
                 "anemoi.models.layers.activations.SwiGLU",
             ]
         ),
-        window_size=st.integers(min_value=1, max_value=512),
         shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
         batch_size=st.integers(min_value=1, max_value=40),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
-        softcap=st.floats(min_value=0.0, max_value=1.0),
         qk_norm=st.booleans(),
     )
-    @settings(max_examples=10)
+    @settings(max_examples=10, deadline=None)
     def test_forward_output(
         self,
         factor_attention_heads,
         hidden_dim,
         num_heads,
         activation,
-        window_size,
         shapes,
         batch_size,
         dropout_p,
-        softcap,
         qk_norm,
     ):
         num_channels = num_heads * factor_attention_heads
@@ -113,11 +110,11 @@ class TestTransformerProcessorBlock:
             num_channels=num_channels,
             hidden_dim=hidden_dim,
             num_heads=num_heads,
-            window_size=window_size,
+            window_size=None,
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
-            softcap=softcap,
+            softcap=None,
             qk_norm=qk_norm,
         )
 
@@ -125,6 +122,47 @@ class TestTransformerProcessorBlock:
         output = block.forward(x, shapes, batch_size)
         assert isinstance(output[0], torch.Tensor)
         assert output[0].shape == (batch_size, num_channels)
+
+    def test_custom_attn_channels(self):
+        num_channels = 128
+        num_heads = 8
+        attn_channels = 96
+
+        block = TransformerProcessorBlock(
+            num_channels=num_channels,
+            hidden_dim=256,
+            attn_channels=attn_channels,
+            num_heads=num_heads,
+            window_size=None,
+            dropout_p=0.0,
+            layer_kernels=load_layer_kernels(),
+            attention_implementation="scaled_dot_product_attention",
+            softcap=None,
+            qk_norm=False,
+        )
+
+        assert block.attention.attn_channels == attn_channels
+        assert block.attention.projection.in_features == attn_channels
+        assert block.attention.projection.out_features == num_channels
+
+        x = torch.randn((4, num_channels))
+        output = block.forward(x, [[4, num_channels]], batch_size=1)
+        assert output[0].shape == (4, num_channels)
+
+    def test_custom_attn_channels_must_be_divisible_by_num_heads(self):
+        with pytest.raises(ValueError, match="attn_channels"):
+            TransformerProcessorBlock(
+                num_channels=128,
+                hidden_dim=256,
+                attn_channels=100,
+                num_heads=8,
+                window_size=None,
+                dropout_p=0.0,
+                layer_kernels=load_layer_kernels(),
+                attention_implementation="scaled_dot_product_attention",
+                softcap=None,
+                qk_norm=False,
+            )
 
 
 class TestGraphConvProcessorBlock:

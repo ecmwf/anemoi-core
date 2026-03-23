@@ -30,7 +30,6 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -108,7 +107,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(self.config, self.graph_data)
+        datamodule = AnemoiDatasetsDataModule(self.config)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -144,38 +143,6 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
-        """Create graph for a specific dataset, overriding the dataset path in config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
-
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        graph_config = self.config.graph
-
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
-
-        return GraphCreator(config=graph_config).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
-
     @cached_property
     @abstractmethod
     def profiler(self) -> None:
@@ -183,21 +150,103 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
+    def graph_data(self) -> HeteroData:
         """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
-        return graphs
+        # Determine filename
+        if (graph_filename := self.config.system.input.graph) is not None:
+            graph_filename = Path(graph_filename)
+
+            # Try loading existing
+            if graph_filename.exists() and not self.config.graph.overwrite:
+                from anemoi.graphs.utils import get_distributed_device
+
+                LOGGER.info("Loading graph data from %s", graph_filename)
+                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+
+            # TODO(): We could add some functionality to load partial graphs here, and compute the rest from the config.
+        else:
+            graph_filename = None
+
+        # Create new graph
+        from anemoi.graphs.create import GraphCreator
+
+        return GraphCreator(config=self.config.graph).create(
+            save_path=graph_filename,
+            overwrite=self.config.graph.overwrite,
+        )
+
+    def _validate_transfer_learning_datasets(
+        self,
+        model: pl.LightningModule,
+    ) -> None:
+        """Validate dataset compatibility between checkpoint and config for transfer learning.
+
+        This method handles multiple transfer learning scenarios when loading a checkpoint:
+
+        - **Scenario 1**: Exact match (checkpoint datasets == config datasets)
+          All weights are loaded normally.
+
+        - **Scenario 2**: Adding datasets (config has datasets not in checkpoint)
+          Missing datasets will have their encoder & decoder weights randomly initialized.
+          The shared processor weights are still transferred.
+
+        - **Scenario 3**: Removing datasets (checkpoint has datasets not in config)
+          Extra datasets in checkpoint are ignored (their weights are not loaded).
+
+        - **Scenario 4**: Swapping datasets (combination of scenarios 2 and 3)
+          Some datasets are added (randomly initialized), others are removed (ignored).
+
+        -----
+        - Logs warnings for datasets that are missing or ignored
+        - Logs info summary of loaded and initialized datasets
+        - The shared processor weights are always transferred
+        """
+        loaded_datasets = []
+        initialized_datasets = []
+
+        # Check if checkpoint has multi-dataset format
+        if not isinstance(model._ckpt_model_name_to_index, dict):
+            return
+
+        # Validate each dataset in current config against checkpoint
+        for dataset_name, data_indices in self.data_indices.items():
+            if dataset_name in model._ckpt_model_name_to_index:
+                # Dataset found in checkpoint - validate variables match
+                ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
+                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                loaded_datasets.append(dataset_name)
+            else:
+                # Dataset not found in checkpoint - will be randomly initialized
+                LOGGER.warning(
+                    "Dataset '%s' NOT found in checkpoint. Encoder & decoder weights will be randomly initialized!",
+                    dataset_name,
+                )
+                initialized_datasets.append(dataset_name)
+
+        # Check for datasets in checkpoint but not in config
+        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
+        if ignored_datasets:
+            for ignored_dataset in ignored_datasets:
+                LOGGER.warning(
+                    "Dataset '%s' found in checkpoint but NOT in config. "
+                    "Encoder & decoder weights for '%s' will be ignored.",
+                    ignored_dataset,
+                    ignored_dataset,
+                )
+
+        # Log summary of what was loaded
+        if loaded_datasets:
+            LOGGER.info("Successfully loaded weights for datasets: %s", loaded_datasets)
+        if initialized_datasets:
+            LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
 
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
         assert (
             not (
-                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
+                "layer_kernels" in self.config.model.processor
+                and "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
                 and ".Transformer" in self.config.model.processor.target_
             )
             and not (
@@ -243,9 +292,8 @@ class AnemoiTrainer(ABC):
                 )
 
             model.data_indices = self.data_indices
-            # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            # Validate data indices between checkpoint and current config
+            self._validate_transfer_learning_datasets(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights

@@ -33,7 +33,6 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.models import AnemoiModelEncProcDecInterpolator
 from anemoi.training.diagnostics.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
@@ -81,6 +80,7 @@ class BasePlotCallback(Callback, ABC):
         self._executor = None
         self._error: BaseException = None
         self.datashader_plotting = config.diagnostics.plot.datashader
+        self.projection_kind = getattr(config.diagnostics.plot, "projection_kind", "equirectangular")
 
         if self.config.diagnostics.plot.asynchronous:
             LOGGER.info("Setting up asynchronous plotting ...")
@@ -95,17 +95,14 @@ class BasePlotCallback(Callback, ABC):
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
-    def _get_init_step(self, rollout_step: int, mode: tuple) -> int:
-        """Return index of initial step for plotting."""
-        return rollout_step if mode == "time_interp" else 0
+    @property
+    def artifact_subfolder(self) -> str:
+        """Return the artifact subfolder name for experiment logging.
 
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
-        """Return times outputted by the model."""
-        if isinstance(pl_module.model.model, AnemoiModelEncProcDecInterpolator):
-            output_times = (len(config.training.explicit_times.target), "time_interp")
-        else:
-            output_times = (getattr(pl_module, "rollout", 0), "forecast")
-        return output_times
+        Used by MLflow to organize artifacts into per-callback folders.
+        Derived automatically from the concrete callback class name.
+        """
+        return type(self).__name__
 
     @rank_zero_only
     def _output_figure(
@@ -134,7 +131,7 @@ class BasePlotCallback(Callback, ABC):
                 logger.experiment.log({exp_log_tag: wandb.Image(fig)})
             elif logger and logger.logger_name == "mlflow":
                 run_id = logger.run_id
-                logger.experiment.log_artifact(run_id, str(save_path))
+                logger.experiment.log_artifact(run_id, str(save_path), artifact_path=self.artifact_subfolder)
 
         plt.close(fig)  # cleanup
 
@@ -163,7 +160,7 @@ class BasePlotCallback(Callback, ABC):
 
             if self.config.diagnostics.log.mlflow.enabled:
                 run_id = logger.run_id
-                logger.experiment.log_artifact(run_id, str(save_path))
+                logger.experiment.log_artifact(run_id, str(save_path), artifact_path=self.artifact_subfolder)
 
         plt.close(fig)  # cleanup
 
@@ -280,27 +277,19 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 
             # gather tensors if necessary
             batch = {
-                dataset_name: pl_module.allgather_batch(
-                    dataset_tensor,
-                    pl_module.grid_indices[dataset_name],
-                    pl_module.grid_dim,
-                )
+                dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
                 for dataset_name, dataset_tensor in batch.items()
             }
-            # output: [loss, [pred_dict1, pred_dict2, ...]], gather predictions for plotting
+            # output: (loss, [pred_dict1, pred_dict2, ...]); all tasks return a list of per-step dicts.
             preds = output[1]
-            if isinstance(preds, dict):
-                preds = [preds]
+            if not isinstance(preds, list):
 
+                raise TypeError(preds)
             output = [
                 output[0],
                 [
                     {
-                        dataset_name: pl_module.allgather_batch(
-                            dataset_pred,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
-                        )
+                        dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
                         for dataset_name, dataset_pred in pred.items()
                     }
                     for pred in preds
@@ -315,12 +304,9 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                     if hasattr(post_processor, "nan_locations"):
                         post_processor.nan_locations = pl_module.allgather_batch(
                             post_processor.nan_locations,
-                            pl_module.grid_indices[dataset_name],
-                            pl_module.grid_dim,
+                            dataset_name,
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
-
-            output_times = self._get_output_times(self.config, pl_module)
 
             self.plot(
                 trainer,
@@ -330,7 +316,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                output_times=output_times,
                 **kwargs,
             )
 
@@ -366,14 +351,11 @@ class BasePerEpochPlotCallback(BasePlotCallback):
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
 
-            output_times = self._get_output_times(self.config, pl_module)
-
             self.plot(
                 trainer,
                 pl_module,
                 self.dataset_names,
                 epoch=trainer.current_epoch,
-                output_times=output_times,
                 **kwargs,
             )
 
@@ -493,13 +475,14 @@ class LongRolloutPlots(BasePlotCallback):
         plot_parameters_dict = {
             pl_module.data_indices.model.output.name_to_index[name]: (
                 name,
-                name not in self.config.data.get("diagnostic", []),
+                name in self.config.data.get("diagnostic", []),
             )
             for name in self.parameters
         }
         if self.latlons is None:
-            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
+            for dataset_name in self.dataset_names:
+                self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+                self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         assert batch.shape[1] >= self.max_rollout + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
@@ -611,7 +594,9 @@ class LongRolloutPlots(BasePlotCallback):
             data_0.squeeze(),
             data_rollout_step.squeeze(),
             output_tensor[0, 0, :, :],  # rolloutstep, first member
+            datashader=self.datashader_plotting,
             colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
         )
         self._output_figure(
             logger,
@@ -750,16 +735,32 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         super().__init__(config, dataset_names=dataset_names, every_n_epochs=every_n_epochs)
         self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
 
-    def get_node_trainable_tensors(
-        self,
-        node_attributes: NamedNodesAttributes,
-        dataset_name: str,
-    ) -> dict[str, torch.Tensor]:
+    def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
         return {
-            name: tt.trainable
-            for name, tt in node_attributes[dataset_name].trainable_tensors.items()
-            if tt.trainable is not None
+            name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None
         }
+
+    @staticmethod
+    def _resolve_edge_provider(provider: Any, dataset_name: str) -> Any:
+        if provider is None:
+            return None
+        if isinstance(provider, (dict, torch.nn.ModuleDict)):
+            if dataset_name in provider:
+                return provider[dataset_name]
+            return None
+        return provider
+
+    @staticmethod
+    def _has_trainable_edge_params(provider: Any) -> bool:
+        if provider is None:
+            return False
+        trainable_module = getattr(provider, "trainable", None)
+        if trainable_module is None:
+            return False
+        # Graph providers has TrainableTensor -> .trainable;
+        # parameter is nested as .trainable.trainable.
+        trainable_parameter = getattr(trainable_module, "trainable", None)
+        return trainable_parameter is not None
 
     def get_edge_trainable_modules(
         self,
@@ -776,37 +777,15 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         # but only for the modules (encoder/processor/decoder).
         trainable_modules = {}
 
-        # Check encoder
-        if (
-            hasattr(model, "encoder_graph_provider")
-            and dataset_name in model.encoder_graph_provider
-            and hasattr(model.encoder_graph_provider[dataset_name], "trainable")
-            and model.encoder_graph_provider[dataset_name].trainable is not None
-            and model.encoder_graph_provider[dataset_name].trainable.trainable is not None
-        ):
-            trainable_modules[(model._graph_name_data, model._graph_name_hidden)] = model.encoder_graph_provider[
-                dataset_name
-            ]
-
-        # Check decoder
-        if (
-            hasattr(model, "decoder_graph_provider")
-            and dataset_name in model.decoder_graph_provider
-            and hasattr(model.decoder_graph_provider[dataset_name], "trainable")
-            and model.decoder_graph_provider[dataset_name].trainable is not None
-            and model.decoder_graph_provider[dataset_name].trainable.trainable is not None
-        ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_data)] = model.decoder_graph_provider[
-                dataset_name
-            ]
-
-        # Check processor
-        if (
-            hasattr(model, "processor_graph_provider")
-            and model.processor_graph_provider.trainable is not None
-            and model.processor_graph_provider.trainable.trainable is not None
-        ):
-            trainable_modules[(model._graph_name_hidden, model._graph_name_hidden)] = model.processor_graph_provider
+        provider_specs = (
+            ("encoder_graph_provider", (dataset_name, model._graph_name_hidden)),
+            ("decoder_graph_provider", (model._graph_name_hidden, dataset_name)),
+            ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
+        )
+        for provider_name, edge_key in provider_specs:
+            provider = self._resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
+            if self._has_trainable_edge_params(provider):
+                trainable_modules[edge_key] = provider
 
         return trainable_modules
 
@@ -820,10 +799,12 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
+        node_trainable_tensors = self.get_node_trainable_tensors(model.node_attributes)
+
         for dataset_name in dataset_names:
-            if len(node_trainable_tensors := self.get_node_trainable_tensors(model.node_attributes, dataset_name)):
+            if dataset_name in node_trainable_tensors and node_trainable_tensors[dataset_name] is not None:
                 fig = plot_graph_node_features(
-                    model.node_attributes[dataset_name],
+                    model.node_attributes,
                     node_trainable_tensors,
                     datashader=self.datashader_plotting,
                 )
@@ -846,7 +827,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
                 )
             elif len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
                 fig = plot_graph_edge_features(
-                    model.node_attributes[dataset_name],
+                    model.node_attributes,
                     edge_trainable_modules,
                     q_extreme_limit=self.q_extreme_limit,
                 )
@@ -860,16 +841,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
                 )
             else:
                 LOGGER.warning("There are no trainable edge attributes to plot.")
-
-    @rank_zero_only
-    def on_validation_epoch_end(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        **kwargs,
-    ) -> None:
-
-        self.plot(trainer, pl_module, self.dataset_names, epoch=trainer.current_epoch, **kwargs)
 
 
 class PlotLoss(BasePerBatchPlotCallback):
@@ -1007,7 +978,6 @@ class PlotLoss(BasePerBatchPlotCallback):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
     ) -> None:
         logger = trainer.logger
         _ = batch_idx
@@ -1018,8 +988,8 @@ class PlotLoss(BasePerBatchPlotCallback):
         for dataset_name in dataset_names:
 
             data_indices = pl_module.data_indices[dataset_name]
-            parameter_names = list(data_indices.model.output.name_to_index.keys())
-            parameter_positions = list(data_indices.model.output.name_to_index.values())
+            parameter_names = list[str](data_indices.model.output.name_to_index.keys())
+            parameter_positions = list[int](data_indices.model.output.name_to_index.values())
             # reorder parameter_names by position
             parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
             metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
@@ -1036,12 +1006,10 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            if output_times[1] != "forecast":
-                output_times = [1]
-
-            for rollout_step in range(output_times[0]):
+            adapter = pl_module.plot_adapter
+            for rollout_step in range(adapter.loss_plot_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
-                start = pl_module.n_step_input + rollout_step * pl_module.n_step_output
+                start = adapter.get_loss_plot_batch_start(rollout_step)
                 y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
                 var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
                 y_true = y_time.index_select(-1, var_idx)
@@ -1076,15 +1044,16 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
             for dataset in self.loss:
-                if (
-                    hasattr(self.loss[dataset].scaler, "nan_mask_weights")
-                    and self.loss[dataset].scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-                ):
-                    self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(
-                        self.loss[dataset].scaler.nan_mask_weights,
-                        pl_module.grid_indices[dataset],
-                        pl_module.grid_dim,
-                    )
+                for leaf_loss in self.loss[dataset].iter_leaf_losses():
+                    if (
+                        hasattr(leaf_loss, "scaler")
+                        and hasattr(leaf_loss.scaler, "nan_mask_weights")
+                        and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+                    ):
+                        leaf_loss.scaler.nan_mask_weights = pl_module.allgather_batch(
+                            leaf_loss.scaler.nan_mask_weights,
+                            dataset,
+                        )
 
             super().on_validation_batch_end(
                 trainer,
@@ -1121,22 +1090,44 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
-        output_times: tuple,
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
+        Parameters
+        ----------
+        pl_module : pl.LightningModule
+            The LightningModule instance
+        dataset_name : str
+            The name of the dataset to process
+        outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
+            The outputs from the model. The second element must be a list of dicts
+            (one per outer step). Tasks with a single step (e.g. diffusion, multi-out
+            interpolator) must return [y_pred] so that ``for x in outputs[1]``
+            iterates over steps; if they return the dict directly, iteration would
+            be over dataset names and indexing would fail.
+        batch : dict[str, torch.Tensor]
+            The batch of data
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            The data and output tensors for plotting
+        """
         if self.latlons is None:
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name][
-                pl_module.model.model._graph_name_data
-            ].x.detach()
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
+        # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
+        assert isinstance(
+            outputs[1],
+            list,
+        ), "outputs[1] must be a list of per-step dicts."
+
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = output_times[0]
-        if output_times[1] == "forecast":
-            total_targets *= pl_module.n_step_output
+        total_targets = pl_module.plot_adapter.get_total_plot_targets()
 
         input_tensor = (
             batch[dataset_name][
@@ -1157,9 +1148,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 for x in outputs[1]
             ),
         )
-        if output_times[1] == "time_interp" and output_tensor.ndim == 5 and output_tensor.shape[0] == 1:
-            # Multi-out interpolator: rollouts are packed in the time dimension.
-            output_tensor = output_tensor.squeeze(0)
+
+        output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
         output_tensor = (
             pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
         )
@@ -1240,7 +1230,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
     ) -> None:
         logger = trainer.logger
 
@@ -1254,12 +1243,12 @@ class PlotSample(BasePlotAdditionalMetrics):
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
-                    name not in diagnostics,
+                    name in diagnostics,
                 )
                 for name in self.parameters
             }
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             local_rank = pl_module.local_rank
 
@@ -1271,64 +1260,43 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            if output_times[1] == "forecast":
-                max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
-                    for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
-                        fig = plot_predicted_multilevel_flat_sample(
-                            plot_parameters_dict,
-                            self.per_sample,
-                            latlons,
-                            self.accumulation_levels_plot,
-                            data[init_step, ...].squeeze(),
-                            data[truth_idx, ...].squeeze(),
-                            output_tensor[rollout_step, out_step, ...],
-                            datashader=self.datashader_plotting,
-                            precip_and_related_fields=self.precip_and_related_fields,
-                            colormaps=self.colormaps,
-                        )
+            for item in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                pl_module.plot_adapter.output_times,
+                max_out_steps=self.output_steps,
+            ):
+                if len(item) == 3:
+                    x, y_pred, tag_suffix = item
+                    y_true = None
+                else:
+                    x, y_true, y_pred, tag_suffix = item
+                fig = plot_predicted_multilevel_flat_sample(
+                    plot_parameters_dict,
+                    self.per_sample,
+                    latlons,
+                    self.accumulation_levels_plot,
+                    x,
+                    y_true,
+                    y_pred,
+                    datashader=self.datashader_plotting,
+                    precip_and_related_fields=self.precip_and_related_fields,
+                    colormaps=self.colormaps,
+                    projection_kind=self.projection_kind,
+                )
 
-                        self._output_figure(
-                            logger,
-                            fig,
-                            epoch=epoch,
-                            tag=(
-                                "pred_val_sample_"
-                                f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
-                                f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                            exp_log_tag=(
-                                "val_pred_sample_"
-                                f"{dataset_name}_rstep{rollout_step:02d}_out{out_step:02d}_"
-                                f"rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                        )
-            else:
-                for rollout_step in range(output_times[0]):
-                    interp_step = rollout_step + 1
-                    init_step = self._get_init_step(rollout_step, output_times[1])
-                    fig = plot_predicted_multilevel_flat_sample(
-                        plot_parameters_dict,
-                        self.per_sample,
-                        latlons,
-                        self.accumulation_levels_plot,
-                        data[init_step, ...].squeeze(),
-                        data[rollout_step + 1, ...].squeeze(),
-                        output_tensor[rollout_step, ...],
-                        datashader=self.datashader_plotting,
-                        precip_and_related_fields=self.precip_and_related_fields,
-                        colormaps=self.colormaps,
-                    )
-
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=f"pred_val_sample_{dataset_name}_istep{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                        exp_log_tag=f"val_pred_sample_{dataset_name}_istep{interp_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                    )
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=(
+                        f"pred_val_sample_{dataset_name}_{tag_suffix}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    exp_log_tag=(
+                        f"val_pred_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                )
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
@@ -1381,13 +1349,12 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
     ) -> None:
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
         for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
@@ -1398,7 +1365,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             )
 
         for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
             diagnostics = (
@@ -1409,61 +1376,43 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             plot_parameters_dict_spectrum = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
-                    name not in diagnostics,
+                    name in diagnostics,
                 )
                 for name in self.parameters
             }
 
-            if output_times[1] == "forecast":
-                max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
-                    for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
-                        fig = plot_power_spectrum(
-                            plot_parameters_dict_spectrum,
-                            latlons,
-                            data[init_step, ...].squeeze(),
-                            data[truth_idx, ...].squeeze(),
-                            output_tensor[rollout_step, out_step, ...],
-                            min_delta=self.min_delta,
-                        )
+            for item in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                pl_module.plot_adapter.output_times,
+                max_out_steps=self.output_steps,
+            ):
+                if len(item) == 3:
+                    x, y_pred, tag_suffix = item
+                    y_true = None
+                else:
+                    x, y_true, y_pred, tag_suffix = item
+                fig = plot_power_spectrum(
+                    plot_parameters_dict_spectrum,
+                    latlons,
+                    x,
+                    y_true,
+                    y_pred,
+                    min_delta=self.min_delta,
+                )
 
-                        self._output_figure(
-                            logger,
-                            fig,
-                            epoch=epoch,
-                            tag=(
-                                "pred_val_spec_"
-                                f"{dataset_name}_rstep_{rollout_step:02d}_out{out_step:02d}_"
-                                f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                            exp_log_tag=(
-                                "pred_val_spec_"
-                                f"{dataset_name}_rstep_{rollout_step:02d}_out{out_step:02d}_"
-                                f"rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                        )
-            else:
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
-                    interp_step = rollout_step + 1
-                    fig = plot_power_spectrum(
-                        plot_parameters_dict_spectrum,
-                        latlons,
-                        data[init_step, ...].squeeze(),
-                        data[rollout_step + 1, ...].squeeze(),
-                        output_tensor[rollout_step, ...],
-                        min_delta=self.min_delta,
-                    )
-
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=f"pred_val_spec_{dataset_name}_istep_{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                        exp_log_tag=f"pred_val_spec_{dataset_name}_istep_{interp_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                    )
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=(
+                        f"pred_val_spec_{dataset_name}_{tag_suffix}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    exp_log_tag=(
+                        f"pred_val_spec_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                )
 
 
 class PlotHistogram(BasePlotAdditionalMetrics):
@@ -1524,7 +1473,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        output_times: tuple,
     ) -> None:
         logger = trainer.logger
 
@@ -1532,7 +1480,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
             diagnostics = (
@@ -1551,58 +1499,40 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             plot_parameters_dict_histogram = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
-                    name not in diagnostics,
+                    name in diagnostics,
                 )
                 for name in self.parameters
             }
 
-            if output_times[1] == "forecast":
-                max_out_steps = min(pl_module.n_step_output, self.output_steps)
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
-                    for out_step in range(max_out_steps):
-                        truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
-                        fig = plot_histogram(
-                            plot_parameters_dict_histogram,
-                            data[init_step, ...].squeeze(),
-                            data[truth_idx, ...].squeeze(),
-                            output_tensor[rollout_step, out_step, ...],
-                            self.precip_and_related_fields,
-                            self.log_scale,
-                        )
+            for item in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                pl_module.plot_adapter.output_times,
+                max_out_steps=self.output_steps,
+            ):
+                if len(item) == 3:
+                    x, y_pred, tag_suffix = item
+                    y_true = None
+                else:
+                    x, y_true, y_pred, tag_suffix = item
+                fig = plot_histogram(
+                    plot_parameters_dict_histogram,
+                    x,
+                    y_true,
+                    y_pred,
+                    self.precip_and_related_fields,
+                    self.log_scale,
+                )
 
-                        self._output_figure(
-                            logger,
-                            fig,
-                            epoch=epoch,
-                            tag=(
-                                "pred_val_histo_"
-                                f"{dataset_name}_rstep_{rollout_step:02d}_out{out_step:02d}_"
-                                f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                            exp_log_tag=(
-                                "pred_val_histo_"
-                                f"{dataset_name}_rstep_{rollout_step:02d}_out{out_step:02d}_"
-                                f"rank{local_rank:01d}{self.focus_mask.tag}"
-                            ),
-                        )
-            else:
-                for rollout_step in range(output_times[0]):
-                    init_step = self._get_init_step(rollout_step, output_times[1])
-                    interp_step = rollout_step + 1
-                    fig = plot_histogram(
-                        plot_parameters_dict_histogram,
-                        data[init_step, ...].squeeze(),
-                        data[rollout_step + 1, ...].squeeze(),
-                        output_tensor[rollout_step, ...],
-                        self.precip_and_related_fields,
-                        self.log_scale,
-                    )
-
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=f"pred_val_histo_{dataset_name}_istep_{interp_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                        exp_log_tag=f"pred_val_histo_{dataset_name}_istep_{interp_step:02d}_rank{local_rank:01d}{self.focus_mask.tag}",
-                    )
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=(
+                        f"pred_val_histo_{dataset_name}_{tag_suffix}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    exp_log_tag=(
+                        f"pred_val_histo_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                )

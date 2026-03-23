@@ -81,6 +81,34 @@ To set up experiment tracking:
 #. Start the experiment tracking server and monitor your training runs
    in real-time.
 
+****************************
+ Reproducibility and Seeding
+****************************
+
+Anemoi Training seeds the random number generators used during training
+to control stochastic parts of a run. This helps repeat experiments, but
+it does not guarantee exact reproducibility across hardware, software
+versions, or distributed executions because floating-point numerics and
+parallel reductions can still differ slightly.
+
+-  Set ``ANEMOI_BASE_SEED`` explicitly if you want a fixed base seed for
+   a run.
+-  If ``ANEMOI_BASE_SEED`` is not set, Anemoi Training uses
+   ``SLURM_JOB_ID`` when running inside a SLURM job.
+-  If neither value is available, Anemoi Training falls back to ``42``.
+
+When restarting from a checkpoint, avoid reusing the same manual base
+seed. Checkpoints restore model and optimizer state, but not the
+random-number streams used during training and data loading, so the same
+seed can replay the same sequence of random choices after restart. This
+is usually not a concern when the seed comes from ``SLURM_JOB_ID``,
+because a new SLURM job normally gets a new job ID.
+
+Seeds below ``1000`` are multiplied by ``1000`` before use, so a
+fallback seed of ``42`` appears in logs as an effective seed of
+``42000``. This normalized base seed is logged during training and
+stored in checkpoint metadata.
+
 Step 5: Execute Training
 ========================
 
@@ -194,20 +222,6 @@ and the batch size. ``num_workers`` relates to model parallelisation.
       validation: null
       test: 20
 
-The grid points being modelled are also defined. In many cases this will
-be the full grid. For limited area modelling, you may want to define a
-set of target indices which mask/remove some grid points, leaving only
-the area being modelled.
-
-.. code:: yaml
-
-   # set a custom mask for grid points.
-   # Useful for LAM (dropping unconnected nodes from forcing dataset)
-   grid_indices:
-      datasets:
-         your_dataset_name:
-            _target_: anemoi.training.data.grid_indices.FullGrid
-            nodes_name: ${graph.data}
 
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we
@@ -223,7 +237,9 @@ time of each section of the data.
 This can be given as a full date, or just the year, or year and month,
 in these cases the first of the month/first of the year is used.
 
-We also define the dataset used and the frequency. These can be set
+We also define the dataset reader options under ``dataset_config``.
+This includes the dataset source (``dataset``) and optional keys such as
+``frequency``, ``drop``, ``select`` and ``statistics``. These can be set
 separately for the different training/validation/test parts of the
 dataset `your_dataset_name`, for example, if test data is stored in a
 different file.
@@ -309,8 +325,6 @@ performed. The user can specify the imputer for each dataset by setting
 ensuring that the variable value over NaNs becomes zero after mean-std
 normalisation. Another option is to impute with a given constant.
 
-The ``DynamicInputImputer`` can be used for fields where the NaN
-locations change in time.
 
 .. code:: yaml
 

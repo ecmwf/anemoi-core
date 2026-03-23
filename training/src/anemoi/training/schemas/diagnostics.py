@@ -211,7 +211,7 @@ class PlotEnsSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-    members: list[int] | None = Field(default=None)
+    members: list[int] | int | None = Field(default=None)
     "List of ensemble members to plot. If None, plots all members."
     focus_area: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
@@ -303,6 +303,11 @@ class PlotSchema(PydanticBaseModel):
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
+    projection_kind: Literal["equirectangular", "lambert_conformal"] = Field(
+        default="equirectangular",
+        examples=["equirectangular", "lambert_conformal"],
+    )
+    "Map projection for diagnostics plots: 'equirectangular' or 'lambert_conformal'."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
 
