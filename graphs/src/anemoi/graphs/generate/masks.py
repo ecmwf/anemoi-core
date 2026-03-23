@@ -23,16 +23,24 @@ LOGGER = logging.getLogger(__name__)
 
 TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
 
+
 class RadiusAreaMaskBuilder:
     """Class to build a mask based on a radius search using the similarity of the cosine between
     two points on the unit sphere and their great-circle distance.
-    
+
     If torch_cluster is available: all calculations are done as torch tensors!
-        i) use_gpu = True: Calculations are done on the GPU 
+        i) use_gpu = True: Calculations are done on the GPU
         ii) use_gpu = False: Calculations are done on the CPU
     Else falling back to scipy.spatial.cKDTree (on CPU)
     """
-    def __init__(self, reference_node_name: str, margin_radius_km: float = 100, mask_attr_name: str | None = None, use_gpu: bool = False):
+
+    def __init__(
+        self,
+        reference_node_name: str,
+        margin_radius_km: float = 100,
+        mask_attr_name: str | None = None,
+        use_gpu: bool = False,
+    ):
         assert isinstance(margin_radius_km, (int, float)), "The margin radius must be a number."
         assert margin_radius_km > 0, "The margin radius must be positive."
 
@@ -47,13 +55,12 @@ class RadiusAreaMaskBuilder:
         if use_gpu and not TORCH_CLUSTER_AVAILABLE:
             LOGGER.warning("The 'torch-cluster library is not installed, cannot use the GPU. Falling back scipy + CPU")
             self.use_gpu = False
-        
 
     @property
     def _chord_threshold(self) -> float:
         """Euclidean chord length threshold equivalent to margin_radius_km."""
         return float(2 * np.sin(self.margin_radius_km / (2 * EARTH_RADIUS)))
-    
+
     @staticmethod
     def _to_unit_sphere_torch(coords_rad: torch.Tensor) -> torch.Tensor:
         """Convert (lat, lon) in radians to 3D unit-sphere coordinates.
@@ -69,7 +76,7 @@ class RadiusAreaMaskBuilder:
             Unit-sphere Cartesian coordinates, in float32.
         """
         LOGGER.debug(f"coords_rad is on device: {coords_rad.device}")
-        #TODO: We can cast to torch.float32 for larger chunksize (faster computations)
+        # TODO: We can cast to torch.float32 for larger chunksize (faster computations)
         # But then graphs old graphs are not 100% reproducable (typically have 3 ~ 5 more points at the mask boundary)
         coords_rad = coords_rad.to(torch.float64)
         lat, lon = coords_rad[:, 0], coords_rad[:, 1]
@@ -77,7 +84,7 @@ class RadiusAreaMaskBuilder:
         y = torch.cos(lat) * torch.sin(lon)
         z = torch.sin(lat)
         return torch.stack([x, y, z], dim=1)
-    
+
     @staticmethod
     def _to_unit_sphere(coords_rad: np.ndarray) -> np.ndarray:
         """Convert (lat, lon) in radians to 3D unit-sphere coordinates.
@@ -98,7 +105,7 @@ class RadiusAreaMaskBuilder:
         y = np.cos(lat) * np.sin(lon)
         z = np.sin(lat)
         return np.stack([x, y, z], axis=1)
-    
+
     def get_reference_coords(self, graph: HeteroData) -> torch.Tensor:
         """Retrieve coordinates from the reference nodes (kept on device).
 
@@ -125,7 +132,7 @@ class RadiusAreaMaskBuilder:
             coords_rad = coords_rad[mask]
 
         return coords_rad
-    
+
     def fit_coords(self, coords_rad: torch.Tensor) -> None:
         """Store the reference unit-sphere vectors.
 
@@ -136,8 +143,9 @@ class RadiusAreaMaskBuilder:
         """
         if TORCH_CLUSTER_AVAILABLE:
             self._ref_vectors = self._to_unit_sphere_torch(coords_rad)
-        else: 
+        else:
             from scipy.spatial import cKDTree
+
             LOGGER.debug("Using cKDTree")
             self._ref_vectors = self._to_unit_sphere(coords_rad)
             self._kdtree = cKDTree(self._ref_vectors)
@@ -154,7 +162,9 @@ class RadiusAreaMaskBuilder:
         if self.mask_attr_name is not None:
             reference_mask_str += f" ({self.mask_attr_name})"
 
-        coords_rad = self.get_reference_coords(graph) # This is always a torch.Tensor | when cluster is available coords_rad lives on the GPU
+        coords_rad = self.get_reference_coords(
+            graph
+        )  # This is always a torch.Tensor | when cluster is available coords_rad lives on the GPU
         if not TORCH_CLUSTER_AVAILABLE:
             self.fit_coords(coords_rad.cpu().numpy())
         elif not self.use_gpu:
@@ -185,30 +195,32 @@ class RadiusAreaMaskBuilder:
         torch.Tensor of shape (N_query,)
             Boolean mask, True where the query node is within margin_radius_km
             of at least one reference node.
-        
-            
+
         """
         # TODO: Do we calculate the dot-product on the GPU (less transfer but lower available memory, thus need to chunk)
         # Or on the CPU (not tested yet, is it faster? We do have typically more memory available --> less chunking).
         assert self._ref_vectors is not None, "The model must be fitted before calling get_mask."
         LOGGER.debug("Getting mask from RadiusAreaMaskBuilder")
         t0 = time.time()
-        
+
         # The coords_rad from the query (typically the processor/hidden nodes) are produced on the CPU as numpy.ndarray.
-        # Need to convert them to torch.Tensor and move them to the correct device. 
+        # Need to convert them to torch.Tensor and move them to the correct device.
         if TORCH_CLUSTER_AVAILABLE:
             from torch_geometric.nn import radius
+
             LOGGER.debug("Using torch-cluster.radius")
 
             query_vectors = self._to_unit_sphere_torch(
-                torch.from_numpy(coords_rad).to(self._ref_vectors.device)   
-            ) # (N_query, 3)
-            LOGGER.debug(f"Reference vectors are on {self._ref_vectors.device}, query vectors are one {query_vectors.device}")
+                torch.from_numpy(coords_rad).to(self._ref_vectors.device)
+            )  # (N_query, 3)
+            LOGGER.debug(
+                f"Reference vectors are on {self._ref_vectors.device}, query vectors are one {query_vectors.device}"
+            )
             edge_index = radius(
-                x=self._ref_vectors,    # reference points
-                y=query_vectors,        # query points
+                x=self._ref_vectors,  # reference points
+                y=query_vectors,  # query points
                 r=self._chord_threshold,
-                max_num_neighbors=1
+                max_num_neighbors=1,
             )
 
             mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
@@ -216,20 +228,19 @@ class RadiusAreaMaskBuilder:
             mask = mask.cpu().numpy()
         else:
             assert self._kdtree is not None, "The model must be fitted before calling get_mask."
-            query_vectors = self._to_unit_sphere(
-                coords_rad
+            query_vectors = self._to_unit_sphere(coords_rad)
+            LOGGER.debug("Reference vectors are on cpu, query vectors are one cpu")
+            counts = self._kdtree.query_ball_point(
+                query_vectors, r=self._chord_threshold, workers=-1, return_length=True
             )
-            LOGGER.debug(f"Reference vectors are on cpu, query vectors are one cpu")
-            counts = self._kdtree.query_ball_point(query_vectors, r=self._chord_threshold, workers=-1, return_length=True)
             mask = counts > 0
-
 
         t1 = time.time()
         LOGGER.debug("Time to get mask from (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         # Bring the mask back to the CPU and return as numpy.ndarray
         return mask
-    
+
 
 class KNNAreaMaskBuilder:
     """Class to build a mask based on distance to masked reference nodes using KNN.
