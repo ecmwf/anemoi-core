@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-import functools
 from collections import deque
 from typing import Any
 
@@ -89,14 +88,12 @@ def expand_iterables(
         'a.length': 3,
         'a.all': [[0, 1, 2], 'b', 'c']}
     """
-
     list_types = list | tuple | ListConfig
     dict_types = dict | DictConfig
     expandable_types = dict_types | list_types
 
     def should_be_expanded(value: list_types) -> bool:
         return any(isinstance(item, expandable_types) for item in value)
-
 
     if isinstance(params, list_types):
         if not should_be_expanded(params):

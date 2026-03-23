@@ -73,4 +73,4 @@ def test_expand_iterables_with_omegaconf() -> None:
         "a.length": 3,
     }
     # Note that ListConfig and plain list are comparible and that ListConfig (and lists) of primitives are preserved
-    assert isinstance(expanded['a'][0], ListConfig)
+    assert isinstance(expanded["a"][0], ListConfig)
