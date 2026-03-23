@@ -405,7 +405,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
             #take the first cache hit
             remote_rank = cache_hits[0] # TODO could be smarter by picking local ranks 
             remote_cache_url=self._get_remote_cache_url(remote_rank)
-            LOGGER.info(f"Rank {self.rank}: accessing date={date} on rank {remote_rank} at {remote_cache_url=}")
+            #LOGGER.info(f"Rank {self.rank}: accessing date={date} on rank {remote_rank} at {remote_cache_url=}")
             
             try:
                 data = zarr.open(remote_cache_url, mode="r")[date]
