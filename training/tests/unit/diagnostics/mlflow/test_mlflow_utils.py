@@ -42,37 +42,22 @@ def test_expand_iterables_single_iterable() -> None:
     # Test case with a single iterable
     dictionary = {"a": ["a", "b", "c"]}
     expanded = expand_iterables(dictionary)
-    assert expanded == {"a.0": "a", "a.1": "b", "a.2": "c", "a.all": ["a", "b", "c"], "a.length": 3}
-
-
-def test_expand_iterables_size_threshold() -> None:
-    # Test case with a single iterable
-    dictionary = {"a": ["a", "b", "c"]}
-    expanded = expand_iterables(dictionary, size_threshold=100)
-    assert expanded == dictionary
+    assert expanded == {"a": ["a", "b", "c"]}
 
 
 def test_expand_iterables_with_nested_dict() -> None:
     dictionary = {"a": {"b": ["a", "b", "c"]}}
     expanded = expand_iterables(dictionary)
-    assert expanded == {"a": {"b.0": "a", "b.1": "b", "b.2": "c", "b.all": ["a", "b", "c"], "b.length": 3}}
-
-
-def test_expand_iterables_with_nested_dict_thresholded() -> None:
-    dictionary = {"a": {"b": ["a", "b", "c"]}, "c": ["d"]}
-    expanded = expand_iterables(dictionary, size_threshold=5)
-    assert expanded == {"a": {"b.0": "a", "b.1": "b", "b.2": "c", "b.all": ["a", "b", "c"], "b.length": 3}, "c": ["d"]}
+    assert expanded == {"a": {"b": ["a", "b", "c"]}}
 
 
 def test_expand_iterables_with_nested_list() -> None:
     dictionary = {"a": [[0, 1, 2], "b", "c"]}
     expanded = expand_iterables(dictionary)
     assert expanded == {
-        "a.0": {0: 0, 1: 1, 2: 2},
-        "a.1": "b",
-        "a.2": "c",
-        "a.all": [[0, 1, 2], "b", "c"],
+        "a": {0: [0, 1, 2], 1: "b", 2: "c"},
         "a.length": 3,
+        "a.all": [[0, 1, 2], "b", "c"],
     }
 
 
@@ -83,9 +68,9 @@ def test_expand_iterables_with_omegaconf() -> None:
     dictionary = DictConfig({"a": ListConfig([ListConfig([0, 1, 2]), "b", "c"])})
     expanded = expand_iterables(dictionary)
     assert expanded == {
-        "a.0": {0: 0, 1: 1, 2: 2},
-        "a.1": "b",
-        "a.2": "c",
+        "a": {0: [0, 1, 2], 1: "b", 2: "c"},
         "a.all": [[0, 1, 2], "b", "c"],
         "a.length": 3,
     }
+    # Note that ListConfig and plain list are comparible and that ListConfig (and lists) of primitives are preserved
+    assert isinstance(expanded['a'][0], ListConfig)
