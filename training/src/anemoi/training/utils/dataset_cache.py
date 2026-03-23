@@ -318,8 +318,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
     def print_cache_stats(self) -> None:
         """Print cache statistics."""
         total = self.total_fetches.value
-
-        #LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local}, hits_remote={self.cache_hits_remote}, misses={self.cache_misses})")
+        
         if total == 0:
             LOGGER.info(f"Rank {self.rank}: No cache accesses yet")
             return
