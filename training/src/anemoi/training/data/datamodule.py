@@ -21,7 +21,6 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
-from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +67,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        lead_times = [self._lead_time_for_step(step + 1) for step in range(self.task.num_output_timesteps)]
+        lead_times = [frequency_to_string(step) for step in self.task.outputs_offsets]
 
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.datasets.items():
@@ -104,10 +103,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
 
-    def _lead_time_for_step(self, step: int) -> str:
-        timestep = frequency_to_timedelta(self.config.data.timestep)
-        return frequency_to_string(timestep * step)
-
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
@@ -138,7 +133,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return MultiDataset(
             data_readers=datasets,
             task=self.task,
-            timestep=self.config.data.timestep,
             shuffle=shuffle,
             label=label,
         )
@@ -181,7 +175,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         output_relative_date_indices = self.task.get_batch_output_indices()
         relative_date_indices = sorted(input_relative_date_indices + output_relative_date_indices)
         timesteps = {
-            "timestep": self.config.data.timestep,
+            "timestep": self.config.data.timestep,  # backwards compatibility with inference
             "relative_date_indices_training": relative_date_indices,  # backwards compatibility with inference
             "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
             "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
