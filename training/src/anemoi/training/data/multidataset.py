@@ -157,33 +157,6 @@ class MultiDataset(IterableDataset):
         return freq_ref
 
     @cached_property
-    def timeincrement(self) -> int:
-        try:
-            frequency = frequency_to_seconds(self.frequency)
-        except ValueError as e:
-            msg = f"Error in data frequency, {self.frequency}"
-            raise ValueError(msg) from e
-
-        try:
-            timestep = frequency_to_seconds(self.timestep)
-        except ValueError as e:
-            msg = f"Error in timestep, {self.timestep}"
-            raise ValueError(msg) from e
-
-        assert timestep % frequency == 0, (
-            f"Timestep ({self.timestep} == {timestep}) isn't a "
-            f"multiple of data frequency ({self.frequency} == {frequency})."
-        )
-
-        LOGGER.info(
-            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
-            timestep // frequency,
-            frequency,
-            timestep,
-        )
-        return timestep // frequency
-
-    @cached_property
     def valid_date_indices(self) -> np.ndarray:
         """Return valid date indices.
 
