@@ -107,11 +107,7 @@ def expand_iterables(
     expanded_params = {}
 
     for key, value in kv_iterable:
-        expanded = (
-            expand_iterables(value, recursive=recursive, delimiter=delimiter)
-            if recursive
-            else value
-        )
+        expanded = expand_iterables(value, recursive=recursive, delimiter=delimiter) if recursive else value
 
         expanded_params[key] = expanded
 
