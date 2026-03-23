@@ -26,7 +26,6 @@ from anemoi.training.data.dataset import create_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
