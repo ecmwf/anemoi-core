@@ -229,7 +229,9 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     pl.LightningModule.__init__(training_module)
 
     task = ForecastingTask(
-        multistep_input=1, multistep_output=1, timestep="6h",
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
         rollout_start=_CFG_FORECASTER.training.rollout.start,
         rollout_epoch_increment=_CFG_FORECASTER.training.rollout.epoch_increment,
         rollout_max=_CFG_FORECASTER.training.rollout.max,
@@ -731,6 +733,7 @@ _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}}
 
 class _InterpolatorStub:
     """Minimal stub with attributes needed by InterpolatorMultiOutPlotAdapter."""
+
     def __init__(self, n_step_input, n_step_output, interp_times):
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
