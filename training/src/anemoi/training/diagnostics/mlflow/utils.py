@@ -88,31 +88,23 @@ def expand_iterables(
     dict_types = dict | DictConfig
     expandable_types = dict_types | list_types
 
-    def should_be_expanded(value: list_types) -> bool:
+    def has_expandable_items(value: list_types) -> bool:
         return any(isinstance(item, expandable_types) for item in value)
 
+    additional = {}
     if isinstance(params, list_types):
-        if not should_be_expanded(params):
+        if not has_expandable_items(params):
             return params
-        kv_iterable = enumerate(params)
-    elif isinstance(params, dict_types):
-        kv_iterable = params.items()
-    else:
+        additional["length"] = len(params)
+        additional["all"] = params
+        params = dict(enumerate(params))
+
+    if not isinstance(params, dict_types):
         return params
 
-    expanded_params = {}
-
-    for key, value in kv_iterable:
-        expanded = expand_iterables(value, recursive=recursive) if recursive else value
-
-        expanded_params[key] = expanded
-
-        if isinstance(value, list_types) and isinstance(expanded, dict):
-            # add summary keys for expanded lists
-            expanded_params[key]["length"] = len(value)
-            expanded_params[key]["all"] = value
-
-    return expanded_params
+    if recursive:
+        return {key: expand_iterables(value) for key, value in params.items()} | additional
+    return dict(params) | additional
 
 
 def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:
