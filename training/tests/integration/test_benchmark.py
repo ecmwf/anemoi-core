@@ -220,7 +220,7 @@ def test_benchmark_dataloader(
     assert dist.is_initialized(), "Distributed process group is not initialized. Make sure to call _init_parallel() before this point."
     assert dist.get_world_size() == 2, "Only 2 GPus supported in this test case"
     # Initialize datamodule with graph data
-    datamodule = AnemoiDatasetsDataModule(config=cfg, graph_data={"data": graph})
+    datamodule = AnemoiDatasetsDataModule(config=cfg)
     if cache_dir is not None:
             LOGGER.info(f"'config.system.hardware.cache_dir' given. Caching dataset under '{cache_dir}'")
             #import pdb
