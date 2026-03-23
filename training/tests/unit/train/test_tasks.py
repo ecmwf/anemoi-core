@@ -20,7 +20,7 @@ from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.train.tasks.base import BaseTrainingModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
-from anemoi.training.train.tasks.forecaster import GraphForecaster
+from anemoi.training.tasks import ForecastingTask
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -217,7 +217,7 @@ def _set_base_task_attrs(
 def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forecaster output_times, get_init_step, and _step return shape (one instantiation)."""
     data_indices = _data_indices_single()
-    forecaster = GraphForecaster.__new__(GraphForecaster)
+    forecaster = ForecastingTask.__new__(ForecastingTask)
     pl.LightningModule.__init__(forecaster)
     _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER)
     forecaster.rollout = _CFG_FORECASTER.training.rollout.start
@@ -734,7 +734,7 @@ def test_graphdiffusionforecaster_output_times_and_get_init_step() -> None:
 
 def test_graphforecaster_get_init_step() -> None:
     """Forecaster get_init_step(rollout_step) returns 0 for all steps."""
-    forecaster = GraphForecaster.__new__(GraphForecaster)
+    forecaster = ForecastingTask.__new__(ForecastingTask)
     pl.LightningModule.__init__(forecaster)
     forecaster.rollout = 2
     forecaster.n_step_input = 1
