@@ -18,7 +18,7 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.tasks import ForecastingTask
-from anemoi.training.train.tasks.base import BaseTrainingModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
 from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
 from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
@@ -311,7 +311,7 @@ def test_graphdiffusionforecaster() -> None:
 
 
 def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
-    module = MagicMock(spec=BaseGraphModule)
+    module = MagicMock(spec=BaseTrainingModule)
     loss = CaptureLoss()
     group = object()
     shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
@@ -326,7 +326,7 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    result = BaseGraphModule._compute_loss(
+    result = BaseTrainingModule._compute_loss(
         module,
         y_pred=y_pred,
         y=y,
@@ -345,7 +345,7 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
 
 
 def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
-    module = MagicMock(spec=BaseGraphModule)
+    module = MagicMock(spec=BaseTrainingModule)
     loss = ShardingAwareCaptureLoss()
     group = object()
     shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
@@ -360,7 +360,7 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    result = BaseGraphModule._compute_loss(
+    result = BaseTrainingModule._compute_loss(
         module,
         y_pred=y_pred,
         y=y,
@@ -383,7 +383,7 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
 def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = MagicMock(spec=BaseGraphModule)
+    module = MagicMock(spec=BaseTrainingModule)
     group = FakeGroup(size=2)
     grid_shard_shapes = [1, 1]
     pred = torch.randn(1, 1, 1, 2, 1)
@@ -408,7 +408,7 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     module.grid_dim = -2
     module.grid_shard_shapes = {"data": grid_shard_shapes}
 
-    result = BaseGraphModule._compute_loss(
+    result = BaseTrainingModule._compute_loss(
         module,
         y_pred=pred,
         y=target,
@@ -497,7 +497,7 @@ def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> N
 
 
 def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
-    module = MagicMock(spec=BaseGraphModule)
+    module = MagicMock(spec=BaseTrainingModule)
     metric = CaptureLoss()
     post_processor = MagicMock(side_effect=lambda x, **_: x)
     group = object()
@@ -516,7 +516,7 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    metrics = BaseGraphModule.calculate_val_metrics(
+    metrics = BaseTrainingModule.calculate_val_metrics(
         module,
         y_pred=y_pred,
         y=y,
@@ -537,7 +537,7 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
 
 
 def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() -> None:
-    module = MagicMock(spec=BaseGraphModule)
+    module = MagicMock(spec=BaseTrainingModule)
     metric = ShardingAwareCaptureLoss()
     post_processor = MagicMock(side_effect=lambda x, **_: x)
     group = object()
@@ -556,7 +556,7 @@ def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() ->
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    metrics = BaseGraphModule.calculate_val_metrics(
+    metrics = BaseTrainingModule.calculate_val_metrics(
         module,
         y_pred=y_pred,
         y=y,
