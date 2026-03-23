@@ -118,6 +118,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         # Store the wrapped dataset to prevent it from being recreated
         self._cached_ds_train = None
+        self.dataset_names = self.ds.dataset_names
         
     @property
     def ds_train(self):
@@ -230,7 +231,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         self.cache = zarr.open(self.cache_path, mode="w")
        
-        dates = len(self) 
+        dates = len(self) + 2 # build in some buffer to avoid out of bounds errors, will be cleaned up in the future with a more robust solution than using integers for cache registry
         #dates = self.ds.size
         #dates = self.ds.ds_train.data.shape[0]
         
@@ -297,6 +298,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
             if hasattr(self, 'httpd') and self.httpd is not None:
                 LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
                 self.httpd.shutdown()
+                #TODO doesnt kill server, use pkill instead
                 if hasattr(self, 'server_thread') and self.server_thread is not None:
                     self.server_thread.join(timeout=5)
                 # Close the socket to free the port
