@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 import omegaconf
 import torch
+from torch_geometric.data import HeteroData
 
 from anemoi.training.diagnostics.callbacks.plot_ens import EnsemblePlotMixin
 from anemoi.training.diagnostics.callbacks.plot_ens import PlotEnsSample
@@ -91,11 +92,9 @@ def test_ensemble_plot_mixin_process():
     pl_module.plot_adapter.output_times = 3
     pl_module.plot_adapter.get_total_plot_targets.return_value = 3
     pl_module.plot_adapter.prepare_plot_output_tensor.side_effect = lambda x: x
-    pl_module.model.model._graph_name_data = "x"
-    pl_module.model.model._graph_data = {dataset_name: MagicMock()}
-    graph_node = MagicMock()
-    graph_node.x = torch.randn(100, 2)
-    pl_module.model.model._graph_data[dataset_name].__getitem__ = lambda _self, k: graph_node if k == "x" else None
+    graph_data = HeteroData()
+    graph_data[dataset_name].x = torch.randn(100, 2)
+    pl_module.model.backbone._graph_data = graph_data
 
     # data_indices: dict[dataset_name -> IndexCollection]
     data_indices = MagicMock()

@@ -4,6 +4,7 @@ defaults:
 - diagnostics: evaluation_ens
 - system: example
 - graph: encoder_decoder_only
+- model_builder: anemoi
 - model: transformer_ens
 - training: ensemble
 - _self_

@@ -98,6 +98,8 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """System configuration, including filesystem and hardware specification."""
     graph: BaseGraphSchema
     """Graph configuration."""
+    model_builder: Any | None = None
+    """Settings for creating the model."""
     model: ModelSchema
     """Model configuration."""
     training: TrainingSchema
@@ -123,6 +125,8 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Hardware configuration."""
     graph: Any
     """Graph configuration."""
+    model_builder: Any = None
+    """Settings for creating the model."""
     model: Any
     """Model configuration."""
     training: Any

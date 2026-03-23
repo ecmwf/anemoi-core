@@ -29,7 +29,6 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.interface import ModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -48,7 +47,9 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.models.interface import ModelInterface
+    from anemoi.training.config_bundle import TaskConfigBundle
+    from anemoi.training.runtime import TaskRuntimeArtifacts
 
 LOGGER = logging.getLogger(__name__)
 
@@ -76,20 +77,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     Parameters
     ----------
-    config : BaseSchema
-        Configuration object defining all parameters.
-    graph_data : HeteroData
-        Graph-structured input data containing node and edge features, keyed by dataset name.
-    statistics : dict
-        Dictionary of training statistics (mean, std, etc.) used for normalization.
-    statistics_tendencies : dict
-        Statistics related to tendencies (if used).
-    data_indices : dict[str, IndexCollection]
-        Maps feature names to index ranges used for training and loss functions.
-    metadata : dict
-        Dictionary with metadata such as dataset provenance and variable descriptions.
-    supporting_arrays : dict
-        Numpy arrays (e.g., topography, masks) needed during inference and stored in checkpoints.
+    config_bundle : TaskConfigBundle
+        Parts of the config used by this task.
+    runtime_artifacts : TaskRuntimeArtifacts
+        Graph data, statistics, indices, metadata, and extra arrays prepared by the trainer.
 
     Attributes
     ----------
@@ -137,31 +128,28 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         model: ModelInterface,
-        config: BaseSchema,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: dict[str, IndexCollection],
-        metadata: dict,
-        supporting_arrays: dict,
+        config_bundle: TaskConfigBundle,
+        runtime_artifacts: TaskRuntimeArtifacts,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
-        config : DictConfig
-            Job configuration
-        graph_data : HeteroData
-            Graph objects keyed by dataset name
-        statistics : dict
-            Statistics of the training data
-        data_indices : dict[str, IndexCollection]
-            Indices of the training data,
-        metadata : dict
-            Provenance and inference metadata.
+        config_bundle : TaskConfigBundle
+            Parts of the config used by this task.
+        runtime_artifacts : TaskRuntimeArtifacts
+            Graph data, statistics, indices, metadata, and extra arrays prepared by the trainer.
 
         """
         super().__init__()
+        config = config_bundle.to_dictconfig()
+
+        graph_data = runtime_artifacts.graph_data
+        statistics = runtime_artifacts.statistics
+        statistics_tendencies = runtime_artifacts.statistics_tendencies
+        data_indices = runtime_artifacts.data_indices
+        metadata = runtime_artifacts.metadata
+        supporting_arrays = runtime_artifacts.supporting_arrays
 
         assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
@@ -181,7 +169,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
             raise AttributeError(msg)
 
         self.model = model
+        self.config_bundle = config_bundle
         self.config = config
+        self.task_runtime_artifacts = runtime_artifacts
+        self.graph_data = graph_data
+        self.statistics = statistics
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays
 
@@ -263,7 +255,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.is_first_step = True
         self.n_step_input = config.training.multistep_input
         self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
-        LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
+        LOGGER.info(
+            "GraphModule with n_step_input=%s and n_step_output=%s",
+            self.n_step_input,
+            self.n_step_output,
+        )
         self.lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -409,7 +405,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if update_states:
             processor_prefixes += ("model.pre_processors.", "model.post_processors.")
         if update_tendencies:
-            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+            processor_prefixes += (
+                "model.pre_processors_tendencies.",
+                "model.post_processors_tendencies.",
+            )
 
         if not processor_prefixes:
             return
@@ -816,9 +815,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
         return
 
-    @abstractmethod
     def fill_metadata(self, metadata: dict) -> None:
-        """Fill inference metadata with task-specific timestep indices."""
+        """Fill inference metadata with default input/output timestep indices."""
+        for dataset_name in self.dataset_names:
+            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
+            rel = ts["relative_date_indices_training"]
+            ts["input_relative_date_indices"] = rel[: self.n_step_input]
+            ts["output_relative_date_indices"] = rel[-self.n_step_output :]
 
     @abstractmethod
     def _step(
@@ -1038,7 +1041,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+    def configure_optimizers(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
         scheduler = self._create_scheduler(optimizer)

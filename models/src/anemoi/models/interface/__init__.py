@@ -46,4 +46,69 @@ class ModelInterface(Protocol):
         ...
 
 
-__all__ = ["ModelInterface"]
+@runtime_checkable
+class DiffusionModelInterface(ModelInterface, Protocol):
+    """Interface for models that support diffusion tasks."""
+
+    def get_diffusion_parameters(self) -> tuple[float, float, float]:
+        """Return ``(sigma_max, sigma_min, sigma_data)`` for diffusion training."""
+        ...
+
+    def forward_with_preconditioning(
+        self,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Run the diffusion forward pass with model-specific preconditioning."""
+        ...
+
+    def apply_imputer_inverse(self, dataset_name: str, x: torch.Tensor) -> torch.Tensor:
+        """Map output-space tensors back through any inverse imputation logic."""
+        ...
+
+    def apply_reference_state_truncation(
+        self,
+        x: dict[str, torch.Tensor],
+        grid_shard_shapes,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> dict[str, torch.Tensor]:
+        """Prepare reference states used by diffusion tasks."""
+        ...
+
+
+@runtime_checkable
+class DiffusionTendencyModelInterface(DiffusionModelInterface, Protocol):
+    """Interface for diffusion models that predict tendencies."""
+
+    def get_tendency_processors(self, dataset_name: str) -> tuple[object, object]:
+        """Return the pre/post tendency processors for one dataset."""
+        ...
+
+    def compute_tendency_step(
+        self,
+        dataset_name: str,
+        y_step: torch.Tensor,
+        x_ref_step: torch.Tensor,
+        tendency_pre_processor: object,
+    ) -> torch.Tensor:
+        """Convert one output step into a tendency target."""
+        ...
+
+    def add_tendency_to_state_step(
+        self,
+        dataset_name: str,
+        x_ref_step: torch.Tensor,
+        tendency_step: torch.Tensor,
+        tendency_post_processor: object,
+    ) -> torch.Tensor:
+        """Reconstruct one state step from a tendency prediction."""
+        ...
+
+
+__all__ = [
+    "ModelInterface",
+    "DiffusionModelInterface",
+    "DiffusionTendencyModelInterface",
+]

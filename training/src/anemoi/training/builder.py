@@ -7,30 +7,25 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Factory function for building ModelInterface via Hydra instantiate."""
+"""Factory functions for building ModelInterface instances via Hydra."""
 
 from __future__ import annotations
 
-import datetime
-import logging
-import uuid as _uuid_module
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.models.interface import ModelInterface
-from anemoi.models.models import AnemoiModel
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.utils.jsonify import map_config_to_primitives
-from anemoi.utils.provenance import gather_provenance_info
 
-LOGGER = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from anemoi.models.interface import ModelInterface
+    from anemoi.training.config_bundle import ModelConfigBundle
+    from anemoi.training.runtime import ModelRuntimeArtifacts
+    from anemoi.utils.config import DotDict
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +111,7 @@ def _build_processors(
             data_config[dataset_name].processors,
             statistics[dataset_name],
             data_indices[dataset_name],
-            statistics_tendencies[dataset_name] if statistics_tendencies is not None else None,
+            (statistics_tendencies[dataset_name] if statistics_tendencies is not None else None),
             n_step_output,
         )
         pre_processors[dataset_name] = pre
@@ -124,7 +119,12 @@ def _build_processors(
         if pre_tend is not None:
             pre_processors_tendencies[dataset_name] = pre_tend
             post_processors_tendencies[dataset_name] = post_tend
-    return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
+    return (
+        pre_processors,
+        post_processors,
+        pre_processors_tendencies,
+        post_processors_tendencies,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -134,72 +134,42 @@ def _build_processors(
 
 def build_anemoi_model(
     *,
-    backbone: DictConfig,
-    training_config: DictConfig,
-    data_config: DictConfig,
-    dataloader_config: DictConfig,
-    graph_config: DictConfig,
-    system_config: DictConfig,
-    **model_arch_kwargs,
+    config_bundle: ModelConfigBundle,
+    runtime_artifacts: ModelRuntimeArtifacts,
+    **_kwargs,
 ) -> ModelInterface:
-    """Build and return a fully constructed ModelInterface.
+    """Create an Anemoi model.
 
-    Called by Hydra instantiate(config.model) from train.py. All inputs come
-    from OmegaConf interpolations in the model yaml — no kwargs from train.py.
+    train.py calls this through Hydra. The trainer prepares the extra data
+    first and passes it in here, together with the parts of the config the
+    model needs.
     """
-
-    def _to_container(v):
-        if isinstance(v, DictConfig):
-            return OmegaConf.to_container(v, resolve=True)
-        return v
-
-    full_config_dict = {
-        "training": _to_container(training_config),
-        "data": _to_container(data_config),
-        "dataloader": _to_container(dataloader_config),
-        "graph": _to_container(graph_config),
-        "system": _to_container(system_config),
-        "model": {
-            "backbone": _to_container(backbone),
-            **{k: _to_container(v) for k, v in model_arch_kwargs.items()},
-        },
-    }
-    config = OmegaConf.create(full_config_dict)
-
-    # Build datamodule to obtain statistics, data_indices, supporting_arrays
-    datamodule = AnemoiDatasetsDataModule(config)
+    config = config_bundle.to_dictconfig()
 
     # Build processors
-    pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies = _build_processors(
+    (
+        pre_processors,
+        post_processors,
+        pre_processors_tendencies,
+        post_processors_tendencies,
+    ) = _build_processors(
         config=config,
-        statistics=datamodule.statistics,
-        data_indices=datamodule.data_indices,
-        statistics_tendencies=datamodule.statistics_tendencies,
+        statistics=runtime_artifacts.statistics,
+        data_indices=runtime_artifacts.data_indices,
+        statistics_tendencies=runtime_artifacts.statistics_tendencies,
     )
 
-    # Build graph (load from file or create)
-    graph_data = _build_graph(config)
+    wrapper_config = config.model.get("wrapper") or OmegaConf.create({"_target_": "anemoi.models.models.AnemoiModel"})
 
-    # Combine supporting arrays with output-mask arrays
-    from anemoi.training.utils.supporting_arrays import build_combined_supporting_arrays
-
-    supporting_arrays = build_combined_supporting_arrays(
-        config=config,
-        graph_data=graph_data,
-        supporting_arrays=datamodule.supporting_arrays,
-    )
-
-    # Build metadata
-    metadata = _build_metadata(config, datamodule)
-
-    return AnemoiModel(
+    return instantiate(
+        wrapper_config,
         model_config=config,
-        graph_data=graph_data,
-        statistics=datamodule.statistics,
-        statistics_tendencies=datamodule.statistics_tendencies,
-        data_indices=datamodule.data_indices,
-        metadata=metadata,
-        supporting_arrays=supporting_arrays,
+        graph_data=runtime_artifacts.graph_data,
+        statistics=runtime_artifacts.statistics,
+        statistics_tendencies=runtime_artifacts.statistics_tendencies,
+        data_indices=runtime_artifacts.data_indices,
+        metadata=runtime_artifacts.metadata,
+        supporting_arrays=runtime_artifacts.supporting_arrays,
         pre_processors=pre_processors,
         post_processors=post_processors,
         pre_processors_tendencies=pre_processors_tendencies,
@@ -207,89 +177,11 @@ def build_anemoi_model(
     )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _build_graph(config: DotDict) -> dict:
-    """Load or create graph data."""
-    graphs = {}
-    dataset_configs = get_multiple_datasets_config(config.dataloader.training)
-    for dataset_name, dataset_config in dataset_configs.items():
-        graph_path = getattr(config.system.input, "graph", None)
-        if graph_path and not getattr(config.graph, "overwrite", False):
-            graph_filename = Path(graph_path)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
-            if graph_filename.exists():
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                graphs[dataset_name] = torch.load(
-                    graph_filename,
-                    map_location=get_distributed_device(),
-                    weights_only=False,
-                )
-                continue
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        graph_config = config.graph
-        dataset_reader_config = dataset_config.dataset_config
-        if isinstance(dataset_reader_config, dict):
-            dataset_source = dataset_reader_config.get("dataset")
-        else:
-            dataset_source = dataset_reader_config
-        if (
-            dataset_source is not None
-            and hasattr(graph_config.nodes, "data")
-            and hasattr(graph_config.nodes.data.node_builder, "dataset")
-        ):
-            graph_config.nodes.data.node_builder.dataset = dataset_source
-
-        save_path = None
-        if graph_path:
-            save_path = Path(graph_path)
-            if save_path.name.endswith(".pt"):
-                graph_name = save_path.name.replace(".pt", f"_{dataset_name}.pt")
-                save_path = save_path.parent / graph_name
-
-        graphs[dataset_name] = GraphCreator(config=graph_config).create(
-            save_path=save_path,
-            overwrite=getattr(config.graph, "overwrite", False),
-        )
-
-    return graphs
-
-
-def _build_metadata(config: DotDict, datamodule: AnemoiDatasetsDataModule) -> dict:
-    """Build inference/provenance metadata."""
-    metadata_inference = {
-        "dataset_names": None,  # populated by fill_metadata
-        "task": None,  # set by train.py after build
-    }
-    md_dict = {
-        "version": "2.0",
-        "config": config,
-        "run_id": str(_uuid_module.uuid4()),
-        "dataset": None,
-        "data_indices": None,
-        "provenance_training": gather_provenance_info(),
-        "timestamp": datetime.datetime.now(tz=datetime.UTC),
-        "metadata_inference": metadata_inference,
-        "uuid": None,
-    }
-    datamodule.fill_metadata(md_dict)
-
-    n_step_input = config.training.multistep_input
-    n_step_output = getattr(config.training, "multistep_output", 1)
-    for dataset_name in datamodule.dataset_names:
-        ts = md_dict["metadata_inference"][dataset_name]["timesteps"]
-        rel = ts["relative_date_indices_training"]
-        ts["input_relative_date_indices"] = rel[:n_step_input]
-        ts["output_relative_date_indices"] = rel[-n_step_output:]
-
-    return map_config_to_primitives(md_dict)
+def build_direct_model(
+    *,
+    config_bundle: ModelConfigBundle,
+    runtime_artifacts: ModelRuntimeArtifacts,
+    **_kwargs,
+) -> ModelInterface:
+    """Create a model directly from ``config.model``."""
+    return instantiate(config_bundle.model, runtime_artifacts=runtime_artifacts)

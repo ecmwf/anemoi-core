@@ -1,12 +1,3 @@
-_target_: anemoi.training.builder.build_anemoi_model
-_recursive_: false
-
-training_config: ${training}
-data_config: ${data}
-dataloader_config: ${dataloader}
-graph_config: ${graph}
-system_config: ${system}
-
 num_channels: 1024
 condition_on_residual: False
 output_mask:
