@@ -9,7 +9,7 @@
 
 from .custom import CustomTask
 from .forecasting import ForecastingTask
-from .timeinterpolation import TemporalDownscalingTask
+from .temporal_downscaling import TemporalDownscalingTask
 from .timeless import AutoencodingTask
 from .timeless import SpatialDownscalingTask
 
