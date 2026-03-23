@@ -15,7 +15,7 @@ import pytest
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.train.tasks.forecaster import GraphForecaster
+from anemoi.training.tasks import ForecastingTask
 from anemoi.training.train.train import AnemoiTrainer
 
 
@@ -233,7 +233,7 @@ def test_on_epoch_wrong_validation(
 
 def test_on_load_checkpoint_restores_name_to_index() -> None:
     """Test that on_load_checkpoint correctly restores _ckpt_model_name_to_index."""
-    model = GraphForecaster.__new__(GraphForecaster)
+    model = ForecastingTask.__new__(ForecastingTask)
     dataset_name = "test_dataset"
     model.config = types.SimpleNamespace(
         training=types.SimpleNamespace(

@@ -277,7 +277,7 @@ class AnemoiTrainer(ABC):
         }
 
         model_task = get_class(self.config.training.model_task)
-        model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
+        model = model_task(**kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
