@@ -1,4 +1,4 @@
-_target_: anemoi.training.tasks.TimeInterpolationTask
+_target_: anemoi.training.tasks.TemporalDownscalingTask
 input_timestep: 6H
 output_timestep: 1H
 output_left_boundary: False

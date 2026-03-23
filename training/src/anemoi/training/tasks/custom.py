@@ -15,14 +15,14 @@ from anemoi.utils.dates import as_timedelta
 LOGGER = logging.getLogger(__name__)
 
 
-class TimeInterpolationTask(BaseSingleStepTask):
-    """Time interpolation task implementation.
+class CustomTask(BaseSingleStepTask):
+    """Custom task implementation.
 
     Input and output offsets are specified as duration strings
     (e.g. ``["0H", "6H"]`` and ``["1H", "2H", "3H", "4H", "5H"]``).
     """
 
-    name: str = "time-interpolator"
+    name: str = "custom-task"
 
     def __init__(
         self,

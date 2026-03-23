@@ -22,10 +22,10 @@ class BaseTimelessTask(BaseSingleStepTask):
         super().__init__(input_offset=[datetime.timedelta(0)], output_offset=[datetime.timedelta(0)])
 
 
-class DownscalingTask(BaseTimelessTask):
-    """Downscaling task implementation."""
+class SpatialDownscalingTask(BaseTimelessTask):
+    """Spatial downscaling task implementation."""
 
-    name: str = "downscaler"
+    name: str = "spatial-downscaler"
 
 
 class AutoencodingTask(BaseTimelessTask):

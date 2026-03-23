@@ -1,3 +1,8 @@
 _target_: anemoi.training.tasks.CustomTask
 inputs_offsets: ["-6H", "-2H", "-1H","0H"]
 outputs_offsets: ["1H", "2H", "3H"]
+
+
+# Backward forecaster (for predictability analysis)
+inputs_offsets: ["0H", "6H"]
+outputs_offsets: ["-6H"]

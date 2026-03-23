@@ -8,13 +8,16 @@
 # nor does it submit to any jurisdiction.
 
 from .forecasting import ForecastingTask
-from .timeinterpolation import TimeInterpolationTask
+from .timeinterpolation import TemporalDownscalingTask
 from .timeless import AutoencodingTask
-from .timeless import DownscalingTask
+from .timeless import SpatialDownscalingTask
+from .custom import CustomTask
+
 
 __all__ = [
     "AutoencodingTask",
-    "DownscalingTask",
+    "CustomTask",
+    "SpatialDownscalingTask",
     "ForecastingTask",
-    "TimeInterpolationTask",
+    "TemporalDownscalingTask",
 ]
