@@ -26,7 +26,6 @@ from anemoi.training.data.dataset import create_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,7 +37,6 @@ class MultiDataset(IterableDataset):
         self,
         task: BaseTask,
         data_readers: dict[str, dict],
-        timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
     ) -> None:
@@ -51,8 +49,7 @@ class MultiDataset(IterableDataset):
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices: dict[str, list[int]]
             list of time indices to load from the data relative to the current sample
-        timestep : str, optional
-            the time frequency of the samples, by default '6h'
+
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
@@ -60,7 +57,6 @@ class MultiDataset(IterableDataset):
         """
         self.label = label
         self.shuffle = shuffle
-        self.timestep = timestep
         self.dataset_names = list(data_readers.keys())
 
         # Create each dataset. It will correspond to one key of the batch
@@ -109,11 +105,6 @@ class MultiDataset(IterableDataset):
     def statistics(self) -> dict[str, dict]:
         """Return combined statistics from all datasets."""
         return self._collect("statistics")
-
-    @cached_property
-    def statistics_tendencies(self) -> dict[str, dict | None]:
-        """Return combined tendency statistics from all datasets."""
-        return {name: dataset.statistics_tendencies(self.timestep) for name, dataset in self.datasets.items()}
 
     @cached_property
     def metadata(self) -> dict[str, dict]:
