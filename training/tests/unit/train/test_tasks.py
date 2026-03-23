@@ -17,11 +17,14 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.tasks import AutoencodingTask
 from anemoi.training.tasks import ForecastingTask
+from anemoi.training.tasks import TemporalDownscalingTask
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.tasks.diffusionforecaster import GraphDiffusionForecaster
-from anemoi.training.train.tasks.ensforecaster import GraphEnsForecaster
-from anemoi.training.train.tasks.interpolator import GraphMultiOutInterpolator
+from anemoi.training.train.methods.diffusion import BaseDiffusionForecaster
+from anemoi.training.train.methods.diffusion import DiffusionTraining
+from anemoi.training.train.methods.ensemble import EnsembleTraining
+from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -200,6 +203,7 @@ def _set_base_task_attrs(
     config: DictConfig,
     n_step_input: int = 1,
     n_step_output: int = 1,
+    task: Any = None,
 ) -> None:
     """Set attributes common to tasks built via __new__ + pl.LightningModule.__init__."""
     obj.data_indices = data_indices
@@ -212,49 +216,62 @@ def _set_base_task_attrs(
     obj.model_comm_group_size = 1
     obj.grid_shard_shapes = {"data": None}
     obj.grid_shard_slice = {"data": None}
+    if task is not None:
+        obj.task = task
 
 
 def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forecaster output_times, get_init_step, and _step return shape (one instantiation)."""
     data_indices = _data_indices_single()
-    forecaster = ForecastingTask.__new__(ForecastingTask)
-    pl.LightningModule.__init__(forecaster)
-    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_FORECASTER)
-    forecaster.rollout = _CFG_FORECASTER.training.rollout.start
-    forecaster.rollout_epoch_increment = _CFG_FORECASTER.training.rollout.epoch_increment
-    forecaster.rollout_max = _CFG_FORECASTER.training.rollout.max
-    forecaster.model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
-    forecaster.is_first_step = False
-    forecaster.updating_scalars = {}
-    forecaster.target_dataset_names = forecaster.dataset_names
-    forecaster.loss = {"data": DummyLoss()}
-    forecaster.loss_supports_sharding = False
-    forecaster.metrics_support_sharding = True
-    forecaster._plot_adapter = ForecasterPlotAdapter(forecaster)
 
-    assert forecaster.plot_adapter.output_times == 1
+    # Build a SingleTraining module with a ForecastingTask
+    training_module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(training_module)
+
+    task = ForecastingTask(
+        multistep_input=1, multistep_output=1, timestep="6h",
+        rollout_start=_CFG_FORECASTER.training.rollout.start,
+        rollout_epoch_increment=_CFG_FORECASTER.training.rollout.epoch_increment,
+        rollout_max=_CFG_FORECASTER.training.rollout.max,
+    )
+    _set_base_task_attrs(training_module, data_indices=data_indices, config=_CFG_FORECASTER, task=task)
+    training_module.model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
+    training_module.is_first_step = False
+    training_module.updating_scalars = {}
+    training_module.target_dataset_names = training_module.dataset_names
+    training_module.loss = {"data": DummyLoss()}
+    training_module.loss_supports_sharding = False
+    training_module.metrics_support_sharding = True
+    training_module._plot_adapter = ForecasterPlotAdapter(training_module)
+
+    # ForecasterPlotAdapter accesses _task.rollout, n_step_input, n_step_output
+    # Set rollout on the training module to match the task's rollout
+    training_module.rollout = task.rollout
+    assert training_module.plot_adapter.output_times == 1
     for i in range(1, _CFG_FORECASTER.training.rollout.max + 1):
-        forecaster.rollout = i
-        assert forecaster.plot_adapter.get_init_step(i) == 0
-        assert forecaster.plot_adapter.output_times == i
+        task.rollout = i
+        training_module.rollout = i
+        assert training_module.plot_adapter.get_init_step(i) == 0
+        assert training_module.plot_adapter.output_times == i
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
     monkeypatch.setattr(
-        forecaster,
-        "_advance_input",
+        task,
+        "advance_input",
         lambda x, *_args, **_kwargs: x,
     )
 
-    forecaster.rollout = 2
-    required_time_steps = forecaster.n_step_input + forecaster.rollout * forecaster.n_step_output
+    task.rollout = 2
+    task._steps = tuple({"rollout_step": i} for i in range(task.rollout))
+    required_time_steps = training_module.n_step_input + task.rollout * training_module.n_step_output
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, required_time_steps, e, g, v, dtype=torch.float32)}
 
-    loss, _, y_preds = forecaster._step(batch, validation_mode=False)
+    loss, _, y_preds = training_module._step(batch, validation_mode=False)
 
     assert isinstance(loss, torch.Tensor)
-    assert len(y_preds) == forecaster.rollout
+    assert len(y_preds) == task.rollout
     for step_pred in y_preds:
         assert isinstance(step_pred, dict)
         assert "data" in step_pred
@@ -263,11 +280,11 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         assert pred.ndim == 5
         assert pred.shape == (
             b,
-            forecaster.n_step_output,
+            training_module.n_step_output,
             e,
             g,
             v,
-        ), f"Expected (B, n_step_output, E, G, V) = ({b}, {forecaster.n_step_output}, {e}, {g}, {v}), got {pred.shape}"
+        ), f"Expected (B, n_step_output, E, G, V) = ({b}, {training_module.n_step_output}, {e}, {g}, {v}), got {pred.shape}"
 
 
 _CFG_DIFFUSION = DictConfig(
@@ -284,9 +301,14 @@ def test_graphdiffusionforecaster() -> None:
             self.model = model
 
     data_indices = _data_indices_single()
-    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    task = ForecastingTask(
+        multistep_input=_CFG_DIFFUSION.training.multistep_input,
+        multistep_output=_CFG_DIFFUSION.training.multistep_output,
+        timestep="6h",
+    )
+    forecaster = DiffusionTraining.__new__(DiffusionTraining)
     pl.LightningModule.__init__(forecaster)
-    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION, task=task)
     forecaster.model = DummyDiffusion(
         DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
     )
@@ -421,7 +443,7 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
 
 
 def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
-    module = MagicMock(spec=GraphDiffusionForecaster)
+    module = MagicMock(spec=BaseDiffusionForecaster)
     loss = CaptureLoss()
     group = object()
     shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
@@ -437,7 +459,7 @@ def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    result = GraphDiffusionForecaster._compute_loss(
+    result = BaseDiffusionForecaster._compute_loss(
         module,
         y_pred=y_pred,
         y=y,
@@ -458,7 +480,7 @@ def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
 
 
 def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> None:
-    module = MagicMock(spec=GraphDiffusionForecaster)
+    module = MagicMock(spec=BaseDiffusionForecaster)
     loss = ShardingAwareCaptureLoss()
     group = object()
     shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
@@ -474,7 +496,7 @@ def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> N
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    result = GraphDiffusionForecaster._compute_loss(
+    result = BaseDiffusionForecaster._compute_loss(
         module,
         y_pred=y_pred,
         y=y,
@@ -582,11 +604,12 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
     """Rollout step works when model returns (B, T, E, G, V); _advance_input uses last time step."""
     data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
 
-    forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
+    task = ForecastingTask(multistep_input=1, multistep_output=1, timestep="6h", rollout_start=1, rollout_max=1)
+
+    forecaster = EnsembleTraining.__new__(EnsembleTraining)
     pl.LightningModule.__init__(forecaster)
     forecaster.n_step_input = 1
     forecaster.n_step_output = 1
-    forecaster.rollout = 1
     forecaster.nens_per_device = 2
     forecaster.model = DummyModel(num_output_variables=len(data_indices.model.output), output_times=1)
     forecaster.model_comm_group = None
@@ -597,6 +620,13 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
     forecaster.data_indices = {"data": data_indices}
     forecaster.dataset_names = ["data"]
     forecaster.grid_dim = -2
+    forecaster.task = task
+    forecaster.target_dataset_names = ["data"]
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
 
     def _compute_loss_metrics(
         y_pred: dict[str, torch.Tensor],
@@ -609,12 +639,15 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
         return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
     b, g, v = 2, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn((b, forecaster.n_step_input + forecaster.rollout, 1, g, v), dtype=torch.float32)}
+    batch = {"data": torch.randn((b, forecaster.n_step_input + task.rollout, 1, g, v), dtype=torch.float32)}
 
-    loss, metrics, preds = next(forecaster._rollout_step(batch=batch, rollout=1, validation_mode=False))
+    loss, metrics, y_preds = forecaster._step(batch=batch, validation_mode=False)
     assert isinstance(loss, torch.Tensor)
-    assert metrics == {}
+    assert isinstance(y_preds, list)
+    assert len(y_preds) == task.rollout
+    preds = y_preds[0]
     assert isinstance(preds, dict)
     assert preds["data"].ndim == 5
     assert preds["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
@@ -635,33 +668,31 @@ def test_rollout_advance_input_keeps_latest_steps(
 ) -> None:
     data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
 
-    forecaster = GraphEnsForecaster.__new__(GraphEnsForecaster)
-    pl.LightningModule.__init__(forecaster)
-    forecaster.n_step_input = n_step_input
-    forecaster.n_step_output = n_step_output
-    forecaster.output_mask = {"data": NoOutputMask()}
-    forecaster.data_indices = {"data": data_indices}
-    forecaster.grid_shard_slice = {"data": None}
+    task = ForecastingTask(
+        multistep_input=n_step_input,
+        multistep_output=n_step_output,
+        timestep="6h",
+    )
 
     b, e, g, v = 1, 1, 2, len(_NAME_TO_INDEX)
-    x = torch.zeros((b, forecaster.n_step_input, e, g, v), dtype=torch.float32)
-    for step in range(forecaster.n_step_input):
+    x = torch.zeros((b, n_step_input, e, g, v), dtype=torch.float32)
+    for step in range(n_step_input):
         x[:, step] = float(step + 1)
     y_pred = torch.stack(
         [
-            torch.full((b, e, g, v), float(forecaster.n_step_input + step), dtype=torch.float32)
-            for step in range(1, forecaster.n_step_output + 1)
+            torch.full((b, e, g, v), float(n_step_input + step), dtype=torch.float32)
+            for step in range(1, n_step_output + 1)
         ],
         dim=1,
     )
-    batch = torch.zeros((b, forecaster.n_step_input + forecaster.n_step_output, e, g, v), dtype=torch.float32)
+    batch = torch.zeros((b, n_step_input + n_step_output, e, g, v), dtype=torch.float32)
 
-    updated = forecaster._advance_dataset_input(
+    updated = task._advance_dataset_input(
         x,
         y_pred,
         batch,
         rollout_step=0,
-        dataset_name="data",
+        data_indices=data_indices,
     )
     kept_steps = updated[0, :, 0, 0, 0].tolist()
     expected_next_input = expected
@@ -698,26 +729,32 @@ _CFG_INTERP_STEP = DictConfig({"training": {"explicit_times": {"input": [0, 3], 
 _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}})
 
 
-@pytest.mark.parametrize(
-    "task_class",
-    [GraphMultiOutInterpolator],
-    ids=["multi_out"],
-)
-def test_interpolator_output_times_and_get_init_step(
-    task_class: type[GraphMultiOutInterpolator],
-) -> None:
-    """Both interpolator task types: output_times == len(target), get_init_step(i) == i."""
-    interpolator = task_class.__new__(task_class)
-    pl.LightningModule.__init__(interpolator)
-    interpolator.n_step_input = 1
-    interpolator.n_step_output = len(_CFG_INTERP_TWO_TARGETS.training.explicit_times.target)
-    interpolator.interp_times = _CFG_INTERP_TWO_TARGETS.training.explicit_times.target
-    interpolator.model = None  # unused for this test
-    interpolator._plot_adapter = InterpolatorMultiOutPlotAdapter(interpolator)
+class _InterpolatorStub:
+    """Minimal stub with attributes needed by InterpolatorMultiOutPlotAdapter."""
+    def __init__(self, n_step_input, n_step_output, interp_times):
+        self.n_step_input = n_step_input
+        self.n_step_output = n_step_output
+        self.interp_times = interp_times
+        self._plot_adapter = None
 
-    assert interpolator.plot_adapter.output_times == 2
-    for i in range(interpolator.plot_adapter.output_times):
-        assert interpolator.plot_adapter.get_init_step(i) == i
+    @property
+    def plot_adapter(self):
+        return self._plot_adapter
+
+
+def test_interpolator_output_times_and_get_init_step() -> None:
+    """Interpolator task: output_times == len(target), get_init_step(i) == i."""
+    interp_times = _CFG_INTERP_TWO_TARGETS.training.explicit_times.target
+    stub = _InterpolatorStub(
+        n_step_input=1,
+        n_step_output=len(interp_times),
+        interp_times=interp_times,
+    )
+    stub._plot_adapter = InterpolatorMultiOutPlotAdapter(stub)
+
+    assert stub.plot_adapter.output_times == 2
+    for i in range(stub.plot_adapter.output_times):
+        assert stub.plot_adapter.get_init_step(i) == i
 
 
 # ---- output_times / get_init_step / _step return format for all tasks ----
@@ -725,8 +762,11 @@ def test_interpolator_output_times_and_get_init_step(
 
 def test_graphdiffusionforecaster_output_times_and_get_init_step() -> None:
     """Diffusion has output_times=1 and uses base get_init_step (returns 0)."""
-    forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
+    forecaster = DiffusionTraining.__new__(DiffusionTraining)
     pl.LightningModule.__init__(forecaster)
+    forecaster.n_step_input = 1
+    forecaster.n_step_output = 1
+    forecaster._plot_adapter = DiffusionPlotAdapter(forecaster)
     forecaster._plot_adapter = DiffusionPlotAdapter(forecaster)
     assert forecaster.plot_adapter.output_times == 1
     assert forecaster.plot_adapter.get_init_step(0) == 0
@@ -734,22 +774,20 @@ def test_graphdiffusionforecaster_output_times_and_get_init_step() -> None:
 
 def test_graphforecaster_get_init_step() -> None:
     """Forecaster get_init_step(rollout_step) returns 0 for all steps."""
-    forecaster = ForecastingTask.__new__(ForecastingTask)
-    pl.LightningModule.__init__(forecaster)
-    forecaster.rollout = 2
-    forecaster.n_step_input = 1
-    forecaster.n_step_output = 1
-    forecaster._plot_adapter = ForecasterPlotAdapter(forecaster)
-    assert forecaster.plot_adapter.get_init_step(0) == 0
-    assert forecaster.plot_adapter.get_init_step(1) == 0
+    training_module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(training_module)
+    training_module.rollout = 2
+    training_module.n_step_input = 1
+    training_module.n_step_output = 1
+    training_module._plot_adapter = ForecasterPlotAdapter(training_module)
+    assert training_module.plot_adapter.get_init_step(0) == 0
+    assert training_module.plot_adapter.get_init_step(1) == 0
 
 
 def test_graphautoencoder_output_times() -> None:
-    """GraphAutoEncoder has output_times=1."""
-    from anemoi.training.train.tasks.autoencoder import GraphAutoEncoder
-
+    """Autoencoder training module has output_times=1."""
     data_indices = _data_indices_single()
-    ae = GraphAutoEncoder.__new__(GraphAutoEncoder)
+    ae = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(ae)
     _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE)
     ae._plot_adapter = AutoencoderPlotAdapter(ae)
@@ -757,8 +795,7 @@ def test_graphautoencoder_output_times() -> None:
 
 
 def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GraphAutoEncoder _step returns (loss, metrics, [y_pred]) for consistent task contract."""
-    from anemoi.training.train.tasks.autoencoder import GraphAutoEncoder
+    """SingleTraining + AutoencodingTask _step returns (loss, metrics, [y_pred]) for consistent task contract."""
 
     def dummy_forward(x: dict) -> dict:
         b = next(iter(x.values())).shape[0]
@@ -769,9 +806,10 @@ def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> 
         return {dn: torch.randn(b, t, e, g, v, dtype=torch.float32) for dn in x}
 
     data_indices = _data_indices_single()
-    ae = GraphAutoEncoder.__new__(GraphAutoEncoder)
+    task = AutoencodingTask()
+    ae = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(ae)
-    _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE)
+    _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE, task=task)
     ae.model = type(
         "M",
         (),
@@ -792,8 +830,8 @@ def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> 
     _assert_step_return_format(loss, y_preds, expected_len=1)
 
 
-def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GraphMultiOutInterpolator _step returns (loss, metrics, [y_pred]) for plot callback contract."""
+def test_temporal_downscaling_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SingleTraining + TemporalDownscalingTask _step returns (loss, metrics, [y_pred]) for plot callback contract."""
 
     def dummy_forward(x_bound: dict) -> dict:
         b = next(iter(x_bound.values())).shape[0]
@@ -803,34 +841,36 @@ def test_graphmultioutinterpolator_step_returns_list(monkeypatch: pytest.MonkeyP
         return {"data": torch.randn(b, 2, e, g, v, dtype=torch.float32)}
 
     data_indices = _data_indices_single()
-    task = GraphMultiOutInterpolator.__new__(GraphMultiOutInterpolator)
-    pl.LightningModule.__init__(task)
+    task = TemporalDownscalingTask(
+        inputs_offsets=["0h", "18h"],
+        outputs_offsets=["6h", "12h"],
+    )
+    training_module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(training_module)
     _set_base_task_attrs(
-        task,
+        training_module,
         data_indices=data_indices,
         config=_CFG_INTERP_STEP,
-        n_step_output=len(_CFG_INTERP_STEP.training.explicit_times.target),
+        n_step_output=task.num_output_timesteps,
+        n_step_input=task.num_input_timesteps,
+        task=task,
     )
-    task.boundary_times = _CFG_INTERP_STEP.training.explicit_times.input
-    task.interp_times = _CFG_INTERP_STEP.training.explicit_times.target
-    sorted_indices = sorted(set(task.boundary_times + task.interp_times))
-    task.imap = {idx: i for i, idx in enumerate(sorted_indices)}
-    task.model = type(
+    training_module.model = type(
         "M",
         (),
         {"__call__": lambda _self, x, **_kwargs: dummy_forward(x)},
     )()
-    task.loss = {"data": DummyLoss()}
+    training_module.loss = {"data": DummyLoss()}
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
     monkeypatch.setattr(
-        task,
+        training_module,
         "compute_loss_metrics",
         lambda *args, **_kwargs: (torch.tensor(0.0), {}, args[0] if args else None),
     )
 
     b, t, e, g, v = 2, 4, 1, 4, 2
     batch = {"data": torch.randn(b, t, e, g, v, dtype=torch.float32)}
-    loss, _, y_preds = task._step(batch, validation_mode=False)
+    loss, _, y_preds = training_module._step(batch, validation_mode=False)
 
     _assert_step_return_format(loss, y_preds, expected_len=1)

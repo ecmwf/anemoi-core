@@ -19,7 +19,7 @@ class BaseTimelessTask(BaseSingleStepTask):
     """
 
     def __init__(self, **_kwargs) -> None:
-        super().__init__(input_offset=[datetime.timedelta(0)], output_offset=[datetime.timedelta(0)])
+        super().__init__(inputs_offsets=[datetime.timedelta(0)], outputs_offsets=[datetime.timedelta(0)])
 
 
 class SpatialDownscalingTask(BaseTimelessTask):

@@ -5,7 +5,7 @@ from pytest_mock import MockerFixture
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
-from anemoi.training.train.tasks.base import BaseTrainingModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 
 
 @pytest.fixture
