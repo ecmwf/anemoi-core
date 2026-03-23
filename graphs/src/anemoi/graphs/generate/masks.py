@@ -10,30 +10,44 @@
 
 import logging
 import time
+from importlib.util import find_spec
 
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric.data import HeteroData
-from torch_geometric.nn import radius
 
 from anemoi.graphs import EARTH_RADIUS
 
 LOGGER = logging.getLogger(__name__)
 
+TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
+
 class RadiusAreaMaskBuilder:
     """Class to build a mask based on a radius search using the similarity of the cosine between
     two points on the unit sphere and their great-circle distance.
+    
+    If torch_cluster is available: all calculations are done as torch tensors!
+        i) use_gpu = True: Calculations are done on the GPU 
+        ii) use_gpu = False: Calculations are done on the CPU
+    Else falling back to scipy.spatial.cKDTree (on CPU)
     """
-    def __init__(self, reference_node_name: str, margin_radius_km: float = 100, mask_attr_name: str | None = None):
+    def __init__(self, reference_node_name: str, margin_radius_km: float = 100, mask_attr_name: str | None = None, use_gpu: bool = False):
         assert isinstance(margin_radius_km, (int, float)), "The margin radius must be a number."
         assert margin_radius_km > 0, "The margin radius must be positive."
 
-        self.nearest_neighbour = NearestNeighbors(metric="haversine", n_jobs=4)
         self.margin_radius_km = margin_radius_km
         self.reference_node_name = reference_node_name
         self.mask_attr_name = mask_attr_name
-        self._ref_vectors: torch.Tensor | None = None
+        self._ref_vectors: torch.Tensor | np.ndarray | None = None
+        self.use_gpu = use_gpu
+        if use_gpu and not torch.cuda.is_available():
+            LOGGER.warning("No GPU available falling back to CPU")
+            self.use_gpu = False
+        if use_gpu and not TORCH_CLUSTER_AVAILABLE:
+            LOGGER.warning("The 'torch-cluster library is not installed, cannot use the GPU. Falling back scipy + CPU")
+            self.use_gpu = False
+        
 
     @property
     def _chord_threshold(self) -> float:
@@ -41,7 +55,7 @@ class RadiusAreaMaskBuilder:
         return float(2 * np.sin(self.margin_radius_km / (2 * EARTH_RADIUS)))
     
     @staticmethod
-    def _to_unit_sphere(coords_rad: torch.Tensor) -> torch.Tensor:
+    def _to_unit_sphere_torch(coords_rad: torch.Tensor) -> torch.Tensor:
         """Convert (lat, lon) in radians to 3D unit-sphere coordinates.
 
         Parameters
@@ -63,6 +77,27 @@ class RadiusAreaMaskBuilder:
         y = torch.cos(lat) * torch.sin(lon)
         z = torch.sin(lat)
         return torch.stack([x, y, z], dim=1)
+    
+    @staticmethod
+    def _to_unit_sphere(coords_rad: np.ndarray) -> np.ndarray:
+        """Convert (lat, lon) in radians to 3D unit-sphere coordinates.
+
+        Parameters
+        ----------
+        coords_rad : numpy.ndarray of shape (N, 2)
+            Latitude and longitude in radians.
+
+        Returns
+        -------
+        numpy.ndarray of shape (N, 3)
+            Unit-sphere Cartesian coordinates, in float32.
+        """
+        LOGGER.debug(f"coords_rad is on device: {coords_rad.device}")
+        lat, lon = coords_rad[:, 0], coords_rad[:, 1]
+        x = np.cos(lat) * np.cos(lon)
+        y = np.cos(lat) * np.sin(lon)
+        z = np.sin(lat)
+        return np.stack([x, y, z], axis=1)
     
     def get_reference_coords(self, graph: HeteroData) -> torch.Tensor:
         """Retrieve coordinates from the reference nodes (kept on device).
@@ -99,7 +134,13 @@ class RadiusAreaMaskBuilder:
         coords_rad : torch.Tensor of shape (N_ref, 2)
             Latitude and longitude of the reference nodes in radians.
         """
-        self._ref_vectors = self._to_unit_sphere(coords_rad)
+        if TORCH_CLUSTER_AVAILABLE:
+            self._ref_vectors = self._to_unit_sphere_torch(coords_rad)
+        else: 
+            from scipy.spatial import cKDTree
+            LOGGER.debug("Using cKDTree")
+            self._ref_vectors = self._to_unit_sphere(coords_rad)
+            self._kdtree = cKDTree(self._ref_vectors)
 
     def fit(self, graph: HeteroData) -> None:
         """Fit to the reference nodes in the graph.
@@ -113,8 +154,13 @@ class RadiusAreaMaskBuilder:
         if self.mask_attr_name is not None:
             reference_mask_str += f" ({self.mask_attr_name})"
 
-        coords_rad = self.get_reference_coords(graph)
-        self.fit_coords(coords_rad)
+        coords_rad = self.get_reference_coords(graph) # This is always a torch.Tensor | when cluster is available coords_rad lives on the GPU
+        if not TORCH_CLUSTER_AVAILABLE:
+            self.fit_coords(coords_rad.cpu().numpy())
+        elif not self.use_gpu:
+            self.fit_coords(coords_rad.cpu())
+        else:
+            self.fit_coords(coords_rad)
 
         LOGGER.info(
             'Fitting %s with %d reference nodes from "%s".',
@@ -149,27 +195,40 @@ class RadiusAreaMaskBuilder:
         t0 = time.time()
         
         # The coords_rad from the query (typically the processor/hidden nodes) are produced on the CPU as numpy.ndarray.
-        # Need to convert them to torch.Tensor and move them to the correct device.  
-        query_vectors = self._to_unit_sphere(
-            torch.from_numpy(coords_rad)#.to(self._ref_vectors.device)   
-        ).cpu()  # (N_query, 3)   
+        # Need to convert them to torch.Tensor and move them to the correct device. 
+        if TORCH_CLUSTER_AVAILABLE:
+            from torch_geometric.nn import radius
+            LOGGER.debug("Using torch-cluster.radius")
 
+            query_vectors = self._to_unit_sphere_torch(
+                torch.from_numpy(coords_rad).to(self._ref_vectors.device)   
+            ) # (N_query, 3)
+            LOGGER.debug(f"Reference vectors are on {self._ref_vectors.device}, query vectors are one {query_vectors.device}")
+            edge_index = radius(
+                x=self._ref_vectors,    # reference points
+                y=query_vectors,        # query points
+                r=self._chord_threshold,
+                max_num_neighbors=1
+            )
 
-        edge_index = radius(
-            x=self._ref_vectors.cpu(),    # reference points
-            y=query_vectors,        # query points
-            r=self._chord_threshold,
-            max_num_neighbors=1
-    )
+            mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
+            mask[edge_index[0]] = True
+            mask = mask.cpu().numpy()
+        else:
+            assert self._kdtree is not None, "The model must be fitted before calling get_mask."
+            query_vectors = self._to_unit_sphere(
+                coords_rad
+            )
+            LOGGER.debug(f"Reference vectors are on cpu, query vectors are one cpu")
+            counts = self._kdtree.query_ball_point(query_vectors, r=self._chord_threshold, workers=-1, return_length=True)
+            mask = counts > 0
 
-        mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
-        mask[edge_index[0]] = True
 
         t1 = time.time()
         LOGGER.debug("Time to get mask from (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         # Bring the mask back to the CPU and return as numpy.ndarray
-        return mask.cpu().numpy()
+        return mask
     
 
 class KNNAreaMaskBuilder:
