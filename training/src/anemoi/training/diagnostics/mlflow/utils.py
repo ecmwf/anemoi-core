@@ -49,7 +49,7 @@ def expand_iterables(
     recursive: bool = True,
     delimiter: str = ".",
 ) -> Any:
-    """Enumerate list-like iterables of non-primitve elements
+    """Enumerate list-like iterables of non-primitve elements.
 
     Converts lists, tuples, and ListConfigs into individual keyed dicts with
     numeric indices (e.g., 0, 1, ...) and additional summary keys ('all',
@@ -107,10 +107,11 @@ def expand_iterables(
     expanded_params = {}
 
     for key, value in kv_iterable:
-        if recursive:
-            expanded = expand_iterables(value, recursive=recursive, delimiter=delimiter)
-        else:
-            expanded = value
+        expanded = (
+            expand_iterables(value, recursive=recursive, delimiter=delimiter)
+            if recursive
+            else value
+        )
 
         expanded_params[key] = expanded
 
