@@ -175,7 +175,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         output_relative_date_indices = self.task.get_batch_output_indices()
         relative_date_indices = sorted(input_relative_date_indices + output_relative_date_indices)
         timesteps = {
-            "timestep": self.config.data.timestep, # backwards compatibility with inference
+            "timestep": self.config.data.timestep,  # backwards compatibility with inference
             "relative_date_indices_training": relative_date_indices,  # backwards compatibility with inference
             "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
             "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
