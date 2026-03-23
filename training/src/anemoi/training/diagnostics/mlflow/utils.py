@@ -47,9 +47,8 @@ def expand_iterables(
     params: Any,
     *,
     recursive: bool = True,
-    delimiter: str = ".",
 ) -> Any:
-    """Enumerate list-like iterables of non-primitve elements.
+    """Enumerate list-like iterables of non-primitve elements as dicts.
 
     Converts lists, tuples, and ListConfigs into individual keyed dicts with
     numeric indices (e.g., 0, 1, ...) and additional summary keys ('all',
@@ -66,9 +65,6 @@ def expand_iterables(
     recursive : bool, optional
         Expand nested dictionaries.
         Default is True.
-    delimiter: str, optional
-        Delimiter to use for keys.
-        Default is ".".
 
     Returns
     -------
@@ -82,7 +78,7 @@ def expand_iterables(
         >>> expand_iterables({'a': {'b': {'c': 123}}})
         {'a': {'b': {'c': 123}}}
         >>> expand_iterables({'a': [['a1', 'a2']]})
-        {'a': {0: ['a1', 'a2']}, 'a.length': 1, 'a.all': [['a1', 'a2']]}
+        {'a': {0: ['a1', 'a2'], 'length': 1, 'all': [['a1', 'a2']]}}
         >>> expand_iterables({'a': [[0, 1, 2], 'b', 'c'])
         {'a': {0: [0, 1, 2], 1: 'b', 2: 'c'},
         'a.length': 3,
@@ -107,18 +103,14 @@ def expand_iterables(
     expanded_params = {}
 
     for key, value in kv_iterable:
-        expanded = (
-            expand_iterables(value, recursive=recursive, delimiter=delimiter)
-            if recursive
-            else value
-        )
+        expanded = expand_iterables(value, recursive=recursive) if recursive else value
 
         expanded_params[key] = expanded
 
-        if isinstance(value, list_types) and expanded is not value:
+        if isinstance(value, list_types) and isinstance(expanded, dict):
             # add summary keys for expanded lists
-            expanded_params[f"{key}{delimiter}length"] = len(value)
-            expanded_params[f"{key}{delimiter}all"] = value
+            expanded_params[key]["length"] = len(value)
+            expanded_params[key]["all"] = value
 
     return expanded_params
 

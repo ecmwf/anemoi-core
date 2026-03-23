@@ -680,7 +680,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         params = params.copy()
         for key in expand_keys or []:
             if key in params:
-                expanded_params[key] = expand_iterables(params.pop(key), delimiter=".")
+                expanded_params[key] = expand_iterables(params.pop(key))
         expanded_params.update(params)
 
         expanded_params = _flatten_dict(
