@@ -29,7 +29,6 @@ class TestMultiDataset:
     @pytest.fixture
     def multi_dataset(self, mocker: MockFixture, dataset_config: dict) -> MultiDataset:
         """Fixture to provide a MultiDataset instance with mocked datasets."""
-        data_readers = {"dataset_a": None, "dataset_b": None}
 
         # Mock create_dataset to return mock datasets
         mock_dataset_a = mocker.MagicMock()
@@ -44,10 +43,7 @@ class TestMultiDataset:
         mock_dataset_b.has_trajectories = False
         mock_dataset_b.frequency = "3h"
 
-        mocker.patch(
-            "anemoi.training.data.multidataset.create_dataset",
-            side_effect=[mock_dataset_a, mock_dataset_b],
-        )
+        data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
 
         return MultiDataset(data_readers=data_readers, **dataset_config)
 
