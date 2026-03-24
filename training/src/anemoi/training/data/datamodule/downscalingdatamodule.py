@@ -98,6 +98,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         shuffle: bool = True,
         val_rollout: int = 1,
         label: str = "generic",
+        overfit_on_index: int|None = None,
     ) -> DownscalingDataset:
 
         data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
@@ -108,6 +109,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             label=label,
             lres_grid_indices=self.lres_grid_indices,
             hres_grid_indices=self.hres_grid_indices,
+            overfit_on_index=overfit_on_index
         )
         return data
 
