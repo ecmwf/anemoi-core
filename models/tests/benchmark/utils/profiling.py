@@ -1,4 +1,5 @@
 import torch
+from torch.cuda import cudart, check_error
 
 def benchmark(f, *inputs, mode="both", warmup_iter=100, run_iter=100):
     
@@ -41,20 +42,31 @@ def benchmark(f, *inputs, mode="both", warmup_iter=100, run_iter=100):
         out = f(*inputs)
     for _ in range(warmup_iter):
         torch.compiler.cudagraph_mark_step_begin()
-        if mode == "fwd" or mode == "both":
+        if mode == "fwd":
+            with torch.no_grad():
+                out = f(*inputs)
+        elif mode == "both":
             out = f(*inputs)
         if mode == "bwd" or mode == "both":
             loss = dummy_loss(out)
-            loss.backward(retain_graph=(mode == "bwd"))
+            with torch.autograd.grad_mode.set_mulithreading_enabled(False):
+                loss.backward(retain_graph=(mode == "bwd"))
             reset_grad(*inputs)
         cache_filler_1.zero_()
     
     if mode == "bwd":
         out = f(*inputs)
+
+    torch.cuda.synchronize()
+    check_error(cudart().cudaProfilerStart())
     start.record()
+    #with torch.autograd.profiler.emit_nvtx():
     for _ in range(run_iter):
         torch.compiler.cudagraph_mark_step_begin()
-        if mode == "fwd" or mode == "both":
+        if mode == "fwd":
+            with torch.no_grad():
+                out = f(*inputs)
+        elif mode == "both":
             out = f(*inputs)
         if mode == "bwd" or mode == "both":
             loss = dummy_loss(out)
@@ -63,6 +75,7 @@ def benchmark(f, *inputs, mode="both", warmup_iter=100, run_iter=100):
         cache_filler_1.zero_()
     end.record()
     torch.cuda.synchronize()
+    check_error(cudart().cudaProfilerStop())
     
     run_time = start.elapsed_time(end) / run_iter - filler_time
     

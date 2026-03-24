@@ -155,6 +155,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
+        use_cuda_graphs: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBaseMapper.
@@ -190,6 +191,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Backend to use for graph transformer conv, options are "triton" and "pyg"
         edge_pre_mlp: bool, by default False
             Allow for edge feature mixing
+        use_cuda_graphs: bool, by default False
+            Whether to use cuda graphs. This can improve performance by fusing many small kernel launches into a single graph, but requires static input shapes and will increase memory usage.
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -199,6 +202,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
+            use_cuda_graphs=use_cuda_graphs,
         )
 
         self.num_chunks = num_chunks
@@ -217,6 +221,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
         )
+        #self.proc = torch.compile(self.proc, mode="reduce-overhead")
 
         self.offload_layers(cpu_offload)
 
@@ -228,6 +233,12 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
             f"Supported strategies are 'heads' and 'edges'."
         )
+
+        import os
+
+        self.use_cuda_graphs = use_cuda_graphs
+        if self.use_cuda_graphs:
+            LOGGER.info(f"CUDA graphs enabled for {self.__class__.__name__}. Note that this may increase memory usage and requires static input shapes for optimal performance.")
 
     def prepare_edge_sharding_wrapper(
         self,
@@ -283,6 +294,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         return x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst, cond
 
+    #@torch.compile(mode="reduce-overhead")
     def run_processor_chunk_edge_sharding(
         self,
         x: tuple[Tensor, Tensor],
@@ -326,17 +338,28 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             x_dst_is_sharded=True,
         )
 
-        (_, x_dst_out), _ = self.proc(
-            (x_src_chunk, x_dst_chunk),
-            edge_attr,
-            edge_index_chunk,
-            shapes,
-            batch_size,
-            chunk_size,
-            model_comm_group,
-            cond=cond,
-            **kwargs,
-        )
+        if self.use_cuda_graphs:
+            # Wrap self.proc capturing non-tensor args; only tensors go through forward
+            wrapper = GraphTransformerMapperBlockCudaGraphWrapper(
+                self.proc, batch_size, shapes, chunk_size, model_comm_group
+            ).to(edge_index.device)
+            # make_graphed_callables does warmup + capture internally
+            graphed_fn = torch.cuda.make_graphed_callables(
+                wrapper, (x_src_chunk, x_dst_chunk, edge_attr, edge_index_chunk)
+            )
+            x_dst_out = graphed_fn(x_src_chunk, x_dst_chunk, edge_attr, edge_index_chunk)
+        else:
+            (_, x_dst_out), _ = self.proc(
+                (x_src_chunk, x_dst_chunk),
+                edge_attr,
+                edge_index_chunk,
+                shapes,
+                batch_size,
+                chunk_size,
+                model_comm_group,
+                cond=cond,
+                **kwargs,
+            )
 
         return self.post_process(
             x_dst=x_dst_out, shapes_dst=shapes[1], model_comm_group=model_comm_group, keep_x_dst_sharded=True
@@ -479,6 +502,39 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             **kwargs,
         }
 
+#        if self.use_cuda_graphs:
+#            if self.cuda_graph is None:
+#                # capture the graph with static input
+#
+#                LOGGER.info(f"Capturing CUDA graph for {self.__class__.__name__} with input shape {input_shape} and output shape {output_shape}.")
+#
+#                # set up static inputs/outputs for graph capture based on actual input shapes
+#                # these will be reused across the lifetime of the model, so we only capture once and can handle dynamic shapes across different forward calls by copying new inputs into the static input tensors before replaying the graph
+#                input_shape = x.shape
+#                output_shape = (*x[1].shape[:-1], self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim)
+#                self.static_cuda_graph_input = torch.empty(input_shape, device=x[0].device, dtype=x[0].dtype)
+#                self.static_cuda_graph_output = torch.empty(output_shape, device=x[0].device, dtype=x[0].dtype)
+#                # warmup
+#                kwargs_forward_capture = kwargs_forward.copy()
+#                kwargs_forward_capture["x"] = (self.static_cuda_graph_input, self.static_cuda_graph_input)
+#                s = torch.cuda.Stream()
+#                s.wait_stream(torch.cuda.current_stream())
+#                with torch.cuda.stream(s):
+#                    for i in range(3):
+#                        static_output = self.mapper_forward_with_edge_sharding(**kwargs_forward_capture)
+#
+#                # capture
+#                self.cuda_graph = torch.cuda.CUDAGraph()
+#                with torch.cuda.graph(self.cuda_graph):
+#                    static_output = self.mapper_forward_with_edge_sharding(**kwargs_forward_capture)
+#
+#                LOGGER.info(f"Finished capturing CUDA graph for {self.__class__.__name__}.")
+#
+#            # replay the graph with actual input
+#            self.static_cuda_graph_input.copy_(x[0])
+#            self.cuda_graph.replay() # output will be stored in self.static_cuda_graph_output
+#            return self.static_cuda_graph_output, x[1]
+#
         if self.shard_strategy == "edges":
             return self.mapper_forward_with_edge_sharding(**kwargs_forward)
         else:  # self.shard_strategy == "heads"
@@ -488,6 +544,32 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
                 **kwargs_forward,
             )
 
+class GraphTransformerMapperBlockCudaGraphWrapper(torch.nn.Module):
+    """Wrapper for GraphTransformerMapperBlock to enable CUDA graph capture and replay.
+
+    Captures all non-tensor forward args in __init__ and only passes tensors
+    to forward, since CUDA graphs require tensor-only inputs.
+    """
+
+    def __init__(self, block, batch_size, shard_shapes, size, model_comm_group=None):
+        super().__init__()
+        self.block = block
+        self.batch_size = batch_size
+        self.shard_shapes = shard_shapes
+        self.size = size
+        self.model_comm_group = model_comm_group
+
+    def forward(self, x_src, x_dst, edge_attr, edge_index):
+        (_, x_dst_out), _ = self.block(
+            (x_src, x_dst),
+            edge_attr,
+            edge_index,
+            self.shard_shapes,
+            self.batch_size,
+            self.size,
+            self.model_comm_group,
+        )
+        return x_dst_out
 
 class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
     """Graph Transformer Mapper from data -> hidden."""
@@ -556,6 +638,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
         )
 
         self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)

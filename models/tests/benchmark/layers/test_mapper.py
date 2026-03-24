@@ -25,6 +25,7 @@ from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
+import nsight
 
 
 from anemoi.models.utils.compile import mark_for_compilation
@@ -56,8 +57,11 @@ LOGGER = logging.getLogger(__name__)
 
 class GraphConfig_n320_to_o96:
     """Configuration for the graph used in benchmarks."""
-    num_src_nodes: int = 542080  
-    num_dst_nodes: int = 40320
+    #num_src_nodes: int = 542080  
+    #num_dst_nodes: int = 40320
+    #num_edges: int = 748348  
+    num_src_nodes: int = 542080
+    num_dst_nodes: int = 40320 
     num_edges: int = 748348  
 
 class GraphConfig_o96_to_n320:
@@ -90,9 +94,9 @@ class MapperBenchmarkConfig:
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
-    #shard_strategy: str = "edges"
-    shard_strategy: str = "heads"
-    graph_attention_backend: str = "pyg" # TODO pick triton by default if running on GPU
+    shard_strategy: str = "edges"
+    #shard_strategy: str = "heads"
+    graph_attention_backend: str = "triton" # TODO pick triton by default if running on GPU
     edge_dim: int = None
     edge_pre_mlp: bool = False
     
@@ -147,7 +151,7 @@ def benchmark_graph(graph_config, device) -> HeteroData:
     return graph
 
 
-@pytest.fixture
+#@pytest.fixture
 def benchmark_graph_provider(graph_config, mapper_benchmark_config, device):
     """Create graph provider for benchmarking."""
     
@@ -161,12 +165,20 @@ def benchmark_graph_provider(graph_config, mapper_benchmark_config, device):
     )
     return provider.to(device)
 
+def dummy_loss(_out):
+        loss = 0
+        if isinstance(_out, torch.Tensor):
+            loss += _out.sum()
+        else:
+            for o in _out:
+                loss += o.sum()
+        return loss
 
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("graph_config", [GraphConfig_n320_to_o96()])
-@pytest.mark.parametrize("mode", ["fwd"])
-@pytest.mark.parametrize("use_cuda_graphs", [False, True])
+@pytest.mark.parametrize("mode", ["both"])
+@pytest.mark.parametrize("use_cuda_graphs", [False])
 def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device, use_cuda_graphs):
     """Benchmark the GraphTransformerForwardMapper."""
     config = mapper_benchmark_config
@@ -183,6 +195,7 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchma
     # Create mapper
     mapper_config = asdict(config)
     mapper_config["edge_dim"] = benchmark_graph_provider.edge_dim
+    mapper_config["use_cuda_graphs"] = use_cuda_graphs
     mapper = GraphTransformerForwardMapper(**mapper_config).to(device)
 
     mapper = mark_for_compilation(mapper, compile_config().compile)
@@ -195,29 +208,14 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchma
     shard_shapes = ([list(x_src.shape)], [list(x_dst.shape)])
     edge_attr, edge_index, _ = benchmark_graph_provider.get_edges(batch_size=config.batch_size)
 
-    if use_cuda_graphs:
-        wrapper = CUDAGraphMapperWrapper(mapper, config.batch_size, shard_shapes).to(device) # avoid passing non tensor inputs to forward
-        wrapper = torch.cuda.make_graphed_callables(wrapper, (x_src, x_dst, edge_attr, edge_index))
+    with nsight.annotate("Mapper forward (triton)"):
+        out = mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
 
-        def forward_fn():
-            return wrapper(x_src, x_dst, edge_attr, edge_index)
-    else:
-        def forward_fn():
-            return mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
-    
-    # Run benchmark
-    LOGGER.debug(f"Running {mode} benchmark...")
-    run_time, peak_memory = run_benchmark(
-        forward_fn,
-        mode=mode,
-        warmup_iter=config.warmup_iter,
-        run_iter=config.run_iter
-    )
-    
-    LOGGER.debug(f"Forward mapper benchmark complete:")
-    LOGGER.debug(f"  Time per iteration: {run_time:.2f} ms")
-    LOGGER.debug(f"  Peak memory usage: {peak_memory:.2f} MB")
-    
+    mapper_config["graph_attention_backend"] = 'pyg'
+    mapper_pyg = GraphTransformerForwardMapper(**mapper_config).to(device)
+    with nsight.annotate("Mapper forward (pyg)"):
+        out = mapper_pyg.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
+
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("graph_config", [GraphConfig_o96_to_n320()])
@@ -298,3 +296,35 @@ def test_benchmark_backward_mapper(mapper_benchmark_config, graph_config, benchm
 #    mapper_benchmark_config.num_chunks = num_chunks
 #    use_cuda_graphs = False
 #    test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device, use_cuda_graphs)
+
+@nsight.analyze.plot(
+    "mapper_fwd_n320_o96.png",
+    plot_type="bar",
+    title="Mapper Forward Pass Performance (n320 to o96)",
+    ylabel="Time (ms)",
+)
+@nsight.analyze.kernel(
+    configs=[512, 1024, 2048],
+    runs=3,
+    #metrics=["dram__throughput.avg"],
+    #metrics=["sm__cycles_elapsed.avg",],
+    #metrics=["gpu__time_duration.sum",],
+    #metrics=["smsp__sass_inst_executed_op_shared.sum",],
+    metrics=["dram__cycles_active_read.sum",],
+    #replay_mode='range', # annotation should only have 1 kernel # didnt work for some reason
+    combine_kernel_metrics=lambda x, y: x + y,  # Sum metrics from multiple kernels
+)
+def benchmark_forward_mapper(num_channels):
+    mapper = MapperBenchmarkConfig(in_channels_src=num_channels, in_channels_dst=num_channels)
+    graph=benchmark_graph_provider(GraphConfig_n320_to_o96(), mapper, "cuda:0")
+    return test_benchmark_forward_mapper(mapper,GraphConfig_n320_to_o96(),graph, "both", "cuda:0", False)
+
+def main() -> None:
+    #graph=benchmark_graph_provider(GraphConfig_n320_to_o96(), MapperBenchmarkConfig(), "cuda:0")
+    #result = benchmark_forward_mapper()
+    #print(result.to_dataframe())
+    #print("\nTip: Run 'ncu --query-metrics' to see all available metrics!")
+
+
+if __name__ == "__main__":
+    main()

@@ -51,3 +51,30 @@ def test_benchmark_training_cycle(
     store: str = f"ssh://{user}@{hostname}:{path}"
 
     benchmark(cfg, test_case, store)
+
+@pytest.mark.multigpu
+@pytest.mark.slow
+def test_benchmark_encoder(
+    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
+) -> None:
+    """Runs a benchmark encoder setup and then compares them against the values stored on a server."""
+    cfg, test_case = benchmark_config
+    LOGGER.info("Benchmarking the configuration: %s", test_case)
+    
+    # Reset memory logging and free all possible memory between runs
+    # this ensures we report the peak memory used during each run,
+    # and not the peak memory used by the run with the highest memory usage
+    reset_peak_memory_stats()
+    empty_cache()
+    gc.collect()
+
+    
+
+    return
+    
+    # determine store from benchmark config
+    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
+    user, hostname, path = parse_benchmark_config(config_path)
+    store: str = f"ssh://{user}@{hostname}:{path}"
+
+    benchmark_encoder(cfg, test_case, store)

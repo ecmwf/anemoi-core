@@ -48,8 +48,10 @@ def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
     -------
     The result of calling func with the provided arguments
     """
+    using_cuda_graphs = True # TODO find some way to dtermine if we are inside cuda graph capture
+    preserve_rng_state = not using_cuda_graphs # We need to disable RNG state preservation when using CUDA graphs, otherwise we get an error about non-deterministic behavior. This is because CUDA graphs do not support RNG state preservation.
     if enabled:
-        return checkpoint(func, *args, **kwargs, use_reentrant=False)
+        return checkpoint(func, *args, **kwargs, use_reentrant=False, preserve_rng_state=preserve_rng_state)
     return func(*args, **kwargs)
 
 

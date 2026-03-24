@@ -210,17 +210,17 @@ def drop_unconnected_src_nodes(
     Returns
     -------
     tuple[Tensor, Adj, Tensor]
-        reduced node features, relabeled edge index (contiguous, starting from 0),
-        indices of connected source nodes
+        source node features (unchanged), edge index (unchanged),
+        full arange of source node indices
+
+    Note
+    ----
+    This is a CUDA-graph-compatible version that skips the actual dropping.
+    Unconnected source nodes have no edges, so they do not participate in
+    message passing and the result is mathematically identical.
+    Any operation that produces data-dependent output shapes (torch.unique,
+    torch.where, boolean indexing) is forbidden during CUDA graph capture.
     """
-    connected_src_nodes = torch.unique(edge_index[0])
-    dst_nodes = torch.arange(num_nodes[1], device=x_src.device)
-
-    edge_index_new, _ = bipartite_subgraph(
-        (connected_src_nodes, dst_nodes),
-        edge_index,
-        size=num_nodes,
-        relabel_nodes=True,
-    )
-
-    return x_src[connected_src_nodes], edge_index_new, connected_src_nodes
+    num_src = num_nodes[0]
+    connected_src_nodes = torch.arange(num_src, device=x_src.device)
+    return x_src, edge_index, connected_src_nodes
