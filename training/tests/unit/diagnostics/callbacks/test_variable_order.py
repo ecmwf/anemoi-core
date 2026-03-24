@@ -15,7 +15,7 @@ import pytest
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 
 
