@@ -146,8 +146,8 @@ def global_config(
         get_tmp_path,
     )
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
 
     OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
     cfg.training.scalers.datasets.data["output_steps"] = {
@@ -207,8 +207,8 @@ def multidatasets_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
 
     return cfg, [url_dataset, url_dataset_b]
 
@@ -292,8 +292,8 @@ def ensemble_config(
     cfg = handle_truncation_matrices(cfg, get_test_data)
     assert isinstance(cfg, DictConfig)
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
     return cfg, url_dataset
 
 
@@ -560,11 +560,11 @@ def multidatasets_diffusion_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     if is_tendency:
-        cfg.training.multistep_input = 3
-        cfg.training.multistep_output = 2
+        cfg.task.multistep_input = 3
+        cfg.task.multistep_output = 2
     else:
-        cfg.training.multistep_input = 2
-        cfg.training.multistep_output = 1
+        cfg.task.multistep_input = 2
+        cfg.task.multistep_output = 1
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 

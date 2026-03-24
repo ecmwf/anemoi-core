@@ -43,7 +43,7 @@ diagnostics:
         - v_850
         - 2t
         - tp
-        output_steps: ${training.multistep_output}
+        output_steps: ${task.multistep_output}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
         precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
