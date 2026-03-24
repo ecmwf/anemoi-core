@@ -491,46 +491,46 @@ class LoggingSchema(BaseModel):
 
 
 class MemorySchema(BaseModel):
-    enabled: bool = Field(example=False)
+    enabled: bool = Field(default=False, example=False)
     "Enable memory report. Default to false."
-    steps: PositiveInt = Field(example=5)
+    steps: PositiveInt = Field(default=5, example=5)
     "Frequency of memory profiling. Default to 5."
-    warmup: NonNegativeInt = Field(example=2)
+    warmup: NonNegativeInt = Field(default=2, example=2)
     "Number of step to discard before the profiler starts to record traces. Default to 2."
-    extra_plots: bool = Field(example=False)
+    extra_plots: bool = Field(default=False, example=False)
     "Save plots produced with torch.cuda._memory_viz.profile_plot if available. Default to false."
-    trace_rank0_only: bool = Field(example=False)
+    trace_rank0_only: bool = Field(default=False, example=False)
     "Trace only rank 0 from SLURM_PROC_ID. Default to false."
 
 
 class Snapshot(BaseModel):
-    enabled: bool = Field(example=False)
+    enabled: bool = Field(default=False, example=False)
     "Enable memory snapshot recording. Default to false."
-    steps: PositiveInt = Field(example=4)
+    steps: PositiveInt = Field(default=4, example=4)
     "Frequency of snapshot. Default to 4."
-    warmup: NonNegativeInt = Field(example=0)
+    warmup: NonNegativeInt = Field(default=0, example=0)
     "Number of step to discard before the profiler starts to record traces. Default to 0."
 
 
 class Profiling(BaseModel):
-    enabled: bool = Field(example=False)
+    enabled: bool = Field(default=False, example=False)
     "Enable component profiler. Default to false."
     verbose: bool | None = None
     "Set to true to include the full list of profiled action or false to keep it concise."
 
 
 class BenchmarkProfilerSchema(BaseModel):
-    memory: MemorySchema = Field(default_factory=lambda: MemorySchema())
+    memory: MemorySchema = Field(default_factory=MemorySchema)
     "Schema for memory report containing metrics associated with CPU and GPU memory allocation."
-    time: Profiling = Field(default_factory=lambda: Profiling(True))
+    time: Profiling = Field(default_factory=lambda: Profiling(enabled=True))
     "Report with metrics of execution time for certain steps across the code."
-    speed: Profiling = Field(default_factory=lambda: Profiling(True))
+    speed: Profiling = Field(default_factory=lambda: Profiling(enabled=True))
     "Report with metrics of execution speed at training and validation time."
-    system: Profiling = Field(default_factory=lambda: Profiling())
+    system: Profiling = Field(default_factory=Profiling)
     "Report with metrics of GPU/CPU usage, memory and disk usage and total execution time."
-    model_summary: Profiling = Field(default_factory=lambda: Profiling())
+    model_summary: Profiling = Field(default_factory=Profiling)
     "Table summary of layers and parameters of the model."
-    snapshot: Snapshot = Field(default_factory=lambda: Snapshot())
+    snapshot: Snapshot = Field(default_factory=Snapshot)
     "Memory snapshot if torch.cuda._record_memory_history is available."
 
 
@@ -548,7 +548,7 @@ class ProgressBarSchema(BaseModel):
 class DiagnosticsSchema(BaseModel):
     plot: PlotSchema | None = None
     "Plot schema."
-    callbacks: list = Field(default_factory=list, example=[])
+    callbacks: list[Any] = Field(default_factory=list, example=[])
     "Callbacks schema."
     benchmark_profiler: BenchmarkProfilerSchema
     "Benchmark profiler schema for `profile` command."

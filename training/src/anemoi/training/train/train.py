@@ -67,9 +67,16 @@ class AnemoiTrainer(ABC):
         # Resolve the config to avoid shenanigans with lazy loading
 
         self.config = convert_to_omegaconf(build_schema(config))
+        print(self.config.graph.edges[0].edge_builders)
+        stop
 
         self.load_weights_only = self.config.training.load_weights_only
         self.parent_uuid = None
+        self.start_from_checkpoint = (
+            bool(self.config.training.run_id)
+            or bool(self.config.training.fork_run_id)
+            or bool(self.config.system.input.warm_start)
+        )
 
         self.config.training.run_id = self.run_id
         LOGGER.info("Run id: %s", self.config.training.run_id)
@@ -88,11 +95,10 @@ class AnemoiTrainer(ABC):
             fork_run_id=self.config.training.fork_run_id,
             parent_run_server2server=self.parent_run_server2server,
         )
-        self.start_from_checkpoint = (
-            bool(self.config.training.run_id)
-            or bool(self.config.training.fork_run_id)
-            or bool(self.system.input.warm_start)
-        )
+        print(self.start_from_checkpoint)
+        print(self.config.training.run_id)
+        print(self.config.training.fork_run_id)
+        print(self.system.input.warm_start)
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
         LOGGER.info("Checkpoints path: %s", self.system.output.checkpoints)
         LOGGER.info("Plots path: %s", self.system.output.plots)

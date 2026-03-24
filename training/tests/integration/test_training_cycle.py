@@ -89,6 +89,34 @@ def test_config_without_validation_accepts_invalid_projection_kind(global_config
     assert config.diagnostics.plot.projection_kind == "invalid_projection"
 
 
+def test_config_without_validation_resolves_strategy_interpolations(
+    gnn_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = gnn_config
+    cfg.config_validation = False
+    config = build_schema(cfg)
+    assert isinstance(config.training.strategy.num_gpus_per_model, int)
+    assert isinstance(config.training.strategy.read_group_size, int)
+
+
+def test_config_without_validation_applies_graph_builder_defaults(
+    gnn_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = gnn_config
+    cfg.config_validation = False
+
+    # Ensure we verify default injection on a user-provided cutoff builder dict.
+    with open_dict(cfg.graph.edges[0].edge_builders[0]):
+        cfg.graph.edges[0].edge_builders[0].pop("max_num_neighbours", None)
+
+    config = build_schema(cfg)
+    edge_builder = config.graph.edges[0].edge_builders[0]
+    if isinstance(edge_builder, DictConfig | dict):
+        assert edge_builder.get("max_num_neighbours") == 64
+    else:
+        assert edge_builder.max_num_neighbours == 64
+
+
 def test_config_without_validation_preserves_extra_fields(global_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = global_config
     cfg.config_validation = False
