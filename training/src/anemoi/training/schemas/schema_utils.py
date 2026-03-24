@@ -119,6 +119,53 @@ def _safe_field_default(field_info: Any, *, allow_factory: bool = True) -> Any:
         return _MISSING
 
 
+def _field_output_key(field_name: str, field_info: Any) -> str:
+    """Return config key name to use for this field."""
+    return field_info.alias or field_name
+
+
+def _field_input_value(data: DictConfig | dict[str, Any] | None, field_name: str, field_info: Any) -> Any:
+    """Read field value from config, supporting both name and alias."""
+    if not isinstance(data, DictConfig | dict):
+        return None
+    alias = field_info.alias
+    try:
+        if alias and alias in data:
+            return data.get(alias)
+        return data.get(field_name)
+    except Exception:
+        # Some config values are unresolved interpolations at this stage
+        # (for example missing env vars in local runs). Treat them as absent
+        # while collecting schema defaults.
+        return None
+
+
+def _drop_none_mapping_values(value: Any) -> Any:
+    """Drop None-valued entries recursively from a mapping."""
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            if item is None:
+                continue
+            cleaned[key] = _drop_none_mapping_values(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_drop_none_mapping_values(item) for item in value]
+    return value
+
+
+def _clean_dataset_kwargs(value: Any) -> Any:
+    """Remove absent-None kwargs from dataset reader mappings."""
+    if isinstance(value, dict):
+        cleaned = {key: _clean_dataset_kwargs(item) for key, item in value.items()}
+        if "dataset" in cleaned:
+            return _drop_none_mapping_values(cleaned)
+        return cleaned
+    if isinstance(value, list):
+        return [_clean_dataset_kwargs(item) for item in value]
+    return value
+
+
 def _resolve_discriminated_union_model(
     annotation: Any,
     metadata: tuple[Any, ...],
@@ -412,11 +459,10 @@ def schema_defaults(model: type[PydanticBaseModel], data: DictConfig | dict[str,
     """
     defaults: dict[str, Any] = {}
     for field_name, field_info in model.model_fields.items():
+        output_key = _field_output_key(field_name, field_info)
         annotation, annotation_metadata = _unwrap_annotated(field_info.annotation)
         metadata = (*annotation_metadata, *tuple(field_info.metadata))
-        field_value = None
-        if isinstance(data, DictConfig | dict):
-            field_value = data.get(field_name)
+        field_value = _field_input_value(data, field_name, field_info)
 
         # Pick the concrete nested model first so defaults come from the same
         # branch the user selected, e.g. the right training schema for model_task.
@@ -444,7 +490,10 @@ def schema_defaults(model: type[PydanticBaseModel], data: DictConfig | dict[str,
         )
 
         if has_default:
-            defaults[field_name] = default_value
+            # Dataset reader kwargs are passed directly to `open_dataset()`.
+            # Keeping absent None values (e.g. `select: None`) changes runtime
+            # behavior in lenient mode, so strip them from dataset mappings.
+            defaults[output_key] = _clean_dataset_kwargs(default_value)
 
     return defaults
 
@@ -545,6 +594,61 @@ def _annotation_model_candidates(annotation: Any) -> list[type[PydanticBaseModel
     return []
 
 
+def _dict_key_patterns(key_annotation: Any) -> list[str]:
+    """Return schema path segments for dictionary keys."""
+    key_annotation, _ = _unwrap_annotated(key_annotation)
+    if get_origin(key_annotation) is Literal:
+        literal_keys = [str(value) for value in get_args(key_annotation)]
+        return literal_keys or [_WILDCARD_PATH_SEGMENT]
+    return [_WILDCARD_PATH_SEGMENT]
+
+
+def _collect_annotation_patterns(
+    annotation: Any,
+    prefix: tuple[str, ...],
+    seen_models: tuple[type[PydanticBaseModel], ...],
+) -> set[tuple[str, ...]]:
+    """Collect model path patterns reachable from an annotation."""
+    annotation, _ = _unwrap_annotated(annotation)
+
+    if isinstance(annotation, type) and issubclass(annotation, PydanticBaseModel):
+        return _collect_schema_path_patterns(annotation, prefix, seen_models)
+
+    origin = get_origin(annotation)
+    if origin in (Union, UnionType):
+        patterns: set[tuple[str, ...]] = set()
+        for candidate in get_args(annotation):
+            patterns.update(_collect_annotation_patterns(candidate, prefix, seen_models))
+        return patterns
+
+    if origin in (list, tuple, set):
+        args = get_args(annotation)
+        element_annotation = args[0] if args else Any
+        return _collect_annotation_patterns(
+            element_annotation,
+            (*prefix, _WILDCARD_PATH_SEGMENT),
+            seen_models,
+        )
+
+    if origin is dict:
+        args = get_args(annotation)
+        if len(args) < 2:
+            return set()
+        key_annotation, value_annotation = args[0], args[1]
+        patterns: set[tuple[str, ...]] = set()
+        for key_segment in _dict_key_patterns(key_annotation):
+            patterns.update(
+                _collect_annotation_patterns(
+                    value_annotation,
+                    (*prefix, key_segment),
+                    seen_models,
+                ),
+            )
+        return patterns
+
+    return set()
+
+
 def _collect_schema_path_patterns(
     model: type[PydanticBaseModel],
     prefix: tuple[str, ...] = (),
@@ -561,24 +665,7 @@ def _collect_schema_path_patterns(
         field_path = (*prefix, field_name)
         patterns.add(field_path)
 
-        annotation, _ = _unwrap_annotated(field_info.annotation)
-        origin = get_origin(annotation)
-
-        if origin is dict:
-            args = get_args(annotation)
-            if len(args) > 1:
-                for candidate in _annotation_model_candidates(args[1]):
-                    patterns.update(
-                        _collect_schema_path_patterns(
-                            candidate,
-                            (*field_path, _WILDCARD_PATH_SEGMENT),
-                            next_seen,
-                        ),
-                    )
-            continue
-
-        for candidate in _annotation_model_candidates(annotation):
-            patterns.update(_collect_schema_path_patterns(candidate, field_path, next_seen))
+        patterns.update(_collect_annotation_patterns(field_info.annotation, field_path, next_seen))
 
     return patterns
 

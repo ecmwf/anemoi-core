@@ -67,8 +67,6 @@ class AnemoiTrainer(ABC):
         # Resolve the config to avoid shenanigans with lazy loading
 
         self.config = convert_to_omegaconf(build_schema(config))
-        print(self.config.graph.edges[0].edge_builders)
-        stop
 
         self.load_weights_only = self.config.training.load_weights_only
         self.parent_uuid = None

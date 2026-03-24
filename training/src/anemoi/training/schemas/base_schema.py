@@ -21,7 +21,6 @@ from pydantic import ConfigDict
 from pydantic import ValidationError
 from pydantic import model_validator
 from pydantic_core import PydanticCustomError
-from pydantic_core import PydanticUndefined
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
@@ -65,7 +64,7 @@ def apply_runtime_postprocessing(config: BaseSchema | UnvalidatedBaseSchema) -> 
 
 class BaseSchema(BaseModel):
     """Top-level schema for the training configuration.
-    
+
     Args:
         data: Data configuration
         dataloader: Dataloader configuration

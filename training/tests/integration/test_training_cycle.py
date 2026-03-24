@@ -246,6 +246,58 @@ def test_pydantic_defaults_match_between_validation_modes(gnn_config: tuple[Dict
     )
 
 
+def test_valid_config_output_matches_between_validation_modes(
+    gnn_config: tuple[DictConfig, str],
+) -> None:
+    def _project_to_reference_shape(candidate: object, reference: object) -> object:
+        if isinstance(reference, dict) and isinstance(candidate, dict):
+            return {
+                key: _project_to_reference_shape(candidate[key], value)
+                for key, value in reference.items()
+                if key in candidate
+            }
+        if isinstance(reference, list) and isinstance(candidate, list):
+            return [
+                _project_to_reference_shape(candidate_item, reference_item)
+                for candidate_item, reference_item in zip(candidate, reference, strict=False)
+            ]
+        return candidate
+
+    def _normalize_runtime_value(value: object) -> object:
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, dict):
+            return {key: _normalize_runtime_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [_normalize_runtime_value(item) for item in value]
+        return value
+
+    cfg, _ = gnn_config
+    strict_input = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+    defaults_only_input = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+
+    assert isinstance(strict_input, DictConfig)
+    assert isinstance(defaults_only_input, DictConfig)
+
+    strict_input.config_validation = True
+    defaults_only_input.config_validation = False
+
+    strict_config = build_schema(strict_input)
+    defaults_only_config = build_schema(defaults_only_input)
+
+    strict_output = OmegaConf.to_container(strict_config.model_dump(by_alias=True), resolve=True)
+    defaults_only_output = OmegaConf.to_container(defaults_only_config.model_dump(by_alias=True), resolve=True)
+
+    assert isinstance(strict_output, dict)
+    assert isinstance(defaults_only_output, dict)
+
+    # Compare the runtime-critical sections that should be identical between
+    # strict and defaults-only modes for a valid config.
+    for section in ("data", "dataloader", "system", "graph", "model", "training"):
+        projected_defaults_only = _project_to_reference_shape(defaults_only_output[section], strict_output[section])
+        assert _normalize_runtime_value(strict_output[section]) == _normalize_runtime_value(projected_defaults_only)
+
+
 def test_config_validation_flag_only_changes_strict_semantic_checks(
     gnn_config: tuple[DictConfig, str],
 ) -> None:
