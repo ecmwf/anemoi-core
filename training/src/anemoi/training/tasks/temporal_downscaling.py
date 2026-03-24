@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import datetime
 
 from anemoi.training.tasks.base import BaseSingleStepTask
 from anemoi.utils.dates import as_timedelta
@@ -16,20 +17,32 @@ LOGGER = logging.getLogger(__name__)
 
 
 class TemporalDownscalingTask(BaseSingleStepTask):
-    """Temporal downscaling task implementation.
-
-    Input and output offsets are specified as duration strings
-    (e.g. ``["0H", "6H"]`` and ``["1H", "2H", "3H", "4H", "5H"]``).
-    """
+    """Temporal downscaling task implementation."""
 
     name: str = "temporal-downscaler"
 
     def __init__(
         self,
-        inputs_offsets: list[str],
-        outputs_offsets: list[str],
+        input_timestep: str,
+        output_timestep: str,
+        output_left_boundary: bool = False,
+        output_right_boundary: bool = False,
         **_kwargs,
     ) -> None:
-        inputs_offsets = [as_timedelta(offset) for offset in inputs_offsets]
-        outputs_offsets = [as_timedelta(offset) for offset in outputs_offsets]
-        super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets)
+        input_timedelta = as_timedelta(input_timestep)
+        output_timedelta = as_timedelta(output_timestep)
+
+        input_offsets = [datetime.timedelta(hours=0), input_timedelta]
+
+        assert (
+            input_timedelta % output_timedelta == datetime.timedelta(0)
+        ), "Input timestep must be an integer multiple of output timestep for temporal downscaling."
+        num_output_steps = input_timedelta // output_timedelta
+        output_offsets = [output_timedelta * (i + 1) for i in range(num_output_steps)]
+        if output_left_boundary:
+            output_offsets = [datetime.timedelta(hours=0)] + output_offsets
+
+        if output_right_boundary:
+            output_offsets = output_offsets + [input_timedelta]
+
+        super().__init__(inputs_offsets=input_offsets, outputs_offsets=output_offsets)
