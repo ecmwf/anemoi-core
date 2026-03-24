@@ -474,9 +474,6 @@ class DiffusionTendForecasterSchema(ForecasterSchema):
 
 
 TrainingSchema = Annotated[
-    ForecasterSchema
-    | ForecasterEnsSchema
-    | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema,
+    ForecasterSchema | ForecasterEnsSchema | DiffusionForecasterSchema | DiffusionTendForecasterSchema,
     Discriminator("model_task"),
 ]
