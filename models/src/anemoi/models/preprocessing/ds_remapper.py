@@ -13,6 +13,7 @@ from typing import Optional
 
 import torch
 from torch import nn
+
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
 from anemoi.models.preprocessing.mappings import affine_transform
@@ -35,6 +36,7 @@ from anemoi.models.preprocessing.mappings import sqrt_converter
 
 LOGGER = logging.getLogger(__name__)
 
+
 class TopRemapper(BasePreprocessor):
     """Top-level normalizer for input, output data."""
 
@@ -55,7 +57,7 @@ class TopRemapper(BasePreprocessor):
         data_indices : dict
         """
         super().__init__(config, statistics, data_indices)
-        
+
         self.remappers = {}
         # this two-step process is done to allow for casting to the correct device
         # alternative is to install tensordict, or use ModuleList
@@ -68,9 +70,9 @@ class TopRemapper(BasePreprocessor):
             default=self.default,
             remap=self.remap,
             normalizer=self.normalizer,
-            method_kwargs = self.method_kwargs,
+            method_kwargs=self.method_kwargs,
         )
-        self.remappers["input_lres"] = self.remapper_input 
+        self.remappers["input_lres"] = self.remapper_input
 
         self.remapper_input_hres = FieldRemapper(
             config=config,
@@ -81,7 +83,7 @@ class TopRemapper(BasePreprocessor):
             default=self.default,
             remap=self.remap,
             normalizer=self.normalizer,
-            method_kwargs = self.method_kwargs,
+            method_kwargs=self.method_kwargs,
         )
         self.remappers["input_hres"] = self.remapper_input_hres
         self.remapper_output = FieldRemapper(
@@ -93,7 +95,7 @@ class TopRemapper(BasePreprocessor):
             default=self.default,
             remap=self.remap,
             normalizer=self.normalizer,
-            method_kwargs = self.method_kwargs,
+            method_kwargs=self.method_kwargs,
         )
         self.remappers["output"] = self.remapper_output
 
@@ -127,8 +129,10 @@ class TopRemapper(BasePreprocessor):
         except ValueError:
             raise ValueError(f"No remapper found for dataset type: {dataset}")
         return remapper.inverse_transform(
-            data, in_place=in_place, #data_index=data_index
+            data,
+            in_place=in_place,  # data_index=data_index
         )
+
 
 class FieldRemapper(nn.Module):
     """Remap and convert variables for single variables."""
@@ -257,9 +261,7 @@ class FieldRemapper(nn.Module):
             else:
                 raise KeyError(f"Unknown remapping method for {name}: {method}")
 
-        self.register_buffer(
-            f"_{self.dataset}_idx", data_indices_ds.full, persistent=True
-        )
+        self.register_buffer(f"_{self.dataset}_idx", data_indices_ds.full, persistent=True)
 
     def transform(self, x, in_place: bool = True) -> torch.Tensor:
         if not in_place:

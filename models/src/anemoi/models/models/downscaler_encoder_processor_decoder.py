@@ -9,15 +9,14 @@
 
 
 import logging
+import time
 import warnings
 from typing import Callable
 from typing import Optional
 from typing import Union
-import time
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
@@ -28,15 +27,9 @@ from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
-from anemoi.models.models.diffusion_encoder_processor_decoder import (
-    AnemoiDiffusionModelEncProcDec,
-    AnemoiDiffusionTendModelEncProcDec,
-)
+from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
-
-from icecream import ic
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,12 +53,9 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             graph_data=graph_data,
             truncation_data=truncation_data,
         )
-        (
-            x_in_residual_indices,
-            y_residual_indices,
-            x_in_non_residual_indices,
-            y_non_residual_indices
-        ) = self._set_residual_channel_indices(data_indices, model_config)
+        (x_in_residual_indices, y_residual_indices, x_in_non_residual_indices, y_non_residual_indices) = (
+            self._set_residual_channel_indices(data_indices, model_config)
+        )
         self.register_buffer(
             "x_in_residual_indices",
             x_in_residual_indices,
@@ -104,84 +94,107 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         }
 
         self.DEFAULT_HIGH_NOISE_SCHEDULER_PARAMS = {
-          "schedule_type": "karras",
-          "sigma_max": 100000.0,
-          "sigma_min": 0.02,
-          "rho": 7.0,
-          "num_steps": 80,
+            "schedule_type": "karras",
+            "sigma_max": 100000.0,
+            "sigma_min": 0.02,
+            "rho": 7.0,
+            "num_steps": 80,
         }
 
         self.DEFAULT_HIGH_NOISE_SAMPLER_PARAMS = {
-          "sampler": "heun",
-          "S_churn": 2.5,
-          "S_min": 0.75,
-          "S_max": 100000,
-          "S_noise": 1.05,
+            "sampler": "heun",
+            "S_churn": 2.5,
+            "S_min": 0.75,
+            "S_max": 100000,
+            "S_noise": 1.05,
         }
 
     def _get_config_field_lists(self, model_config, input_field_name, out_field_names):
 
-        if isinstance(model_config['data'], dict):
-            is_residual_fields_attr = "residual_fields" in model_config['data']
-            is_direct_pred_attr = "direct_prediction_fields" in model_config['data']
-            residual_fields = model_config['data'].get("residual_fields", [])
-            direct_prediction_fields = model_config['data'].get("direct_prediction_fields", [])
-            in_hres_forcings_fields = model_config['data'].get("forcing", [])
+        if isinstance(model_config["data"], dict):
+            is_residual_fields_attr = "residual_fields" in model_config["data"]
+            is_direct_pred_attr = "direct_prediction_fields" in model_config["data"]
+            residual_fields = model_config["data"].get("residual_fields", [])
+            direct_prediction_fields = model_config["data"].get("direct_prediction_fields", [])
+            in_hres_forcings_fields = model_config["data"].get("forcing", [])
         else:
-            is_residual_fields_attr = hasattr(model_config['data'], "residual_fields")
-            is_direct_pred_attr = hasattr(model_config['data'], "direct_prediction_fields")
-            residual_fields = getattr(model_config['data'], "residual_fields", [])
-            direct_prediction_fields = getattr(model_config['data'], "direct_prediction_fields", [])
-            in_hres_forcings_fields = getattr(model_config['data'], "forcing", [])
+            is_residual_fields_attr = hasattr(model_config["data"], "residual_fields")
+            is_direct_pred_attr = hasattr(model_config["data"], "direct_prediction_fields")
+            residual_fields = getattr(model_config["data"], "residual_fields", [])
+            direct_prediction_fields = getattr(model_config["data"], "direct_prediction_fields", [])
+            in_hres_forcings_fields = getattr(model_config["data"], "forcing", [])
         undeclared_residuals = (not is_residual_fields_attr) or (residual_fields is None)
         undeclared_direct_fields = (not is_direct_pred_attr) or (direct_prediction_fields is None)
         empty_residuals = len(residual_fields) == 0
         empty_direct_fields = len(direct_prediction_fields) == 0
-        out_diff_variables = set() # output variables not in direct_prediction_fields or residual_fields
+        out_diff_variables = set()  # output variables not in direct_prediction_fields or residual_fields
 
         if not undeclared_direct_fields:
-            assert set(direct_prediction_fields).issubset(set(out_field_names)), "config.data.direct_prediction_fields must be included in the list of output variables."
-        
+            assert set(direct_prediction_fields).issubset(
+                set(out_field_names)
+            ), "config.data.direct_prediction_fields must be included in the list of output variables."
+
         if not undeclared_residuals:
-            assert set(residual_fields).issubset(set(out_field_names)), "config.data.residual_fields must be included in the list of output variables. "
-            assert set(residual_fields).issubset(set(input_field_name)), "config.data.residual_fields must be included in the list of input variables."
+            assert set(residual_fields).issubset(
+                set(out_field_names)
+            ), "config.data.residual_fields must be included in the list of output variables. "
+            assert set(residual_fields).issubset(
+                set(input_field_name)
+            ), "config.data.residual_fields must be included in the list of input variables."
 
         if undeclared_direct_fields:
             if undeclared_residuals:  # all output vars are non residual
                 direct_prediction_fields = out_field_names
-                LOGGER.info(f"⚠️ config.data.residual_fields and config.data.direct_prediction_fields are both undeclared. "
-                            f"The model will assume that all output variables are non-residual.")
+                LOGGER.info(
+                    "⚠️ config.data.residual_fields and config.data.direct_prediction_fields are both undeclared. "
+                    "The model will assume that all output variables are non-residual."
+                )
             elif empty_residuals:  # all output vars are non residual
                 direct_prediction_fields = out_field_names
-                LOGGER.info(f"⚠️ config.data.direct_prediction_fields is undeclared and config.data.residual_fields is an empty list. "
-                            f"The model will assume that all output variables are non-residual.")
-            elif set(residual_fields) != set(out_field_names): # residual not equal to output variables # missing output vars from residual must be non-residual
+                LOGGER.info(
+                    "⚠️ config.data.direct_prediction_fields is undeclared and config.data.residual_fields is an empty list. "
+                    "The model will assume that all output variables are non-residual."
+                )
+            elif set(residual_fields) != set(
+                out_field_names
+            ):  # residual not equal to output variables # missing output vars from residual must be non-residual
                 out_diff_variables = set(out_field_names).difference(set(residual_fields))
                 direct_prediction_fields = list(out_diff_variables)
-                LOGGER.info(f"⚠️ config.data.direct_prediction_fields is undeclared and config.data.residual_fields is different from the list of output variables. "
-                            f"The model will assume that all output variables not in config.data.residual_fields are non-residual, that is {out_diff_variables}")
-            #else: output variables are all residual variables
+                LOGGER.info(
+                    f"⚠️ config.data.direct_prediction_fields is undeclared and config.data.residual_fields is different from the list of output variables. "
+                    f"The model will assume that all output variables not in config.data.residual_fields are non-residual, that is {out_diff_variables}"
+                )
+            # else: output variables are all residual variables
         elif undeclared_residuals:
-            if empty_direct_fields: # all output vars are residual
+            if empty_direct_fields:  # all output vars are residual
                 residual_fields = out_field_names
-                LOGGER.info(f"⚠️ config.data.residual_fields is undeclared and config.data.direct_prediction_fields is an empty list. "
-                            f"The model will assume that all output variables are residual.")
-            elif set(direct_prediction_fields) != set(out_field_names): # direct pred fields not equal to output variables # missing output vars from direct_pred must be residual
+                LOGGER.info(
+                    "⚠️ config.data.residual_fields is undeclared and config.data.direct_prediction_fields is an empty list. "
+                    "The model will assume that all output variables are residual."
+                )
+            elif set(direct_prediction_fields) != set(
+                out_field_names
+            ):  # direct pred fields not equal to output variables # missing output vars from direct_pred must be residual
                 out_diff_variables = set(out_field_names).difference(set(direct_prediction_fields))
                 residual_fields = list(out_diff_variables)
-                LOGGER.info(f"⚠️ config.data.residual_fields is undeclared and config.data.direct_prediction_fields is different from the list of output variables. "
-                            f"The model will assume that all output variables not in config.data.direct_prediction_fields are residual, that is {out_diff_variables}")
-            #else: output variables are all non-residual variables
-        else: #both residual and non residual variables declared, checking if they match the output variables
+                LOGGER.info(
+                    f"⚠️ config.data.residual_fields is undeclared and config.data.direct_prediction_fields is different from the list of output variables. "
+                    f"The model will assume that all output variables not in config.data.direct_prediction_fields are residual, that is {out_diff_variables}"
+                )
+            # else: output variables are all non-residual variables
+        else:  # both residual and non residual variables declared, checking if they match the output variables
             res_non_res_common_variables = set(residual_fields).intersection(set(direct_prediction_fields))
-            assert len(res_non_res_common_variables)==0, f"config.data.residual_fields and config.data.direct_prediction_fields must not contain matching variables: {res_non_res_common_variables}."
+            assert (
+                len(res_non_res_common_variables) == 0
+            ), f"config.data.residual_fields and config.data.direct_prediction_fields must not contain matching variables: {res_non_res_common_variables}."
             res_and_non_res_fields = set(residual_fields).union(set(direct_prediction_fields))
             out_diff_variables = res_and_non_res_fields.symmetric_difference(set(out_field_names))
-            assert len(out_diff_variables) == 0, (f"The variables listed config.data.residual_fields and config.data.direct_prediction_fields must add up to the list of output variables. "
-                                              f"These variables are different: {out_diff_variables}")
+            assert len(out_diff_variables) == 0, (
+                f"The variables listed config.data.residual_fields and config.data.direct_prediction_fields must add up to the list of output variables. "
+                f"These variables are different: {out_diff_variables}"
+            )
 
         return residual_fields, direct_prediction_fields, in_hres_forcings_fields
-
 
     def _set_residual_channel_indices(self, data_indices, model_config):
         input_name_to_index = self.data_indices.data.input[0].name_to_index
@@ -192,9 +205,10 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             if v in self.data_indices.data.output.full
         }
 
-        (residual_fields, 
-        direct_prediction_fields, 
-        in_hres_forcings_fields, #unused for now
+        (
+            residual_fields,
+            direct_prediction_fields,
+            in_hres_forcings_fields,  # unused for now
         ) = self._get_config_field_lists(model_config, input_name_to_index.keys(), out_name_to_index.keys())
 
         in_non_residual_fields = [field for field in input_name_to_index.keys() if field not in residual_fields]
@@ -204,10 +218,10 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         y_non_res_indices = [out_name_to_index[channel] for channel in direct_prediction_fields]
 
         return (
-            torch.tensor(x_in_res_indices).to(torch.int32), 
-            torch.tensor(y_res_indices).to(torch.int32), 
-            torch.tensor(x_in_non_res_indices).to(torch.int32), 
-            torch.tensor(y_non_res_indices).to(torch.int32)
+            torch.tensor(x_in_res_indices).to(torch.int32),
+            torch.tensor(y_res_indices).to(torch.int32),
+            torch.tensor(x_in_non_res_indices).to(torch.int32),
+            torch.tensor(y_non_res_indices).to(torch.int32),
         )
 
     def compute_residuals_advanced(
@@ -239,10 +253,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         y_residual_indices = self.y_residual_indices.to(y.device)
         x_in_residual_indices = self.x_in_residual_indices.to(y.device)
         # residuals = y for direct channels, and y - x for inverse channels
-        residuals = (
-            y[..., y_residual_indices]
-            - x_in_interp_to_hres[..., x_in_residual_indices] 
-        )
+        residuals = y[..., y_residual_indices] - x_in_interp_to_hres[..., x_in_residual_indices]
 
         norm_target = pre_processors_state(residuals, dataset="output", in_place=False)
         return norm_target
@@ -322,25 +333,19 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             The residuals tensor output from model.
         """
         residuals = (
-            y[..., self.data_indices.data.output.full]
-            - x_in_interp_to_hres[..., self.data_indices.data.output.full]
+            y[..., self.data_indices.data.output.full] - x_in_interp_to_hres[..., self.data_indices.data.output.full]
         )
 
         # to deal with residuals or direct prediction, see compute_tendency
         # in diffusion_encoder_processor_decoder.py
         return residuals
-    def _interpolate_to_high_res(
-        self, x, grid_shard_shapes=None, model_comm_group=None
-    ):
+
+    def _interpolate_to_high_res(self, x, grid_shard_shapes=None, model_comm_group=None):
 
         if grid_shard_shapes is not None:
-            shard_shapes = self._get_shard_shapes(
-                x, 0, grid_shard_shapes, model_comm_group
-            )
+            shard_shapes = self._get_shard_shapes(x, 0, grid_shard_shapes, model_comm_group)
             # grid-sharded input: reshard to channel-shards to apply truncation
-            x = shard_channels(
-                x, shard_shapes, model_comm_group
-            )  # we get the full sequence here
+            x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
 
         # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
         # hence we check that they are on the correct device ; copy should only happen in the first forward run
@@ -375,12 +380,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         bs, ens, _, _ = x.shape
         x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
 
-        x_trunc = self._interpolate_to_high_res(
-            x_trunc, grid_shard_shapes, model_comm_group
-        )
-        return einops.rearrange(
-            x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens
-        )
+        x_trunc = self._interpolate_to_high_res(x_trunc, grid_shard_shapes, model_comm_group)
+        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_lres_channels = len(data_indices.model.input[0])
@@ -407,16 +408,10 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         grid_shard_shapes=None,
         model_comm_group=None,
     ):
-        node_attributes_data = self.node_attributes(
-            self._graph_name_data, batch_size=bse
-        )
+        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(
-                node_attributes_data, 0, grid_shard_shapes, model_comm_group
-            )
-            node_attributes_data = shard_tensor(
-                node_attributes_data, 0, shard_shapes_nodes, model_comm_group
-            )
+            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
 
@@ -438,9 +433,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(
-            x_data_latent, 0, grid_shard_shapes, model_comm_group
-        )
+        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
         return x_data_latent, None, shard_shapes_data
 
@@ -464,9 +457,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
-        self._assert_valid_sharding(
-            batch_size, ensemble_size, in_out_sharded, model_comm_group
-        )
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # prepare noise conditionings
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(c_noise)
@@ -488,9 +479,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             grid_shard_shapes,
             model_comm_group,
         )
-        x_hidden_latent = self.node_attributes(
-            self._graph_name_hidden, batch_size=batch_size
-        )
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         # time_encoder = time.time()
@@ -532,9 +521,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
         # print("time in decoder", time.time() - time_decoder)
 
-        x_out = self._assemble_output(
-            x_out, x_skip, batch_size, ensemble_size, x_in_lres_interp_hres.dtype
-        )
+        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x_in_lres_interp_hres.dtype)
         # print("time in model forward step", time.time() - start_init)
         return x_out
 
@@ -609,9 +596,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             model_comm_group=model_comm_group,
         )[:, None, ...]
 
-        x_in_interp_to_hres = pre_processors(
-            x_in_interp_to_hres, dataset="input_lres", in_place=False
-        )
+        x_in_interp_to_hres = pre_processors(x_in_interp_to_hres, dataset="input_lres", in_place=False)
         x_in_hres = pre_processors(x_in_hres, dataset="input_hres", in_place=False)
 
         return (x_in_interp_to_hres, x_in_hres), hres_grid_shard_shapes
@@ -796,10 +781,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             grid_size,
             self.num_output_channels,
         )
-        y_init = (
-            torch.randn(shape, device=x_in_interp_to_hres.device, dtype=sigmas.dtype)
-            * sigmas[0]
-        )
+        y_init = torch.randn(shape, device=x_in_interp_to_hres.device, dtype=sigmas.dtype) * sigmas[0]
 
         print("sigmas", sigmas)
 
@@ -814,7 +796,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 default_sampler = self.DEFAULT_LOW_NOISE_SAMPLER_PARAMS
             diffusion_sampler_config = dict(default_sampler)
         print(f"default {diffusion_sampler_config=}")
-        
+
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
@@ -920,8 +902,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             post_processors,
             post_processors_tendencies,
         )
-        """
-        out = self.correction_bug_to_delete(
+        """out = self.correction_bug_to_delete(
             out, residuals, post_processors
         )  # to be deleted
         """

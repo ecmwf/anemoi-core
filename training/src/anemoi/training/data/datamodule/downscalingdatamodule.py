@@ -7,14 +7,15 @@
 
 import logging
 import os
-from hydra.utils import instantiate
 from functools import cached_property
+
+import numpy as np
+from hydra.utils import instantiate
+
+from anemoi.datasets.data import open_dataset
 from anemoi.training.data.datamodule.singledatamodule import AnemoiDatasetsDataModule
 from anemoi.training.data.dataset.downscalingdataset import DownscalingDataset
-import numpy as np
-
 from anemoi.training.data.grid_indices import BaseGridIndices
-from anemoi.datasets.data import open_dataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +27,9 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
     def statistics(self) -> dict:
 
         statistics = list(self.ds_train.statistics)
-        if not hasattr(self.config.hardware.paths, "residual_statistics") or not hasattr(self.config.hardware.files, "residual_statistics"):
+        if not hasattr(self.config.hardware.paths, "residual_statistics") or not hasattr(
+            self.config.hardware.files, "residual_statistics",
+        ):
             LOGGER.warning("No residual_statistics path configured, using base statistics only")
             return tuple(statistics)
 
@@ -42,7 +45,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         if use_residual_for is None:
             # Backward compatible: use residual stats for ALL variables
             LOGGER.info("Not using residual statistics for any variable (no filter specified)")
-            variables_to_use_residual = [] #reduced_name_to_index
+            variables_to_use_residual = []  # reduced_name_to_index
         else:
             # Only use residual stats for specified variables
             variables_to_use_residual = [var for var in use_residual_for if var in out_name_to_index.keys()]
@@ -97,9 +100,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         label: str = "generic",
     ) -> DownscalingDataset:
 
-        data_reader = self.add_trajectory_ids(
-            data_reader
-        )  # NOTE: Functionality to be moved to anemoi datasets
+        data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
         data = DownscalingDataset(
             data_reader=data_reader,
             relative_date_indices=np.array([0]),

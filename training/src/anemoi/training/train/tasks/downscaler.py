@@ -11,23 +11,21 @@
 from __future__ import annotations
 
 import logging
-from icecream import ic
 import time
 from typing import TYPE_CHECKING
-import time
+
 import torch
+from hydra.utils import instantiate
 from torch.utils.checkpoint import checkpoint
+
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
-from anemoi.training.utils.enums import TensorDim
 from anemoi.training.train.tasks.base import BaseGraphModule
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
-import pandas as pd
+from anemoi.training.utils.enums import TensorDim
+
 if TYPE_CHECKING:
 
     from collections.abc import Mapping
-    from collections.abc import Generator
 
     from torch_geometric.data import HeteroData
 
@@ -67,9 +65,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.rho = config.model.model.diffusion.rho
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
-        self.training_approach = getattr(
-            config.training, "training_approach", "probabilistic_low_noise"
-        )
+        self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
         reader_group_size = self.config.dataloader.read_group_size
         self.lres_grid_indices = instantiate(
             self.config.model_dump(by_alias=True).dataloader.lres_grid_indices,
@@ -152,7 +148,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """Process batch size of len 3 with each item of dimensions:
         [batch_size, dates, ensemble, gridpoints, variables].
         """
-
         del batch_idx
 
         x_in, x_in_hres, y = batch
@@ -163,17 +158,13 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             grid_shard_shapes=self.lres_grid_shard_shapes,
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
-        
+
         # compute target with residual and non_residual variables
         y_target = self.model.model.compute_residuals(y, x_in_interp_to_hres)
 
         # normalize inputs and target
-        x_in_interp_to_hres_norm = self.model.pre_processors(
-            x_in_interp_to_hres, dataset="input_lres", in_place=False
-        ) 
-        x_in_hres_norm = self.model.pre_processors(
-            x_in_hres, dataset="input_hres", in_place=False
-        ) 
+        x_in_interp_to_hres_norm = self.model.pre_processors(x_in_interp_to_hres, dataset="input_lres", in_place=False)
+        x_in_hres_norm = self.model.pre_processors(x_in_hres, dataset="input_hres", in_place=False)
         y_target_norm = self.model.pre_processors(y_target, dataset="output", in_place=False)
 
         # Scaler update
@@ -240,8 +231,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         if self.training_approach == "probabilistic_high_noise":
             rnd_uniform = torch.rand(shape, device=device)
             sigma = (
-                sigma_max ** (1.0 / rho)
-                + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
             ) ** rho
 
         elif self.training_approach == "probabilistic_low_noise":
@@ -275,7 +265,6 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         torch.Tensor
             Allgathered (full) batch
         """
-
         return batch  # already have the full grid
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
@@ -290,9 +279,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         """
         with torch.no_grad():
-            val_loss, metrics, y_preds = self._step(
-                batch, batch_idx, training_mode=True, validation_mode=True
-            )
+            val_loss, metrics, y_preds = self._step(batch, batch_idx, training_mode=True, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",
@@ -320,9 +307,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         return val_loss, y_preds
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss, _, _ = self._step(
-            batch, batch_idx, training_mode=True, validation_mode=False
-        )
+        train_loss, _, _ = self._step(batch, batch_idx, training_mode=True, validation_mode=False)
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,
@@ -360,19 +345,13 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             validation metrics and predictions
         """
         metrics = {}
-        y_postprocessed = self.model.post_processors(
-            y, in_place=False, dataset="output"
-        )
-        y_pred_postprocessed = self.model.post_processors(
-            y_pred, in_place=False, dataset="output"
-        )
+        y_postprocessed = self.model.post_processors(y, in_place=False, dataset="output")
+        y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False, dataset="output")
 
         for metric_name, metric in self.metrics.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(
-                    y_pred_postprocessed, y_postprocessed
-                )
+                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():
@@ -407,20 +386,13 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         torch.Tensor
             Batch after transfer
         """
-
         if self.keep_batch_sharded and self.model_comm_group_size > 1:
             self.lres_grid_shard_shapes = self.lres_grid_indices.shard_shapes
             self.hres_grid_shard_shapes = self.hres_grid_indices.shard_shapes
             self.grid_shard_shapes = self.grid_indices.shard_shapes
-            self.lres_grid_shard_slice = self.lres_grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
-            self.hres_grid_shard_slice = self.hres_grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
-            self.grid_shard_slice = self.grid_indices.get_shard_slice(
-                self.reader_group_rank
-            )
+            self.lres_grid_shard_slice = self.lres_grid_indices.get_shard_slice(self.reader_group_rank)
+            self.hres_grid_shard_slice = self.hres_grid_indices.get_shard_slice(self.reader_group_rank)
+            self.grid_shard_slice = self.grid_indices.get_shard_slice(self.reader_group_rank)
         else:
             batch = self.allgather_batch(batch)
             self.lres_grid_shard_shapes, self.lres_grid_shard_slice = None, None
@@ -446,9 +418,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             torch.cuda.synchronize()
         self.bw_last = time.perf_counter() - self._tb
 
-    def optimizer_step(
-        self, epoch, batch_idx, optimizer, optimizer_closure=None, *a, **k
-    ):
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure=None, *a, **k):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t = time.perf_counter()
@@ -462,8 +432,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             torch.cuda.synchronize()
         dt = time.perf_counter() - self._t0
         it_s = 1.0 / dt
-        """
-        self.log_dict(
+        """self.log_dict(
             {"it_s": it_s, "bw_s": self.bw_last, "opt_s": self.opt_last},
             on_step=True,
             prog_bar=True,
