@@ -78,6 +78,10 @@ def prepare_mlflow_run_id(
     client.set_tag(run_id, "mlflow.user", owner)
     client.set_tag(run_id, "dry_run", True)
     client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
+
+    info = client.anemoi_auth.user_info()
+    client.set_tag(run_id, "prepare.user", info.name)
+    client.set_tag(run_id, "prepare.username", info.username)
     AnemoiMLflowLogger.log_hyperparams_in_mlflow(
         client,
         run_id,
