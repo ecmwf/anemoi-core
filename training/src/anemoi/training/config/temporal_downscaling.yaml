@@ -23,6 +23,3 @@ diagnostics:
   plot:
     callbacks: []
   callbacks: []
-
-training:
-  rollout: null # override the default, it does not make sense for an interpolator
