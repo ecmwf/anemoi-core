@@ -174,10 +174,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def ds_train(self) -> NativeGridDataset:
+        ds = open_dataset(self.config.dataloader.training)
+        overfit_on_date = getattr(self.config.dataloader, "overfit_on_date", None)
+        overfit_on_index = getattr(self.config.dataloader, "overfit_on_index", None)
+        if overfit_on_date is not None:
+            assert np.datetime64(overfit_on_date) in ds.dates, f"overfit_on_date={overfit_on_date} was not found in training dataset dates."
+            overfit_on_index = np.where(ds.dates == np.datetime64(overfit_on_date))[0][0]
         return self._get_dataset(
-            open_dataset(self.config.dataloader.training),
+            ds,
             label="train",
-            overfit_on_index=getattr(self.config.dataloader, "overfit_on_index", None),
+            overfit_on_index=overfit_on_index,
         )
 
     @cached_property
