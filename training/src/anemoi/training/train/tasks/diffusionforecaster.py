@@ -39,7 +39,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         *,
         config: BaseSchema,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -154,13 +154,21 @@ class BaseDiffusionForecaster(BaseGraphModule):
         """
         assert weights is not None, f"{self.__class__.__name__} must be provided for diffusion loss computation."
 
-        return dataset_ctx.static.loss(
-            y_pred,
-            y,
-            weights=weights[dataset_ctx.static.name],
-            grid_shard_slice=dataset_ctx.dynamic.effective_grid_shard_slice,
-            group=self.model_comm_group,
-        )
+        loss = dataset_ctx.static.loss
+        assert loss is not None, f"Dataset {dataset_ctx.static.name} has no configured loss."
+
+        loss_kwargs = {
+            "weights": weights[dataset_ctx.static.name],
+            "grid_shard_slice": dataset_ctx.dynamic.effective_grid_shard_slice,
+            "group": self.model_comm_group,
+        }
+        if getattr(loss, "needs_shard_layout_info", False):
+            loss_kwargs.update(
+                grid_dim=self.grid_dim,
+                grid_shard_shapes=dataset_ctx.dynamic.grid_shard_shapes,
+            )
+
+        return loss(y_pred, y, **loss_kwargs)
 
     def _noise_target(self, x: dict[str, torch.Tensor], sigma: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Add noise to the state."""
@@ -267,7 +275,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         self,
         *,
         config: BaseSchema,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],

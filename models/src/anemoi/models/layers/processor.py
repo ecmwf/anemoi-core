@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from typing import Optional
 
@@ -29,6 +30,22 @@ from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
+
+LOGGER = logging.getLogger(__name__)
+
+
+class NoOpProcessor(nn.Module):
+    """No-op processor, used for ablations."""
+
+    def __init__(self, **kwargs) -> None:
+        if len(kwargs) > 0:
+            LOGGER.warning(
+                f"{self.__class__.__name__} does not use any of the following provided kwargs: {list(kwargs.keys())}"
+            )
+        super().__init__()
+
+    def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
+        return x
 
 
 class BaseProcessor(nn.Module, ABC):
@@ -194,6 +211,7 @@ class TransformerProcessor(BaseProcessor):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
+        attn_channels: Optional[int] = None,
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
@@ -218,6 +236,11 @@ class TransformerProcessor(BaseProcessor):
             Number of heads in transformer
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to num_channels. This allows reducing the number of
+            channels used for the attention computation without changing the
+            width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -253,6 +276,7 @@ class TransformerProcessor(BaseProcessor):
             TransformerProcessorBlock,
             num_channels=num_channels,
             hidden_dim=(mlp_hidden_ratio * num_channels),
+            attn_channels=attn_channels,
             num_heads=num_heads,
             qk_norm=qk_norm,
             window_size=window_size,
@@ -396,6 +420,7 @@ class GraphTransformerProcessor(BaseProcessor):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -419,6 +444,11 @@ class GraphTransformerProcessor(BaseProcessor):
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to num_channels. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         cpu_offload : bool, optional
@@ -446,6 +476,7 @@ class GraphTransformerProcessor(BaseProcessor):
             in_channels=num_channels,
             hidden_dim=(mlp_hidden_ratio * num_channels),
             out_channels=num_channels,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
