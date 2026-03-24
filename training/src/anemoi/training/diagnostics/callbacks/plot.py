@@ -371,14 +371,14 @@ class LongRolloutPlots(BasePlotCallback):
 
         - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
             rollout:
-            - ${dataloader.validation_rollout}
-            video_rollout: ${dataloader.validation_rollout}
+            - ${task.validation_rollout}
+            video_rollout: ${task.validation_rollout}
             every_n_epochs: 1
             sample_idx: ${diagnostics.plot.sample_idx}
             parameters: ${diagnostics.plot.parameters}
 
-    The selected rollout steps for plots and video need to be lower or equal to dataloader.validation_rollout.
-    Increasing dataloader.validation_rollout has no effect on the rollout steps during training.
+    The selected rollout steps for plots and video need to be lower or equal to task.validation_rollout.
+    Increasing task.validation_rollout has no effect on the rollout steps during training.
     It ensures, that enough time steps are available for the plots and video in the validation batches.
 
     The runtime of creating one animation of one variable for 56 rollout steps is about 1 minute.

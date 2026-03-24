@@ -64,7 +64,7 @@ class RolloutEval(Callback):
 
         assert batch_tensor.shape[1] >= self.rollout * pl_module.n_step_output + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
-            f"Set `dataloader.validation_rollout` to at least {max(self.rollout)}"
+            f"Set `task.validation_rollout` to at least {max(self.rollout)}"
         )
 
         with torch.no_grad():

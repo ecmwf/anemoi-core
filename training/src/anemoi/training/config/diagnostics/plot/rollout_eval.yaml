@@ -80,10 +80,10 @@ callbacks:
     - 10u
     - 10v
   - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
-    # for rollout and video_rollout pick any integers below dataloader.validation_rollout
+    # for rollout and video_rollout pick any integers below task.validation_rollout
     rollout:
-      - ${dataloader.validation_rollout}
-    video_rollout: ${dataloader.validation_rollout}
+      - ${task.validation_rollout}
+    video_rollout: ${task.validation_rollout}
     every_n_epochs: 20
     sample_idx: ${diagnostics.plot.sample_idx}
     parameters: ${diagnostics.plot.parameters}
