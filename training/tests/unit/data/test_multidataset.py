@@ -35,7 +35,7 @@ class TestMultiDataset:
         mock_dataset_b.frequency = "3h"
 
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
-        relative_date_indices = {"dataset_a": [-1, 0, 1], "dataset_b": [-1, 0, 1]} # e.g. f([t, t-6h]) = t+12h
+        relative_date_indices = {"dataset_a": [-1, 0, 1], "dataset_b": [-1, 0, 1]}  # e.g. f([t, t-6h]) = t+12h
 
         return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
