@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 
     import torch
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -55,32 +54,30 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         """
         # start rollout of preprocessed batch
+        rollout_steps = rollout or self.rollout
+        required_time_steps = rollout_steps * self.n_step_output + self.n_step_input
         x = {}
         for dataset_name, dataset_batch in batch.items():
             x[dataset_name] = dataset_batch[
                 :,
-                0 : self.multi_step,
+                0 : self.n_step_input,
                 ...,
                 self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
+            ]  # (bs, n_step_input, latlon, nvar)
             msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {rollout + self.multi_step}"
+                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {required_time_steps}"
             )
-            assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
+            assert dataset_batch.shape[1] >= required_time_steps, msg
 
-        for rollout_step in range(rollout or self.rollout):
-            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
+        for rollout_step in range(rollout_steps):
             y_pred = self(x)
-
             y = {}
             for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[
-                    :,
-                    self.multi_step + rollout_step,
-                    ...,
-                    self.data_indices[dataset_name].data.output.full,
-                ]
+                start = self.n_step_input + rollout_step * self.n_step_output
+                y_time = dataset_batch.narrow(1, start, self.n_step_output)
+                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+                y[dataset_name] = y_time.index_select(-1, var_idx)
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
             loss, metrics_next, y_pred = checkpoint(

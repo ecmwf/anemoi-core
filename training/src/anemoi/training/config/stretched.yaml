@@ -1,0 +1,38 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: stretched_grid
+- model: graphtransformer
+- training: stretched
+- _self_
+
+config_validation: True
+
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# system:
+#   hardware:
+#     num_gpus_per_node: 1
+
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${system.input.dataset}
+        thinning: ???
+      - dataset: ${system.input.forcing_dataset}
+    adjust: all
+    min_distance_km: 0
+training:
+  scalers:
+    datasets:
+      data: # user-defined key in data
+        node_weights:
+          weight_frac_of_total: ???
+system:
+  input:
+    dataset: ???
+    forcing_dataset: ???

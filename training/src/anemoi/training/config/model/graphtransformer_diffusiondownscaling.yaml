@@ -18,7 +18,7 @@ model:
     sigma_min: 0.02
     rho: 7.0
     log_normal_mean: -1.2
-    log_normal_std: 1.2    
+    log_normal_std: 1.2
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.diffusion.noise_channels}
@@ -66,6 +66,7 @@ processor:
   num_heads: 4
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
@@ -78,6 +79,7 @@ encoder:
   num_heads: 4
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "heads"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
@@ -88,11 +90,12 @@ decoder:
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 1
-  mlp_hidden_ratio: 4 
+  mlp_hidden_ratio: 4
   num_heads: 4
   initialise_data_extractor_zero: False
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "heads"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"

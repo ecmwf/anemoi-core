@@ -1,0 +1,43 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: encoder_decoder_only
+- model: graphtransformer
+- training: autoencoder
+- _self_
+
+config_validation: True
+
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# system:
+#   hardware:
+#     num_gpus_per_node: 1
+
+dataloader:
+  validation_rollout: 0
+
+model:
+  model:
+    _target_: anemoi.models.models.AnemoiModelAutoEncoder
+
+training:
+  model_task: anemoi.training.train.tasks.GraphAutoEncoder
+
+diagnostics:
+  plot:
+    callbacks:
+      #TODO: Enable reconstruction plots once separate PR is merged
+      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotReconstruction
+      #   sample_idx: ${diagnostics.plot.sample_idx}
+      #   per_sample : 6
+      #   parameters: ${diagnostics.plot.parameters}
+      #   every_n_batches: ${diagnostics.plot.frequency.batch}
+      #   #Defining the accumulation levels for precipitation related fields and the colormap
+      #   accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+      #   precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+      #   colormaps: ${diagnostics.plot.colormaps}

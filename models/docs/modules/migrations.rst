@@ -28,7 +28,6 @@ ordered list of scripts. Each script contains:
 -  some metadata information, such as the version of the migration
    system, or the version of anemoi-models,
 -  a ``migrate`` function to migrate checkpoints
--  optionnally a ``rollback`` function to reverse the migration function
 -  optionnally a ``migrate_setup`` function to fix import issues.
 
 Similarly, the checkpoint contain some migration information that
@@ -43,9 +42,6 @@ informs on its migration state:
    This is used to detect whether already executed scripts have changed.
    For now, it only logs a warning, but a more complex behavior could be
    added in the future,
-
--  the ``rollback`` function: the same as in the script, in case you
-   need the checkpoint in an older version,
 
 **********************
  Compatibility groups
@@ -103,24 +99,20 @@ algorithm. To follow along, here is an example:
 +----------------+-----------------+
 | migration 2    | migration 2     |
 +----------------+-----------------+
-| migration 5    | migration 3     |
+| migration 5    |                 |
 +----------------+-----------------+
-| migration 6    | migration 4     |
+| migration 6    |                 |
 +----------------+-----------------+
 | migration 7    |                 |
 +----------------+-----------------+
 
--  First, we rollback any additional migrations in the checkpoint,
-   starting from the end (here, migration 4 and 3 need to be
-   rollbacked).
+-  First, we check if there are extra migrations in the checkpoint. If so, fail.
 
 -  Then, we migrate any missing migrations in the checkpoint, starting
    from the start (here migration 5, 6 and 7).
 
 In the example, it will produce:
 
--  ROLLBACK migration 4
--  ROLLBACK migration 3
 -  MIGRATE migration 5
 -  MIGRATE migration 6
 -  MIGRATE migration 7
@@ -137,7 +129,6 @@ checkpoint. It can be accessed through:
    >>> history = metadata.get("migrations", {}).get("history", [])
    >>> for executed_migration in history:
    ...    print(executed_migration)
-   { "type": "rollback", "name": "migration_name1.py", "signature": "[...]" }
    { "type": "migrate", "name": "migration_name2.py", "signature": "[...]" }
 
 **********

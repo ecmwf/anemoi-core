@@ -69,44 +69,45 @@ class TestGraphTransformerBaseMapper:
         return MapperConfig()
 
     @pytest.fixture
-    def graph_provider(self, fake_graph):
-        return create_graph_provider(
+    def graph_provider(self, fake_graph, device):
+        provider = create_graph_provider(
             graph=fake_graph[("nodes", "to", "nodes")],
             edge_attributes=["edge_attr1", "edge_attr2"],
             src_size=self.NUM_SRC_NODES,
             dst_size=self.NUM_DST_NODES,
             trainable_size=6,
         )
+        return provider.to(device)
 
     @pytest.fixture
-    def mapper(self, mapper_init, graph_provider):
+    def mapper(self, mapper_init, graph_provider, device):
         config = asdict(mapper_init)
         config["edge_dim"] = graph_provider.edge_dim
         return ConcreteGraphTransformerBaseMapper(
             **config,
             out_channels_dst=self.OUT_CHANNELS_DST,
-        )
+        ).to(device)
 
     @pytest.fixture
-    def pair_tensor(self, mapper_init):
+    def pair_tensor(self, mapper_init, device):
         return (
-            torch.rand(self.NUM_SRC_NODES, mapper_init.in_channels_src),
-            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.in_channels_src, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
         )
 
-    @pytest.fixture
-    def fake_graph(self) -> HeteroData:
+    @pytest.fixture(scope="module")
+    def fake_graph(self, device) -> HeteroData:
         """Fake graph."""
         graph = HeteroData()
         graph[("nodes", "to", "nodes")].edge_index = torch.concat(
             [
-                torch.randint(0, self.NUM_SRC_NODES, (1, self.NUM_EDGES)),
-                torch.randint(0, self.NUM_DST_NODES, (1, self.NUM_EDGES)),
+                torch.randint(0, self.NUM_SRC_NODES, (1, self.NUM_EDGES), device=device),
+                torch.randint(0, self.NUM_DST_NODES, (1, self.NUM_EDGES), device=device),
             ],
             axis=0,
         )
-        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((self.NUM_EDGES, 1))
-        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((self.NUM_EDGES, 32))
+        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((self.NUM_EDGES, 1), device=device)
+        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((self.NUM_EDGES, 32), device=device)
         return graph
 
     def test_initialization(self, mapper, mapper_init):
@@ -151,10 +152,10 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
     OUT_CHANNELS_DST = None
 
     @pytest.fixture
-    def mapper(self, mapper_init, graph_provider):
+    def mapper(self, mapper_init, graph_provider, device):
         config = asdict(mapper_init)
         config["edge_dim"] = graph_provider.edge_dim
-        return GraphTransformerForwardMapper(**config)
+        return GraphTransformerForwardMapper(**config).to(device)
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         x = pair_tensor
@@ -183,7 +184,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
 
         # Dummy loss
-        target = torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim)
+        target = torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim, device=x_dst.device)
         loss_fn = nn.MSELoss()
 
         loss = loss_fn(x_dst, target)
@@ -243,13 +244,13 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
     """Test the GraphTransformerBackwardMapper class."""
 
     @pytest.fixture
-    def mapper(self, mapper_init, graph_provider):
+    def mapper(self, mapper_init, graph_provider, device):
         config = asdict(mapper_init)
         config["edge_dim"] = graph_provider.edge_dim
         return GraphTransformerBackwardMapper(
             **config,
             out_channels_dst=self.OUT_CHANNELS_DST,
-        )
+        ).to(device)
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         x = pair_tensor
@@ -268,7 +269,11 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         assert shapes_dst == [[self.NUM_DST_NODES, mapper_init.hidden_dim]]
 
     def test_post_process(self, mapper, mapper_init):
-        x_dst = torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim)
+        x_dst = torch.rand(
+            self.NUM_DST_NODES,
+            mapper_init.hidden_dim,
+            device=next(mapper.parameters()).device,
+        )
         shapes_dst = [list(x_dst.shape)]
 
         result = mapper.post_process(x_dst, shapes_dst=shapes_dst)
@@ -281,9 +286,10 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         batch_size = 1
 
         # Different size for x_dst, as the Backward mapper changes the channels in shape in pre-processor
+        device = next(mapper.parameters()).device
         x = (
-            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
-            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src, device=device),
         )
 
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
@@ -291,7 +297,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         assert result.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])
 
         # Dummy loss
-        target = torch.rand(self.NUM_DST_NODES, self.OUT_CHANNELS_DST)
+        target = torch.rand(self.NUM_DST_NODES, self.OUT_CHANNELS_DST, device=result.device)
         loss_fn = nn.MSELoss()
 
         loss = loss_fn(result, target)
@@ -315,9 +321,10 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
         batch_size = 1
 
+        device = next(mapper.parameters()).device
         x = (
-            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
-            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src, device=device),
         )
 
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
@@ -334,9 +341,10 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
         batch_size = 1
 
+        device = next(mapper.parameters()).device
         x = (
-            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
-            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src, device=device),
         )
 
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)

@@ -1,0 +1,83 @@
+format: zarr
+# Time frequency requested from dataset
+frequency: 6h
+# Time step of model (must be multiple of frequency)
+timestep: 6h
+
+datasets:
+  data: # user-defined name for the dataset
+    # features that are not part of the forecast state
+    # but are used as forcing to generate the forecast state
+    forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "insolation"
+    - "lsm"
+    - "sdor"
+    - "slor"
+    - "z"
+    # features that are only part of the forecast state
+    # but are not used as the input to the model
+    diagnostic:
+    - tp
+    - cp
+
+    # const_imputer:
+    #   default: "none"
+    #   0: []
+
+    # processors including imputers and normalizers are applied in order of definition
+    # the order of definition from this file is preserved when this config is included
+    # and new processors in the main config file are added at the end of the dictionary
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+
+          # Remap cp statistics to those of tp when using FractionBounding. This ensures
+          # that cp, as a fraction of tp, remains consistent with tp's scale and statistics.
+          # NOTE: This remap should only be applied if FractionBounding is enabled for cp.
+          # remap:
+          #   cp: tp
+
+          # Standardization applied to tp and cp variables. Ensure that if cp is bounded
+          # as a fraction of tp, both variables are normalized using these shared statistics.
+          # "Std" normalization is preferred here over "mean-std" to avoid shifting of the
+          # zero value in the normalized space.
+          std:
+          - "tp"
+          # - "cp"
+
+          min-max:
+          max:
+          - "sdor"
+          - "slor"
+          - "z"
+          none:
+          - "cos_latitude"
+          - "cos_longitude"
+          - "sin_latitude"
+          - "sin_longitude"
+          - "cos_julian_day"
+          - "cos_local_time"
+          - "sin_julian_day"
+          - "sin_local_time"
+          - "insolation"
+          - "lsm"
+      # const_imputer:
+      #   _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+      #   config:
+      #     default: "none"
+      #     0: []
+      # When using the imputer, consider including the nan_mask_weights scaler in the
+      # training loss to ensure imputed grid points are not considered in the loss computation
+
+# Values set in the code
+num_features: null # number of features in the forecast state

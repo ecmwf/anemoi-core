@@ -8,6 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/training-0.9.0...training-0.9.1) (2026-02-09)
+
+
+### Features
+
+* Focus area ([#799](https://github.com/ecmwf/anemoi-core/issues/799)) ([e34fdd7](https://github.com/ecmwf/anemoi-core/commit/e34fdd7b88506f50b5e214658636ad34e966dff8))
+* Multi output steps ([#636](https://github.com/ecmwf/anemoi-core/issues/636)) ([99aaf71](https://github.com/ecmwf/anemoi-core/commit/99aaf715bd423acfc21a1794e231acdd7ee37ac4))
+* **training:** Make activation checkpoints configurable ([#797](https://github.com/ecmwf/anemoi-core/issues/797)) ([b06b450](https://github.com/ecmwf/anemoi-core/commit/b06b450509dfc2ff36a4a20f161676917ed976ae))
+* **training:** Support datasets with missing dates ([#860](https://github.com/ecmwf/anemoi-core/issues/860)) ([76eaaa4](https://github.com/ecmwf/anemoi-core/commit/76eaaa44f127f4c0899f67582e71bec944659206))
+
+
+### Bug Fixes
+
+* Deactivate PlotSprectrum from testing pipelines ([#846](https://github.com/ecmwf/anemoi-core/issues/846)) ([6c778e4](https://github.com/ecmwf/anemoi-core/commit/6c778e442e26e71a589813fee644707d26be1583))
+* **schema:** Remove optional config fields from the schema ([#865](https://github.com/ecmwf/anemoi-core/issues/865)) ([6f37d7d](https://github.com/ecmwf/anemoi-core/commit/6f37d7df1f44d9e3259479022b29c93c528c2544))
+* **training,data:** Add tests for MultiDataset ([#868](https://github.com/ecmwf/anemoi-core/issues/868)) ([9c399b2](https://github.com/ecmwf/anemoi-core/commit/9c399b2502d44933acec2c5d3700b61a6ad4e72d))
+* **training,dataset:** Fix missing drop or frequency ([#857](https://github.com/ecmwf/anemoi-core/issues/857)) ([f9b6599](https://github.com/ecmwf/anemoi-core/commit/f9b65998d325c6f3be13abd1963d897c2f7123aa))
+* **training:** Follow-up to multiple datasets ([#844](https://github.com/ecmwf/anemoi-core/issues/844)) ([3a25674](https://github.com/ecmwf/anemoi-core/commit/3a25674d56fea996dfb31cffe48734321ddecf8b))
+
+## [0.9.0](https://github.com/ecmwf/anemoi-core/compare/training-0.8.4...training-0.9.0) (2026-01-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models,training:** multi dataset integration
+
+### Features
+
+* Drop python 3.10 ([#795](https://github.com/ecmwf/anemoi-core/issues/795)) ([ebea6d0](https://github.com/ecmwf/anemoi-core/commit/ebea6d09b4f7ea834865134670d0f2e187140ae1))
+* **models,training:** Multi dataset integration ([f537d7f](https://github.com/ecmwf/anemoi-core/commit/f537d7f209092215a94b9e7c613acc781ca4966b))
+* **training:** Autoencoder 🗜️ ([#252](https://github.com/ecmwf/anemoi-core/issues/252)) ([50e497b](https://github.com/ecmwf/anemoi-core/commit/50e497bd3c815a78638185081e9d008e6d828aa2))
+
+
+### Bug Fixes
+
+* **deps:** Workaround for failing uv dependency resolution ([#828](https://github.com/ecmwf/anemoi-core/issues/828)) ([bc64bac](https://github.com/ecmwf/anemoi-core/commit/bc64bac8df31f8ffb9951de4f7d02bf4f442a4be))
+* Set min version for azureml-mlflow ([#842](https://github.com/ecmwf/anemoi-core/issues/842)) ([0f721a5](https://github.com/ecmwf/anemoi-core/commit/0f721a56fc5bb59b7a405f2fe81fa34d027ff1b1))
+
 ## [0.8.4](https://github.com/ecmwf/anemoi-core/compare/training-0.8.3...training-0.8.4) (2026-01-14)
 
 

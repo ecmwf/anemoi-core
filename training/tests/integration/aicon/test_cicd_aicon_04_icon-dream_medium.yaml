@@ -219,6 +219,7 @@ training:
   deterministic: false
   precision: 16-mixed
   multistep_input: 2
+  multistep_output: 1
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0
@@ -309,6 +310,7 @@ diagnostics:
     # Precipitation and related fields
     precip_and_related_fields: [tp, cp]
     datasets_to_plot: ["data"]
+    focus_areas: {}
     callbacks: []
 
   debug:

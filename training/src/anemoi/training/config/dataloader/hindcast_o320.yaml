@@ -75,27 +75,27 @@ training:
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
       drop: []
-      fake_hindcasts: 
+      fake_hindcasts:
         end:  ${dataloader.training_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
     in_hres:
       dataset: ${system.input.dataset_in_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
-      fake_hindcasts: 
+      fake_hindcasts:
         end:  ${dataloader.training_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
       drop: []
     out_hres:
       dataset: ${system.input.dataset_out_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
-      drop: []    
-      fake_hindcasts: 
+      drop: []
+      fake_hindcasts:
         end:  ${dataloader.training_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
 
 validation_rollout: 0 # number of rollouts to use for validation
 
@@ -110,30 +110,30 @@ validation:
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
       drop: []
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
     in_hres:
       dataset: ${system.input.dataset_in_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
       drop: []
     out_hres:
       dataset: ${system.input.dataset_out_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
-      drop: []    
-      fake_hindcasts: 
+      drop: []
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}     
+        steps: ${dataloader.steps}
 
 # Multi-dataset test with same datasets, different time period
 test:
@@ -146,28 +146,27 @@ test:
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
       drop: []
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.test_date}
         end:  ${dataloader.test_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
     in_hres:
       dataset: ${system.input.dataset_in_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.test_date}
         end:  ${dataloader.test_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
       drop: []
     out_hres:
       dataset: ${system.input.dataset_out_hres}
       start: ${dataloader.training.start}
       end: ${dataloader.training.end}
       frequency: ${data.frequency}
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.test_date}
         end:  ${dataloader.test_date}
-        steps: ${dataloader.steps}     
+        steps: ${dataloader.steps}
       drop: []
-

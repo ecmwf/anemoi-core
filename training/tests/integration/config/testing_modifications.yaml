@@ -11,9 +11,6 @@ dataloader:
     validation: 2
 
 diagnostics:
-  plot:
-    callbacks: []
-    asynchronous: False # Whether to plot asynchronously
   log:
     wandb:
       enabled: False

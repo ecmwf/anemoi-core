@@ -10,7 +10,7 @@
 
 import numpy as np
 
-from anemoi.training.utils.usable_indices import get_usable_indices
+from anemoi.training.data.usable_indices import get_usable_indices
 
 
 def test_get_usable_indices() -> None:
@@ -20,7 +20,7 @@ def test_get_usable_indices() -> None:
     expected_values = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8])
     assert np.allclose(valid_indices, expected_values)
 
-    # Test 3 indices, either from rollout = 1 and multistep = 2, or rollout = 2 and multistep = 1
+    # Test 3 indices, either from rollout = 1 and n-step = 2, or rollout = 2 and n-step = 1
     valid_indices = get_usable_indices(missing_indices=set(), series_length=10, relative_indices=np.array([0, 1, 2]))
     expected_values = np.array([0, 1, 2, 3, 4, 5, 6, 7])
     assert np.allclose(valid_indices, expected_values)

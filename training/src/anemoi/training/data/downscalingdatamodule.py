@@ -7,12 +7,11 @@
 
 import logging
 import os
-from hydra.utils import instantiate
 from functools import cached_property
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
 import numpy as np
 
+from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,14 +56,14 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             # Only use residual stats for specified variables
             variables_to_use_residual = [var for var in use_residual_for if var in reduced_name_to_index]
             LOGGER.info(
-                f"Using residual statistics for {len(variables_to_use_residual)} variables: {variables_to_use_residual}"
+                f"Using residual statistics for {len(variables_to_use_residual)} variables: {variables_to_use_residual}",
             )
 
             # Log variables that were specified but not found
             missing_vars = [var for var in use_residual_for if var not in reduced_name_to_index]
             if missing_vars:
                 LOGGER.warning(
-                    f"Variables specified for residual normalization but not found in dataset: {missing_vars}"
+                    f"Variables specified for residual normalization but not found in dataset: {missing_vars}",
                 )
 
         # Build statistics arrays, selectively using residual stats

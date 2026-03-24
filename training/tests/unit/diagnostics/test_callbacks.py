@@ -12,6 +12,7 @@
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import numpy as np
 import omegaconf
 import pytest
 import torch
@@ -19,6 +20,7 @@ import yaml
 
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
+from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
 from anemoi.training.diagnostics.callbacks.plot_ens import EnsemblePlotMixin
 from anemoi.training.diagnostics.callbacks.plot_ens import PlotEnsSample
@@ -37,6 +39,7 @@ diagnostics:
 
   plot:
     enabled: False
+    focus_areas: null
     callbacks: []
 
   debug:
@@ -123,35 +126,37 @@ def test_ensemble_plot_mixin_process():
     """Test EnsemblePlotMixin.process method."""
     mixin = EnsemblePlotMixin()
     mixin.sample_idx = 0
-    mixin.latlons = None
+    mixin.latlons = {"data": np.zeros((100, 2))}
 
     # Mock lightning module
     pl_module = MagicMock()
-    pl_module.multi_step = 2
+    pl_module.n_step_input = 2
     pl_module.rollout = 3
-    pl_module.data_indices.data.output.full = slice(None)
-    pl_module.latlons_data = {"data": torch.randn(100, 2)}
+    pl_module.n_step_output = 1
+    data_indices = MagicMock()
+    data_indices.data.output.full = slice(None)
+    pl_module.data_indices = {"data": data_indices}
 
     # Mock config
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
     # Create test tensors
-    # batch: bs, input_steps + forecast_steps, latlon, nvar
-    batch = {"data": torch.randn(2, 6, 100, 5)}
-    # input_tensor: bs, rollout + 1, latlon, nvar
-    data_tensor = torch.randn(2, 4, 100, 5)
-    # loss: 1, y_preds: bs, latlon, nvar
-    y_preds = [{"data": torch.randn(2, 100, 5)} for _ in range(3)]
+    # batch: bs, input_steps + forecast_steps, ens, latlon, nvar
+    batch = {"data": torch.randn(2, 6, 1, 100, 5)}
+    # input_tensor: bs, rollout + 1, ens, latlon, nvar
+    data_tensor = torch.randn(2, 4, 1, 100, 5)
+    # loss: 1, y_preds: bs, multi-out, ens, latlon, nvar
+    y_preds = [{"data": torch.randn(2, 1, 1, 100, 5)} for _ in range(3)]
     outputs = [torch.tensor(0.5), y_preds]
 
     # Mock post_processors
     mock_post_processors = MagicMock()
     mock_post_processors.return_value = data_tensor
-    # tensor after post_processors: bs, ensemble, latlon, nvar
+    # tensor after post_processors: bs, multi-out, ensemble, latlon, nvar
     mock_post_processors.side_effect = [
         data_tensor,
-        torch.randn(2, 1, 100, 5),
-        torch.randn(2, 1, 100, 5),
-        torch.randn(2, 1, 100, 5),
+        torch.randn(2, 1, 1, 100, 5),
+        torch.randn(2, 1, 1, 100, 5),
+        torch.randn(2, 1, 1, 100, 5),
     ]
     mock_post_processors.cpu.return_value = mock_post_processors
     pl_module.model.post_processors = {"data": mock_post_processors}
@@ -176,12 +181,13 @@ def test_ensemble_plot_mixin_process():
     assert result_output_tensor is not None
 
     # Check dimensions
-    assert data.shape == (4, 100, 5), f"Expected data shape (4, 100, 5), got {data.shape}"
+    assert data.shape == (4, 1, 100, 5), f"Expected data shape (4, 1, 100, 5), got {data.shape}"
     assert result_output_tensor.shape == (
         3,
+        1,
         100,
         5,
-    ), f"Expected output_tensor shape (3, 100, 5), got {result_output_tensor.shape}"
+    ), f"Expected output_tensor shape (3, 1, 100, 5), got {result_output_tensor.shape}"
 
 
 def test_rollout_eval_ens_eval():
@@ -192,7 +198,7 @@ def test_rollout_eval_ens_eval():
     # Mock pl_module
     pl_module = MagicMock()
     pl_module.device = torch.device("cpu")
-    pl_module.multi_step = 1
+    pl_module.n_step_input = 1
     pl_module._rollout_step.return_value = [
         (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None, None),
         (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None, None),
@@ -212,6 +218,35 @@ def test_rollout_eval_ens_eval():
         assert args[3] == 2  # batch size
 
 
+def test_rollout_eval_handles_dict_batch():
+    """Test RolloutEval._eval with a dict batch (multi-dataset style)."""
+    config = omegaconf.OmegaConf.create({})
+    callback = RolloutEval(config, rollout=2, every_n_batches=1)
+
+    # Mock pl_module
+    pl_module = MagicMock()
+    pl_module.device = torch.device("cpu")
+    pl_module.n_step_input = 1
+    pl_module.n_step_output = 1
+    pl_module._rollout_step.return_value = [
+        (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None),
+        (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None),
+    ]
+
+    # Mock batch (bs, ms, ens, latlon, nvar)
+    batch = {"data": torch.randn(2, 4, 1, 10, 5)}
+
+    with patch.object(callback, "_log") as mock_log:
+        callback._eval(pl_module, batch)
+
+        #  Check for output
+        mock_log.assert_called_once()
+        args = mock_log.call_args[0]
+        assert args[1].item() == pytest.approx(0.125)  # (0.1 + 0.15) / 2
+        assert args[2]["metric1"].item() == pytest.approx(0.25)  # Last metric value
+        assert args[3] == 2  # batch size
+
+
 def test_ensemble_plot_callbacks_instantiation():
     """Test that ensemble plot callbacks can be instantiated."""
     config = omegaconf.OmegaConf.create(
@@ -219,6 +254,7 @@ def test_ensemble_plot_callbacks_instantiation():
             "diagnostics": {
                 "plot": {
                     "parameters": ["temperature", "pressure"],
+                    "focus_areas": {},
                     "datashader": False,
                     "asynchronous": False,
                     "frequency": {"batch": 1},
@@ -238,6 +274,7 @@ def test_ensemble_plot_callbacks_instantiation():
         sample_idx=0,
         parameters=["temperature", "pressure"],
         accumulation_levels_plot=[0.1, 0.5, 0.9],
+        output_steps=1,
     )
     assert plot_ens_sample is not None
 
@@ -246,6 +283,7 @@ def test_ensemble_plot_callbacks_instantiation():
         sample_idx=0,
         parameters=["temperature"],
         accumulation_levels_plot=[0.5],
+        output_steps=1,
     )
     assert plot_sample is not None
 
@@ -253,6 +291,7 @@ def test_ensemble_plot_callbacks_instantiation():
         config=config,
         sample_idx=0,
         parameters=["temperature"],
+        output_steps=1,
     )
     assert plot_spectrum is not None
 
@@ -260,6 +299,7 @@ def test_ensemble_plot_callbacks_instantiation():
         config=config,
         sample_idx=0,
         parameters=["temperature"],
+        output_steps=1,
     )
     assert plot_histogram is not None
 
