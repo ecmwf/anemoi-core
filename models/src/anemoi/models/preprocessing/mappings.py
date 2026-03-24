@@ -67,7 +67,7 @@ def inverse_displace_boundary_atoms(
 ):
     """Clamps the values back to the original range, to the original boundary values. Can be used on lower bound, upper bound, or both."""
 
-    return x.clamp(lower_atom, upper_atom)
+    return x.clamp_(lower_atom, upper_atom)
 
 
 # --------------------------------------------------------
