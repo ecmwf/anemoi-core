@@ -19,15 +19,7 @@ class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
 
     @pytest.fixture
-    def dataset_config(self) -> dict:
-        """Fixture to provide dataset configuration."""
-        return {
-            "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h
-            "shuffle": True,
-        }
-
-    @pytest.fixture
-    def multi_dataset(self, mocker: MockFixture, dataset_config: dict) -> MultiDataset:
+    def multi_dataset(self, mocker: MockFixture) -> MultiDataset:
         """Fixture to provide a MultiDataset instance with mocked datasets."""
         # Mock create_dataset to return mock datasets
         mock_dataset_a = mocker.MagicMock()
@@ -43,8 +35,9 @@ class TestMultiDataset:
         mock_dataset_b.frequency = "3h"
 
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
+        relative_date_indices = {"dataset_a": [-1, 0, 1], "dataset_b": [-1, 0, 1]} # e.g. f([t, t-6h]) = t+12h
 
-        return MultiDataset(data_readers=data_readers, **dataset_config)
+        return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
     def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
         """Test that valid_date_indices returns the intersection of indices from all datasets."""
