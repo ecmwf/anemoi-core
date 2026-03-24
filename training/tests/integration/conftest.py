@@ -466,7 +466,7 @@ def interpolator_config(
 ) -> tuple[DictConfig, str]:
     """Compose a runnable configuration for the temporal-interpolation model with multiple output steps.
 
-    It is based on `interpolator_multiout.yaml` and only patches paths pointing to the
+    It is based on `temoral_downscaling.yaml` and only patches paths pointing to the
     sample dataset that the tests download locally.
     """
     # No model override here - the template already sets the dedicated
@@ -476,7 +476,7 @@ def interpolator_config(
         config_path="../../src/anemoi/training/config",
         job_name="test_interpolator",
     ):
-        template = compose(config_name="interpolator")
+        template = compose(config_name="temporal_downscaling.yaml")
 
     use_case_modifications = OmegaConf.load(
         Path.cwd() / "training/tests/integration/config/test_interpolator.yaml",
