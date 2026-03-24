@@ -29,7 +29,6 @@ class TestMultiDataset:
     @pytest.fixture
     def multi_dataset(self, mocker: MockFixture, dataset_config: dict) -> MultiDataset:
         """Fixture to provide a MultiDataset instance with mocked datasets."""
-
         # Mock create_dataset to return mock datasets
         mock_dataset_a = mocker.MagicMock()
         mock_dataset_a.missing = set()
