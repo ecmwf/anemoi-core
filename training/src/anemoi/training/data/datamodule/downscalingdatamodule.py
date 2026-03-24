@@ -7,14 +7,15 @@
 
 import logging
 import os
-from hydra.utils import instantiate
 from functools import cached_property
+
+import numpy as np
+from hydra.utils import instantiate
+
+from anemoi.datasets.data import open_dataset
 from anemoi.training.data.datamodule.singledatamodule import AnemoiDatasetsDataModule
 from anemoi.training.data.dataset.downscalingdataset import DownscalingDataset
-import numpy as np
-
 from anemoi.training.data.grid_indices import BaseGridIndices
-from anemoi.datasets.data import open_dataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,6 +26,14 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
     @cached_property
     def statistics(self) -> dict:
 
+        statistics = list(self.ds_train.statistics)
+        if not hasattr(self.config.hardware.paths, "residual_statistics") or not hasattr(
+            self.config.hardware.files,
+            "residual_statistics",
+        ):
+            LOGGER.warning("No residual_statistics path configured, using base statistics only")
+            return tuple(statistics)
+
         residual_statistics = np.load(
             os.path.join(
                 self.config.hardware.paths.residual_statistics,
@@ -32,39 +41,55 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             ),
             allow_pickle=True,
         ).item()
+        out_name_to_index = self.ds_train.name_to_index[2]
+        use_residual_for = getattr(self.config.data, "residual_fields", None)
+        if use_residual_for is None:
+            # Backward compatible: use residual stats for ALL variables
+            LOGGER.info("Not using residual statistics for any variable (no filter specified)")
+            variables_to_use_residual = []  # reduced_name_to_index
+        else:
+            # Only use residual stats for specified variables
+            variables_to_use_residual = [var for var in use_residual_for if var in out_name_to_index.keys()]
+            LOGGER.info(
+                f"Using residual statistics for {len(variables_to_use_residual)} variables: {variables_to_use_residual}",
+            )
 
-        reduced_name_to_index = self.ds_train.name_to_index[2].keys()
-        reduced_residual_statistics = {
-            "mean": np.array(
-                [
-                    residual_statistics["mean"][field_name]
-                    for field_name in reduced_name_to_index
-                ]
-            ),
-            "stdev": np.array(
-                [
-                    residual_statistics["stdev"][field_name]
-                    for field_name in reduced_name_to_index
-                ]
-            ),
-            "maximum": np.array(
-                [
-                    residual_statistics["maximum"][field_name]
-                    for field_name in reduced_name_to_index
-                ]
-            ),
-            "minimum": np.array(
-                [
-                    residual_statistics["minimum"][field_name]
-                    for field_name in reduced_name_to_index
-                ]
-            ),
+            # Log variables that were specified but not found
+            missing_vars = [var for var in use_residual_for if var not in out_name_to_index.keys()]
+            if missing_vars:
+                LOGGER.warning(
+                    f"Variables specified for residual normalization but not found in dataset: {missing_vars}",
+                )
+        LOGGER.info(f"Variables to be used for residuals with residual statistics: {variables_to_use_residual}")
+        base_stats = statistics[2]  # Original high-res statistics
+        mean_array = []
+        stdev_array = []
+        maximum_array = []
+        minimum_array = []
+
+        for field_name in list(out_name_to_index.keys()):
+            if field_name in variables_to_use_residual:
+                # Use residual statistics for this variable
+                mean_array.append(residual_statistics["mean"][field_name])
+                stdev_array.append(residual_statistics["stdev"][field_name])
+                maximum_array.append(residual_statistics["maximum"][field_name])
+                minimum_array.append(residual_statistics["minimum"][field_name])
+            else:
+                # Use base statistics for this variable
+                idx = out_name_to_index[field_name]
+                mean_array.append(base_stats["mean"][idx])
+                stdev_array.append(base_stats["stdev"][idx])
+                maximum_array.append(base_stats["maximum"][idx])
+                minimum_array.append(base_stats["minimum"][idx])
+        # Create the combined statistics dictionary
+        combined_statistics = {
+            "mean": np.array(mean_array),
+            "stdev": np.array(stdev_array),
+            "maximum": np.array(maximum_array),
+            "minimum": np.array(minimum_array),
         }
 
-        statistics = list(
-            self.ds_train.statistics
-        )  # to list as statistics is a tuple immutable
-        statistics[2] = reduced_residual_statistics
+        statistics[2] = combined_statistics
         return tuple(statistics)
         # return reduced_residual_statistics
 
@@ -74,11 +99,10 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         shuffle: bool = True,
         val_rollout: int = 1,
         label: str = "generic",
+        overfit_on_index: int | None = None,
     ) -> DownscalingDataset:
 
-        data_reader = self.add_trajectory_ids(
-            data_reader
-        )  # NOTE: Functionality to be moved to anemoi datasets
+        data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
         data = DownscalingDataset(
             data_reader=data_reader,
             relative_date_indices=np.array([0]),
@@ -86,6 +110,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             label=label,
             lres_grid_indices=self.lres_grid_indices,
             hres_grid_indices=self.hres_grid_indices,
+            overfit_on_index=overfit_on_index,
         )
         return data
 

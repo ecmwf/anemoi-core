@@ -46,6 +46,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
     ) -> None:
 
         model_config_local = DotDict(model_config)
+        self.training_approach = model_config_local.training.training_approach
 
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
@@ -53,7 +54,9 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         self.sigma_data = diffusion_config.sigma_data
         self.sigma_max = diffusion_config.sigma_max
         self.sigma_min = diffusion_config.sigma_min
-        self.inference_defaults = diffusion_config.inference_defaults
+        self.inference_defaults = None
+        if hasattr(diffusion_config, "inference_defaults"):
+            self.inference_defaults = diffusion_config.inference_defaults
 
         super().__init__(
             model_config=model_config,
@@ -116,7 +119,6 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
     def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
-
         c_data = self._make_noise_emb(
             noise_cond,
             repeat=self.node_attributes.num_nodes[self._graph_name_data],

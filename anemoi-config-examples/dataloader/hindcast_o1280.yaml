@@ -30,7 +30,7 @@ limit_batches:
 # ============
 
 steps: [0, 12, 24, 36, 48, 60, 72]
-#select: [2t, 10u, 10v, msl] 
+#select: [2t, 10u, 10v, msl]
 training_date: 2021
 valid_date: 2022
 test_date: 2023
@@ -54,24 +54,24 @@ training:
   frequency: ${data.frequency}
   dataset:
     zip:
-    - dataset: 
+    - dataset:
       - ${hardware.paths.data}/${hardware.files.dataset_x}
       name: lres
-      fake_hindcasts: 
+      fake_hindcasts:
         end: ${dataloader.training_date}
         steps: ${dataloader.steps}
-      #select: ${dataloader.select} 
+      #select: ${dataloader.select}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
       name: hres
-      fake_hindcasts: 
-        end:  ${dataloader.training_date}
-        steps: ${dataloader.steps}    
-    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
-      name: out
-      fake_hindcasts: 
+      fake_hindcasts:
         end:  ${dataloader.training_date}
         steps: ${dataloader.steps}
-      #select: ${dataloader.select} 
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
+      name: out
+      fake_hindcasts:
+        end:  ${dataloader.training_date}
+        steps: ${dataloader.steps}
+      #select: ${dataloader.select}
     adjust:
     - dates
 
@@ -81,26 +81,26 @@ validation:
   frequency: ${data.frequency}
   dataset:
     zip:
-    - dataset: 
+    - dataset:
         - ${hardware.paths.data}/${hardware.files.dataset_x}
       name: lres
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}       
-      #select: ${dataloader.select} 
+        steps: ${dataloader.steps}
+      #select: ${dataloader.select}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
       name: hres
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
       name: out
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}       
-      #select: ${dataloader.select} 
+        steps: ${dataloader.steps}
+      #select: ${dataloader.select}
     adjust:
     - dates

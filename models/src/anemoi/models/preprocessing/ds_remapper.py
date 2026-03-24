@@ -12,6 +12,7 @@ import logging
 from typing import Optional
 
 import torch
+from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
@@ -36,7 +37,104 @@ from anemoi.models.preprocessing.mappings import sqrt_converter
 LOGGER = logging.getLogger(__name__)
 
 
-class Remapper(BasePreprocessor):
+class TopRemapper(BasePreprocessor):
+    """Top-level normalizer for input, output data."""
+
+    def __init__(
+        self,
+        config=None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
+    ) -> None:
+        """Initialize the remapper.
+
+        Parameters
+        ----------
+        config : DotConfig
+            Configuration object
+        statistics : Dicts
+            Statistics for input, output data
+        data_indices : dict
+        """
+        super().__init__(config, statistics, data_indices)
+
+        self.remappers = {}
+        # this two-step process is done to allow for casting to the correct device
+        # alternative is to install tensordict, or use ModuleList
+        self.remapper_input = FieldRemapper(
+            config=config,
+            statistics=statistics[0],
+            data_indices_ds=data_indices.data.input[0],
+            dataset="input_lres",
+            methods=self.methods,
+            default=self.default,
+            remap=self.remap,
+            normalizer=self.normalizer,
+            method_kwargs=self.method_kwargs,
+        )
+        self.remappers["input_lres"] = self.remapper_input
+
+        self.remapper_input_hres = FieldRemapper(
+            config=config,
+            statistics=statistics[1],
+            data_indices_ds=data_indices.data.input[1],
+            dataset="input_hres",
+            methods=self.methods,
+            default=self.default,
+            remap=self.remap,
+            normalizer=self.normalizer,
+            method_kwargs=self.method_kwargs,
+        )
+        self.remappers["input_hres"] = self.remapper_input_hres
+        self.remapper_output = FieldRemapper(
+            config=config,
+            statistics=statistics[2],
+            data_indices_ds=data_indices.data.output,
+            dataset="output",
+            methods=self.methods,
+            default=self.default,
+            remap=self.remap,
+            normalizer=self.normalizer,
+            method_kwargs=self.method_kwargs,
+        )
+        self.remappers["output"] = self.remapper_output
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        dataset: str,
+        in_place: bool = True,
+        inverse: bool = False,
+    ) -> torch.Tensor:
+        if inverse:
+            return self.inverse_transform(x, dataset, in_place=in_place)
+        return self.transform(x, dataset, in_place=in_place)
+
+    def transform(self, data, dataset: str, in_place: bool = True):
+        try:
+            remapper = self.remappers[dataset]
+        except ValueError:
+            raise ValueError(f"No remapper found for dataset type: {dataset}")
+        return remapper.transform(data, in_place=in_place)
+
+    def inverse_transform(
+        self,
+        data,
+        dataset: str,
+        in_place: bool = True,
+        data_index: Optional[torch.Tensor] = None,
+    ):
+        try:
+            remapper = self.remappers[dataset]
+        except ValueError:
+            raise ValueError(f"No remapper found for dataset type: {dataset}")
+        return remapper.inverse_transform(
+            data,
+            in_place=in_place,  # data_index=data_index
+        )
+
+
+class FieldRemapper(nn.Module):
     """Remap and convert variables for single variables."""
 
     supported_methods = {
@@ -71,11 +169,23 @@ class Remapper(BasePreprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
+        data_indices_ds: Optional[IndexCollection] = None,
+        dataset: str = None,
         statistics: Optional[dict] = None,
+        methods: str = "none",
+        method_kwargs: Optional[dict] = {},
+        default: str = "none",
+        remap: dict = {},
+        normalizer: str = "none",
     ) -> None:
-        super().__init__(config, data_indices, statistics)
-        self._create_remapping_indices(statistics)
+        super().__init__()
+        self.methods = methods
+        self.dataset = dataset
+        self.default = default
+        self.remap = remap
+        self.method_kwargs = method_kwargs
+        self.normalizer = normalizer
+        self._create_remapping_indices(data_indices_ds, statistics)
         self._validate_indices()
 
     def _validate_indices(self):
@@ -92,14 +202,15 @@ class Remapper(BasePreprocessor):
 
     def _create_remapping_indices(
         self,
+        data_indices_ds,
         statistics=None,
     ):
         """Create the parameter indices for remapping."""
         # list for training and inference mode as position of parameters can change
-        name_to_index_training_input = self.data_indices.data.input.name_to_index
-        name_to_index_inference_input = self.data_indices.model.input.name_to_index
-        name_to_index_training_output = self.data_indices.data.output.name_to_index
-        name_to_index_inference_output = self.data_indices.model.output.name_to_index
+        name_to_index_training_input = data_indices_ds.name_to_index
+        name_to_index_inference_input = data_indices_ds.name_to_index
+        name_to_index_training_output = data_indices_ds.name_to_index
+        name_to_index_inference_output = data_indices_ds.name_to_index
         self.num_training_input_vars = len(name_to_index_training_input)
         self.num_inference_input_vars = len(name_to_index_inference_input)
         self.num_training_output_vars = len(name_to_index_training_output)
@@ -149,6 +260,8 @@ class Remapper(BasePreprocessor):
                     self.remapper_kwargs.append({})
             else:
                 raise KeyError(f"Unknown remapping method for {name}: {method}")
+
+        self.register_buffer(f"_{self.dataset}_idx", data_indices_ds.full, persistent=True)
 
     def transform(self, x, in_place: bool = True) -> torch.Tensor:
         if not in_place:

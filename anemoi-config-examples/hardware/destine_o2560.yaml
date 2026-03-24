@@ -1,7 +1,7 @@
 defaults:
   - paths: main
   - files: destine_o2560
-  
+
 
 
 # number of GPUs per node and number of nodes (for DDP)

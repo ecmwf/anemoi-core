@@ -9,7 +9,8 @@
 
 from dataclasses import dataclass
 
-from anemoi.models.data_indices.ds_tensor import InputTensorIndex, OutputTensorIndex
+from anemoi.models.data_indices.ds_tensor import InputTensorIndex
+from anemoi.models.data_indices.ds_tensor import OutputTensorIndex
 
 
 class BaseIndex:

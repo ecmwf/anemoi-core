@@ -74,9 +74,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.statistics_tendencies = statistics_tendencies
         self.truncation_data = truncation_data
         self.metadata = metadata
-        self.supporting_arrays = (
-            supporting_arrays if supporting_arrays is not None else {}
-        )
+        self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
         self._build_model()
 
@@ -175,9 +173,7 @@ class AnemoiModelInterface(torch.nn.Module):
         if hasattr(self, "pre_processors_tendencies"):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
-            predict_kwargs["post_processors_tendencies"] = (
-                self.post_processors_tendencies
-            )
+            predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
 
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)

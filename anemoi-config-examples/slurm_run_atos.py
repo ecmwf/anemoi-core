@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 
-import subprocess
-import logging
-from pathlib import Path
 import os
-from datetime import datetime
+from pathlib import Path
 
-from anemoi.training.run_manage.slurm_job import get_date_folder, SlurmJob
-
+from anemoi.training.run_manage.slurm_job import SlurmJob
+from anemoi.training.run_manage.slurm_job import get_date_folder
 
 hres = "o1280"
 
