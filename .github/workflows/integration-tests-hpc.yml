@@ -78,6 +78,10 @@ jobs:
             python3 -m venv .venv
             source .venv/bin/activate
             pip install --upgrade pip
+            # explictly request the CUDA 12 version of torch
+            # Since torch 2.11 the default torch wheels are built against cuda 13
+            # The GPU runners currently only support CUDA 12 and older
+            pip install torch torchvision triton --index-url https://download.pytorch.org/whl/cu128
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
             srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu
             deactivate
