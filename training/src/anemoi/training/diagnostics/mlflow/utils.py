@@ -48,20 +48,20 @@ def expand_iterables(
     *,
     recursive: bool = True,
 ) -> Any:
-    """Enumerate list-like iterables of non-primitve elements as dicts.
+    """Enumerate list-like iterables of non-primitive elements as dicts.
 
     Converts lists, tuples, and ListConfigs into individual keyed dicts with
     numeric indices (e.g., 0, 1, ...) and additional summary keys ('all',
-    'length') when the iterable contains nested structures. Non-iterable
-    values and iterables of primitive types are kept as-is.
-
-    DictConfig are converted to dicts. Dicts are copied into new dicts. Inputs
-    of other types are returned without conversion
+    'length') when the iterable contains nested structures. DictConfigs are
+    converted to dicts. Dicts are copied into new dicts. Inputs of other
+    types are returned without conversion.
 
     Parameters
     ----------
-    params : dict[str, Any] | DictConfig[str, Any] | list | tuple | ListConfig
-        Parameter dictionary, list, tuple, or configuration object to expand.
+    params : Any
+        Parameter dictionary (dict | DictConfig) to copy to a new dict,
+        list (list | tuple | ListConfig) to expand, or
+        Any type to be returned as is.
     recursive : bool, optional
         Expand nested dictionaries.
         Default is True.
@@ -69,7 +69,8 @@ def expand_iterables(
     Returns
     -------
     Any
-        Dictionary with all iterable values expanded or list/tuple of primitive types.
+        Dictionary with all iterable values expanded, list/tuple of primitive
+        types, or the plain `params` if it is neither a list nor a dict.
 
     Examples
     --------
@@ -79,7 +80,7 @@ def expand_iterables(
         {'a': {'b': {'c': 123}}}
         >>> expand_iterables({'a': [['a1', 'a2']]})
         {'a': {0: ['a1', 'a2'], 'length': 1, 'all': [['a1', 'a2']]}}
-        >>> expand_iterables({'a': [[0, 1, 2], 'b', 'c'])
+        >>> expand_iterables({'a': [[0, 1, 2], 'b', 'c']})
         {'a': {0: [0, 1, 2], 1: 'b', 2: 'c'},
         'a.length': 3,
         'a.all': [[0, 1, 2], 'b', 'c']}
