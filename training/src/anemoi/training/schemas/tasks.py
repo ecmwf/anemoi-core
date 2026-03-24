@@ -25,7 +25,7 @@ class TaskRollout(BaseModel):
     "Number of rollouts to start with."
     epoch_increment: NonNegativeInt = Field(default=0, example=0)
     "Number of epochs to increment the rollout."
-    max: NonNegativeInt = Field(default=1, example=1)
+    maximum: NonNegativeInt = Field(default=1, example=1)
     "Maximum number of rollouts."
 
 
@@ -42,6 +42,8 @@ class ForecastingTaskSchema(BaseModel):
     "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
     rollout: TaskRollout = Field(default_factory=TaskRollout)
     "Rollout configuration for autoregressive training."
+    validation_rollout: int = Field(examples=[0, 6, 12])
+    "Number of rollouts to use for validation."
 
 
 class AutoencodingTaskSchema(BaseModel):
