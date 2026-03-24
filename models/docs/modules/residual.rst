@@ -49,12 +49,23 @@ Graph-based example:
 
 .. code:: yaml
 
+   graph:
+     projections:
+       truncation:
+         truncation:
+           grid: o32
+           edge_weight_attribute: gauss_weight
+           gaussian_norm: l1
+           num_nearest_neighbours: 32
+           sigma: 0.18840
+
    model:
      residual:
        _target_: anemoi.models.layers.residual.TruncatedConnection
-       truncation_down_edges_name: ${graph.projections.residual.down_edges_name}
-       truncation_up_edges_name: ${graph.projections.residual.up_edges_name}
-       edge_weight_attribute: ${graph.projections.residual.edge_weight_attribute}
+
+With the graph-based configuration, ``TruncatedConnection`` derives the
+dataset-specific projection edge names automatically from
+``graph.projections.truncation``.
 
 Gaussian distance weights computed with ``norm: l1`` should be used as
 ``edge_weight_attribute`` (commonly ``gauss_weight`` in the projection

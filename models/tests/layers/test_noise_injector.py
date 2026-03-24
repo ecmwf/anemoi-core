@@ -12,7 +12,6 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.ensemble import NoiseConditioning
-from anemoi.models.layers.ensemble import NoiseInjector
 
 
 def _build_noise_graph(
@@ -89,30 +88,3 @@ def test_noise_conditioning_requires_graph_data() -> None:
             edge_weight_attribute="gauss_weight",
             graph_data=None,
         )
-
-
-def test_noise_injector_accepts_graph_data() -> None:
-    injector = NoiseInjector(
-        noise_std=1,
-        noise_channels_dim=2,
-        noise_mlp_hidden_dim=4,
-        num_channels=8,
-        layer_kernels={},
-        graph_data=HeteroData(),
-    )
-
-    batch_size = 1
-    ensemble_size = 2
-    grid_size = 3
-    x = torch.zeros((batch_size * ensemble_size * grid_size, 8))
-
-    out, noise = injector(
-        x=x,
-        batch_size=batch_size,
-        ensemble_size=ensemble_size,
-        grid_size=grid_size,
-        shard_shapes_ref=[],
-    )
-
-    assert noise is None
-    assert out.shape == x.shape

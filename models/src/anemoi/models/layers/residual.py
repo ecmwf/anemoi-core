@@ -25,11 +25,10 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.utils.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+from anemoi.models.utils.projection_helpers import projection_edge_name
 from anemoi.models.utils.projection_helpers import projection_node_name
 from anemoi.models.utils.projection_helpers import residual_projection_edge_names
 from anemoi.models.utils.projection_helpers import residual_projection_truncation_node_name
-from anemoi.models.utils.projection_helpers import rewrite_dataset_projection_edge_name
-from anemoi.models.utils.projection_helpers import rewrite_dataset_projection_node_name
 
 
 class BaseResidualConnection(nn.Module, ABC):
@@ -285,19 +284,21 @@ class TruncatedConnection(BaseResidualConnection):
             edge_weight_attribute = derived_edge_weight_attribute or DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 
         if data_nodes is not None:
-            data_nodes = rewrite_dataset_projection_node_name(
+            data_nodes = projection_node_name(
                 data_nodes,
                 dataset_name=dataset_name,
                 graph_or_config=graph,
                 dataset_names=dataset_names,
+                prefer_existing=True,
             )
 
         if truncation_nodes is not None:
-            truncation_nodes = rewrite_dataset_projection_node_name(
+            truncation_nodes = projection_node_name(
                 truncation_nodes,
                 dataset_name=dataset_name,
                 graph_or_config=graph,
                 dataset_names=dataset_names,
+                prefer_existing=True,
             )
         elif truncation_up_file_path is None and truncation_down_file_path is None:
             truncation_nodes = projection_node_name(
@@ -308,19 +309,27 @@ class TruncatedConnection(BaseResidualConnection):
             )
 
         if truncation_down_edges_name is not None:
-            truncation_down_edges_name = rewrite_dataset_projection_edge_name(
-                truncation_down_edges_name,
+            source_name, relation_name, target_name = tuple(truncation_down_edges_name)
+            truncation_down_edges_name = projection_edge_name(
+                source_name,
+                target_name,
                 dataset_name=dataset_name,
                 graph_or_config=graph,
                 dataset_names=dataset_names,
+                relation_name=relation_name,
+                prefer_existing=True,
             )
 
         if truncation_up_edges_name is not None:
-            truncation_up_edges_name = rewrite_dataset_projection_edge_name(
-                truncation_up_edges_name,
+            source_name, relation_name, target_name = tuple(truncation_up_edges_name)
+            truncation_up_edges_name = projection_edge_name(
+                source_name,
+                target_name,
                 dataset_name=dataset_name,
                 graph_or_config=graph,
                 dataset_names=dataset_names,
+                relation_name=relation_name,
+                prefer_existing=True,
             )
 
         return (

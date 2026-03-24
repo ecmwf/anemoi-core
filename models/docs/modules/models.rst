@@ -40,6 +40,10 @@ Key features:
    :no-undoc-members:
    :show-inheritance:
 
+For the training-side CRPS setup, including loss, truncation, and
+ensemble-specific configuration changes, see
+:doc:`anemoi-training:user-guide/kcrps-set-up`.
+
 **********************************************
  Hierarchical Encoder-Processor-Decoder Model
 **********************************************

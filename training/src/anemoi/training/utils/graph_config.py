@@ -221,6 +221,34 @@ def _build_projection_edge(
     return edge
 
 
+def _projection_node_entry(
+    node_name: str,
+    *,
+    projection_cfg: Any,
+    dataset_name: str,
+    fused_dataset_graph: bool,
+    node_builder_cfg: Any,
+    default_node_builder: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Build one projection node entry with local node references rewritten for the concrete graph."""
+    graph_node_name = projection_node_name(
+        node_name,
+        dataset_name=dataset_name,
+        fused_dataset_graph=fused_dataset_graph,
+    )
+
+    node_builder = _to_container(node_builder_cfg, resolve=True)
+    if node_builder is None:
+        node_builder = default_node_builder
+    else:
+        node_builder = _rename_projection_values(
+            node_builder,
+            _projection_node_rename_map(projection_cfg, dataset_name),
+        )
+
+    return graph_node_name, {"node_builder": node_builder}
+
+
 def _derived_residual_projection(
     projection_cfg: Any,
     *,
@@ -234,31 +262,25 @@ def _derived_residual_projection(
 
     truncation_cfg = _to_container(truncation_cfg, resolve=True)
     truncation_node_name = residual_projection_truncation_node_name(projection_cfg)
-    graph_node_name = projection_node_name(
+    grid = truncation_cfg.get("grid", truncation_cfg.get("truncation_grid"))
+    if truncation_cfg.get("node_builder") is None and grid is None:
+        msg = "Residual truncation projection requires either truncation.node_builder or truncation.grid."
+        raise ValueError(msg)
+
+    graph_node_name, node_entry = _projection_node_entry(
         truncation_node_name,
+        projection_cfg=projection_cfg,
         dataset_name=dataset_name,
         fused_dataset_graph=fused_dataset_graph,
-    )
-
-    rename_map = _projection_node_rename_map(projection_cfg, dataset_name)
-
-    node_builder = _to_container(truncation_cfg.get("node_builder"), resolve=True)
-    if node_builder is None:
-        grid = truncation_cfg.get("grid", truncation_cfg.get("truncation_grid"))
-        if grid is None:
-            msg = "Residual truncation projection requires either truncation.node_builder or truncation.grid."
-            raise ValueError(msg)
-        node_builder = {
+        node_builder_cfg=truncation_cfg.get("node_builder"),
+        default_node_builder={
             "_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes",
             "grid": grid,
-        }
-    else:
-        node_builder = _rename_projection_values(node_builder, rename_map)
+        },
+    )
 
     nodes = {
-        graph_node_name: {
-            "node_builder": node_builder,
-        },
+        graph_node_name: node_entry,
     }
 
     edges = [
@@ -294,32 +316,26 @@ def _derived_multiscale_projection(
     smoothers = _to_container(smoothers, resolve=True)
     projection_nodes: dict[str, Any] = {}
     projection_edges: list[Any] = []
-    rename_map = _projection_node_rename_map(projection_cfg, dataset_name)
     for smoother_name, smoother_cfg in smoothers.items():
         smoother_cfg = dict(smoother_cfg)
         node_name = smoother_cfg.get("node_name", smoother_name)
-        graph_node_name = projection_node_name(
+        graph_node_name, node_entry = _projection_node_entry(
             node_name,
+            projection_cfg=projection_cfg,
             dataset_name=dataset_name,
             fused_dataset_graph=fused_dataset_graph,
-        )
-
-        node_builder = _to_container(smoother_cfg.get("node_builder"), resolve=True)
-        if node_builder is None:
-            node_builder = {
+            node_builder_cfg=smoother_cfg.get("node_builder"),
+            default_node_builder={
                 "_target_": "anemoi.graphs.nodes.ReferenceNodes",
                 "reference_node_name": projection_node_name(
                     "data",
                     dataset_name=dataset_name,
                     fused_dataset_graph=fused_dataset_graph,
                 ),
-            }
-        else:
-            node_builder = _rename_projection_values(node_builder, rename_map)
+            },
+        )
 
-        projection_nodes[graph_node_name] = {
-            "node_builder": node_builder,
-        }
+        projection_nodes[graph_node_name] = node_entry
         projection_edges.append(
             _build_projection_edge(
                 node_name,

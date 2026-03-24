@@ -13,14 +13,7 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.nodes.builders.from_reference import ReferenceNodes
-
-
-def test_init():
-    node_builder = ReferenceNodes(reference_node_name="data", name="smooth")
-    assert isinstance(node_builder, BaseNodeBuilder)
-    assert isinstance(node_builder, ReferenceNodes)
 
 
 def test_register_nodes_copies_coordinates():

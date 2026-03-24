@@ -17,8 +17,6 @@ from anemoi.models.utils.projection_helpers import projection_edge_name
 from anemoi.models.utils.projection_helpers import projection_node_name
 from anemoi.models.utils.projection_helpers import residual_projection_edge_names
 from anemoi.models.utils.projection_helpers import residual_projection_truncation_node_name
-from anemoi.models.utils.projection_helpers import rewrite_dataset_projection_edge_name
-from anemoi.models.utils.projection_helpers import rewrite_dataset_projection_node_name
 from anemoi.models.utils.projection_helpers import uses_fused_dataset_graph
 
 
@@ -166,28 +164,32 @@ def test_multiscale_loss_matrices_graph_builds_graph_entries_from_smoothers() ->
     ]
 
 
-def test_rewrite_projection_names_prefers_existing_graph_names(fused_graph: HeteroData) -> None:
+def test_projection_names_can_prefer_existing_graph_names(fused_graph: HeteroData) -> None:
     assert (
-        rewrite_dataset_projection_node_name(
+        projection_node_name(
             "smooth_4x",
             dataset_name="era5",
             graph_or_config=fused_graph,
             dataset_names=["era5", "cerra"],
+            prefer_existing=True,
         )
         == "era5_smooth_4x"
     )
     assert (
-        rewrite_dataset_projection_node_name(
+        projection_node_name(
             "era5_smooth_4x",
             dataset_name="era5",
             graph_or_config=fused_graph,
             dataset_names=["era5", "cerra"],
+            prefer_existing=True,
         )
         == "era5_smooth_4x"
     )
-    assert rewrite_dataset_projection_edge_name(
-        ["smooth_4x", "to", "smooth_4x"],
+    assert projection_edge_name(
+        "smooth_4x",
+        "smooth_4x",
         dataset_name="era5",
         graph_or_config=fused_graph,
         dataset_names=["era5", "cerra"],
+        prefer_existing=True,
     ) == ("era5_smooth_4x", "to", "era5_smooth_4x")

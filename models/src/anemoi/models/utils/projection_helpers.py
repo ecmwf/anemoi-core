@@ -61,6 +61,7 @@ def projection_node_name(
     graph_or_config: HeteroData | DictConfig | Mapping | None = None,
     dataset_names: list[str] | None = None,
     fused_dataset_graph: bool | None = None,
+    prefer_existing: bool = False,
 ) -> str:
     """Resolve a local projection node name to the actual node name in the graph.
 
@@ -72,8 +73,16 @@ def projection_node_name(
         assert graph_or_config is not None and dataset_names is not None
         fused_dataset_graph = uses_fused_dataset_graph(graph_or_config, dataset_names)
 
-    if fused_dataset_graph:
-        return dataset_projection_node_name(dataset_name, base_node_name)
+    candidate = dataset_projection_node_name(dataset_name, base_node_name) if fused_dataset_graph else base_node_name
+    if not prefer_existing:
+        return candidate
+
+    assert graph_or_config is not None
+    node_names = get_graph_node_names(graph_or_config)
+    if base_node_name in node_names:
+        return base_node_name
+    if candidate in node_names:
+        return candidate
     return base_node_name
 
 
@@ -86,6 +95,7 @@ def projection_edge_name(
     dataset_names: list[str] | None = None,
     fused_dataset_graph: bool | None = None,
     relation_name: str = DEFAULT_EDGE_RELATION_NAME,
+    prefer_existing: bool = False,
 ) -> tuple[str, str, str]:
     """Resolve a local projection edge tuple to the actual edge tuple in the graph."""
     return (
@@ -95,6 +105,7 @@ def projection_edge_name(
             graph_or_config=graph_or_config,
             dataset_names=dataset_names,
             fused_dataset_graph=fused_dataset_graph,
+            prefer_existing=prefer_existing,
         ),
         relation_name,
         projection_node_name(
@@ -103,6 +114,7 @@ def projection_edge_name(
             graph_or_config=graph_or_config,
             dataset_names=dataset_names,
             fused_dataset_graph=fused_dataset_graph,
+            prefer_existing=prefer_existing,
         ),
     )
 
@@ -232,52 +244,3 @@ def multiscale_loss_matrices_graph(
 
     matrices.append(None)
     return matrices
-
-
-def rewrite_dataset_projection_node_name(
-    node_name: str,
-    *,
-    dataset_name: str,
-    graph_or_config: HeteroData | DictConfig | Mapping,
-    dataset_names: list[str],
-) -> str:
-    """Convert a local projection node name to the node name used in the graph.
-
-    If the supplied name already exists in the graph, leave it unchanged. This
-    works for both expanded names and generic local names.
-    """
-    node_names = get_graph_node_names(graph_or_config)
-    if node_name in node_names:
-        return node_name
-
-    candidate = dataset_projection_node_name(dataset_name, node_name)
-    if candidate in node_names and uses_fused_dataset_graph(graph_or_config, dataset_names):
-        return candidate
-
-    return node_name
-
-
-def rewrite_dataset_projection_edge_name(
-    edge_name: tuple[str, str, str] | list[str],
-    *,
-    dataset_name: str,
-    graph_or_config: HeteroData | DictConfig | Mapping,
-    dataset_names: list[str],
-) -> tuple[str, str, str]:
-    """Rewrite a local projection edge tuple to the concrete edge tuple in the graph."""
-    source_name, relation_name, target_name = tuple(edge_name)
-    return (
-        rewrite_dataset_projection_node_name(
-            source_name,
-            dataset_name=dataset_name,
-            graph_or_config=graph_or_config,
-            dataset_names=dataset_names,
-        ),
-        relation_name,
-        rewrite_dataset_projection_node_name(
-            target_name,
-            dataset_name=dataset_name,
-            graph_or_config=graph_or_config,
-            dataset_names=dataset_names,
-        ),
-    )

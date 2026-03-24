@@ -17,6 +17,7 @@ from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.utils.enums import TensorDim
 
 
@@ -145,6 +146,48 @@ def test_multiscale_graph_based(
 
     assert isinstance(loss, torch.Tensor)
     assert multiscale_loss.smoothing_matrices[-1] is None
+
+
+def test_multiscale_schema_accepts_manual_graph_list() -> None:
+    schema = MultiScaleLossSchema(
+        _target_="anemoi.training.losses.MultiscaleLossWrapper",
+        per_scale_loss={"_target_": "anemoi.training.losses.MSELoss", "scalers": []},
+        weights=[1.0, 1.0],
+        keep_batch_sharded=False,
+        loss_matrices_graph=[
+            {"edges_name": ["smooth_8x", "to", "smooth_8x"], "edge_weight_attribute": "edge_weight"},
+            None,
+        ],
+    )
+
+    assert isinstance(schema.loss_matrices_graph, list)
+    assert schema.loss_matrices_graph[0].edges_name == ("smooth_8x", "to", "smooth_8x")
+    assert schema.loss_matrices_graph[1] is None
+
+
+def test_multiscale_schema_validates_manual_graph_weights_length() -> None:
+    with pytest.raises(ValueError, match="weights must have same length as loss_matrices_graph"):
+        MultiScaleLossSchema(
+            _target_="anemoi.training.losses.MultiscaleLossWrapper",
+            per_scale_loss={"_target_": "anemoi.training.losses.MSELoss", "scalers": []},
+            weights=[1.0],
+            keep_batch_sharded=False,
+            loss_matrices_graph=[
+                {"edges_name": ["smooth_8x", "to", "smooth_8x"], "edge_weight_attribute": "edge_weight"},
+                None,
+            ],
+        )
+
+
+def test_multiscale_schema_validates_file_weights_length() -> None:
+    with pytest.raises(ValueError, match="weights must have same length as loss_matrices"):
+        MultiScaleLossSchema(
+            _target_="anemoi.training.losses.MultiscaleLossWrapper",
+            per_scale_loss={"_target_": "anemoi.training.losses.MSELoss", "scalers": []},
+            weights=[1.0],
+            keep_batch_sharded=False,
+            loss_matrices=["matrix.npz", None],
+        )
 
 
 @pytest.mark.parametrize("per_scale_loss", [AlmostFairKernelCRPS(), MSELoss()])

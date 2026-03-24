@@ -197,13 +197,16 @@ The truncation system supports several types of transformation matrices:
    include smaller and smaller scales.
 
 **Loss Matrices Graph (``loss_matrices_graph``)**
-   List of graph-based smoothing definitions used by
-   ``MultiscaleLossWrapper``. Each entry is a dictionary containing an
-   ``edges_name`` tuple (and optional ``edge_weight_attribute``). The
-   edges are defined in ``config.graph.projections`` and are merged into
-   the main graph at startup. Gaussian distance weights computed with
-   ``norm: l1`` should be used as ``edge_weight_attribute`` (commonly
-   ``gauss_weight`` in the projection graph).
+   Graph-based smoothing definitions used by
+   ``MultiscaleLossWrapper``. This field supports two modes:
+
+   - ``true``: auto-build one smoothing matrix per
+     ``graph.projections.multiscale.smoothers`` entry.
+   - ``[...]``: use a manual explicit list of graph edge references.
+
+   Gaussian distance weights computed with ``norm: l1`` should be used
+   as ``edge_weight_attribute`` (commonly ``gauss_weight`` in the
+   projection graph).
 
 .. note::
 
@@ -234,30 +237,35 @@ with ``norm: l1`` should be used as ``edge_weight_attribute`` (commonly
    graph:
      projections:
        multiscale:
-         matrices:
-           - edges_name: ["smooth_1x", "to", "smooth_1x"]
+         smoothers:
+           smooth_1x:
              edge_weight_attribute: gauss_weight
-           - edges_name: ["smooth_2x", "to", "smooth_2x"]
+             gaussian_norm: l1
+             num_nearest_neighbours: 16
+             sigma: 0.00471
+           smooth_2x:
              edge_weight_attribute: gauss_weight
-         nodes: ...
-         edges: ...
-       residual:
-         down_edges_name: ["${graph.data}", "to", "truncation"]
-         up_edges_name: ["truncation", "to", "${graph.data}"]
-         edge_weight_attribute: gauss_weight
-         nodes: ...
-         edges: ...
+             gaussian_norm: l1
+             num_nearest_neighbours: 32
+             sigma: 0.00942
+       truncation:
+         truncation:
+           grid: o32
+           edge_weight_attribute: gauss_weight
+           gaussian_norm: l1
+           num_nearest_neighbours: 32
+           sigma: 0.18840
 
 .. code:: yaml
 
-   # training + model config
+   # training + model config, auto-generated loss graphs
    training:
      training_loss:
        datasets:
          your_dataset_name:
            _target_: anemoi.training.losses.MultiscaleLossWrapper
-           loss_matrices_graph: ${graph.projections.multiscale.matrices}
-           weights: [1.0, 1.0]
+           loss_matrices_graph: true
+           weights: [1.0, 1.0, 1.0]
            per_scale_loss:
              _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
              scalers: ['node_weights']
@@ -265,9 +273,32 @@ with ``norm: l1`` should be used as ``edge_weight_attribute`` (commonly
    model:
      residual:
        _target_: anemoi.models.layers.residual.TruncatedConnection
-       truncation_down_edges_name: ${graph.projections.residual.down_edges_name}
-       truncation_up_edges_name: ${graph.projections.residual.up_edges_name}
-       edge_weight_attribute: ${graph.projections.residual.edge_weight_attribute}
+
+.. code:: yaml
+
+   # training config, manual explicit loss graphs
+   training:
+     training_loss:
+       datasets:
+         your_dataset_name:
+           _target_: anemoi.training.losses.MultiscaleLossWrapper
+           loss_matrices_graph:
+             - edges_name: [smooth_2x, to, smooth_2x]
+               edge_weight_attribute: gauss_weight
+             - edges_name: [smooth_1x, to, smooth_1x]
+               edge_weight_attribute: gauss_weight
+             - null
+           weights: [1.0, 1.0, 1.0]
+           per_scale_loss:
+             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             scalers: ['node_weights']
+
+With ``loss_matrices_graph: true``, the smoother node names are derived
+from ``graph.projections.multiscale.smoothers`` using ``node_name`` if
+present, otherwise the smoother key itself. In fused graphs, those names
+are adapted to the dataset-specific graph node names automatically. With
+the manual list form, the names are taken literally and must already
+match the concrete graph edge types.
 
 File-based configuration (still supported)
 ******************************************

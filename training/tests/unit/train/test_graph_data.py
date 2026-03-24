@@ -72,7 +72,7 @@ def test_validate_loaded_graph_rejects_missing_dataset_node() -> None:
         TrainerGraphDataFactory.validate_loaded_graph(graph, ["era5", "cerra"])
 
 
-def test_create_graph_for_dataset_updates_dataset_path_and_merges_projections() -> None:
+def test_create_graph_updates_dataset_path_and_merges_projections() -> None:
     config = build_graph_config()
     factory = TrainerGraphDataFactory(config)
     created_graph = HeteroData()
@@ -83,7 +83,7 @@ def test_create_graph_for_dataset_updates_dataset_path_and_merges_projections() 
     ):
         graph_creator_cls.return_value.create.return_value = created_graph
 
-        graph = factory.create_graph_for_dataset("datasets/era5.zarr", "era5")
+        graph = factory.create_graph(dataset_names=["era5"], dataset_path="datasets/era5.zarr")
 
     assert graph is created_graph
     merge_projection.assert_called_once()
@@ -94,7 +94,27 @@ def test_create_graph_for_dataset_updates_dataset_path_and_merges_projections() 
     graph_creator_cls.return_value.create.assert_called_once_with(save_path=None, overwrite=True)
 
 
-def test_create_graph_for_dataset_reuses_configured_graph_path_without_suffix(tmp_path: Path) -> None:
+def test_create_graph_reuses_configured_graph_path_without_suffix(tmp_path: Path) -> None:
+    graph_path = tmp_path / "graph.pt"
+    config = build_graph_config(
+        {
+            "system": {"input": {"graph": graph_path}},
+            "graph": {"overwrite": False},
+        },
+    )
+    factory = TrainerGraphDataFactory(config)
+    loaded_graph = HeteroData()
+    loaded_graph["data"].num_nodes = 1
+    graph_path.write_text("fake graph")
+
+    with patch.object(factory, "load_graph_from_file", return_value=loaded_graph) as load_graph_from_file:
+        graph = factory.create_graph(dataset_names=["era5"], dataset_path="datasets/era5.zarr")
+
+    assert graph is loaded_graph
+    load_graph_from_file.assert_called_once_with(graph_path)
+
+
+def test_create_graph_validates_reused_graph_against_generic_data_node(tmp_path: Path) -> None:
     graph_path = tmp_path / "graph.pt"
     config = build_graph_config(
         {
@@ -106,11 +126,45 @@ def test_create_graph_for_dataset_reuses_configured_graph_path_without_suffix(tm
     loaded_graph = HeteroData()
     graph_path.write_text("fake graph")
 
-    with patch.object(factory, "load_graph_from_file", return_value=loaded_graph) as load_graph_from_file:
-        graph = factory.create_graph_for_dataset("datasets/era5.zarr", "era5")
+    with (
+        patch.object(factory, "load_graph_from_file", return_value=loaded_graph) as load_graph_from_file,
+        patch.object(factory, "validate_loaded_graph") as validate_loaded_graph,
+    ):
+        graph = factory.create_graph(dataset_names=["era5"], dataset_path="datasets/era5.zarr")
 
     assert graph is loaded_graph
     load_graph_from_file.assert_called_once_with(graph_path)
+    validate_loaded_graph.assert_called_once_with(loaded_graph, ["data"])
+
+
+def test_create_graph_validates_reused_graph_against_dataset_nodes_for_fused_graphs(tmp_path: Path) -> None:
+    graph_path = tmp_path / "graph.pt"
+    config = build_graph_config(
+        {
+            "system": {"input": {"graph": graph_path}},
+            "graph": {
+                "overwrite": False,
+                "nodes": {
+                    "era5": {},
+                    "cerra": {},
+                    "hidden": {},
+                },
+            },
+        },
+    )
+    factory = TrainerGraphDataFactory(config)
+    loaded_graph = HeteroData()
+    graph_path.write_text("fake graph")
+
+    with (
+        patch.object(factory, "load_graph_from_file", return_value=loaded_graph) as load_graph_from_file,
+        patch.object(factory, "validate_loaded_graph") as validate_loaded_graph,
+    ):
+        graph = factory.create_graph(dataset_names=["era5", "cerra"])
+
+    assert graph is loaded_graph
+    load_graph_from_file.assert_called_once_with(graph_path)
+    validate_loaded_graph.assert_called_once_with(loaded_graph, ["era5", "cerra"])
 
 
 def test_build_uses_fused_graph_for_multiple_datasets() -> None:
@@ -136,15 +190,46 @@ def test_build_uses_fused_graph_for_multiple_datasets() -> None:
     factory = TrainerGraphDataFactory(config)
     fused_graph = HeteroData()
 
-    with (
-        patch.object(factory, "create_fused_graph", return_value=fused_graph) as create_fused_graph,
-        patch.object(factory, "create_graph_for_dataset") as create_graph_for_dataset,
-    ):
+    with patch.object(factory, "create_graph", return_value=fused_graph) as create_graph:
         graph = factory.build()
 
     assert graph is fused_graph
-    create_fused_graph.assert_called_once_with(["era5", "cerra"])
-    create_graph_for_dataset.assert_not_called()
+    create_graph.assert_called_once_with(dataset_names=["era5", "cerra"])
+
+
+def test_build_validates_existing_multi_dataset_graph_against_dataset_names(tmp_path: Path) -> None:
+    graph_path = tmp_path / "existing.pt"
+    graph_path.write_text("fake graph")
+    config = build_graph_config(
+        {
+            "system": {"input": {"graph": graph_path}},
+            "graph": {
+                "overwrite": False,
+                "nodes": None,
+                "edges": None,
+            },
+            "dataloader": {
+                "training": {
+                    "datasets": {
+                        "era5": {"dataset_config": {"dataset": "datasets/era5.zarr"}},
+                        "cerra": {"dataset_config": {"dataset": "datasets/cerra.zarr"}},
+                    },
+                },
+            },
+        },
+    )
+    factory = TrainerGraphDataFactory(config)
+    loaded_graph = HeteroData()
+
+    with (
+        patch.object(factory, "load_graph_from_file", return_value=loaded_graph) as load_graph_from_file,
+        patch.object(factory, "validate_loaded_graph") as validate_loaded_graph,
+    ):
+        graph = factory.build()
+
+    assert graph is loaded_graph
+    load_graph_from_file.assert_called_once_with(graph_path)
+    validate_loaded_graph.assert_called_once_with(loaded_graph, ["era5", "cerra"])
 
 
 def test_build_uses_single_dataset_source_from_dataset_config() -> None:
@@ -152,11 +237,11 @@ def test_build_uses_single_dataset_source_from_dataset_config() -> None:
     factory = TrainerGraphDataFactory(config)
     single_graph = HeteroData()
 
-    with patch.object(factory, "create_graph_for_dataset", return_value=single_graph) as create_graph_for_dataset:
+    with patch.object(factory, "create_graph", return_value=single_graph) as create_graph:
         graph = factory.build()
 
     assert graph is single_graph
-    create_graph_for_dataset.assert_called_once_with("datasets/single.zarr", "data")
+    create_graph.assert_called_once_with(dataset_names=["data"], dataset_path="datasets/single.zarr")
 
 
 def test_build_requires_dataset_key_in_dataset_config_mapping() -> None:

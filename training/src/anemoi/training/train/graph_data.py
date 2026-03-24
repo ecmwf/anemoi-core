@@ -19,6 +19,7 @@ from omegaconf import OmegaConf
 
 from anemoi.graphs.create import GraphCreator
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.models.utils.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.models.utils.projection_helpers import uses_fused_dataset_graph
 from anemoi.training.utils.graph_config import merge_projection_and_graph_config
 
@@ -35,7 +36,7 @@ class TrainerGraphDataFactory:
     - detect load-only `graph=existing` mode
     - reuse the configured graph file when possible
     - expand projection configs before graph creation
-    - choose between single-dataset and combined multi-dataset graph creation
+    - create graphs for single-dataset or fused multi-dataset training
     """
 
     def __init__(self, config: DictConfig) -> None:
@@ -71,6 +72,24 @@ class TrainerGraphDataFactory:
             raise FileNotFoundError(msg)
         return graph_filename
 
+    def _required_graph_dataset_names(self, dataset_names: list[str]) -> list[str]:
+        """Return the dataset node names expected in the graph itself."""
+        if uses_fused_dataset_graph(self.config.graph, dataset_names):
+            return dataset_names
+        return [DEFAULT_DATASET_NAME]
+
+    @staticmethod
+    def _required_existing_graph_dataset_names(dataset_names: list[str]) -> list[str]:
+        """Return the dataset node names required when loading a graph as-is.
+
+        Existing-graph mode has no graph config to inspect, so multi-dataset
+        runs must validate against the actual dataloader dataset names.
+        Single-dataset runs still expect the generic ``data`` node type.
+        """
+        if len(dataset_names) > 1:
+            return dataset_names
+        return [DEFAULT_DATASET_NAME]
+
     @staticmethod
     def validate_loaded_graph(graph_data: HeteroData, dataset_names: list[str]) -> None:
         """Ensure a loaded combined graph contains the dataset nodes required by training."""
@@ -82,35 +101,53 @@ class TrainerGraphDataFactory:
             )
             raise ValueError(msg)
 
-    def create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
-        """Create or load a single-dataset graph, including any derived projections."""
-        graph_filename = None
-        if self.config.system.input.graph is not None:
-            graph_filename = Path(self.config.system.input.graph)
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                return self.load_graph_from_file(graph_filename)
+    def _graph_output_path(self) -> Path | None:
+        """Return the configured graph save path, if any."""
+        graph_path = self.config.system.input.graph
+        return Path(graph_path) if graph_path is not None else None
 
-        graph_config = OmegaConf.create(OmegaConf.to_container(self.config.graph, resolve=False))
-        merge_projection_and_graph_config(graph_config, dataset_names=[dataset_name])
+    def _load_existing_graph_if_available(
+        self,
+        graph_filename: Path | None,
+        dataset_names: list[str],
+    ) -> HeteroData | None:
+        """Load and validate a saved graph when overwrite is disabled."""
+        if graph_filename is None or self.config.graph.overwrite or not graph_filename.exists():
+            return None
 
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
+        graph_data = self.load_graph_from_file(graph_filename)
+        self.validate_loaded_graph(graph_data, self._required_graph_dataset_names(dataset_names))
+        return graph_data
 
-        return GraphCreator(config=graph_config).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
-
-    def create_fused_graph(self, dataset_names: list[str]) -> HeteroData:
-        """Create or load one graph that already contains all dataset node groups."""
-        graph_filename = None
-        if self.config.system.input.graph is not None:
-            graph_filename = Path(self.config.system.input.graph)
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                return self.load_graph_from_file(graph_filename)
-
+    def _build_graph_config(self, dataset_names: list[str], dataset_path: str | None = None) -> DictConfig:
+        """Clone the graph config, expand projections, and inject the single-dataset source if needed."""
         graph_config = OmegaConf.create(OmegaConf.to_container(self.config.graph, resolve=False))
         merge_projection_and_graph_config(graph_config, dataset_names=dataset_names)
+
+        if dataset_path is not None and graph_config.get("nodes") is not None:
+            data_node_cfg = graph_config.nodes.get(DEFAULT_DATASET_NAME)
+            if (
+                data_node_cfg is not None
+                and hasattr(data_node_cfg, "node_builder")
+                and hasattr(data_node_cfg.node_builder, "dataset")
+            ):
+                data_node_cfg.node_builder.dataset = dataset_path
+
+        return graph_config
+
+    def create_graph(
+        self,
+        *,
+        dataset_names: list[str],
+        dataset_path: str | None = None,
+    ) -> HeteroData:
+        """Load an existing graph or build a new one from the expanded graph config."""
+        graph_filename = self._graph_output_path()
+        graph_data = self._load_existing_graph_if_available(graph_filename, dataset_names)
+        if graph_data is not None:
+            return graph_data
+
+        graph_config = self._build_graph_config(dataset_names, dataset_path=dataset_path)
 
         return GraphCreator(config=graph_config).create(
             save_path=graph_filename,
@@ -124,12 +161,12 @@ class TrainerGraphDataFactory:
 
         if self.is_existing_graph_mode():
             graph_data = self.load_graph_from_file(self.existing_graph_path())
-            self.validate_loaded_graph(graph_data, dataset_names)
+            self.validate_loaded_graph(graph_data, self._required_existing_graph_dataset_names(dataset_names))
             return graph_data
 
         if uses_fused_dataset_graph(self.config.graph, dataset_names):
             LOGGER.info("Creating fused graph for datasets %s", dataset_names)
-            return self.create_fused_graph(dataset_names)
+            return self.create_graph(dataset_names=dataset_names)
 
         if len(dataset_names) != 1:
             msg = (
@@ -153,4 +190,4 @@ class TrainerGraphDataFactory:
             raise ValueError(msg)
 
         LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-        return self.create_graph_for_dataset(dataset_source, dataset_name)
+        return self.create_graph(dataset_names=[dataset_name], dataset_path=dataset_source)

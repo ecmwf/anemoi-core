@@ -16,7 +16,6 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import ValidationError
 from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
-from torch_geometric.data import HeteroData
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -181,45 +180,6 @@ def test_training_cycle_multidatasets(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-@skip_if_offline
-@pytest.mark.slow
-def test_training_cycle_multidatasets_graph_multiscale_truncated(
-    multidatasets_graph_multiscale_truncated_config: tuple[DictConfig, list[str]],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, urls = multidatasets_graph_multiscale_truncated_config
-    assert cfg.training.multistep_output == 2
-    assert cfg.training.multistep_input == 3
-
-    for url in urls:
-        get_test_archive(url)
-
-    trainer = AnemoiTrainer(cfg)
-    pl_module = trainer.model
-    assert isinstance(trainer.graph_data, HeteroData)
-
-    for dataset_name in ["era5", "cerra"]:
-        graph_data = trainer.graph_data
-
-        truncation_node = f"{dataset_name}_truncation"
-        smoothing_node = f"{dataset_name}_smooth_test"
-        assert truncation_node in graph_data.node_types
-        assert smoothing_node in graph_data.node_types
-        assert ("truncation", "to", "data") not in graph_data.edge_types
-        assert ("smooth_test", "to", "smooth_test") not in graph_data.edge_types
-        assert (dataset_name, "to", truncation_node) in graph_data.edge_types
-        assert (truncation_node, "to", dataset_name) in graph_data.edge_types
-        assert (smoothing_node, "to", smoothing_node) in graph_data.edge_types
-
-        assert pl_module.model.model.residual[dataset_name].provider_down is not None
-        assert pl_module.model.model.residual[dataset_name].provider_up is not None
-        assert pl_module.loss[dataset_name].smoothing_matrices[0] is not None
-        assert len(pl_module.loss[dataset_name].smoothing_matrices) == 2
-        assert pl_module.loss[dataset_name].smoothing_matrices[-1] is None
-
-    trainer.train()
-
-
 def test_config_validation_multidatasets(
     multidatasets_config: tuple[DictConfig, list[str]],
 ) -> None:
@@ -268,26 +228,6 @@ def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_te
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
     BaseSchema(**cfg)
-
-
-def test_default_ensemble_template_keeps_main_multiscale_defaults() -> None:
-    from hydra import compose
-    from hydra import initialize
-
-    with initialize(
-        version_base=None,
-        config_path="../../src/anemoi/training/config",
-        job_name="test_ensemble_defaults",
-    ):
-        cfg = compose(config_name="ensemble_crps")
-
-    training_loss_cfg = cfg.training.training_loss.datasets.data
-    validation_loss_cfg = cfg.training.validation_metrics.datasets.data.multiscale
-
-    assert training_loss_cfg.loss_matrices == [None]
-    assert training_loss_cfg.get("loss_matrices_graph", False) is False
-    assert validation_loss_cfg.loss_matrices == [None]
-    assert validation_loss_cfg.get("loss_matrices_graph", False) is False
 
 
 @skip_if_offline

@@ -286,6 +286,15 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     "Deactivate autocast for the kernel CRPS calculation"
 
 
+class GraphLossMatrixSchema(BaseModel):
+    """One graph-backed smoothing matrix definition for multiscale loss."""
+
+    edges_name: tuple[str, str, str]
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
     per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
@@ -293,24 +302,23 @@ class MultiScaleLossSchema(BaseModel):
     keep_batch_sharded: bool
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
-    loss_matrices_graph: bool = False
-
-    @field_validator("weights")
-    @classmethod
-    def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
-        if "loss_matrices" in info.data and info.data.get("loss_matrices") is not None:
-            assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
-        return v
+    loss_matrices_graph: bool | list[GraphLossMatrixSchema | None] = False
 
     @model_validator(mode="after")
     def validate_matrix_source(self) -> Self:
         file_based = self.loss_matrices is not None
-        graph_based = bool(self.loss_matrices_graph)
+        graph_based = self.loss_matrices_graph is True or isinstance(self.loss_matrices_graph, list)
         if file_based and graph_based:
             msg = "Specify either loss_matrices or loss_matrices_graph, not both."
             raise ValueError(msg)
         if not file_based and not graph_based:
-            msg = "Specify either loss_matrices_graph=True or provide loss_matrices."
+            msg = "Specify loss_matrices, loss_matrices_graph=True, or an explicit loss_matrices_graph list."
+            raise ValueError(msg)
+        if self.loss_matrices is not None and len(self.weights) != len(self.loss_matrices):
+            msg = "weights must have same length as loss_matrices"
+            raise ValueError(msg)
+        if isinstance(self.loss_matrices_graph, list) and len(self.weights) != len(self.loss_matrices_graph):
+            msg = "weights must have same length as loss_matrices_graph"
             raise ValueError(msg)
         return self
 
