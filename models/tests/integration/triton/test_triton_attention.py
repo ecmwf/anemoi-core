@@ -32,6 +32,7 @@ try:
 except BaseException:
     HAS_FLASH = False
 
+
 def attention_ref(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -60,6 +61,7 @@ def attention_ref(
 
     attn_weights = torch.softmax(scores, dim=-1)
     return torch.matmul(attn_weights, v_fp32).to(output_dtype)
+
 
 @pytest.mark.gpu
 def test_triton_attention_deterministic():
@@ -450,14 +452,14 @@ def test_triton_attention_cumulative_loss_vs_flash(Z, H, N_CTX, HEAD_DIM, causal
     print(f"  Flash  loss curve : {flash_losses[0]:.4f} -> {flash_losses[24]:.4f} -> {flash_final:.4f}")
 
     # Both should be decreasing (sanity check that training is working)
-    #assert triton_losses[-1] < triton_losses[0], (
+    # assert triton_losses[-1] < triton_losses[0], (
     #    f"Triton loss did not decrease — training loop broken "
     #    f"(first={triton_losses[0]:.6f}, last={triton_losses[-1]:.6f})"
-    #)
-    #assert flash_losses[-1] < flash_losses[0], (
+    # )
+    # assert flash_losses[-1] < flash_losses[0], (
     #    f"Flash loss did not decrease — training loop broken "
     #    f"(first={flash_losses[0]:.6f}, last={flash_losses[-1]:.6f})"
-    #)
+    # )
 
     if not (triton_losses[-1] < triton_losses[0]) and not (flash_losses[-1] < flash_losses[0]):
         pytest.skip("Warning: Neither loss decreased, so final loss comparison may be meaningless. Skipping test")
