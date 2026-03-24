@@ -79,16 +79,12 @@ class DownscalingDataset(NativeGridDataset):
             shuffled_chunk_indices[:10],
         )
         # override the list of indices to a list of a single index to do overfitting on
-        if self.overfit_on_index is not None: 
+        if self.overfit_on_index is not None:
             shuffled_chunk_indices = [self.overfit_on_index]
 
         for i in shuffled_chunk_indices:
-            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
-            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
+            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(self.reader_group_rank)
+            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(self.reader_group_rank)
 
             # Load full grid in CPU memory, select grid_shard after
             # Note that anemoi-datasets currently doesn't support slicing + indexing
