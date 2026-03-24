@@ -67,7 +67,7 @@ def inverse_displace_boundary_atoms(
 ):
     """Clamps the values back to the original range, to the original boundary values. Can be used on lower bound, upper bound, or both."""
 
-    return x.clamp(lower_atom, upper_atom)
+    return x.clamp_(lower_atom, upper_atom)
 
 
 # --------------------------------------------------------
@@ -219,12 +219,12 @@ def inverse_asinh_converter(x, c=1.0):
 # --------------------------------------------------------
 def log1p_converter(x):
     """Convert positive var in to log(1+var)."""
-    return torch.log1p(x)
+    return torch.log1p_(x)
 
 
 def expm1_converter(x):
     """Convert back log(1+var) to var."""
-    return torch.expm1(x)
+    return torch.expm1_(x)
 
 
 # --------------------------------------------------------
