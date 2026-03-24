@@ -39,7 +39,7 @@ def test_clean_config_params() -> None:
 
 
 def test_expand_iterables_single_iterable() -> None:
-    # Test case with a single iterable
+    """Test case with a single iterable."""
     dictionary = {"a": ["a", "b", "c"]}
     expanded = expand_iterables(dictionary)
     assert expanded == {"a": ["a", "b", "c"]}
@@ -56,6 +56,25 @@ def test_expand_iterables_with_nested_list() -> None:
     expanded = expand_iterables(dictionary)
     assert expanded == {
         "a": {0: [0, 1, 2], 1: "b", 2: "c", "length": 3, "all": [[0, 1, 2], "b", "c"]},
+    }
+
+
+def test_flattened_expand_iterables_with_nested_list() -> None:
+    """Demonstrate how `_flatten_dict` and `expand_iterables` work together."""
+    from pytorch_lightning.loggers.mlflow import _flatten_dict
+
+    dictionary = {"a": [[0, 1, 2], "b", "c"]}
+    expanded = expand_iterables(dictionary)
+    assert expanded == {
+        "a": {0: [0, 1, 2], 1: "b", 2: "c", "length": 3, "all": [[0, 1, 2], "b", "c"]},
+    }
+    flattened = _flatten_dict(expanded, delimiter=".")
+    assert flattened == {
+        "a.0": [0, 1, 2],
+        "a.1": "b",
+        "a.2": "c",
+        "a.length": 3,
+        "a.all": [[0, 1, 2], "b", "c"],
     }
 
 
