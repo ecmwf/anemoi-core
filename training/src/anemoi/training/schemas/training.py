@@ -53,17 +53,6 @@ class SWA(BaseModel):
     "Learning rate for SWA."
 
 
-class Rollout(BaseModel):
-    """Rollout configuration."""
-
-    start: NonNegativeInt = Field(example=1)
-    "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(example=0)
-    "Number of epochs to increment the rollout."
-    max: NonNegativeInt = Field(example=1)
-    "Maximum number of rollouts."
-
-
 class LR(BaseModel):
     """Learning rate configuration.
 
