@@ -354,7 +354,7 @@ class CosineLatWeightedAttribute(BaseLatWeightedAttribute):
 
 
 class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
-    """Latitude-weighted area weights for rectilinear grids.
+    r"""Latitude-weighted area weights for rectilinear grids.
 
     Attributes
     ----------
@@ -369,8 +369,10 @@ class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
     Notes
     ------
     The area of a latitude band is
+
     .. math::
         A = 2\pi R(\sin(lat_2) - \sin(lat_1))
+
     where R is the earth radius and lat_1, lat_2 are in radians.
     """
 
