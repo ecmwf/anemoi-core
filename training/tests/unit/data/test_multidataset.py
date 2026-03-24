@@ -22,7 +22,6 @@ class TestMultiDataset:
     def dataset_config(self) -> dict:
         """Fixture to provide dataset configuration."""
         return {
-            "timestep": "6h",
             "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h
             "shuffle": True,
         }
