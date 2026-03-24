@@ -84,13 +84,6 @@ strategy:
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
-# length of the "rollout" window (see Keisler's paper)
-rollout:
-  start: 1
-  # increase rollout every n epochs
-  epoch_increment: 0
-  # maximum rollout to use
-  max: 1
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
