@@ -40,7 +40,7 @@ dependencies = [
   "numpy>=1.26",
   "plotly>=5.19",
   "scikit-learn>=1.5",
-  "torch>=2.2",
+  "torch>=2.2,<2.11",
   "torch-geometric>=2.3.1",
   "typeguard>=4",
 ]
