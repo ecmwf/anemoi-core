@@ -57,6 +57,7 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads: int,
         embed_dim: int,
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
         qkv_bias: bool = False,
         qk_norm: bool = False,
         is_causal: bool = False,
@@ -81,7 +82,10 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads : int
             number of heads
         embed_dim : int
-            embedding dimension
+            Input and output embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to embed_dim.
         qkv_bias : bool, optional
             bias for querys, keys and values, by default False
         qk_norm : bool, optional
@@ -102,16 +106,17 @@ class MultiHeadSelfAttention(nn.Module):
         """
         super().__init__()
 
-        assert (
-            embed_dim % num_heads == 0
-        ), f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
+        self.attn_channels = embed_dim if attn_channels is None else attn_channels
+        if self.attn_channels <= 0:
+            raise ValueError(f"attn_channels must be > 0, got {self.attn_channels}")
+        if self.attn_channels % num_heads != 0:
+            raise ValueError(f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads})")
 
         self.attention_implementation = attention_implementation
         self.use_alibi_slopes = use_alibi_slopes
 
         self.num_heads = num_heads
-        self.embed_dim = embed_dim
-        self.head_dim = embed_dim // num_heads  # q k v
+        self.head_dim = self.attn_channels // num_heads  # q k v
         self.window_size = window_size
         self.dropout_p = dropout_p
         self.is_causal = is_causal
@@ -128,11 +133,11 @@ class MultiHeadSelfAttention(nn.Module):
             self.alibi_slopes = None
 
         linear = layer_kernels.Linear
-        self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
-        self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
-        self.lin_v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.lin_q = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_k = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_v = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
 
-        self.projection = linear(embed_dim, embed_dim, bias=True)
+        self.projection = linear(self.attn_channels, embed_dim, bias=True)
 
         if self.qk_norm:
             self.q_norm = layer_kernels["QueryNorm"](self.head_dim)
