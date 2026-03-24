@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
 import datetime
+import logging
 
 from anemoi.training.tasks.base import BaseSingleStepTask
 from anemoi.utils.dates import as_timedelta
@@ -34,8 +34,8 @@ class TemporalDownscalingTask(BaseSingleStepTask):
 
         input_offsets = [datetime.timedelta(hours=0), input_timedelta]
 
-        assert (
-            input_timedelta % output_timedelta == datetime.timedelta(0)
+        assert input_timedelta % output_timedelta == datetime.timedelta(
+            0,
         ), "Input timestep must be an integer multiple of output timestep for temporal downscaling."
         num_output_steps = input_timedelta // output_timedelta
         output_offsets = [output_timedelta * (i + 1) for i in range(num_output_steps)]
