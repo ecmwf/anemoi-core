@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+from collections.abc import Callable
 
 import torch
 
@@ -141,7 +142,7 @@ class ForecastingTask(BaseTask):
             )
         return x
 
-    def log_extra(self, logger, logger_enabled: bool) -> None:
+    def log_extra(self, logger: Callable, logger_enabled: bool) -> None:
         """Log any task-specific information."""
         logger(
             "rollout",

@@ -229,7 +229,9 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     pl.LightningModule.__init__(training_module)
 
     task = ForecastingTask(
-        multistep_input=1, multistep_output=1, timestep="6h",
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
         rollout_start=_CFG_FORECASTER.training.rollout.start,
         rollout_epoch_increment=_CFG_FORECASTER.training.rollout.epoch_increment,
         rollout_max=_CFG_FORECASTER.training.rollout.max,
@@ -243,8 +245,6 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     training_module.loss_supports_sharding = False
     training_module.metrics_support_sharding = True
     training_module._plot_adapter = ForecasterPlotAdapter(training_module)
-
-    # ForecasterPlotAdapter accesses _task.rollout, n_step_input, n_step_output
     # Set rollout on the training module to match the task's rollout
     training_module.rollout = task.rollout
     assert training_module.plot_adapter.output_times == 1
@@ -284,7 +284,10 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
             e,
             g,
             v,
-        ), f"Expected (B, n_step_output, E, G, V) = ({b}, {training_module.n_step_output}, {e}, {g}, {v}), got {pred.shape}"
+        ), (
+            f"Expected (B, n_step_output, E, G, V) = "
+            f"({b}, {training_module.n_step_output}, {e}, {g}, {v}), got {pred.shape}"
+        )
 
 
 _CFG_DIFFUSION = DictConfig(
@@ -643,7 +646,7 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
     b, g, v = 2, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn((b, forecaster.n_step_input + task.rollout, 1, g, v), dtype=torch.float32)}
 
-    loss, metrics, y_preds = forecaster._step(batch=batch, validation_mode=False)
+    loss, _metrics, y_preds = forecaster._step(batch=batch, validation_mode=False)
     assert isinstance(loss, torch.Tensor)
     assert isinstance(y_preds, list)
     assert len(y_preds) == task.rollout
@@ -731,14 +734,15 @@ _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}}
 
 class _InterpolatorStub:
     """Minimal stub with attributes needed by InterpolatorMultiOutPlotAdapter."""
-    def __init__(self, n_step_input, n_step_output, interp_times):
+
+    def __init__(self, n_step_input: int, n_step_output: int, interp_times: list) -> None:
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
         self.interp_times = interp_times
         self._plot_adapter = None
 
     @property
-    def plot_adapter(self):
+    def plot_adapter(self) -> None:
         return self._plot_adapter
 
 

@@ -195,8 +195,6 @@ class TimeStepScalerSchema(BaseModel):
 
 class UniformTimeStepScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.UniformTimeStepScaler"] = Field(..., alias="_target_")
-    multistep_output: PositiveInt = Field(example=5)
-    "Number of output time steps."
 
 
 class LeadTimeDecayScalerSchema(BaseModel):
@@ -460,52 +458,34 @@ class BaseTrainingSchema(BaseModel):
 
 
 class ForecasterSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.methods.GraphForecaster",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="model_task")
     "Training objective."
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
 
 
 class ForecasterEnsSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.methods.GraphEnsForecaster",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="model_task")
     "Training objective."
 
 
 class DiffusionForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.methods.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="model_task")
     "Training objective."
 
 
 class DiffusionTendForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.methods.GraphDiffusionTendForecaster"] = Field(
+    model_task: Literal["anemoi.training.train.methods.DiffusionTendTraining"] = Field(
         ...,
         alias="model_task",
     )
     "Training objective."
 
 
-class AutoencoderSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.methods.GraphAutoEncoder",] = Field(..., alias="model_task")
-    "Training objective."
-
-
-class InterpolationMultiSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.methods.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
-    "Training objective."
-    explicit_times: ExplicitTimes
-    "Time indices for input and output."
-
-    # Needed to allow to override default training configuration
-    # Forced to be None (null)
-    rollout: Literal[None] = None
-
-
 TrainingSchema = Annotated[
     ForecasterSchema
     | ForecasterEnsSchema
-    | InterpolationMultiSchema
     | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema
-    | AutoencoderSchema,
+    | DiffusionTendForecasterSchema,
     Discriminator("model_task"),
 ]

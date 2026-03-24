@@ -212,10 +212,10 @@ class BaseTask(ABC):
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
-    def log_extra(self, *_args, **_kwargs) -> None:
+    def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
 
-    def on_train_epoch_end(self, current_epoch: int) -> None:
+    def on_train_epoch_end(self, current_epoch: int) -> None:  # noqa: B027
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""
 
     def fill_metadata(self, md_dict: dict) -> None:

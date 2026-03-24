@@ -1,4 +1,4 @@
-# Modifications for the basic template "interpolator_multiout.yaml"
+# Modifications for the basic template "interpolator.yaml"
 system:
   input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
@@ -18,11 +18,6 @@ dataloader:
         start: 2017-01-08 18:00:00
 
 training:
-
-# Instead of inferred using multistep, specify time indices explicitly
-  explicit_times:
-    input: [0,3]
-    target: [1, 2]
   multistep_output: 2
 
 diagnostics:
