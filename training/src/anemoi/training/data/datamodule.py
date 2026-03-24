@@ -16,6 +16,8 @@ from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
@@ -23,6 +25,15 @@ from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
+
+
+def compute_relative_date_indices(
+    task: BaseTask,
+    data_readers: dict[str, BaseAnemoiReader],
+    **kwargs,
+) -> dict[str, list[int]]:
+    """Compute relative date indices for each dataset based on task offsets."""
+    return {name: [o // dr.frequency for o in task.get_offsets(**kwargs)] for name, dr in data_readers.items()}
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
@@ -67,7 +78,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        lead_times = [frequency_to_string(step) for step in self.task.outputs_offsets]
+        lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
 
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.datasets.items():
@@ -111,12 +122,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_valid(self) -> MultiDataset:
         """Create multi-dataset for validation."""
-        return self._get_dataset(
-            self.valid_dataloader_config,
-            shuffle=False,
-            val_rollout=self.config.dataloader.validation_rollout,
-            label="validation",
-        )
+        return self._get_dataset(self.valid_dataloader_config, shuffle=False, label="validation")
 
     @cached_property
     def ds_test(self) -> MultiDataset:
@@ -125,14 +131,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     def _get_dataset(
         self,
-        datasets: dict[str, dict],
+        config: dict[str, dict],
         shuffle: bool = True,
-        val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
+        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        relative_date_indices = compute_relative_date_indices(self.task, data_readers, label=label)
+
         return MultiDataset(
-            data_readers=datasets,
-            task=self.task,
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
             shuffle=shuffle,
             label=label,
         )

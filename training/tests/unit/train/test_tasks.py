@@ -232,9 +232,11 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         multistep_input=1,
         multistep_output=1,
         timestep="6h",
-        rollout_start=_CFG_FORECASTER.training.rollout.start,
-        rollout_epoch_increment=_CFG_FORECASTER.training.rollout.epoch_increment,
-        rollout_max=_CFG_FORECASTER.training.rollout.max,
+        rollout={
+            "start": _CFG_FORECASTER.training.rollout.start,
+            "epoch_increment": _CFG_FORECASTER.training.rollout.epoch_increment,
+            "max": _CFG_FORECASTER.training.rollout.max,
+        },
     )
     _set_base_task_attrs(training_module, data_indices=data_indices, config=_CFG_FORECASTER, task=task)
     training_module.model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
@@ -607,7 +609,7 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
     """Rollout step works when model returns (B, T, E, G, V); _advance_input uses last time step."""
     data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
 
-    task = ForecastingTask(multistep_input=1, multistep_output=1, timestep="6h", rollout_start=1, rollout_max=1)
+    task = ForecastingTask(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 1, "max": 1})
 
     forecaster = EnsembleTraining.__new__(EnsembleTraining)
     pl.LightningModule.__init__(forecaster)

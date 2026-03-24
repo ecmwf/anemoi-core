@@ -15,7 +15,6 @@ from collections.abc import Iterable
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,12 +26,10 @@ class BaseTask(ABC):
     input and output time offsets as ``timedelta`` objects. The base class
     provides:
 
-    * An ``offset`` property that is the union of input and output offsets,
+    * An ``_offsets`` property that is the union of input and output offsets,
       used by the datamodule to determine which time steps to load.
     * ``get_inputs`` / ``get_targets`` to split a loaded batch into model
-      inputs and targets based on position within ``offset``.
-    * ``get_relative_time_indices(frequency)`` to convert offsets into
-      integer indices for a specific dataset frequency.
+      inputs and targets based on position within ``_offsets``.
 
     Attributes
     ----------
@@ -44,6 +41,15 @@ class BaseTask(ABC):
         Number of output time steps for the task.
     num_steps : int
         Number of steps in the task (for multi-step tasks).
+
+    Methods
+    -------
+    get_input_offsets() -> list[datetime.timedelta]
+        Get the list of input time offsets.
+    get_output_offsets(**kwargs) -> list[datetime.timedelta]
+        Get the list of output time offsets.
+    get_offsets() -> list[datetime.timedelta]
+        Get the full list of input and output time offsets.
     """
 
     name: str
@@ -78,7 +84,7 @@ class BaseTask(ABC):
         return self._steps
 
     @property
-    def offset(self) -> list[datetime.timedelta]:
+    def offsets(self) -> list[datetime.timedelta]:
         """Full sorted union of input and output offsets.
 
         This is used by the datamodule to compute
@@ -101,52 +107,43 @@ class BaseTask(ABC):
         """Number of steps in the task."""
         return len(self._steps)
 
+    def get_input_offsets(self, **_kwargs) -> list[datetime.timedelta]:
+        """Get the list of input time offsets."""
+        return self._inputs_offsets
+
+    def get_output_offsets(self, **_kwargs) -> list[datetime.timedelta]:
+        """Return the output offsets for a given step.
+
+        The default implementation returns ``self._outputs_offsets``.
+        Subclasses may override this to shift outputs per rollout step.
+        """
+        return self._outputs_offsets
+
+    def get_offsets(self, **_kwargs) -> list[datetime.timedelta]:
+        """Get the list of offsets for a given label (e.g. "training", "validation", "test").
+
+        By default, this returns ``self.offsets``, but can be overridden by subclasses to return
+        different offsets per label for example (e.g different rollout in training vs validation).
+        """
+        return self.offsets
+
     def _offset_to_batch_indices(self, offsets: list[datetime.timedelta]) -> list[int]:
-        """Map a list of offsets to their positions in ``self.offset``."""
-        full = self.offset
+        """Map a list of offsets to their positions in ``self.offsets``."""
+        full = self.offsets
         return [full.index(o) for o in offsets]
 
-    def get_relative_time_indices(self, frequency: str | datetime.timedelta) -> list[int]:
-        """Convert ``self.offset`` to integer dataset indices for a given *frequency*.
-
-        The smallest offset is mapped to index 0.
-
-        Parameters
-        ----------
-        frequency : str | datetime.timedelta
-            Data frequency of the dataset (e.g. ``"1H"`` or ``timedelta(hours=1)``).
-
-        Returns
-        -------
-        list[int]
-            Integer indices suitable for indexing into the dataset's time
-            dimension.
-        """
-        if not isinstance(frequency, datetime.timedelta):
-            frequency = frequency_to_timedelta(frequency)
-
-        return [o // frequency for o in self.offset]
-
-    def get_batch_input_indices(self) -> list[int]:
-        """Positions of the input offsets within the full batch ``offset``."""
-        return self._offset_to_batch_indices(self._inputs_offsets)
+    def get_batch_input_indices(self, **kwargs) -> list[int]:
+        """Positions of the input offsets within the full batch ``_offsets``."""
+        return self._offset_to_batch_indices(self.get_input_offsets(**kwargs))
 
     def get_batch_output_indices(self, **kwargs) -> list[int]:
-        """Positions of the output offsets within the full batch ``offset``.
+        """Positions of the output offsets within the full batch ``_offsets``.
 
         Parameters are forwarded to ``get_output_offset`` so that
         subclasses can parametrise the output selection (e.g. per
         rollout step).
         """
         return self._offset_to_batch_indices(self.get_output_offsets(**kwargs))
-
-    def get_output_offsets(self, **_kwargs) -> list[datetime.timedelta]:
-        """Return the output offsets for a given step.
-
-        The default implementation returns ``self.outputs_offsets``.
-        Subclasses may override this to shift outputs per rollout step.
-        """
-        return self.outputs_offsets
 
     def get_inputs(
         self,

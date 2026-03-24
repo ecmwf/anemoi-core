@@ -440,8 +440,6 @@ class BaseTrainingSchema(BaseModel):
 class ForecasterSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="model_task")
     "Training objective."
-    rollout: Rollout | None = Field(default_factory=Rollout)
-    "Rollout configuration."
 
 
 class ForecasterEnsSchema(ForecasterSchema):
