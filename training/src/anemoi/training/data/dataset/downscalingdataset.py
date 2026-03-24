@@ -10,7 +10,6 @@ import logging
 import os
 from collections.abc import Callable
 
-
 # from torch_geometric.nn import radius
 import torch
 from einops import rearrange
@@ -33,7 +32,7 @@ class DownscalingDataset(NativeGridDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
-        overfit_on_index: int|None = None
+        overfit_on_index: int | None = None,
     ) -> None:
 
         super().__init__(
@@ -83,12 +82,8 @@ class DownscalingDataset(NativeGridDataset):
         for i in shuffled_chunk_indices:
             if self.overfit_on_index is not None:
                 i = self.overfit_on_index
-            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
-            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
+            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(self.reader_group_rank)
+            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(self.reader_group_rank)
 
             # Load full grid in CPU memory, select grid_shard after
             # Note that anemoi-datasets currently doesn't support slicing + indexing

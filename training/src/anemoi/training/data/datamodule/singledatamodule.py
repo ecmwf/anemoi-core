@@ -177,7 +177,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self._get_dataset(
             open_dataset(self.config.dataloader.training),
             label="train",
-            overfit_on_index=getattr(self.config.dataloader,"overfit_on_index", None),
+            overfit_on_index=getattr(self.config.dataloader, "overfit_on_index", None),
         )
 
     @cached_property
