@@ -151,7 +151,7 @@ def benchmark_graph(graph_config, device) -> HeteroData:
     return graph
 
 
-#@pytest.fixture
+@pytest.fixture
 def benchmark_graph_provider(graph_config, mapper_benchmark_config, device):
     """Create graph provider for benchmarking."""
     
@@ -201,20 +201,47 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchma
     mapper = mark_for_compilation(mapper, compile_config().compile)
     
     # Create input tensors
-    x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=False)
-    x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=False)
+    x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
+    x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
     x = (x_src, x_dst)
     
     shard_shapes = ([list(x_src.shape)], [list(x_dst.shape)])
     edge_attr, edge_index, _ = benchmark_graph_provider.get_edges(batch_size=config.batch_size)
 
-    with nsight.annotate("Mapper forward (triton)"):
-        out = mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
 
-    mapper_config["graph_attention_backend"] = 'pyg'
-    mapper_pyg = GraphTransformerForwardMapper(**mapper_config).to(device)
-    with nsight.annotate("Mapper forward (pyg)"):
-        out = mapper_pyg.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
+
+    #with nsight.annotate("Mapper forward (triton)"):
+    out = mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
+
+    for i in range(100):
+        x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
+        x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
+        x = (x_src, x_dst)
+
+
+        if i == 0: # warmup
+            with torch.cuda.stream(torch.cuda.Stream()): # run in a separate stream to avoid synchronizing the graph capture stream during warmup
+                out = mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
+                loss = dummy_loss(out)
+                loss.backward()
+            continue
+        if i == 1: #graph capture
+            x_static = (torch.empty_like(x_src, device=device, requires_grad=True), torch.empty_like(x_dst, device=device, requires_grad=True))
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g, capture_error_mode="thread_local"):  #dont error if a different thread does an unsupported cuda op
+                out = mapper.forward(x_static, config.batch_size, shard_shapes, edge_attr, edge_index)
+                loss = dummy_loss(out)
+                with torch.autograd.grad_mode.set_mulithreading_enabled(False): # dont run bwd pass in a seperarte thread
+                    loss.backward()
+
+        #replay graph in subsequent iterations
+        x_static.copy_(x, non_blocking=True)
+        g.replay()
+
+    #mapper_config["graph_attention_backend"] = 'pyg'
+    #mapper_pyg = GraphTransformerForwardMapper(**mapper_config).to(device)
+    #with nsight.annotate("Mapper forward (pyg)"):
+    #    out = mapper_pyg.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
 
 @pytest.mark.gpu
 @pytest.mark.slow
@@ -320,8 +347,8 @@ def benchmark_forward_mapper(num_channels):
     return test_benchmark_forward_mapper(mapper,GraphConfig_n320_to_o96(),graph, "both", "cuda:0", False)
 
 def main() -> None:
-    #graph=benchmark_graph_provider(GraphConfig_n320_to_o96(), MapperBenchmarkConfig(), "cuda:0")
-    #result = benchmark_forward_mapper()
+    graph=benchmark_graph_provider(GraphConfig_n320_to_o96(), MapperBenchmarkConfig(), "cuda:0")
+    result = benchmark_forward_mapper()
     #print(result.to_dataframe())
     #print("\nTip: Run 'ncu --query-metrics' to see all available metrics!")
 
