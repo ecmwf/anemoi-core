@@ -74,7 +74,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 
     @property
     def output_times(self) -> int:
-        return max(1, self._task.rollout.step)
+        return max(1, self._task.rollout.maximum)
 
     def get_init_step(self, rollout_step: int) -> int:
         del rollout_step
