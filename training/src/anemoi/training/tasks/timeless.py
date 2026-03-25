@@ -10,6 +10,7 @@
 import datetime
 
 from anemoi.training.tasks.base import BaseSingleStepTask
+from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
 
 
 class BaseTimelessTask(BaseSingleStepTask):
@@ -20,6 +21,8 @@ class BaseTimelessTask(BaseSingleStepTask):
 
     def __init__(self, **_kwargs) -> None:
         super().__init__(inputs_offsets=[datetime.timedelta(0)], outputs_offsets=[datetime.timedelta(0)])
+
+        self._plot_adapter = AutoencoderPlotAdapter
 
 
 class SpatialDownscalingTask(BaseTimelessTask):

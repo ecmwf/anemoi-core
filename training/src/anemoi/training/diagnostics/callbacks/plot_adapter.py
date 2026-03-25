@@ -100,9 +100,6 @@ class DiffusionPlotAdapter(BasePlotAdapter):
         del rollout_step
         return 0
 
-    def get_loss_plot_batch_start(self, rollout_step: int) -> int:
-        return self._task.n_step_input + rollout_step * self._task.n_step_output
-
     def iter_plot_samples(
         self,
         data: Any,
@@ -119,8 +116,8 @@ class DiffusionPlotAdapter(BasePlotAdapter):
         yield x, y_true, y_pred, "istep01"
 
 
-class InterpolatorPlotAdapter(BasePlotAdapter):
-    """Interpolator: loss-plot batch start at n_step_input, one sample per step."""
+class TemporalDownscalingPlotAdapter(BasePlotAdapter):
+    """Temporal downscaling: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
 
     def get_init_step(self, rollout_step: int) -> int:
         return rollout_step
@@ -148,10 +145,6 @@ class InterpolatorPlotAdapter(BasePlotAdapter):
             )
             y_pred = pred.squeeze() if hasattr(pred, "squeeze") else pred
             yield x, y_true, y_pred, f"istep{rollout_step + 1:02d}"
-
-
-class InterpolatorMultiOutPlotAdapter(InterpolatorPlotAdapter):
-    """Multi-out interpolator: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:

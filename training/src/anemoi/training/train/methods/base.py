@@ -166,6 +166,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         super().__init__()
         self.task = task
+        self._plot_adapter = task._plot_adapter(self)
 
         assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"

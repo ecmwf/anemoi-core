@@ -16,6 +16,7 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks.base import BaseTask
 from anemoi.utils.dates import frequency_to_timedelta
+from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 
 LOGGER = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ class ForecastingTask(BaseTask):
         outputs_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
         steps = tuple({"rollout_step": i} for i in range(self.rollout.step))
         super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets, steps=steps)
+        self._plot_adapter = ForecasterPlotAdapter
 
     @property
     def _step_shift(self) -> datetime.timedelta:
