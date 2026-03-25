@@ -17,7 +17,6 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 
 from .base import BaseTrainingModule
 
@@ -62,7 +61,6 @@ class BaseDiffusionForecaster(BaseTrainingModule):
         )
 
         self.rho = config.model.model.diffusion.rho
-        self._plot_adapter = DiffusionPlotAdapter(self)
 
     def forward(
         self,
