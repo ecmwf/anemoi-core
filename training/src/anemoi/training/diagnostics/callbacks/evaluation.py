@@ -88,10 +88,9 @@ class RolloutEval(Callback):
 
         loss_scales = loss
         loss = loss_scales.sum()
+        loss_name = getattr(pl_module.loss, "name", pl_module.loss.__class__.__name__.lower())
         pl_module.log(
-            f"val_r{self.max_rollout}_{getattr(
-                pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower()
-                )}",
+            f"val_r{self.max_rollout}_{loss_name}",
             loss,
             on_epoch=True,
             on_step=True,
@@ -103,9 +102,7 @@ class RolloutEval(Callback):
         if loss_scales.numel() > 1:
             for scale in range(loss_scales.numel()):
                 pl_module.log(
-                    f"val_r{self.max_rollout}_{getattr(
-                        pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower()
-                        )}",
+                    f"val_r{self.max_rollout}_{loss_name}",
                     loss_scales[scale],
                     on_epoch=True,
                     on_step=True,
