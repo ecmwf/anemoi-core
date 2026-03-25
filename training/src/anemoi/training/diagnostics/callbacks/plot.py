@@ -1127,7 +1127,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = pl_module.plot_adapter.get_total_plot_targets()
+        total_targets = pl_module.plot_adapter.output_times
 
         input_tensor = (
             batch[dataset_name][

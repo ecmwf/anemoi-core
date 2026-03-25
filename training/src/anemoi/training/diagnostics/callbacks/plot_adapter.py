@@ -40,11 +40,6 @@ class BasePlotAdapter(ABC):
         """Input step index for a given rollout step."""
         ...
 
-    def get_total_plot_targets(self, output_times: int | None = None) -> int:
-        if output_times is None:
-            output_times = self.output_times
-        return output_times
-
     @property
     def loss_plot_times(self) -> int:
         return 1
@@ -74,11 +69,6 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def get_init_step(self, rollout_step: int) -> int:
         del rollout_step
         return 0
-
-    def get_total_plot_targets(self, output_times: int | None = None) -> int:
-        if output_times is None:
-            output_times = self.output_times
-        return output_times * self._task.n_step_output
 
     @property
     def loss_plot_times(self) -> int:
@@ -113,11 +103,6 @@ class DiffusionPlotAdapter(BasePlotAdapter):
     def get_init_step(self, rollout_step: int) -> int:
         del rollout_step
         return 0
-
-    def get_total_plot_targets(self, output_times: int | None = None) -> int:
-        if output_times is None:
-            output_times = self.output_times
-        return output_times * self._task.n_step_output
 
     @property
     def loss_plot_times(self) -> int:
