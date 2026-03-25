@@ -14,9 +14,9 @@ from collections.abc import Callable
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks.base import BaseTask
 from anemoi.utils.dates import frequency_to_timedelta
-from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 
 LOGGER = logging.getLogger(__name__)
 

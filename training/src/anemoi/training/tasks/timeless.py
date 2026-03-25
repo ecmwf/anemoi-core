@@ -9,8 +9,8 @@
 
 import datetime
 
-from anemoi.training.tasks.base import BaseSingleStepTask
 from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
+from anemoi.training.tasks.base import BaseSingleStepTask
 
 
 class BaseTimelessTask(BaseSingleStepTask):

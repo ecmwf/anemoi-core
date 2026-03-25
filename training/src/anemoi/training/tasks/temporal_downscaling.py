@@ -10,9 +10,9 @@
 import datetime
 import logging
 
+from anemoi.training.diagnostics.callbacks.plot_adapter import TemporalDownscalingPlotAdapter
 from anemoi.training.tasks.base import BaseSingleStepTask
 from anemoi.utils.dates import as_timedelta
-from anemoi.training.diagnostics.callbacks.plot_adapter import TemporalDownscalingPlotAdapter
 
 LOGGER = logging.getLogger(__name__)
 

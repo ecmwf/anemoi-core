@@ -42,7 +42,7 @@ class BasePlotAdapter(ABC):
 
     @property
     def task_steps(self) -> int:
-        return self.task.steps 
+        return self.task.steps
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         del rollout_step
