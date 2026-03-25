@@ -259,14 +259,14 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda x, *_args, **_kwargs: x,
     )
 
-    required_time_steps = training_module.n_step_input + rollout_maximum * training_module.n_step_output
+    required_time_steps = training_module.n_step_input + task.rollout.maximum * training_module.n_step_output
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, required_time_steps, e, g, v, dtype=torch.float32)}
 
     loss, _, y_preds = training_module._step(batch, validation_mode=False)
 
     assert isinstance(loss, torch.Tensor)
-    assert len(y_preds) == rollout_maximum
+    assert len(y_preds) == task.rollout.maximum
     for step_pred in y_preds:
         assert isinstance(step_pred, dict)
         assert "data" in step_pred
