@@ -13,6 +13,7 @@ from contextlib import nullcontext
 
 import pytorch_lightning as pl
 import torch
+from omegaconf import ListConfig
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 
@@ -27,14 +28,14 @@ class RolloutEval(Callback):
     distributed synchronization.
     """
 
-    def __init__(self, config: OmegaConf, rollout: list[int], every_n_batches: int) -> None:
+    def __init__(self, config: OmegaConf, rollout: list[int] | ListConfig, every_n_batches: int) -> None:
         """Initialize RolloutEval callback.
 
         Parameters
         ----------
         config : dict
             Dictionary with configuration settings
-        rollout : list[int]
+        rollout : list[int] | ListConfig
             Rollout lengths for evaluation
         every_n_batches : int
             Frequency of rollout evaluation, runs every `n` validation batches
@@ -43,15 +44,16 @@ class RolloutEval(Callback):
         super().__init__()
         self.config = config
 
-        assert isinstance(rollout, list), f"rollout must be a list of ints, got {type(rollout)}"
+        assert isinstance(rollout, list | ListConfig), f"rollout must be a list of ints, got {type(rollout)}"
+        rollout_values = list(rollout)
 
         LOGGER.debug(
             "Setting up RolloutEval callback with rollout = %s, every_n_batches = %d ...",
-            rollout,
+            rollout_values,
             every_n_batches,
         )
-        self.rollout = rollout
-        self.max_rollout = max(rollout)
+        self.rollout = rollout_values
+        self.max_rollout = max(rollout_values)
         self.every_n_batches = every_n_batches
 
     def _eval(
