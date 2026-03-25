@@ -114,8 +114,8 @@ def _build_edge_data(
 
 
 def _build_tiny_graph(device: torch.device) -> HeteroData:
-    num_data_nodes = 12
-    num_hidden_nodes = 12
+    num_data_nodes = 11
+    num_hidden_nodes = 11
 
     graph = HeteroData()
     coords_data = torch.linspace(-1.0, 1.0, num_data_nodes, device=device)
@@ -184,6 +184,17 @@ def _build_tiny_diffusion_config(num_heads: int) -> dict:
         "model.decoder.shard_strategy=heads",
         "model.decoder.graph_attention_backend=pyg",
     ]
+
+    if 16 % num_heads != 0:
+        # Keep q/k/v projection width divisible by the requested head count.
+        attn_channels = num_heads * 3
+        overrides.extend(
+            [
+                f"+model.processor.attn_channels={attn_channels}",
+                f"+model.encoder.attn_channels={attn_channels}",
+                f"+model.decoder.attn_channels={attn_channels}",
+            ],
+        )
 
     with initialize_config_dir(
         version_base=None,
@@ -336,10 +347,10 @@ def _run_diffusion_gradient_scaling_parity(
     model_comm_group: dist.ProcessGroup,
 ) -> None:
     dataset_name = "data"
-    num_heads = 8
+    num_heads = 3
     num_vars = 2
     if num_heads < world_size:
-        msg = f"num_heads ({num_heads}) must be >= world_size ({world_size}) for heads sharding."
+        msg = f"Diffusion parity singleton-head case supports at most {num_heads} ranks, got world_size={world_size}."
         raise ValueError(msg)
 
     out_atol, out_rtol = _tolerances()

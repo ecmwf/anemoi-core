@@ -61,9 +61,7 @@ def _run_core_primitives(
     atol: float,
     rtol: float,
 ) -> None:
-
-    # Keep split sizes equal to ensure backend portability (Gloo all_gather requires equal tensor sizes).
-    x_full = torch.arange(24, dtype=torch.float32, device=device).reshape(8, 3)
+    x_full = torch.arange(21, dtype=torch.float32, device=device).reshape(7, 3)
     shard_shapes_dim0 = get_shard_shapes(x_full, dim=0, model_comm_group=model_comm_group)
 
     # shard_tensor: forward split + backward gather
@@ -81,7 +79,7 @@ def _run_core_primitives(
     torch.testing.assert_close(x.grad, torch.ones_like(x), atol=atol, rtol=rtol)
 
     # gather_tensor: forward gather + backward split
-    y_full = torch.arange(42, dtype=torch.float32, device=device).reshape(7, 6)
+    y_full = torch.arange(35, dtype=torch.float32, device=device).reshape(7, 5)
     shard_shapes_dim1 = get_shard_shapes(y_full, dim=1, model_comm_group=model_comm_group)
     y_local = _split_by_shapes(y_full, dim=1, shard_shapes=shard_shapes_dim1, rank=rank).clone().requires_grad_(True)
     y_gathered = gather_tensor(y_local, dim=1, shapes=shard_shapes_dim1, mgroup=model_comm_group)
@@ -103,7 +101,7 @@ def _run_core_primitives(
     torch.testing.assert_close(z.grad, torch.ones_like(z), atol=atol, rtol=rtol)
 
     # sync_tensor gather_in_fwd=True: gather in fwd, reduce+split in bwd
-    sync_full = torch.arange(24, dtype=torch.float32, device=device).reshape(8, 3)
+    sync_full = torch.arange(21, dtype=torch.float32, device=device).reshape(7, 3)
     sync_shapes = get_shard_shapes(sync_full, dim=0, model_comm_group=model_comm_group)
     sync_local = _split_by_shapes(sync_full, dim=0, shard_shapes=sync_shapes, rank=rank).clone().requires_grad_(True)
     sync_gathered = sync_tensor(
@@ -169,8 +167,48 @@ def _run_transformer_primitives(
     atol: float,
     rtol: float,
 ) -> None:
+    batch_size, num_heads, seq_len, channels = 2, 5, 7, 4
+    x_full = torch.arange(
+        batch_size * num_heads * seq_len * channels,
+        dtype=torch.float32,
+        device=device,
+    ).reshape(batch_size, num_heads, seq_len, channels)
+    seq_split_sizes = get_balanced_partition_sizes(seq_len, world_size)
+    seq_shapes = [[seq_shard, num_heads * channels] for seq_shard in seq_split_sizes]
+    x_seq_local = torch.split(x_full, seq_split_sizes, dim=2)[rank].contiguous().clone().requires_grad_(True)
 
-    batch_size, num_heads, seq_len, channels = 2, 8, 8, 4
+    x_heads_local = shard_heads(x_seq_local, shapes=seq_shapes, mgroup=model_comm_group)
+    head_split_sizes = get_balanced_partition_sizes(num_heads, world_size)
+    x_heads_expected = torch.split(x_full, head_split_sizes, dim=1)[rank].contiguous()
+    torch.testing.assert_close(x_heads_local, x_heads_expected, atol=atol, rtol=rtol)
+
+    x_seq_roundtrip = shard_sequence(x_heads_local, shapes=seq_shapes, num_heads=num_heads, mgroup=model_comm_group)
+    torch.testing.assert_close(x_seq_roundtrip, x_seq_local.detach(), atol=atol, rtol=rtol)
+    x_seq_roundtrip.sum().backward()
+    torch.testing.assert_close(
+        x_seq_local.grad,
+        torch.ones_like(x_seq_local),
+        atol=atol,
+        rtol=rtol,
+    )
+
+
+def _run_transformer_singleton_head_primitives(
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    model_comm_group: dist.ProcessGroup,
+    atol: float,
+    rtol: float,
+) -> None:
+    batch_size, num_heads, seq_len, channels = 2, 3, 7, 4
+    if world_size > num_heads:
+        msg = (
+            "Singleton-head transformer primitive test supports at most "
+            f"{num_heads} ranks, got world_size={world_size}."
+        )
+        raise ValueError(msg)
+
     x_full = torch.arange(
         batch_size * num_heads * seq_len * channels,
         dtype=torch.float32,
@@ -210,7 +248,7 @@ def _run_channel_primitives(
         raise ValueError(msg)
 
     # Sequence-parallel local shard with full channels -> channel-parallel local shard with full sequence.
-    x_full = torch.arange(2 * 7 * 6, dtype=torch.float32, device=device).reshape(2, 7, 6)
+    x_full = torch.arange(2 * 5 * 5, dtype=torch.float32, device=device).reshape(2, 5, 5)
     seq_shapes = get_shard_shapes(x_full, dim=1, model_comm_group=model_comm_group)
     x_seq_local = _split_by_shapes(x_full, dim=1, shard_shapes=seq_shapes, rank=rank).clone().requires_grad_(True)
 
@@ -263,6 +301,8 @@ def _run_rank(
             _run_core_primitives(rank, world_size, device, group, atol, rtol)
         elif suite == "transformer":
             _run_transformer_primitives(rank, world_size, device, group, atol, rtol)
+        elif suite == "transformer_singleton":
+            _run_transformer_singleton_head_primitives(rank, world_size, device, group, atol, rtol)
         else:
             _run_channel_primitives(rank, world_size, device, group, atol, rtol)
         dist.barrier(group=group)
@@ -273,7 +313,7 @@ def _run_rank(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Distributed graph primitive test worker")
     parser.add_argument("--backend", choices=["gloo", "nccl"], required=True)
-    parser.add_argument("--suite", choices=["core", "channels", "transformer"], required=True)
+    parser.add_argument("--suite", choices=["core", "channels", "transformer", "transformer_singleton"], required=True)
     parser.add_argument("--world-size", type=int, default=2)
     parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--precision", choices=["highest", "high", "medium"], default="highest")

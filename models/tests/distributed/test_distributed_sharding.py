@@ -34,11 +34,16 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def _requested_world_size() -> int:
-    raw = os.getenv("ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE", "3")
+    raw = os.getenv("ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE", "2")
     world_size = int(raw)
     if world_size < 2:
         raise ValueError(f"ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE must be >= 2, got {world_size}")
     return world_size
+
+
+def _skip_if_world_size_exceeds(*, world_size: int, max_world_size: int, test_name: str) -> None:
+    if world_size > max_world_size:
+        pytest.skip(f"{test_name} supports at most {max_world_size} ranks, got world_size={world_size}.")
 
 
 def _run_spawn_suite(backend: str, suite: str, nproc_per_node: int = 2) -> None:
@@ -89,3 +94,15 @@ def test_distributed_transformer_sharding_nccl() -> None:
     backend = "nccl" if torch.cuda.is_available() else "gloo"
     world_size = _requested_world_size()
     _run_spawn_suite(backend=backend, suite="transformer", nproc_per_node=world_size)
+
+
+@pytest.mark.multigpu
+def test_distributed_transformer_singleton_head_sharding_nccl() -> None:
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
+    world_size = _requested_world_size()
+    _skip_if_world_size_exceeds(
+        world_size=world_size,
+        max_world_size=3,
+        test_name="Transformer singleton-head sharding test",
+    )
+    _run_spawn_suite(backend=backend, suite="transformer_singleton", nproc_per_node=world_size)

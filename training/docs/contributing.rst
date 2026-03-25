@@ -266,7 +266,7 @@ Run model distributed primitive tests:
 
 .. code:: bash
 
-   ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE=3 \
+   ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE=2 \
    pytest -q \
    models/tests/distributed/test_distributed_sharding.py \
    --multigpu -vv
@@ -284,7 +284,19 @@ Run training distributed strategy tests:
 Notes:
 
 #. ``ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE`` controls GPU/process count.
-#. Primitive tests use world size 3 by default to run with awkward sharding.
+#. Primitive and diffusion parity tests default to 2 GPUs.
+#. Those tests use odd synthetic grid sizes, and the diffusion parity
+   case uses 3 attention heads, so the 2-GPU run exercises a ``3 -> 2/1``
+   singleton head shard while the 3-GPU run still remains supported.
+#. The dedicated transformer singleton-head primitive case also uses
+   ``3`` heads and therefore supports at most 3 ranks.
+#. To run the diffusion parity path on 3 GPUs, use:
+
+.. code:: bash
+
+   ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE=3 \
+   pytest -q training/tests/unit/distributed/test_strategy_distributed.py -k diffusion --multigpu --slow -vv
+
 #. Ensemble parity tests require an even world size.
 #. Deterministic mode is enabled by default
    (``ANEMOI_DISTRIBUTED_TEST_DETERMINISTIC=1``). Set it to ``0`` to disable.
@@ -294,13 +306,6 @@ Notes:
 #. Numerical tolerances can be overridden globally with
    ``ANEMOI_DISTRIBUTED_TEST_ATOL`` and ``ANEMOI_DISTRIBUTED_TEST_RTOL``.
    Defaults are ``1e-5`` for both.
-#. To stress awkward sharding for diffusion parity, run only diffusion
-   with world size 3:
-
-.. code:: bash
-
-   ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE=3 \
-   pytest -q training/tests/unit/distributed/test_strategy_distributed.py -k diffusion --multigpu --slow -vv
 
 *********************************************
  Configuration handling in integration tests

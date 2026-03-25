@@ -33,13 +33,18 @@ def _env_flag(name: str, default: bool) -> bool:
     raise ValueError(msg)
 
 
-def _requested_world_size(default: int = 3) -> int:
+def _requested_world_size(default: int = 2) -> int:
     raw = os.getenv("ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE", str(default))
     world_size = int(raw)
     if world_size < 2:
         msg = f"ANEMOI_DISTRIBUTED_TEST_WORLD_SIZE must be >= 2, got {world_size}"
         raise ValueError(msg)
     return world_size
+
+
+def _skip_if_world_size_exceeds(*, world_size: int, max_world_size: int, test_name: str) -> None:
+    if world_size > max_world_size:
+        pytest.skip(f"{test_name} supports at most {max_world_size} ranks, got world_size={world_size}.")
 
 
 def _run_distributed_strategy_parity(backend: str, world_size: int, suite: str) -> None:
@@ -81,6 +86,11 @@ def _run_distributed_strategy_parity(backend: str, world_size: int, suite: str) 
 @pytest.mark.multigpu
 def test_distributed_strategy_gradient_scaling_diffusion_parity_nccl() -> None:
     world_size = _requested_world_size()
+    _skip_if_world_size_exceeds(
+        world_size=world_size,
+        max_world_size=3,
+        test_name="Diffusion gradient scaling parity test",
+    )
     if not torch.cuda.is_available() or torch.cuda.device_count() < world_size:
         pytest.skip(
             f"Requires at least {world_size} CUDA devices for distributed strategy gradient parity.",
