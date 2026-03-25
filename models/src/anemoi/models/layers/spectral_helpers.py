@@ -169,10 +169,10 @@ class SphericalHarmonicTransform(Module):
 
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
-            LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
+            LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
             self.rfft_rings = self.rfft_rings_reduced_graphed_autograd if use_graphs else self.rfft_rings_reduced_naive
         else:
-            LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
+            LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
 
         number_of_latitude_bands = 2
@@ -265,7 +265,7 @@ class SphericalHarmonicTransform(Module):
 
         key = (tuple(x.shape), x.dtype, x.device, x.requires_grad)
         if key not in self._graphed_rfft_cache:
-            LOGGER.info(f"Compiling graphed callable for rfft_rings_reduced with input signature {key}")
+            LOGGER.debug(f"Compiling graphed callable for rfft_rings_reduced with input signature {key}")
             sample_x = torch.zeros_like(x, requires_grad=x.requires_grad)
             with torch.amp.autocast("cuda", cache_enabled=False):
                 self._graphed_rfft_cache[key] = make_graphed_callables(
@@ -276,7 +276,7 @@ class SphericalHarmonicTransform(Module):
                     tuple([(sample_x,)] * len(self.latitude_bands)),
                 )
         else:
-            LOGGER.info(f"Reusing graphed callable for rfft_rings_reduced with input signature {key}")
+            LOGGER.debug(f"Reusing graphed callable for rfft_rings_reduced with input signature {key}")
 
         return torch.cat([f(x) for f in self._graphed_rfft_cache[key]], dim=-2)
 
@@ -373,10 +373,10 @@ class InverseSphericalHarmonicTransform(Module):
 
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
-            LOGGER.info("InverseSphericalHarmonicTransform: Using irfft_rings_reduced for reduced grid")
+            LOGGER.debug("InverseSphericalHarmonicTransform: Using irfft_rings_reduced for reduced grid")
             self.irfft_rings = self.irfft_rings_reduced
         else:
-            LOGGER.info("InverseSphericalHarmonicTransform: Using irfft_rings_regular for regular grid")
+            LOGGER.debug("InverseSphericalHarmonicTransform: Using irfft_rings_regular for regular grid")
             self.irfft_rings = self.irfft_rings_regular
 
         # Compute Gaussian latitudes (don't need quadrature weights for the inverse)
