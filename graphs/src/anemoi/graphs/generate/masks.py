@@ -14,8 +14,8 @@ from importlib.util import find_spec
 
 import numpy as np
 import torch
-from sklearn.neighbors import NearestNeighbors
 from scipy.spatial import cKDTree
+from sklearn.neighbors import NearestNeighbors
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
@@ -30,7 +30,7 @@ class RadiusAreaMaskBuilder:
     two points on the unit sphere and their great-circle distance.
 
     If torch_cluster is available: all calculations are done as torch tensors!
-        * use_gpu = True: Calculations are done on the GPU 
+        * use_gpu = True: Calculations are done on the GPU
         * use_gpu = False: Calculations are done on the CPU (seems to be fasted from the benchmarks)
     Else falling back to scipy.spatial.cKDTree (on CPU)
     """
@@ -51,7 +51,7 @@ class RadiusAreaMaskBuilder:
         self.margin_radius_km = margin_radius_km
         self.reference_node_name = reference_node_name
         self.mask_attr_name = mask_attr_name
-        
+
         self._ref_vectors: torch.Tensor | np.ndarray | None = None
         self._kdtree: cKDTree | None = None
 
@@ -151,7 +151,7 @@ class RadiusAreaMaskBuilder:
         """
         if TORCH_CLUSTER_AVAILABLE:
             self._ref_vectors = self._to_unit_sphere_torch(coords_rad)
-        else: 
+        else:
             self._ref_vectors = self._to_unit_sphere(coords_rad)
             self._kdtree = cKDTree(self._ref_vectors)
 
@@ -205,7 +205,7 @@ class RadiusAreaMaskBuilder:
         t0 = time.time()
 
         # The coords_rad from the query (typically the processor/hidden nodes) are produced on the CPU as numpy.ndarray.
-        # Need to convert them to torch.Tensor if TORCH_CLUSER_AVAILABLE and move them to the correct device. 
+        # Need to convert them to torch.Tensor if TORCH_CLUSER_AVAILABLE and move them to the correct device.
         if TORCH_CLUSTER_AVAILABLE:
             from torch_geometric.nn import radius
 
