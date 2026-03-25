@@ -23,7 +23,6 @@ import torch
 from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
 from packaging import version
 from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
@@ -34,8 +33,7 @@ from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.base_schema import build_schema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
@@ -65,18 +63,7 @@ class AnemoiTrainer(ABC):
         torch.set_float32_matmul_precision("high")
         # Resolve the config to avoid shenanigans with lazy loading
 
-        if config.config_validation:
-            OmegaConf.resolve(config)
-            self.config = BaseSchema(**config)
-
-            LOGGER.info("Config validated.")
-        else:
-            config = OmegaConf.to_object(config)
-            self.config = UnvalidatedBaseSchema(**DictConfig(config))
-
-            LOGGER.info("Skipping config validation.")
-
-        self.config = convert_to_omegaconf(self.config)
+        self.config = convert_to_omegaconf(build_schema(config))
 
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)

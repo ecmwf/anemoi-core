@@ -7,12 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import Literal
-from typing import TypeAlias
-from typing import TypeVar
+"""Re-export facade — import from schema_defaults or interpolation_anchors directly."""
 
-# The DatasetDict type alias is intended to standardize the structure of dataset-related dictionaries
-# across the codebase, improving type safety and code readability.
-# The dataset-specific configurations are represented as a dictionary where keys are the dataset names
-T = TypeVar("T")
-DatasetDict: TypeAlias = dict[Literal["datasets"], dict[str, T]]
+from .interpolation_anchors import prune_undeclared_interpolation_anchors
+from .interpolation_anchors import resolve_and_prune_undeclared_interpolation_anchors
+from .interpolation_anchors import undeclared_interpolation_anchor_paths
+from .schema_defaults import DatasetDict
+from .schema_defaults import apply_schema_defaults
+from .schema_defaults import schema_defaults
+
+__all__ = [
+    "DatasetDict",
+    "apply_schema_defaults",
+    "prune_undeclared_interpolation_anchors",
+    "resolve_and_prune_undeclared_interpolation_anchors",
+    "schema_defaults",
+    "undeclared_interpolation_anchor_paths",
+]
