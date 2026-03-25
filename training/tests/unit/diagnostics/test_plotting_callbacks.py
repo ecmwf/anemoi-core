@@ -38,7 +38,7 @@ def test_output_times_and_get_init_step_forecaster():
     from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 
     task = MagicMock()
-    task.rollout.maximum = 3
+    task.rollout.step = 3
     task.n_step_output = 1
     task.n_step_input = 1
     adapter = ForecasterPlotAdapter(task)
@@ -59,9 +59,6 @@ def test_output_times_and_get_init_step_interpolator():
     assert adapter.output_times == 2
     assert adapter.get_init_step(0) == 0
     assert adapter.get_init_step(1) == 1
-
-
-##
 
 
 def test_plot_histogram_instantiation():
