@@ -93,29 +93,6 @@ class ForecasterPlotAdapter(BasePlotAdapter):
                 yield x, y_true, y_pred, f"rstep{rollout_step:02d}_out{out_step:02d}"
 
 
-class DiffusionPlotAdapter(BasePlotAdapter):
-    """Diffusion: inherits from base task (not forecaster), single step, forecaster-like loss/plot layout."""
-
-    def get_init_step(self, rollout_step: int) -> int:
-        del rollout_step
-        return 0
-
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-        max_out_steps: int | None = None,
-    ) -> Iterator[tuple[Any, Any, Any, str]]:
-        del output_times, max_out_steps
-        init_step = self.get_init_step(0)
-        x = data[init_step, ...].squeeze()
-        y_true = data[1, ...].squeeze()
-        y_pred = output_tensor[0, ...]
-        y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
-        yield x, y_true, y_pred, "istep01"
-
-
 class TemporalDownscalingPlotAdapter(BasePlotAdapter):
     """Temporal downscaling: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
 
