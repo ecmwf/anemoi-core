@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 class BasePlotAdapter(ABC):
     """Abstract plotting contract. Subclasses define output_times, get_init_step, iter_plot_samples."""
 
-    def __init__(self, task: "BaseTask") -> None:
+    def __init__(self, task: BaseTask) -> None:
         self._task = task
 
     @property
