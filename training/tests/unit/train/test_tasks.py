@@ -248,7 +248,7 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     training_module.metrics_support_sharding = True
     training_module._plot_adapter = ForecasterPlotAdapter(task)
     for i in range(task.rollout.maximum):
-        task.rollout.step = i+1
+        task.rollout.step = i + 1
         assert training_module.plot_adapter.output_times == i + 1
         assert training_module.plot_adapter.get_init_step(i) == 0
 
