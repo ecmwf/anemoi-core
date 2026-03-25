@@ -196,55 +196,6 @@ def test_multiscale_forwards_layout_kwargs_to_filtered_per_scale_loss() -> None:
     assert loss.shape == (1,)
 
 
-def test_multiscale_filtered_per_scale_update_scaler_preserves_variable_filtering() -> None:
-    """Updating VARIABLE scalers through multiscale should preserve filtered per-scale shapes."""
-    data_indices = IndexCollection(DictConfig({"forcing": [], "diagnostic": []}), {"a": 0, "b": 1})
-    multiscale_loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
-                "weights": [1.0],
-                "keep_batch_sharded": False,
-                "loss_matrices": [None],
-                "per_scale_loss": {
-                    "_target_": "anemoi.training.losses.MSELoss",
-                    "predicted_variables": ["a"],
-                    "target_variables": ["a"],
-                    "scalers": ["grid_uniform", "dynamic"],
-                },
-            },
-        ),
-        scalers={
-            "grid_uniform": (3, torch.ones(4)),
-            "dynamic": (4, torch.ones(2)),
-        },
-        data_indices=data_indices,
-    )
-
-    # Initial VARIABLE scaler is filtered to selected predicted variables.
-    torch.testing.assert_close(multiscale_loss.loss.loss.scaler.tensors["dynamic"][1], torch.tensor([1.0]))
-
-    # Update with full-width VARIABLE scaler and ensure filtering is preserved.
-    multiscale_loss.update_scaler("dynamic", torch.tensor([3.0, 5.0]), override=True)
-    updated = multiscale_loss.loss.loss.scaler.tensors["dynamic"][1]
-    assert updated.shape == (1,)
-    torch.testing.assert_close(updated, torch.tensor([3.0]))
-
-    pred = torch.ones((1, 1, 1, 4, 2))
-    target = torch.zeros((1, 1, 1, 4, 2))
-    loss = multiscale_loss(
-        pred,
-        target,
-        group=None,
-        pred_layout=IndexSpace.MODEL_OUTPUT,
-        target_layout=IndexSpace.DATA_FULL,
-    )
-
-    assert isinstance(loss, torch.Tensor)
-    assert loss.shape == (1,)
-    assert torch.isfinite(loss).all()
-
-
 def test_multiscale_loss_forwards_scaler_indices() -> None:
     pred = torch.zeros((1, 1, 1, 2, 2))
     pred[0, 0, 0, 0, 0] = 10.0

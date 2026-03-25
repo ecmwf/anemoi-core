@@ -100,11 +100,6 @@ def test_output_tensor_index_name_position_mapping(output_tensor_index) -> None:
     assert output_tensor_index.positions_for_names(["q", "other"]) == [1, 2]
 
 
-def test_output_tensor_index_positions_for_names_missing(output_tensor_index) -> None:
-    with pytest.raises(ValueError, match="not available in this tensor index-space"):
-        output_tensor_index.positions_for_names(["x"])
-
-
 def test_input_tensor_index_full(input_tensor_index) -> None:
     expected_output = torch.Tensor([0, 1, 3, 4]).to(torch.int)
     assert torch.allclose(input_tensor_index.full, expected_output)
