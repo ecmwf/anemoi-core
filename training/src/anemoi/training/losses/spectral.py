@@ -272,7 +272,6 @@ class FourierCorrelationLoss(SpectralLoss):
 
         # apply weighting/scaling after correlation is computed
         result = (1 - correlation) / n_modes
-
         result = self.scale(
             result,
             scaler_indices,
