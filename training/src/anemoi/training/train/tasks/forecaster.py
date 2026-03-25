@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
