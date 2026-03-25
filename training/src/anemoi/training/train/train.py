@@ -276,8 +276,8 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        model_task = get_class(self.config.training.model_task)
-        model = model_task(**kwargs)  # Task -> pl.LightningModule
+        training_method = get_class(self.config.training.training_method)
+        model = training_method(**kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -290,7 +290,7 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(
+                model = training_method.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,

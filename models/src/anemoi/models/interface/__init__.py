@@ -144,8 +144,7 @@ class AnemoiModelInterface(torch.nn.Module):
             return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
 
         lead_times = list(statistics_tendencies.get("lead_times") or [])
-        n_step_output = getattr(self.config.training, "multistep_output", None)
-        if n_step_output == 1:
+        if self.n_step_output == 1:
             step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
             stats_for_tendencies = step_stats or statistics_tendencies
             return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)

@@ -42,7 +42,7 @@ optimizer:
   eps: 1e-7
 
 # select model
-model_task: anemoi.training.train.methods.DiffusionTraining
+training_method: anemoi.training.train.methods.DiffusionTraining
 
 # select strategy
 strategy:
@@ -125,14 +125,6 @@ metrics:
       - t_850
       - u_850
       - v_850
-
-# length of the "rollout" window (see Keisler's paper)
-rollout:
-  start: 1
-  # increase rollout every n epochs
-  epoch_increment: 0
-  # maximum rollout to use
-  max: 1
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null

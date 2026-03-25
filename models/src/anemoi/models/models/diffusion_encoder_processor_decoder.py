@@ -770,6 +770,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_config: DotDict,
         data_indices: dict,
         statistics: dict,
+        n_step_input: int,
+        n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
         model_config_local = DotDict(model_config)
@@ -779,6 +781,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
+            n_step_input=n_step_input,
+            n_step_output=n_step_output,
             graph_data=graph_data,
         )
 

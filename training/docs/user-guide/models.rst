@@ -13,7 +13,7 @@ anemoi-training:
 #. Diffusion-based Forecasting (GraphDiffusionForecaster)
 
 The model tasks specify the training objective and are specified in the
-configuration through ``training.model_task``. They are our
+configuration through ``training.training_method``. They are our
 `LightningModules <https://lightning.ai/docs/pytorch/lightning.html>`_.
 
 **Model Types:**

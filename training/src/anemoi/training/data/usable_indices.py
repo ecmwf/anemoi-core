@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import numpy as np
 
 
@@ -22,7 +21,7 @@ def get_usable_indices(
     Parameters
     ----------
     missing_indices : set[int]
-        Dataset to be used.
+        Set of missing indices in the series.
     series_length : int
         Length of the series.
     relative_indices: np.ndarray | list[int]

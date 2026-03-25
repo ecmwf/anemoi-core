@@ -9,4 +9,7 @@ rollout:
   # increase rollout every n epochs
   epoch_increment: 0
   # maximum rollout to use
-  max: 1
+  maximum: 1
+  # number of rollout steps to use for validation
+
+validation_rollout: 1

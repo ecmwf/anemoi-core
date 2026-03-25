@@ -20,6 +20,27 @@ from anemoi.utils.dates import frequency_to_timedelta
 LOGGER = logging.getLogger(__name__)
 
 
+class RolloutConfig:
+    """Rollout configuration for autoregressive training."""
+
+    def __init__(self, start: int = 1, epoch_increment: int = 0, maximum: int = 1) -> None:
+        """Initialize rollout configuration."""
+        self.start = start
+        self.epoch_increment = epoch_increment
+        self.maximum = maximum
+        self.step = self.start
+
+    def should_increase(self, current_epoch: int) -> bool:
+        """Check if rollout should be increased at the end of the current epoch."""
+        return self.epoch_increment > 0 and current_epoch % self.epoch_increment == 0
+
+    def increase(self) -> None:
+        """Increase the rollout window by one step."""
+        if self.step < self.maximum:
+            self.step += 1
+            LOGGER.info("Rollout window length has been increased to %d.", self.step)
+
+
 class ForecastingTask(BaseTask):
     """Forecasting task implementation.
 
@@ -39,25 +60,28 @@ class ForecastingTask(BaseTask):
         multistep_input: int,
         multistep_output: int,
         timestep: str,
-        rollout_start: int = 1,
-        rollout_epoch_increment: int = 0,
-        rollout_max: int = 1,
-        **_kwargs,
+        rollout: dict | None = None,
+        validation_rollout: int = 1,
+        **kwargs,
     ) -> None:
         self.timestep = frequency_to_timedelta(timestep)
-
         self.num_input_steps = multistep_input
         self.num_output_steps = multistep_output
+        self.rollout = RolloutConfig(**(rollout or {}))
+        self.validation_rollout = validation_rollout
 
-        self.rollout = rollout_start
-        self.rollout_epoch_increment = rollout_epoch_increment
-        self.rollout_max = rollout_max
+        if len(kwargs) > 0:
+            LOGGER.warning(
+                "The following extra parameters were provided to %s but will be ignored: %s",
+                self.__class__.__name__,
+                kwargs,
+            )
 
         # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
         inputs_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
-        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout_max
+        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
         outputs_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
-        steps = tuple({"rollout_step": i} for i in range(self.rollout))
+        steps = tuple({"rollout_step": i} for i in range(self.rollout.step))
         super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets, steps=steps)
 
     @property
@@ -65,22 +89,22 @@ class ForecastingTask(BaseTask):
         """Time shift between consecutive rollout steps."""
         return self.timestep * self.num_output_steps
 
-    @property
-    def offset(self) -> list[datetime.timedelta]:
-        """Union of input + all rollout output offsets up to ``rollout_max``.
-
-        Pre-allocates enough batch timesteps so the datamodule always
-        loads data for the maximum rollout length.
-        """
+    def _compute_rollout_offsets(self, rollout_step: int) -> list[datetime.timedelta]:
+        """Compute the full list of offsets needed for the current rollout configuration."""
         all_offsets = set(self._inputs_offsets)
-        for step in range(self.rollout_max):
+        for step in range(rollout_step):
             shift = self._step_shift * step
             for o in self._outputs_offsets:
                 all_offsets.add(o + shift)
         return sorted(all_offsets)
 
-    def get_output_offsets(self, rollout_step: int = 0, **_kwargs) -> list[datetime.timedelta]:
+    def get_offsets(self, label: str) -> list[datetime.timedelta]:
+        rollout_step = self.rollout.maximum if label == "training" else self.validation_rollout
+        return self._compute_rollout_offsets(rollout_step)
+
+    def get_output_offsets(self, rollout_step: int = 0, label: str = "training", **_kwargs) -> list[datetime.timedelta]:
         """Return output offsets shifted by ``rollout_step``."""
+        rollout_step = rollout_step if label == "training" else self.validation_rollout
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._outputs_offsets)
 
@@ -146,7 +170,7 @@ class ForecastingTask(BaseTask):
         """Log any task-specific information."""
         logger(
             "rollout",
-            float(self.rollout),
+            float(self.rollout.step),
             on_step=True,
             logger=logger_enabled,
             rank_zero_only=True,
@@ -154,7 +178,5 @@ class ForecastingTask(BaseTask):
         )
 
     def on_train_epoch_end(self, current_epoch: int) -> None:
-        if self.rollout_epoch_increment > 0 and current_epoch % self.rollout_epoch_increment == 0:
-            self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
-        self.rollout = min(self.rollout, self.rollout_max)
+        if self.rollout.should_increase(current_epoch):
+            self.rollout.increase()

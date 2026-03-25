@@ -232,9 +232,11 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         multistep_input=1,
         multistep_output=1,
         timestep="6h",
-        rollout_start=_CFG_FORECASTER.training.rollout.start,
-        rollout_epoch_increment=_CFG_FORECASTER.training.rollout.epoch_increment,
-        rollout_max=_CFG_FORECASTER.training.rollout.maximum,
+        rollout={
+            "start": _CFG_FORECASTER.training.rollout.start,
+            "epoch_increment": _CFG_FORECASTER.training.rollout.epoch_increment,
+            "maximum": _CFG_FORECASTER.training.rollout.maximum,
+        },
     )
     _set_base_task_attrs(training_module, data_indices=data_indices, config=_CFG_FORECASTER, task=task)
     training_module.model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
@@ -607,7 +609,7 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
     """Rollout step works when model returns (B, T, E, G, V); _advance_input uses last time step."""
     data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
 
-    task = ForecastingTask(multistep_input=1, multistep_output=1, timestep="6h", rollout_start=1, rollout_max=1)
+    task = ForecastingTask(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 1, "maximum": 1})
 
     forecaster = EnsembleTraining.__new__(EnsembleTraining)
     pl.LightningModule.__init__(forecaster)
@@ -644,12 +646,12 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
     b, g, v = 2, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn((b, forecaster.n_step_input + task.rollout, 1, g, v), dtype=torch.float32)}
+    batch = {"data": torch.randn((b, forecaster.n_step_input + task.rollout.step, 1, g, v), dtype=torch.float32)}
 
     loss, _metrics, y_preds = forecaster._step(batch=batch, validation_mode=False)
     assert isinstance(loss, torch.Tensor)
     assert isinstance(y_preds, list)
-    assert len(y_preds) == task.rollout
+    assert len(y_preds) == task.rollout.step
     preds = y_preds[0]
     assert isinstance(preds, dict)
     assert preds["data"].ndim == 5
@@ -846,8 +848,10 @@ def test_temporal_downscaling_step_returns_list(monkeypatch: pytest.MonkeyPatch)
 
     data_indices = _data_indices_single()
     task = TemporalDownscalingTask(
-        inputs_offsets=["0h", "18h"],
-        outputs_offsets=["6h", "12h"],
+        input_timestep="18h",
+        output_timestep="6H",
+        output_left_boundary=False,
+        output_right_boundary=False,
     )
     training_module = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(training_module)

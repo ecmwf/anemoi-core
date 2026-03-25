@@ -18,14 +18,14 @@ from pydantic import PositiveInt
 from anemoi.utils.schemas import BaseModel
 
 
-class TaskRollout(BaseModel):
+class RolloutSchema(BaseModel):
     """Rollout configuration for task."""
 
-    start: NonNegativeInt = Field(default=1, example=1)
+    start: NonNegativeInt = Field(example=1)
     "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(default=0, example=0)
+    epoch_increment: NonNegativeInt = Field(example=0)
     "Number of epochs to increment the rollout."
-    max: NonNegativeInt = Field(default=1, example=1)
+    maximum: NonNegativeInt = Field(example=1)
     "Maximum number of rollouts."
 
 
@@ -40,8 +40,10 @@ class ForecastingTaskSchema(BaseModel):
     "Number of output timesteps the model should predict."
     timestep: str = Field(example="6H")
     "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
-    rollout: TaskRollout = Field(default_factory=TaskRollout)
+    rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
+    validation_rollout: NonNegativeInt = Field(example=[0, 6, 12])
+    "Number of rollouts to use for validation."
 
 
 class AutoencodingTaskSchema(BaseModel):
@@ -67,9 +69,9 @@ class TimeInterpolationTaskSchema(BaseModel):
     "Input data timestep as a duration string (e.g. '6H')."
     output_timestep: str = Field(example="1H")
     "Desired output timestep as a duration string (e.g. '1H')."
-    output_left_boundary: bool = Field(default=False, example=False)
+    output_left_boundary: bool = Field(example=False)
     "Whether to include the left boundary in the output."
-    output_right_boundary: bool = Field(default=False, example=False)
+    output_right_boundary: bool = Field(example=False)
     "Whether to include the right boundary in the output."
 
 
