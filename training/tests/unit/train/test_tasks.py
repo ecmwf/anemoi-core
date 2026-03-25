@@ -246,15 +246,11 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     training_module.loss = {"data": DummyLoss()}
     training_module.loss_supports_sharding = False
     training_module.metrics_support_sharding = True
-    training_module._plot_adapter = ForecasterPlotAdapter(training_module)
+    training_module._plot_adapter = ForecasterPlotAdapter(task)
     # Set rollout on the training module to match the task's rollout
-    training_module.rollout = task.rollout
-    assert training_module.plot_adapter.output_times == 1
+    assert training_module.plot_adapter.output_times == _CFG_FORECASTER.training.rollout.maximum + 1
     for i in range(1, _CFG_FORECASTER.training.rollout.maximum + 1):
-        task.rollout = i
-        training_module.rollout = i
         assert training_module.plot_adapter.get_init_step(i) == 0
-        assert training_module.plot_adapter.output_times == i
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *args, **kwargs: fn(*args, **kwargs))
