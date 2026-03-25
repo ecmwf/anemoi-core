@@ -41,7 +41,7 @@ class TestMultiDataset:
 
     def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
         """Test that valid_date_indices returns the intersection of indices from all datasets."""
-        # relative_date_indices: [0, 2, 6]
+        # relative_date_indices are: [0, 2, 6]
         # dataset_a|b has dates [0, 1, 2, ..., 29]
         # dataset_a has indices [0, 1, 2, 3, 4, ..., 22, 23], where 23 = 29 - max(data_relative_time_indices)
         # dataset_b has missing indices {7, 8, 9, 10}
