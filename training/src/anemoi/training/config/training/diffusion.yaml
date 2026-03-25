@@ -42,7 +42,7 @@ optimizer:
   eps: 1e-7
 
 # select model
-model_task: anemoi.training.train.methods.DiffusionTraining
+training_method: anemoi.training.train.methods.DiffusionTraining
 
 # select strategy
 strategy:

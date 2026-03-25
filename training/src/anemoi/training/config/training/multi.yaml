@@ -70,7 +70,7 @@ optimizer:
   # betas: [0.9, 0.95]
 
 # select model
-model_task: anemoi.training.train.methods.SingleTraining
+training_method: anemoi.training.train.methods.SingleTraining
 
 # select strategy
 strategy:

@@ -393,7 +393,7 @@ def benchmark_config(
     elif test_case == "diffusiontend":
         overrides = [
             "model=graphtransformer_diffusiontend",
-            "training.model_task=anemoi.training.train.methods.DiffusionTendTraining",
+            "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
         ]
         base_config = "diffusion"
     else:
@@ -496,7 +496,7 @@ def interpolator_config(
         [],
         [
             "model=graphtransformer_diffusiontend",
-            "training.model_task=anemoi.training.train.methods.DiffusionTendTraining",
+            "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
         ],
     ],
     ids=["diffusion", "diffusiontend"],
@@ -525,14 +525,14 @@ def diffusion_config(
         pytest.param(
             [
                 "model=graphtransformer_diffusion",
-                "training.model_task=anemoi.training.train.methods.DiffusionTraining",
+                "training.training_method=anemoi.training.train.methods.DiffusionTraining",
             ],
             id="diffusion",
         ),
         pytest.param(
             [
                 "model=graphtransformer_diffusiontend",
-                "training.model_task=anemoi.training.train.methods.DiffusionTendTraining",
+                "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
             ],
             id="diffusiontend",
         ),

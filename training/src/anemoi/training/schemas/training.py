@@ -438,29 +438,29 @@ class BaseTrainingSchema(BaseModel):
 
 
 class ForecasterSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="model_task")
+    training_method: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="training_method")
     "Training objective."
 
 
 class ForecasterEnsSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="model_task")
+    training_method: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="training_method")
     "Training objective."
 
 
 class DiffusionForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="model_task")
+    training_method: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="training_method")
     "Training objective."
 
 
 class DiffusionTendForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.methods.DiffusionTendTraining"] = Field(
+    training_method: Literal["anemoi.training.train.methods.DiffusionTendTraining"] = Field(
         ...,
-        alias="model_task",
+        alias="training_method",
     )
     "Training objective."
 
 
 TrainingSchema = Annotated[
     ForecasterSchema | ForecasterEnsSchema | DiffusionForecasterSchema | DiffusionTendForecasterSchema,
-    Discriminator("model_task"),
+    Discriminator("training_method"),
 ]
