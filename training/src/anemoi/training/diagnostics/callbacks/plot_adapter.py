@@ -31,10 +31,9 @@ class BasePlotAdapter(ABC):
         self._task = task
 
     @property
-    @abstractmethod
     def output_times(self) -> int:
         """Number of rollout/outer steps for plotting."""
-        ...
+        return self._task.num_output_timesteps
 
     @abstractmethod
     def get_init_step(self, rollout_step: int) -> int:
@@ -71,10 +70,6 @@ class BasePlotAdapter(ABC):
 
 class ForecasterPlotAdapter(BasePlotAdapter):
     """Rollout forecaster: multiple loss plots, n_step_output targets per step, multi-step iter."""
-
-    @property
-    def output_times(self) -> int:
-        return max(1, self._task.rollout.step)
 
     def get_init_step(self, rollout_step: int) -> int:
         del rollout_step
@@ -115,10 +110,6 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 class DiffusionPlotAdapter(BasePlotAdapter):
     """Diffusion: inherits from base task (not forecaster), single step, forecaster-like loss/plot layout."""
 
-    @property
-    def output_times(self) -> int:
-        return 1
-
     def get_init_step(self, rollout_step: int) -> int:
         del rollout_step
         return 0
@@ -153,10 +144,6 @@ class DiffusionPlotAdapter(BasePlotAdapter):
 
 class InterpolatorPlotAdapter(BasePlotAdapter):
     """Interpolator: loss-plot batch start at n_step_input, one sample per step."""
-
-    @property
-    def output_times(self) -> int:
-        return len(self._task.interp_times)
 
     def get_init_step(self, rollout_step: int) -> int:
         return rollout_step
@@ -197,10 +184,6 @@ class InterpolatorMultiOutPlotAdapter(InterpolatorPlotAdapter):
 
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Autoencoder: single (sample, recon, tag) yield."""
-
-    @property
-    def output_times(self) -> int:
-        return 1
 
     def get_init_step(self, rollout_step: int) -> int:
         del rollout_step
