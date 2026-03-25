@@ -37,7 +37,7 @@ callback, any other kwarg is passed to the callback's constructor.
 
    callbacks:
       - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
-      rollout: 
+      rollout:
       - ${dataloader.validation_rollout}
       frequency: 20
 
