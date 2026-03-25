@@ -84,7 +84,15 @@ class ForecastingTask(BaseTask):
         outputs_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
         steps = tuple({"rollout_step": i} for i in range(self.rollout.step))
         super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets, steps=steps)
-        self._plot_adapter = ForecasterPlotAdapter
+        self._plot_adapter = ForecasterPlotAdapter(self)
+
+    @property
+    def step_names(self) -> list[str]:
+        """Get human-readable step names for the current rollout configuration.
+
+        These names will be used in plot tags and file names.
+        """
+        return [f"_rstep{d['rollout_step']}" for d in self.steps]
 
     @property
     def _step_shift(self) -> datetime.timedelta:

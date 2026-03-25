@@ -166,7 +166,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         super().__init__()
         self.task = task
-        self._plot_adapter = task._plot_adapter(self)
 
         assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
@@ -336,13 +335,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
-        # Concrete tasks set _plot_adapter in their __init__ (BasePlotAdapter is abstract).
-        self._plot_adapter: Any = None
-
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
-        return self._plot_adapter
+        return self.task._plot_adapter
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""

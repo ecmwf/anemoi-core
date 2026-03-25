@@ -47,4 +47,4 @@ class TemporalDownscalingTask(BaseSingleStepTask):
             output_offsets = [*output_offsets, input_timedelta]
 
         super().__init__(inputs_offsets=input_offsets, outputs_offsets=output_offsets)
-        self._plot_adapter = TemporalDownscalingPlotAdapter
+        self._plot_adapter = TemporalDownscalingPlotAdapter(self)

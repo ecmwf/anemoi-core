@@ -65,6 +65,10 @@ class BaseTask(ABC):
         self._steps = steps if steps is not None else ({},)
 
     @property
+    def step_names(self) -> list[str]:
+        return ["" for _ in range(len(self._steps))]
+
+    @property
     def inputs_offsets(self) -> list[datetime.timedelta]:
         """Sorted input time offsets."""
         return self._inputs_offsets

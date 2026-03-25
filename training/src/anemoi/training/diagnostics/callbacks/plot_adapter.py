@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 class BasePlotAdapter(ABC):
     """Abstract plotting contract. Subclasses define output_times, get_init_step, iter_plot_samples."""
 
-    def __init__(self, task: Any) -> None:
+    def __init__(self, task: "BaseTask") -> None:
         self._task = task
 
     @property
@@ -41,8 +41,8 @@ class BasePlotAdapter(ABC):
         ...
 
     @property
-    def task_steps(self) -> int:
-        return self.task.steps
+    def step_names(self) -> list[str]:
+        return self._task.step_names
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         del rollout_step
@@ -71,7 +71,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
         return 0
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
-        return self._task.n_step_input + rollout_step * self._task.n_step_output
+        return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
 
     def iter_plot_samples(
         self,
@@ -81,12 +81,12 @@ class ForecasterPlotAdapter(BasePlotAdapter):
         max_out_steps: int | None = None,
     ) -> Iterator[tuple[Any, Any, Any, str]]:
         task = self._task
-        max_out_steps = min(task.n_step_output, max_out_steps or task.n_step_output)
+        max_out_steps = min(task.num_output_timesteps, max_out_steps or task.num_output_timesteps)
         for rollout_step in range(output_times):
             init_step = self.get_init_step(rollout_step)
             x = data[init_step, ...].squeeze()
             for out_step in range(max_out_steps):
-                truth_idx = rollout_step * task.n_step_output + out_step + 1
+                truth_idx = rollout_step * task.num_output_timesteps + out_step + 1
                 y_true = data[truth_idx, ...].squeeze()
                 y_pred = output_tensor[rollout_step, out_step, ...]
                 y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
@@ -101,7 +101,7 @@ class TemporalDownscalingPlotAdapter(BasePlotAdapter):
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         del rollout_step
-        return self._task.n_step_input
+        return self._task.num_input_timesteps
 
     def iter_plot_samples(
         self,

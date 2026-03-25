@@ -22,7 +22,7 @@ class BaseTimelessTask(BaseSingleStepTask):
     def __init__(self, **_kwargs) -> None:
         super().__init__(inputs_offsets=[datetime.timedelta(0)], outputs_offsets=[datetime.timedelta(0)])
 
-        self._plot_adapter = AutoencoderPlotAdapter
+        self._plot_adapter = AutoencoderPlotAdapter(self)
 
 
 class SpatialDownscalingTask(BaseTimelessTask):
