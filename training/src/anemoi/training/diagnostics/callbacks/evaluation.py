@@ -43,6 +43,8 @@ class RolloutEval(Callback):
         super().__init__()
         self.config = config
 
+        assert isinstance(rollout, list), f"rollout must be a list of ints, got {type(rollout)}"
+
         LOGGER.debug(
             "Setting up RolloutEval callback with rollout = %s, every_n_batches = %d ...",
             rollout,
