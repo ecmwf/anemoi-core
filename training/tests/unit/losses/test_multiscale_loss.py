@@ -16,12 +16,12 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.training.losses import AlmostFairKernelCRPS
-from anemoi.training.losses import IndexSpace
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 
 
 class TrackingLoss(BaseLoss):

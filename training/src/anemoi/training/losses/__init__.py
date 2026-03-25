@@ -7,8 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.training.utils.index_space import IndexSpace
-
 from .combined import CombinedLoss
 from .huber import HuberLoss
 from .kcrps import AlmostFairKernelCRPS
@@ -32,7 +30,6 @@ __all__ = [
     "CombinedLoss",
     "FourierCorrelationLoss",
     "HuberLoss",
-    "IndexSpace",
     "KernelCRPS",
     "LogCoshLoss",
     "LogFFT2Distance",

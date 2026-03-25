@@ -16,7 +16,6 @@ import time
 import traceback
 from abc import ABC
 from abc import abstractmethod
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from pathlib import Path
@@ -871,17 +870,6 @@ class PlotLoss(BasePerBatchPlotCallback):
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
         if self.parameter_groups is None:
             self.parameter_groups = {}
-
-    @classmethod
-    def _iter_scalers(cls, loss_obj: BaseLoss) -> Iterator[object]:
-        if hasattr(loss_obj, "scaler"):
-            yield loss_obj.scaler
-        if hasattr(loss_obj, "losses"):
-            for sub_loss in loss_obj.losses:
-                yield from cls._iter_scalers(sub_loss)
-        inner_loss = getattr(loss_obj, "loss", None)
-        if isinstance(inner_loss, BaseLoss):
-            yield from cls._iter_scalers(inner_loss)
 
     def sort_and_color_by_parameter_group(
         self,
