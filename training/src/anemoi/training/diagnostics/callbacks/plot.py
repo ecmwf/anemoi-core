@@ -1007,8 +1007,8 @@ class PlotLoss(BasePerBatchPlotCallback):
                 )
 
             adapter = pl_module.plot_adapter
-            for rollout_step in range(adapter.loss_plot_times):
-                y_hat = outputs[1][rollout_step][dataset_name]
+            for i, (step_name, rollout_step) in enumerate(adapter.task_steps.items()):
+                y_hat = outputs[1][i][dataset_name]
                 start = adapter.get_loss_plot_batch_start(rollout_step)
                 y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
                 var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
@@ -1021,12 +1021,13 @@ class PlotLoss(BasePerBatchPlotCallback):
                 loss = loss[argsort_indices]
                 fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
 
+                metric_name = f"_rstep{rollout_step:02d}" if step_name == "rollout_step" else ""
                 self._output_figure(
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"loss_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
-                    exp_log_tag=f"loss_sample_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
+                    tag=f"loss_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                    exp_log_tag=f"loss_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
                 )
 
     def on_validation_batch_end(

@@ -41,8 +41,8 @@ class BasePlotAdapter(ABC):
         ...
 
     @property
-    def loss_plot_times(self) -> int:
-        return 1
+    def task_steps(self) -> int:
+        return self.task.steps 
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         del rollout_step
@@ -69,10 +69,6 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def get_init_step(self, rollout_step: int) -> int:
         del rollout_step
         return 0
-
-    @property
-    def loss_plot_times(self) -> int:
-        return self.output_times
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.n_step_input + rollout_step * self._task.n_step_output
@@ -103,10 +99,6 @@ class DiffusionPlotAdapter(BasePlotAdapter):
     def get_init_step(self, rollout_step: int) -> int:
         del rollout_step
         return 0
-
-    @property
-    def loss_plot_times(self) -> int:
-        return 1
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.n_step_input + rollout_step * self._task.n_step_output
