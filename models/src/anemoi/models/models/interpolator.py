@@ -48,8 +48,8 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             Graph definition
         """
         model_config = DotDict(model_config)
-        self.input_times = model_config.training.explicit_times.input
-        self.output_times = model_config.training.explicit_times.target
+        self.input_times = model_config.model.explicit_times.input
+        self.output_times = model_config.model.explicit_times.target
 
         super().__init__(
             model_config=model_config,
@@ -58,7 +58,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             graph_data=graph_data,
         )
 
-        self.latent_skip = model_config.model.latent_skip
+        self.latent_skip = model_config.model.backbone.latent_skip
 
     # Overwrite base class
     def _calculate_input_dim(self, dataset_name: str) -> int:

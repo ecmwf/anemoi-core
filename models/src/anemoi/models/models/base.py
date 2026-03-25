@@ -63,12 +63,12 @@ class BaseGraphModel(nn.Module):
         self.dataset_names = list(data_indices.keys())
 
         model_config = DotDict(model_config)
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_hidden = model_config.model.backbone.hidden_nodes_name
 
-        self.n_step_input = model_config.training.multistep_input
-        self.n_step_output = model_config.training.multistep_output
+        self.n_step_input = model_config.model.multistep_input
+        self.n_step_output = model_config.model.multistep_output
         self.num_channels = model_config.model.num_channels
-        self.latent_skip = model_config.model.model.latent_skip
+        self.latent_skip = model_config.model.backbone.latent_skip
 
         trainable_parameters = broadcast_config_keys(
             model_config.model.trainable_parameters,

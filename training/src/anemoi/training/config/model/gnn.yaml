@@ -1,11 +1,11 @@
 _target_: anemoi.training.builder.build_anemoi_model
 _recursive_: false
 
-training_config: ${training}
-data_config: ${data}
-dataloader_config: ${dataloader}
-graph_config: ${graph}
-system_config: ${system}
+multistep_input: ${training.multistep_input}
+multistep_output: ${training.multistep_output}
+
+datasets: ${data.datasets}
+
 
 num_channels: 512
 cpu_offload: False

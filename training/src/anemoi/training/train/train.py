@@ -245,7 +245,7 @@ class AnemoiTrainer(ABC):
         """Provide the model instance."""
         model_task = get_class(self.config.training.model_task)
 
-        model = instantiate(self.config.model)
+        model = instantiate(self.config.model, runtime_artifacts=self.runtime_artifacts)
 
         self.metadata["metadata_inference"]["task"] = model_task.task_type
 
@@ -354,6 +354,20 @@ class AnemoiTrainer(ABC):
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
         return get_callbacks(self.config)
+
+    @cached_property
+    def runtime_artifacts(self):
+        """Package raw runtime data for the model builder."""
+        from anemoi.training.builder import RuntimeArtifacts
+
+        return RuntimeArtifacts(
+            statistics=self.datamodule.statistics,
+            statistics_tendencies=self.datamodule.statistics_tendencies,
+            data_indices=self.datamodule.data_indices,
+            supporting_arrays=self.datamodule.supporting_arrays,
+            graph_data=self.graph_data,
+            metadata=self.metadata,
+        )
 
     @cached_property
     def metadata(self) -> dict:
