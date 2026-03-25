@@ -23,6 +23,7 @@ from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
 from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
+from .ssim import SSIMLoss
 from .weighted_mse import WeightedMSELoss
 from .wet_area_loss import WeightedSoftWetAreaLoss
 
@@ -42,6 +43,7 @@ __all__ = [
     "RollingAccumulationHuberLoss",
     "SpectralCRPSLoss",
     "SpectralL2Loss",
+    "SSIMLoss",
     "WeightedMSELoss",
     "WeightedSoftWetAreaLoss",
     "get_loss_function",

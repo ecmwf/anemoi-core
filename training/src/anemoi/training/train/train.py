@@ -491,9 +491,12 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def strategy(self) -> Any:
+        strategy_static_graph = OmegaConf.select(self.config, "training.strategy.static_graph")
+        if strategy_static_graph is None:
+            strategy_static_graph = not self.config.training.accum_grad_batches > 1
         return instantiate(
             self.config.training.strategy,
-            static_graph=not self.config.training.accum_grad_batches > 1,
+            static_graph=strategy_static_graph,
         )
 
     def train(self) -> None:

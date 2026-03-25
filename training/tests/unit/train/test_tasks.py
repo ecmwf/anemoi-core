@@ -25,6 +25,20 @@ class DummyLoss(torch.nn.Module):
         return torch.mean((y_pred - y) ** 2)
 
 
+class RecordingLoss(torch.nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen_pred: torch.Tensor | None = None
+        self.seen_target: torch.Tensor | None = None
+
+    def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
+        del kwargs
+        self.seen_pred = y_pred.detach().clone()
+        self.seen_target = y.detach().clone()
+        return torch.mean((y_pred - y) ** 2)
+
+
 class DummyCompositeLoss(torch.nn.Module):
     """CombinedLoss-like object: supports update_scaler but has no .scaler attribute."""
 
@@ -35,6 +49,22 @@ class DummyCompositeLoss(torch.nn.Module):
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         del scaler, override
         self.updated.append(name)
+
+
+class DummyLossWithComponents(torch.nn.Module):
+
+    def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
+        del kwargs
+        return torch.mean((y_pred - y) ** 2)
+
+    def component_metrics(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> dict[str, torch.Tensor]:
+        del kwargs
+        loss = torch.mean((y_pred - y) ** 2)
+        return {
+            "loss_component_demo_raw": loss,
+            "loss_component_demo_scaled": loss * 2.0,
+            "loss_component_demo_weighted": loss * 3.0,
+        }
 
 
 class DummyScalerBuilder:
@@ -111,6 +141,17 @@ class DummyModel:
             grid_shard_slice=grid_shard_slice,
             grid_shard_shapes=grid_shard_shapes,
         )
+
+
+class ShiftProcessor(torch.nn.Module):
+
+    def __init__(self, shift: float) -> None:
+        super().__init__()
+        self.shift = shift
+
+    def forward(self, x: torch.Tensor, in_place: bool = True, **kwargs) -> torch.Tensor:
+        del in_place, kwargs
+        return x + self.shift
 
 
 class DummyDiffusionModel(DummyModel):
@@ -267,6 +308,69 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
             g,
             v,
         ), f"Expected (B, n_step_output, E, G, V) = ({b}, {forecaster.n_step_output}, {e}, {g}, {v}), got {pred.shape}"
+
+
+def test_compute_dataset_loss_metrics_postprocesses_training_loss() -> None:
+    data_indices = _data_indices_single()
+    config = DictConfig({"training": {"training_loss_postprocessed": True}})
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=config)
+    forecaster.training_loss_postprocessed = True
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+    forecaster.model = type("M", (), {"post_processors": {"data": ShiftProcessor(10.0)}})()
+
+    loss_fn = RecordingLoss()
+    forecaster.loss = {"data": loss_fn}
+
+    y_pred = torch.zeros((1, 1, 1, 1, len(_NAME_TO_INDEX)), dtype=torch.float32)
+    y = torch.ones_like(y_pred)
+
+    loss, metrics, original_pred = forecaster.compute_dataset_loss_metrics(
+        y_pred,
+        y,
+        validation_mode=False,
+        dataset_name="data",
+    )
+
+    assert torch.isclose(loss, torch.tensor(1.0))
+    assert metrics == {}
+    assert torch.equal(original_pred, y_pred)
+    assert loss_fn.seen_pred is not None
+    assert loss_fn.seen_target is not None
+    assert torch.allclose(loss_fn.seen_pred, y_pred + 10.0)
+    assert torch.allclose(loss_fn.seen_target, y + 10.0)
+
+
+def test_compute_dataset_loss_metrics_includes_loss_component_metrics_in_validation() -> None:
+    data_indices = _data_indices_single()
+    config = DictConfig({"training": {"training_loss_postprocessed": False}})
+    forecaster = GraphForecaster.__new__(GraphForecaster)
+    pl.LightningModule.__init__(forecaster)
+    _set_base_task_attrs(forecaster, data_indices=data_indices, config=config)
+    forecaster.training_loss_postprocessed = False
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+    forecaster.model = type("M", (), {"post_processors": {"data": ShiftProcessor(0.0)}})()
+    forecaster.loss = {"data": DummyLossWithComponents()}
+    forecaster.metrics = {"data": torch.nn.ModuleDict()}
+    forecaster.val_metric_ranges = {"data": {"all": [0, 1]}}
+
+    y_pred = torch.zeros((1, 1, 1, 1, len(_NAME_TO_INDEX)), dtype=torch.float32)
+    y = torch.ones_like(y_pred)
+
+    loss, metrics, _ = forecaster.compute_dataset_loss_metrics(
+        y_pred,
+        y,
+        validation_mode=True,
+        dataset_name="data",
+    )
+
+    assert torch.isclose(loss, torch.tensor(1.0))
+    assert torch.allclose(metrics["loss_component_demo_raw"], torch.tensor(1.0))
+    assert torch.allclose(metrics["loss_component_demo_scaled"], torch.tensor(2.0))
+    assert torch.allclose(metrics["loss_component_demo_weighted"], torch.tensor(3.0))
 
 
 _CFG_DIFFUSION = DictConfig(

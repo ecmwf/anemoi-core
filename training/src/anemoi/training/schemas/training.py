@@ -409,6 +409,10 @@ class BaseDDPStrategySchema(BaseModel):
     "Number of GPUs per model."
     read_group_size: PositiveInt = Field(example=1)
     "Number of GPUs per reader group. Defaults to number of GPUs."
+    static_graph: bool | None = Field(default=None, example=True)
+    "Override DDP static graph mode. Defaults to the trainer heuristic when unset."
+    find_unused_parameters: bool | None = Field(default=None, example=False)
+    "Enable DDP unused-parameter detection when some branches do not contribute to loss on every step."
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
@@ -475,6 +479,8 @@ class BaseTrainingSchema(BaseModel):
     "Config for stochastic weight averaging."
     training_loss: DatasetDict[LossSchemas]
     "Training loss configuration."
+    training_loss_postprocessed: bool = False
+    "Apply the training loss after postprocessing outputs back to physical space."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
     scalers: DatasetDict[dict[str, ScalerSchema]]

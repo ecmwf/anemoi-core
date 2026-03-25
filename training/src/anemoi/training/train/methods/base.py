@@ -218,6 +218,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self._scaling_values_log = {}  # dict of dict[str, float]
         self.loss = torch.nn.ModuleDict()
         self.metrics = torch.nn.ModuleDict()
+        self.loss_weight_schedule_cfg = getattr(self.config.training, "loss_weight_schedule", None)
+        self._loss_weight_schedule_last_epoch: int | None = None
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = get_multiple_datasets_config(config.training.training_loss)
@@ -288,6 +290,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
             * config.training.lr.rate
             / config.system.hardware.num_gpus_per_model
         )
+        self.lr_iterations = config.training.lr.iterations
+        self.lr_warmup = config.training.lr.warmup
+        self.lr_min = config.training.lr.min
+        self.optimizer_settings = config.training.optimizer
+        self.training_loss_postprocessed = bool(getattr(config.training, "training_loss_postprocessed", False))
+
         self.model_comm_group = None
         self.reader_groups = None
 
@@ -590,7 +598,38 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
+        if getattr(self, "training_loss_postprocessed", False):
+            post_processor = self.model.post_processors[dataset_name]
+            y_pred = post_processor(y_pred, in_place=False)
+            y = post_processor(y, in_place=False)
         return self.loss[dataset_name](
+            y_pred,
+            y,
+            grid_shard_slice=grid_shard_slice,
+            group=self.model_comm_group,
+        )
+
+    def _compute_loss_component_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        grid_shard_slice: slice | None = None,
+        dataset_name: str | None = None,
+        **_kwargs,
+    ) -> dict[str, torch.Tensor]:
+        if dataset_name is None:
+            return {}
+
+        loss_obj = self.loss[dataset_name]
+        if not hasattr(loss_obj, "component_metrics"):
+            return {}
+
+        if getattr(self, "training_loss_postprocessed", False):
+            post_processor = self.model.post_processors[dataset_name]
+            y_pred = post_processor(y_pred, in_place=False)
+            y = post_processor(y, in_place=False)
+
+        return loss_obj.component_metrics(
             y_pred,
             y,
             grid_shard_slice=grid_shard_slice,
@@ -672,12 +711,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(
+            metrics_next = self._compute_loss_component_metrics(
                 y_pred_full,
                 y_full,
                 grid_shard_slice=grid_shard_slice,
                 dataset_name=dataset_name,
                 **kwargs
+            )
+            metrics_next.update(
+                self._compute_metrics(
+                    y_pred_full,
+                    y_full,
+                    grid_shard_slice=grid_shard_slice,
+                    dataset_name=dataset_name,
+                    **kwargs,
+                )
             )
 
         return loss, metrics_next, y_pred
@@ -973,6 +1021,37 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return metrics
 
+    def on_validation_epoch_end(self) -> None:
+        if self.logger_enabled or self.trainer is None:
+            return
+
+        callback_metrics = getattr(self.trainer, "callback_metrics", {})
+        summary_parts: list[str] = []
+        for metric_name, metric_value in sorted(callback_metrics.items(), key=lambda item: str(item[0])):
+            metric_name = str(metric_name)
+            if not metric_name.startswith("val_"):
+                continue
+            if "_scale_" in metric_name and not metric_name.endswith("_scale_0"):
+                continue
+            if "_loss_component_" in metric_name and not metric_name.endswith("_weighted_scale_0"):
+                continue
+            if not ("_loss_component_" in metric_name or "_metric/" in metric_name or metric_name.endswith("_loss")):
+                continue
+
+            if isinstance(metric_value, torch.Tensor):
+                if metric_value.numel() != 1:
+                    continue
+                metric_value = metric_value.detach().float().cpu().item()
+            elif isinstance(metric_value, int | float):
+                metric_value = float(metric_value)
+            else:
+                continue
+
+            summary_parts.append(f"{metric_name}={metric_value:.4g}")
+
+        if summary_parts:
+            LOGGER.info("Validation summary: %s", ", ".join(summary_parts))
+
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         del batch_idx
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
@@ -1054,7 +1133,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     log_val,
                     on_epoch=True,
                     on_step=False,
-                    prog_bar=False,
+                    prog_bar=("_loss_component_" not in mname or mname.endswith("_weighted")),
                     logger=self.logger_enabled,
                     batch_size=batch_size,
                     sync_dist=True,
@@ -1075,6 +1154,57 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         del metric
         scheduler.step(epoch=self.trainer.global_step)
+
+    def _apply_loss_weight_schedule(self, epoch: int, *, force: bool = False) -> None:
+        schedule_cfg = self.loss_weight_schedule_cfg
+        if schedule_cfg is None or not getattr(schedule_cfg, "enabled", True):
+            return
+        if not force and self._loss_weight_schedule_last_epoch == epoch:
+            return
+
+        datasets_cfg = getattr(schedule_cfg, "datasets", None)
+        if datasets_cfg is None:
+            return
+
+        schedule_epochs = max(int(getattr(schedule_cfg, "epochs", 1)), 1)
+        alpha = 1.0 if schedule_epochs == 1 else min(max(epoch, 0) / float(schedule_epochs - 1), 1.0)
+
+        for dataset_name, dataset_cfg in datasets_cfg.items():
+            if dataset_name not in self.loss:
+                continue
+            loss_obj = self.loss[dataset_name]
+            if not hasattr(loss_obj, "loss_weights"):
+                continue
+
+            start = [float(v) for v in dataset_cfg.start]
+            end = [float(v) for v in dataset_cfg.end]
+            if len(start) != len(loss_obj.loss_weights) or len(end) != len(loss_obj.loss_weights):
+                LOGGER.warning(
+                    "Skipping loss weight schedule for dataset %s due to mismatched lengths: start=%d end=%d current=%d",
+                    dataset_name,
+                    len(start),
+                    len(end),
+                    len(loss_obj.loss_weights),
+                )
+                continue
+
+            weights = tuple((1.0 - alpha) * s + alpha * e for s, e in zip(start, end, strict=False))
+            loss_obj.loss_weights = weights
+            LOGGER.info(
+                "Loss weight schedule epoch=%d dataset=%s alpha=%.3f weights=%s",
+                epoch,
+                dataset_name,
+                alpha,
+                [round(weight, 6) for weight in weights],
+            )
+
+        self._loss_weight_schedule_last_epoch = epoch
+
+    def on_fit_start(self) -> None:
+        self._apply_loss_weight_schedule(self.current_epoch, force=True)
+
+    def on_train_epoch_start(self) -> None:
+        self._apply_loss_weight_schedule(self.current_epoch)
 
     def on_train_epoch_end(self) -> None:
         pass

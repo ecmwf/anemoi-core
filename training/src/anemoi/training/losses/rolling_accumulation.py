@@ -47,8 +47,9 @@ class RollingAccumulationHuberLoss(FunctionalLoss):
             )
 
         if self.rate_to_amount:
-            pred = pred * self.step_seconds
-            target = target * self.step_seconds
+            time_factor = self.step_seconds / 3600.0
+            pred = pred * time_factor
+            target = target * time_factor
 
         pred_acc = pred.unfold(dimension=1, size=self.window_size, step=1).sum(dim=-1)
         target_acc = target.unfold(dimension=1, size=self.window_size, step=1).sum(dim=-1)

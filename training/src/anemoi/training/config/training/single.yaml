@@ -110,6 +110,9 @@ strategy:
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
 
+# apply training loss in postprocessed physical space instead of model space
+training_loss_postprocessed: False
+
 # loss function for the model
 training_loss:
   datasets:

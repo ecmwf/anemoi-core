@@ -220,6 +220,52 @@ class CombinedLoss(BaseLoss):
                 loss = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
         return loss
 
+    def _component_name(self, loss_fn: BaseLoss, seen_names: dict[str, int]) -> str:
+        base_name = getattr(loss_fn, "name", loss_fn.__class__.__name__.lower())
+        seen_names[base_name] = seen_names.get(base_name, 0) + 1
+        if seen_names[base_name] == 1:
+            return base_name
+        return f"{base_name}_{seen_names[base_name]}"
+
+    def _raw_component_value(
+        self,
+        loss_fn: BaseLoss,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor | None:
+        raw_kwargs = dict(kwargs)
+        existing_without_scalers = raw_kwargs.pop("without_scalers", None) or []
+        scaler_names = list(getattr(getattr(loss_fn, "scaler", None), "tensors", {}).keys())
+        without_scalers = list(existing_without_scalers) + scaler_names
+        if without_scalers:
+            raw_kwargs["without_scalers"] = without_scalers
+        try:
+            return loss_fn(pred, target, **raw_kwargs)
+        except TypeError:
+            return None
+
+    def component_metrics(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        metrics: dict[str, torch.Tensor] = {}
+        seen_names: dict[str, int] = {}
+
+        for i, loss_fn in enumerate(self.losses):
+            component_name = self._component_name(loss_fn, seen_names)
+            scaled = loss_fn(pred, target, **kwargs)
+            metrics[f"loss_component_{component_name}_scaled"] = scaled
+            metrics[f"loss_component_{component_name}_weighted"] = self.loss_weights[i] * scaled
+
+            raw = self._raw_component_value(loss_fn, pred, target, **kwargs)
+            if raw is not None:
+                metrics[f"loss_component_{component_name}_raw"] = raw
+
+        return metrics
+
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
         for i, spec in self._loss_scaler_specification.items():

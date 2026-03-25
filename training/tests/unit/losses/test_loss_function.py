@@ -15,6 +15,7 @@ from omegaconf import DictConfig
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
+from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.losses import KernelCRPS
 from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import LogSpectralDistance
@@ -592,3 +593,27 @@ def test_spectral_crps_octahedral_irregular_grid_ignore_nans() -> None:
     out_total = loss_ignore(pred, target, squash=True)
     assert out_total.numel() == 1, "octahedral_sht: scalar CRPS expected"
     assert torch.isfinite(out_total).all(), "Expected finite scalar loss when ignore_nans=True"
+
+
+def test_combined_loss_component_metrics_report_raw_scaled_and_weighted(
+    functionalloss: type[FunctionalLoss],
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
+    pred, target, _ = loss_inputs
+
+    first = functionalloss()
+    first.add_scaler(TensorDim.GRID, torch.tensor([2.0, 1.0, 1.0, 1.0]), name="grid")
+    second = functionalloss()
+    second.add_scaler(TensorDim.GRID, torch.tensor([3.0, 1.0, 1.0, 1.0]), name="grid")
+
+    combined = CombinedLoss(first, second, loss_weights=(0.5, 2.0))
+
+    metrics = combined.component_metrics(pred, target)
+
+    assert torch.allclose(metrics["loss_component_returndifference_raw"], torch.tensor([1.0]))
+    assert torch.allclose(metrics["loss_component_returndifference_scaled"], torch.tensor([2.0]))
+    assert torch.allclose(metrics["loss_component_returndifference_weighted"], torch.tensor([1.0]))
+
+    assert torch.allclose(metrics["loss_component_returndifference_2_raw"], torch.tensor([1.0]))
+    assert torch.allclose(metrics["loss_component_returndifference_2_scaled"], torch.tensor([3.0]))
+    assert torch.allclose(metrics["loss_component_returndifference_2_weighted"], torch.tensor([6.0]))

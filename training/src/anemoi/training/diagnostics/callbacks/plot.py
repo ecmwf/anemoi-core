@@ -360,6 +360,70 @@ class BasePerEpochPlotCallback(BasePlotCallback):
             )
 
 
+class PlotValidationMetrics(BasePerEpochPlotCallback):
+    """Plot selected validation metrics over epochs."""
+
+    def __init__(
+        self,
+        config: OmegaConf,
+        metrics: list[str],
+        every_n_epochs: int | None = None,
+        dataset_names: list[str] | None = None,
+    ) -> None:
+        super().__init__(config, every_n_epochs=every_n_epochs, dataset_names=dataset_names)
+        self.metrics = list(metrics)
+        self.history: dict[str, list[tuple[int, float]]] = {metric: [] for metric in self.metrics}
+
+    @rank_zero_only
+    def _plot(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        dataset_names: list[str],
+        epoch: int,
+        **kwargs: Any,
+    ) -> None:
+        del pl_module, dataset_names, kwargs
+
+        callback_metrics = getattr(trainer, "callback_metrics", {})
+        for metric_name in self.metrics:
+            metric_value = callback_metrics.get(metric_name, None)
+            if metric_value is None:
+                continue
+            if isinstance(metric_value, torch.Tensor):
+                if metric_value.numel() != 1:
+                    continue
+                metric_value = metric_value.detach().float().cpu().item()
+            elif isinstance(metric_value, int | float):
+                metric_value = float(metric_value)
+            else:
+                continue
+            self.history[metric_name].append((epoch, float(metric_value)))
+
+        populated = {name: series for name, series in self.history.items() if len(series) > 0}
+        if len(populated) == 0:
+            return
+
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=120)
+        for metric_name, series in populated.items():
+            epochs, values = zip(*series, strict=False)
+            ax.plot(epochs, values, marker="o", linewidth=1.5, label=metric_name)
+
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Validation metric")
+        ax.set_title("Validation Metrics")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8, loc="best")
+        fig.tight_layout()
+        self._output_figure(
+            trainer.logger,
+            fig,
+            epoch=epoch,
+            tag="validation_metrics",
+            exp_log_tag="validation_metrics",
+        )
+
+
 class LongRolloutPlots(BasePlotCallback):
     """Evaluates the model performance over a (longer) rollout window.
 
