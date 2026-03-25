@@ -254,6 +254,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """
         dataset_names = list(x.keys())
 
+        if grid_shard_shapes is None:
+            grid_shard_shapes = {dataset_name: None for dataset_name in dataset_names}
+
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)

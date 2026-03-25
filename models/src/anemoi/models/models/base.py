@@ -275,7 +275,6 @@ class BaseGraphModel(nn.Module):
             # Handle distributed processing
             grid_shard_shapes = None
             if model_comm_group is not None:
-                grid_shard_shapes = {}
                 for dataset_name in dataset_names:
                     shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
                     grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]

@@ -221,7 +221,11 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         pass
 
     def on_train_epoch_end(self) -> None:
-        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
+        if (
+            self.rollout_epoch_increment > 0
+            and self.current_epoch > 0
+            and self.current_epoch % self.rollout_epoch_increment == 0
+        ):
             self.rollout += 1
             LOGGER.debug("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)
