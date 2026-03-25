@@ -190,7 +190,7 @@ _CFG_FORECASTER = DictConfig(
         "training": {
             "multistep_input": 1,
             "multistep_output": 1,
-            "rollout": {"start": 1, "epoch_increment": 1, "max": 3},
+            "rollout": {"start": 1, "epoch_increment": 1, "maximum": 3},
         },
     },
 )
@@ -234,7 +234,7 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         timestep="6h",
         rollout_start=_CFG_FORECASTER.training.rollout.start,
         rollout_epoch_increment=_CFG_FORECASTER.training.rollout.epoch_increment,
-        rollout_max=_CFG_FORECASTER.training.rollout.max,
+        rollout_max=_CFG_FORECASTER.training.rollout.maximum,
     )
     _set_base_task_attrs(training_module, data_indices=data_indices, config=_CFG_FORECASTER, task=task)
     training_module.model = DummyModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
@@ -248,7 +248,7 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     # Set rollout on the training module to match the task's rollout
     training_module.rollout = task.rollout
     assert training_module.plot_adapter.output_times == 1
-    for i in range(1, _CFG_FORECASTER.training.rollout.max + 1):
+    for i in range(1, _CFG_FORECASTER.training.rollout.maximum + 1):
         task.rollout = i
         training_module.rollout = i
         assert training_module.plot_adapter.get_init_step(i) == 0
