@@ -248,7 +248,7 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     training_module.metrics_support_sharding = True
     training_module._plot_adapter = ForecasterPlotAdapter(task)
     # Set rollout on the training module to match the task's rollout
-    assert training_module.plot_adapter.output_times == _CFG_FORECASTER.training.rollout.maximum + 1
+    assert training_module.plot_adapter.output_times == 1
     for i in range(1, _CFG_FORECASTER.training.rollout.maximum + 1):
         assert training_module.plot_adapter.get_init_step(i) == 0
 
@@ -260,16 +260,15 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda x, *_args, **_kwargs: x,
     )
 
-    task.rollout = 2
-    task._steps = tuple({"rollout_step": i} for i in range(task.rollout))
-    required_time_steps = training_module.n_step_input + task.rollout * training_module.n_step_output
+    task._steps = tuple({"rollout_step": i} for i in range(task.rollout.maximum))
+    required_time_steps = training_module.n_step_input + task.rollout.maximum * training_module.n_step_output
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, required_time_steps, e, g, v, dtype=torch.float32)}
 
     loss, _, y_preds = training_module._step(batch, validation_mode=False)
 
     assert isinstance(loss, torch.Tensor)
-    assert len(y_preds) == task.rollout
+    assert len(y_preds) == task.rollout.maximum
     for step_pred in y_preds:
         assert isinstance(step_pred, dict)
         assert "data" in step_pred
