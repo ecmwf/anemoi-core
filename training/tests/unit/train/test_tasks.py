@@ -247,9 +247,8 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     training_module.loss_supports_sharding = False
     training_module.metrics_support_sharding = True
     training_module._plot_adapter = ForecasterPlotAdapter(task)
-    # Set rollout on the training module to match the task's rollout
-    assert training_module.plot_adapter.output_times == 1
-    for i in range(1, _CFG_FORECASTER.training.rollout.maximum + 1):
+    assert training_module.plot_adapter.output_times == task.rollout.maximum
+    for i in range(task.rollout.maximum):
         assert training_module.plot_adapter.get_init_step(i) == 0
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
@@ -260,15 +259,14 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda x, *_args, **_kwargs: x,
     )
 
-    task._steps = tuple({"rollout_step": i} for i in range(task.rollout.maximum))
-    required_time_steps = training_module.n_step_input + task.rollout.maximum * training_module.n_step_output
+    required_time_steps = training_module.n_step_input + rollout_maximum * training_module.n_step_output
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, required_time_steps, e, g, v, dtype=torch.float32)}
 
     loss, _, y_preds = training_module._step(batch, validation_mode=False)
 
     assert isinstance(loss, torch.Tensor)
-    assert len(y_preds) == task.rollout.maximum
+    assert len(y_preds) == rollout_maximum
     for step_pred in y_preds:
         assert isinstance(step_pred, dict)
         assert "data" in step_pred
@@ -768,21 +766,22 @@ def test_graphdiffusionforecaster_output_times_and_get_init_step() -> None:
     forecaster.n_step_input = 1
     forecaster.n_step_output = 1
     forecaster._plot_adapter = DiffusionPlotAdapter(forecaster)
-    forecaster._plot_adapter = DiffusionPlotAdapter(forecaster)
     assert forecaster.plot_adapter.output_times == 1
     assert forecaster.plot_adapter.get_init_step(0) == 0
 
 
 def test_graphforecaster_get_init_step() -> None:
     """Forecaster get_init_step(rollout_step) returns 0 for all steps."""
-    training_module = SingleTraining.__new__(SingleTraining)
-    pl.LightningModule.__init__(training_module)
-    training_module.rollout = 2
-    training_module.n_step_input = 1
-    training_module.n_step_output = 1
-    training_module._plot_adapter = ForecasterPlotAdapter(training_module)
-    assert training_module.plot_adapter.get_init_step(0) == 0
-    assert training_module.plot_adapter.get_init_step(1) == 0
+    task = ForecastingTask(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
+    )
+    adapter = ForecasterPlotAdapter(task)
+    assert adapter.output_times == 2
+    assert adapter.get_init_step(0) == 0
+    assert adapter.get_init_step(1) == 0
 
 
 def test_graphautoencoder_output_times() -> None:
