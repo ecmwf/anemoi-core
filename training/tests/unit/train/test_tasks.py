@@ -247,8 +247,9 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     training_module.loss_supports_sharding = False
     training_module.metrics_support_sharding = True
     training_module._plot_adapter = ForecasterPlotAdapter(task)
-    assert training_module.plot_adapter.output_times == task.rollout.maximum
     for i in range(task.rollout.maximum):
+        task.rollout.step = i+1
+        assert training_module.plot_adapter.output_times == i + 1
         assert training_module.plot_adapter.get_init_step(i) == 0
 
     # _step returns one prediction per rollout step with shape (B, n_step_output, E, G, V)
@@ -779,7 +780,7 @@ def test_graphforecaster_get_init_step() -> None:
         rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
     )
     adapter = ForecasterPlotAdapter(task)
-    assert adapter.output_times == 2
+    assert adapter.output_times == 1
     assert adapter.get_init_step(0) == 0
     assert adapter.get_init_step(1) == 0
 
