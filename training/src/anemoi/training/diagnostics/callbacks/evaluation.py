@@ -27,15 +27,15 @@ class RolloutEval(Callback):
     distributed synchronization.
     """
 
-    def __init__(self, config: OmegaConf, rollout: int, every_n_batches: int) -> None:
+    def __init__(self, config: OmegaConf, rollout: list[int], every_n_batches: int) -> None:
         """Initialize RolloutEval callback.
 
         Parameters
         ----------
         config : dict
             Dictionary with configuration settings
-        rollout : int
-            Rollout length for evaluation
+        rollout : list[int]
+            Rollout lengths for evaluation
         every_n_batches : int
             Frequency of rollout evaluation, runs every `n` validation batches
 
@@ -44,11 +44,12 @@ class RolloutEval(Callback):
         self.config = config
 
         LOGGER.debug(
-            "Setting up RolloutEval callback with rollout = %d, every_n_batches = %d ...",
+            "Setting up RolloutEval callback with rollout = %s, every_n_batches = %d ...",
             rollout,
             every_n_batches,
         )
         self.rollout = rollout
+        self.max_rollout = max(rollout)
         self.every_n_batches = every_n_batches
 
     def _eval(
@@ -62,22 +63,25 @@ class RolloutEval(Callback):
         loss = torch.zeros(1, dtype=batch_tensor.dtype, device=pl_module.device, requires_grad=False)
         metrics = {}
 
-        assert batch_tensor.shape[1] >= self.rollout * pl_module.n_step_output + pl_module.n_step_input, (
+        assert batch_tensor.shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
-            f"Set `dataloader.validation_rollout` to at least {max(self.rollout)}"
+            f"Set `dataloader.validation_rollout` to at least {self.max_rollout}"
         )
 
         with torch.no_grad():
-            for loss_next, metrics_next, _ in pl_module._rollout_step(
-                batch,
-                rollout=self.rollout,
-                validation_mode=True,
+            for ii, (loss_next, metrics_next, _) in enumerate(
+                pl_module._rollout_step(
+                    batch,
+                    rollout=self.max_rollout,
+                    validation_mode=True,
+                ),
             ):
                 loss += loss_next
-                metrics.update(metrics_next)
+                if ii + 1 in self.rollout:
+                    metrics.update(metrics_next)
 
             # scale loss
-            loss *= 1.0 / self.rollout
+            loss *= 1.0 / self.max_rollout
             self._log(pl_module, loss, metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
@@ -85,7 +89,9 @@ class RolloutEval(Callback):
         loss_scales = loss
         loss = loss_scales.sum()
         pl_module.log(
-            f"val_r{self.rollout}_{getattr(pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower())}",
+            f"val_r{self.max_rollout}_{getattr(
+                pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower()
+                )}",
             loss,
             on_epoch=True,
             on_step=True,
@@ -97,7 +103,9 @@ class RolloutEval(Callback):
         if loss_scales.numel() > 1:
             for scale in range(loss_scales.numel()):
                 pl_module.log(
-                    f"val_r{self.rollout}_{getattr(pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower())}",
+                    f"val_r{self.max_rollout}_{getattr(
+                        pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower()
+                        )}",
                     loss_scales[scale],
                     on_epoch=True,
                     on_step=True,
@@ -113,7 +121,7 @@ class RolloutEval(Callback):
                 log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
 
                 pl_module.log(
-                    f"val_r{self.rollout}_" + mname + "_scale_" + str(scale),
+                    f"val_r{self.max_rollout}_" + mname + "_scale_" + str(scale),
                     log_val,
                     on_epoch=True,
                     on_step=False,
@@ -139,7 +147,12 @@ class RolloutEval(Callback):
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
-            context = torch.autocast(device_type=batch.device.type, dtype=dtype) if dtype is not None else nullcontext()
+
+            context = (
+                torch.autocast(device_type=next(iter(batch.values())).device.type, dtype=dtype)
+                if dtype is not None
+                else nullcontext()
+            )
 
             with context:
                 self._eval(pl_module, batch)
@@ -170,22 +183,26 @@ class RolloutEvalEns(RolloutEval):
             requires_grad=False,
         )
         batch_shape = next(iter(batch.values())).shape
-        assert (
-            batch_shape[1] >= self.rollout + pl_module.n_step_input
-        ), f"Batch length ({batch_shape[1]}) not sufficient for requested rollout length!"
+        assert batch_shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
+            "Batch length not sufficient for requested validation rollout length! "
+            f"Set `dataloader.validation_rollout` to at least {self.max_rollout}"
+        )
 
         metrics = {}
         with torch.no_grad():
-            for loss_next, metrics_next, *_ in pl_module._rollout_step(
-                batch=batch,
-                rollout=self.rollout,
-                validation_mode=True,
+            for ii, (loss_next, metrics_next, *_) in enumerate(
+                pl_module._rollout_step(
+                    batch=batch,
+                    rollout=self.max_rollout,
+                    validation_mode=True,
+                ),
             ):
                 loss += loss_next
-                metrics.update(metrics_next)
+                if ii + 1 in self.rollout:
+                    metrics.update(metrics_next)
 
             # scale loss
-            loss *= 1.0 / self.rollout
+            loss *= 1.0 / self.max_rollout
             self._log(pl_module, loss, metrics, batch_shape[0])
 
     def on_validation_batch_end(
