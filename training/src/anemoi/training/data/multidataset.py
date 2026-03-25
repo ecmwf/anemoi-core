@@ -158,7 +158,7 @@ class MultiDataset(IterableDataset):
                 valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
 
             if len(valid_date_indices) == 0:
-                msg = f"No valid date indices found for data reader '{dataset_name}': \n{ds}"
+                msg = f"No valid date indices found for data reader '{dataset_name}': {ds}"
                 raise ValueError(msg)
 
             LOGGER.info("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))

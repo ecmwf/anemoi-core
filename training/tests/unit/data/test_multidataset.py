@@ -35,14 +35,13 @@ class TestMultiDataset:
         mock_dataset_b.frequency = "3h"
 
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
-        relative_date_indices = {"dataset_a": [-1, 0, 1], "dataset_b": [-1, 0, 1]}  # e.g. f([t, t-6h]) = t+12h
+        relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
         return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
     def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
         """Test that valid_date_indices returns the intersection of indices from all datasets."""
-        # relative_date_indices: [0, 1, 3] (for 6H timestep)
-        # data (3h) -> data_relative_time_indices: [0, 2, 6]
+        # relative_date_indices: [0, 2, 6]
         # dataset_a|b has dates [0, 1, 2, ..., 29]
         # dataset_a has indices [0, 1, 2, 3, 4, ..., 22, 23], where 23 = 29 - max(data_relative_time_indices)
         # dataset_b has missing indices {7, 8, 9, 10}
@@ -73,7 +72,9 @@ class TestMultiDataset:
         )
 
         # Accessing valid_date_indices should raise ValueError
-        with pytest.raises(ValueError, match="No valid date indices found for dataset 'dataset_b'"):
+        empty_dataset = multi_dataset.data_readers["dataset_b"]
+        err_msg = f"No valid date indices found for data reader 'dataset_b': {empty_dataset}"
+        with pytest.raises(ValueError, match=err_msg):
             _ = multi_dataset.valid_date_indices
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
@@ -97,3 +98,7 @@ class TestMultiDataset:
         # Accessing valid_date_indices should raise ValueError
         with pytest.raises(ValueError, match="No valid date indices found after intersection across all datasets"):
             _ = multi_dataset.valid_date_indices
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
