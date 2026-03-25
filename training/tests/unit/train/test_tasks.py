@@ -267,7 +267,7 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     loss, _, y_preds = training_module._step(batch, validation_mode=False)
 
     assert isinstance(loss, torch.Tensor)
-    assert len(y_preds) == task.rollout.maximum
+    assert len(y_preds) == 1
     for step_pred in y_preds:
         assert isinstance(step_pred, dict)
         assert "data" in step_pred
