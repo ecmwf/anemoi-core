@@ -151,10 +151,10 @@ The training configuration for diffusion models requires changes:
 
    # Select diffusion model task
    # For standard diffusion:
-   model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
+   training_method: anemoi.training.train.tasks.GraphDiffusionForecaster
 
    # For tendency-based diffusion:
-   model_task: anemoi.training.train.tasks.GraphDiffusionTendForecaster
+   training_method: anemoi.training.train.tasks.GraphDiffusionTendForecaster
 
    # Standard training configuration remains similar
    multistep_input: 2
@@ -236,7 +236,7 @@ A minimal config file for standard diffusion training:
 
    # Select model task for diffusion
    training:
-     model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
+     training_method: anemoi.training.train.tasks.GraphDiffusionForecaster
 
    config_validation: True
 
@@ -256,7 +256,7 @@ For tendency-based diffusion, change the model config and model task:
 
    # Select model task for tendency-based diffusion
    training:
-     model_task: anemoi.training.train.tasks.GraphDiffusionTendForecaster
+     training_method: anemoi.training.train.tasks.GraphDiffusionTendForecaster
 
    # Ensure statistics_tendencies are available
    config_validation: True
