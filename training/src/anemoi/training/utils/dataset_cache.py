@@ -143,7 +143,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         if not dist.is_initialized(): #TODO and check proc_group is valid
             raise ValueError("Torch distributed is not initalised, can't use distributed cache")
                 
-        self.rank = dist.get_rank(self.proc_group)
+        self.rank = dist.get_rank(self.proc_group) % 4 # TODO pass system.hardware.gpus_per_node here
         #self.local_rank = int(os.environ.get("SLURM_LOCALID", (int(os.environ.get("LOCAL_RANK", 0)))))
         
         #self.device = torch.device(f"cuda:{self.local_rank if self.local_rank != -1 else self.rank}" if torch.cuda.is_available() else "cpu")
@@ -297,12 +297,12 @@ class DatasetCache(AnemoiDatasetsDataModule):
         try:
             if hasattr(self, 'httpd') and self.httpd is not None:
                 LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
-                self.httpd.shutdown()
+                #self.httpd.shutdown()
                 #TODO doesnt kill server, use pkill instead
-                if hasattr(self, 'server_thread') and self.server_thread is not None:
-                    self.server_thread.join(timeout=5)
+                #if hasattr(self, 'server_thread') and self.server_thread is not None:
+                #    self.server_thread.join(timeout=5)
                 # Close the socket to free the port
-                self.httpd.server_close()
+                #self.httpd.server_close()
                 LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
         except Exception as e:
             LOGGER.warning(f"Rank {self.rank}: Error shutting down server: {e}")
