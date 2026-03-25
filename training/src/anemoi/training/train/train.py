@@ -36,8 +36,8 @@ from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import build_schema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.schemas.schema_utils import build_runtime_system
-from anemoi.training.schemas.schema_utils import resolve_lineage_run
+from anemoi.training.schemas.runtime_utils import build_runtime_system
+from anemoi.training.schemas.runtime_utils import resolve_lineage_run
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives

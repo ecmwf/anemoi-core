@@ -32,10 +32,9 @@ from anemoi.utils.schemas import BaseModel
 from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .diagnostics import DiagnosticsSchema
+from .runtime_utils import expand_paths
 from .schema_utils import apply_schema_defaults
-from .schema_utils import expand_paths
-from .schema_utils import prune_undeclared_interpolation_anchors
-from .schema_utils import undeclared_interpolation_anchor_paths
+from .schema_utils import resolve_and_prune_undeclared_interpolation_anchors
 from .system import SystemSchema
 from .training import TrainingSchema
 from .validation_errors import ConfigValidationError
@@ -181,9 +180,7 @@ def build_schema(config: DictConfig) -> BaseSchema | UnvalidatedBaseSchema:
         # After resolution, prune interpolation-anchor keys not declared in
         # schema so lenient output shape matches strict output shape.
         config_with_defaults = apply_schema_defaults(config, BaseSchema)
-        undeclared_anchor_paths = undeclared_interpolation_anchor_paths(config_with_defaults, BaseSchema)
-        OmegaConf.resolve(config_with_defaults)
-        prune_undeclared_interpolation_anchors(config_with_defaults, undeclared_anchor_paths)
+        resolve_and_prune_undeclared_interpolation_anchors(config_with_defaults, BaseSchema)
         parsed_config = UnvalidatedBaseSchema(**config_with_defaults)
         apply_runtime_postprocessing(parsed_config)
     return parsed_config
@@ -193,4 +190,3 @@ def convert_to_omegaconf(config: BaseSchema | UnvalidatedBaseSchema) -> dict:
     """Convert either schema representation back into an OmegaConf object."""
     config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
-

@@ -18,6 +18,7 @@ from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
@@ -218,31 +219,28 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
-    processor: Union[
-        NoOpProcessorSchema,
-        GNNProcessorSchema,
-        GraphTransformerProcessorSchema,
-        TransformerProcessorSchema,
-        PointWiseMLPProcessorSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
+    processor: Annotated[
+        Union[
+            NoOpProcessorSchema,
+            GNNProcessorSchema,
+            GraphTransformerProcessorSchema,
+            TransformerProcessorSchema,
+            PointWiseMLPProcessorSchema,
+        ],
+        Discriminator("target_"),
+    ]
     "GNN processor schema."
-    encoder: Union[GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema] = Field(
-        ...,
-        discriminator="target_",
-    )
+    encoder: Annotated[
+        Union[GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema],
+        Discriminator("target_"),
+    ]
     "GNN encoder schema."
-    decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema, TransformerDecoderSchema] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN decoder schema.",
-    residual: ResidualConnectionSchema = Field(
-        ...,
-        discriminator="target_",
-    )
+    decoder: Annotated[
+        Union[GNNDecoderSchema, GraphTransformerDecoderSchema, TransformerDecoderSchema],
+        Discriminator("target_"),
+    ]
+    "GNN decoder schema."
+    residual: ResidualConnectionSchema
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"

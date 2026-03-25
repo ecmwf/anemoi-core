@@ -12,6 +12,8 @@ import datetime
 from pathlib import Path
 from typing import Any
 
+from typing import ClassVar
+
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -56,9 +58,17 @@ class Frequency(RootModel):
 
 
 class DatasetConfigSchema(PydanticBaseModel):
-    """Dictionary-style dataset config passed directly to open_dataset."""
+    """Dictionary-style dataset config passed directly to open_dataset.
+
+    The ``_skip_null_defaults`` marker tells ``schema_defaults`` not to inject
+    ``None`` for optional fields that are absent from the user config.  This is
+    required because ``open_dataset`` is called with ``**dataset_config`` and
+    cannot handle explicit ``None`` keyword arguments (e.g. ``select=None``
+    is treated as a list containing ``None`` rather than "no selection").
+    """
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    _skip_null_defaults: ClassVar[bool] = True
 
     dataset: str | Path | dict | list[dict]
     "Dataset source identifier."
@@ -73,6 +83,11 @@ class DatasetConfigSchema(PydanticBaseModel):
 
     # Note this should be extended in the future to have a full schema for the keys
     # supported by open_dataset and be moved to anemoi-datasets.
+
+    def model_dump(self, **kwargs: Any) -> dict:
+        """Exclude None kwargs — open_dataset does not accept None-valued arguments."""
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(**kwargs)
 
 
 class NativeDatasetSchema(BaseModel):
