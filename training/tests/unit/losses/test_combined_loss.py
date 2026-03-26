@@ -211,9 +211,9 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
         target_layout=IndexSpace.DATA_FULL,
     )
 
-    # First subloss (weight=1): grid=4, per-var MSE×dynamic=[1×2, 0×3, 4×5]=[2,0,20] → sum=22×4=88
-    # Second subloss (weight=0.5): 9×dynamic[tp]=9×2=18 per point, ×4=72 → 72×0.5=36
-    # Total: 88 + 36 = 124
+    # First subloss (weight=1): grid=4, per-var MSE*dynamic=[1*2, 0*3, 4*5]=[2,0,20] -> sum=22*4=88
+    # Second subloss (weight=0.5): 9*dynamic[tp]=9*2=18 per point, *4=72 -> 72*0.5=36
+    # Expected total: 124
     torch.testing.assert_close(out, torch.tensor(124.0))
 
 
