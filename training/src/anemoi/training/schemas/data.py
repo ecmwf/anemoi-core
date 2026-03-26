@@ -13,8 +13,6 @@ from __future__ import annotations
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
-from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC002
-
 
 class DatasetDataSchema(PydanticBaseModel):
     """A class used to represent the configuration of a single dataset."""
@@ -30,9 +28,6 @@ class DatasetDataSchema(PydanticBaseModel):
         "but have a different role. Such that: prognostic = diagnostic - forcing.union(target)."
     )
 
-    processors: dict[str, PreprocessorSchema]
-    "Layers of model performing computation on latent space. \
-        Processors including imputers and normalizers are applied in order of definition. (single dataset mode)"
 
 
 class DataSchema(PydanticBaseModel):

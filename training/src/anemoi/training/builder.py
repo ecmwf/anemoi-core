@@ -113,7 +113,7 @@ def _build_processors_for_dataset(
 
 
 def _build_processors(
-    datasets_config: DictConfig,
+    processors_config: DictConfig,
     statistics: dict,
     data_indices: dict,
     statistics_tendencies: dict | None,
@@ -126,7 +126,7 @@ def _build_processors(
     post_processors_tendencies = torch.nn.ModuleDict()
     for dataset_name in statistics:
         pre, post, pre_tend, post_tend = _build_processors_for_dataset(
-            datasets_config[dataset_name].processors,
+            processors_config[dataset_name],
             statistics[dataset_name],
             data_indices[dataset_name],
             statistics_tendencies[dataset_name] if statistics_tendencies is not None else None,
@@ -149,7 +149,7 @@ def build_anemoi_model(
     *,
     runtime_artifacts: RuntimeArtifacts,
     backbone: DictConfig,
-    datasets: DictConfig,
+    processors: DictConfig,
     multistep_input: int,
     multistep_output: int | None = None,
     **model_arch_kwargs,
@@ -157,7 +157,7 @@ def build_anemoi_model(
     """Build and return a fully constructed AnemoiModel.
 
     Called by Hydra instantiate(config.model, runtime_artifacts=...) from train.py.
-    YAML kwargs (backbone, datasets, multistep_input, multistep_output, **model_arch_kwargs)
+    YAML kwargs (backbone, processors, multistep_input, multistep_output, **model_arch_kwargs)
     come from OmegaConf interpolations in the model yaml.
     runtime_artifacts is injected from Python — not declared in the YAML.
     """
@@ -170,7 +170,6 @@ def build_anemoi_model(
     model_config = OmegaConf.create({
         "model": {
             "backbone": _to_container(backbone),
-            "datasets": _to_container(datasets),
             "multistep_input": multistep_input,
             "multistep_output": multistep_output if multistep_output is not None else 1,
             **{k: _to_container(v) for k, v in model_arch_kwargs.items()},
@@ -179,7 +178,7 @@ def build_anemoi_model(
 
     # Build processors
     pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies = _build_processors(
-        datasets_config=datasets,
+        processors_config=processors,
         statistics=runtime_artifacts.statistics,
         data_indices=runtime_artifacts.data_indices,
         statistics_tendencies=runtime_artifacts.statistics_tendencies,

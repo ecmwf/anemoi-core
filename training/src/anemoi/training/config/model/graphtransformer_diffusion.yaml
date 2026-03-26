@@ -1,10 +1,11 @@
+defaults:
+  - /processors@processors: default
+
 _target_: anemoi.training.builder.build_anemoi_model
 _recursive_: false
 
 multistep_input: ${training.multistep_input}
 multistep_output: ${training.multistep_output}
-
-datasets: ${data.datasets}
 
 
 num_channels: 1024
