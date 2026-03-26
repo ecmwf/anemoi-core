@@ -23,9 +23,28 @@ from pydantic import PositiveInt
 from pydantic import field_validator
 from pydantic import model_validator
 
+from pydantic import ConfigDict
+
 from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
+
+
+class GenericSchema(BaseModel):
+    """Generic Hydra instantiation schema with a required _target_ and arbitrary extra fields."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    target_: str = Field(alias="_target_")
+    """Hydra target class or function to instantiate."""
+
+
+class OptimizerSchema(GenericSchema):
+    """Hydra instantiation config for a PyTorch optimizer."""
+
+
+class LRSchedulerSchema(GenericSchema):
+    """Hydra instantiation config for a learning rate scheduler."""
 
 
 class GradientClip(BaseModel):
@@ -67,9 +86,9 @@ class OptimizationSchema(BaseModel):
 
     lr: NonNegativeFloat = Field(example=0.625e-4)
     "Base learning rate per GPU. Scaled by hardware config at runtime."
-    optimizer: dict[str, Any]
+    optimizer: OptimizerSchema
     """Hydra instantiation config for the optimizer."""
-    lr_scheduler: dict[str, Any] | None = None
+    lr_scheduler: LRSchedulerSchema | None = None
     """Hydra instantiation config for the LR scheduler. If None, no scheduler is used."""
     pl_lr_scheduler: dict[str, Any] | None = None
     """PyTorch Lightning LRSchedulerConfig wrapper fields (interval, monitor, etc.)."""
