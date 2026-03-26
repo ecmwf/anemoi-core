@@ -250,13 +250,9 @@ class ExperimentalSamplerScheduler(NoiseScheduler):
         super().__init__(sigma_max, sigma_min, num_steps)
 
         if sigma_transition <= sigma_min:
-            raise ValueError(
-                f"sigma_transition must be greater than sigma_min, got {sigma_transition} <= {sigma_min}"
-            )
+            raise ValueError(f"sigma_transition must be greater than sigma_min, got {sigma_transition} <= {sigma_min}")
         if sigma_transition >= sigma_max:
-            raise ValueError(
-                f"sigma_transition must be smaller than sigma_max, got {sigma_transition} >= {sigma_max}"
-            )
+            raise ValueError(f"sigma_transition must be smaller than sigma_max, got {sigma_transition} >= {sigma_max}")
 
         default_low = num_steps // 2
         default_high = num_steps - default_low
