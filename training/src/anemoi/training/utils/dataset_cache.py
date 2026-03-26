@@ -367,7 +367,8 @@ class DatasetCache(AnemoiDatasetsDataModule):
 
         # Convert numpy values to Python int and filter out -1
         cache_hits = [int(x) for x in cache_subset if int(x) != -1]
-        LOGGER.info(f"{self.rank=} {self.cache_registry=} {cache_subset=} {cache_hits=}")
+        #LOGGER.info(f"{self.rank=} {self.cache_registry=} {cache_subset=} {cache_hits=}")
+        LOGGER.info(f"{self.rank=} {cache_subset=} {cache_hits=}")
         return cache_hits
 
     def fetch(self, date, verbose=False) -> np.ndarray:
