@@ -1,0 +1,5 @@
+---
+defaults:
+  - input: hindcast_o320
+  - output: diffusiondownscaling
+  - hardware: slurm

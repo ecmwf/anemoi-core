@@ -75,6 +75,63 @@ class SkipConnection(BaseResidualConnection):
         return self._expand_time(x_skip, n_step_output)
 
 
+class InterpolationConnection(BaseResidualConnection):
+    """Interpolation connection for upsampling/downsampling between different grids.
+
+    This applies a single sparse projection to transform from one grid resolution to another.
+    Unlike TruncatedConnection which does down-then-up, this does a single projection.
+
+    Parameters
+    ----------
+    graph : HeteroData, optional
+        Not used (kept for compatibility)
+    interpolation_file_path : str
+        Path to .npz file containing the interpolation matrix
+    step : int, default -1
+        Which timestep to select before interpolation
+    autocast : bool, default False
+        Whether to use automatic mixed precision
+    row_normalize : bool, default False
+        Whether to normalize weights per row
+    """
+
+    def __init__(
+        self,
+        interpolation_file_path: str,
+        step: int = -1,
+        autocast: bool = False,
+        row_normalize: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        self.step = step
+
+        self.provider = ProjectionGraphProvider(
+            graph=None,
+            edges_name=None,
+            file_path=interpolation_file_path,
+            row_normalize=row_normalize,
+        )
+
+        self.projector = SparseProjector(autocast=autocast)
+
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
+        """Apply interpolation from source to target resolution."""
+        batch_size = x.shape[0]
+        x = x[:, self.step, ...]  # pick timestep
+
+        # Reshape: (batch, time, grid, features) → (batch*time, grid, features)
+        x = einops.rearrange(x, "batch time grid features -> (batch time) grid features")
+
+        # Apply single interpolation projection
+        x = self.projector(x, self.provider.get_edges(device=x.device))
+
+        # Reshape back: (batch*time, grid, features) → (batch, time, grid, features)
+        x = einops.rearrange(x, "(batch time) grid features -> batch time grid features", batch=batch_size)
+
+        return x
+
+
 class TruncatedConnection(BaseResidualConnection):
     """Truncated skip connection
 

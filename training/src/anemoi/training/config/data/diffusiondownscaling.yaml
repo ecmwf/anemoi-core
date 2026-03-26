@@ -1,0 +1,64 @@
+format: zarr
+frequency: 1h
+timestep: ${data.frequency}
+
+datasets:
+  in_lres:
+    forcing:
+    diagnostic: [] # [tp, cp]
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          min-max:
+          max:
+          none:
+
+  in_hres:
+    forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    diagnostic: []
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          min-max:
+          max:
+          none:
+          - "cos_latitude"
+          - "cos_longitude"
+          - "sin_latitude"
+          - "sin_longitude"
+          - "cos_julian_day"
+          - "cos_local_time"
+          - "sin_julian_day"
+          - "sin_local_time"
+
+  out_hres:
+    forcing:
+    diagnostic: []
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          min-max:
+          max:
+          none:
+
+
+
+# Values set in the code
+num_features: null # number of features in the forecast state

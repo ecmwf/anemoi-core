@@ -39,7 +39,7 @@ classifiers = [
 dynamic = [ "version" ]
 
 dependencies = [
-  "anemoi-datasets>=0.5.13",
+  "anemoi-datasets @ git+https://github.com/ecmwf/anemoi-datasets.git@feature/fake-hindcasts",
   "anemoi-graphs>=0.5.2",
   "anemoi-models[migrations]>=0.9.5",
   "anemoi-transform>=0.1.11",
