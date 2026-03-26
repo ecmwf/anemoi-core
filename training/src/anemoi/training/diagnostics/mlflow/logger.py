@@ -40,6 +40,7 @@ from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
+from anemoi.utils.mlflow.auth import AuthBase
 from anemoi.utils.mlflow.auth import TokenAuth
 from anemoi.utils.mlflow.utils import health_check
 
@@ -249,6 +250,8 @@ class LogsMonitor:
 class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
     """A custom MLflow logger that logs terminal output."""
 
+    auth: AuthBase  # set by `_init_authentication`
+
     def __init__(
         self,
         experiment_name: str = "lightning_logs",
@@ -434,6 +437,10 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
     ) -> tuple[str | None, str, dict[str, Any]]:
         run_id = None
         tags = {"projectName": project_name}
+
+        if info := self.auth.user_info():
+            tags["train.user"] = info.name
+            tags["train.username"] = info.username
 
         # create a tag with the command used to run the script
         command = os.environ.get("ANEMOI_TRAINING_CMD", sys.argv[0])
