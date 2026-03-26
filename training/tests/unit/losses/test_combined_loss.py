@@ -198,10 +198,10 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
     # target shape: (batch=1, ens=1, step=1, grid=4, data_full_vars=5)
     pred = torch.full((1, 1, 1, 4, 3), 2.0)
     target = torch.zeros((1, 1, 1, 4, 5))
-    target[..., 0] = 1.0   # tp: (2-1)²=1
-    target[..., 2] = 2.0   # t2m: (2-2)²=0
-    target[..., 3] = 4.0   # msl: (2-4)²=4
-    target[..., 4] = 5.0   # imerg: (2-5)²=9 for second subloss
+    target[..., 0] = 1.0  # tp: (2-1)²=1
+    target[..., 2] = 2.0  # t2m: (2-2)²=0
+    target[..., 3] = 4.0  # msl: (2-4)²=4
+    target[..., 4] = 5.0  # imerg: (2-5)²=9 for second subloss
 
     out = loss(
         pred,
