@@ -62,6 +62,79 @@ class NoiseScheduler(ABC):
         pass
 
 
+def _karras_segment(
+    sigma_start: float,
+    sigma_end: float,
+    num_points: int,
+    *,
+    rho: float,
+    device: torch.device = None,
+    dtype_compute: torch.dtype = torch.float64,
+) -> torch.Tensor:
+    """Return a positive sigma segment including both endpoints."""
+    if num_points <= 1:
+        return torch.tensor([sigma_start], device=device, dtype=dtype_compute)
+
+    step_indices = torch.arange(num_points, device=device, dtype=dtype_compute)
+    return (
+        sigma_start ** (1.0 / rho)
+        + step_indices / (num_points - 1.0) * (sigma_end ** (1.0 / rho) - sigma_start ** (1.0 / rho))
+    ) ** rho
+
+
+def _exponential_segment(
+    sigma_start: float,
+    sigma_end: float,
+    num_points: int,
+    *,
+    device: torch.device = None,
+    dtype_compute: torch.dtype = torch.float64,
+) -> torch.Tensor:
+    """Return a positive sigma segment including both endpoints."""
+    if num_points <= 1:
+        return torch.tensor([sigma_start], device=device, dtype=dtype_compute)
+
+    log_sigmas = torch.linspace(
+        torch.log(torch.tensor(sigma_start, device=device, dtype=dtype_compute)),
+        torch.log(torch.tensor(sigma_end, device=device, dtype=dtype_compute)),
+        num_points,
+        device=device,
+        dtype=dtype_compute,
+    )
+    return torch.exp(log_sigmas)
+
+
+def _build_segment(
+    schedule_type: str,
+    sigma_start: float,
+    sigma_end: float,
+    num_points: int,
+    *,
+    rho: float = 7.0,
+    device: torch.device = None,
+    dtype_compute: torch.dtype = torch.float64,
+) -> torch.Tensor:
+    """Build a positive sigma segment for a supported schedule type."""
+    if schedule_type == "karras":
+        return _karras_segment(
+            sigma_start,
+            sigma_end,
+            num_points,
+            rho=rho,
+            device=device,
+            dtype_compute=dtype_compute,
+        )
+    if schedule_type == "exponential":
+        return _exponential_segment(
+            sigma_start,
+            sigma_end,
+            num_points,
+            device=device,
+            dtype_compute=dtype_compute,
+        )
+    raise ValueError(f"Unsupported schedule_type for piecewise segment: {schedule_type}")
+
+
 class KarrasScheduler(NoiseScheduler):
     """Karras et al. EDM schedule."""
 
@@ -82,7 +155,7 @@ class KarrasScheduler(NoiseScheduler):
             / (self.num_steps - 1.0)
             * (self.sigma_min ** (1.0 / self.rho) - self.sigma_max ** (1.0 / self.rho))
         ) ** self.rho
-
+        sigmas = torch.cat([torch.as_tensor(sigmas), torch.zeros_like(sigmas[:1])])
         return sigmas
 
 
@@ -145,6 +218,92 @@ class ExponentialScheduler(NoiseScheduler):
         )
         sigmas = torch.exp(log_sigmas)
 
+        return sigmas
+
+
+class ExperimentalSamplerScheduler(NoiseScheduler):
+    """Piecewise scheduler for aggressive high-sigma collapse and denser low-sigma refinement.
+
+    The schedule is split into two segments:
+    - high segment: typically exponential from ``sigma_max`` to ``sigma_transition``
+    - low segment: typically Karras/EDM from ``sigma_transition`` to ``sigma_min``, then terminal zero
+
+    This is exposed through the noise-scheduler registry under ``experimental_sampler`` to match
+    the existing inference config plumbing, even though it is semantically a scheduler.
+    """
+
+    def __init__(
+        self,
+        sigma_max: float,
+        sigma_min: float,
+        num_steps: int,
+        sigma_transition: float = 10.0,
+        high_schedule_type: str = "exponential",
+        low_schedule_type: str = "karras",
+        num_steps_high: int | None = None,
+        num_steps_low: int | None = None,
+        rho: float = 7.0,
+        rho_high: float | None = None,
+        rho_low: float | None = None,
+        **kwargs,
+    ):
+        super().__init__(sigma_max, sigma_min, num_steps)
+
+        if sigma_transition <= sigma_min:
+            raise ValueError(
+                f"sigma_transition must be greater than sigma_min, got {sigma_transition} <= {sigma_min}"
+            )
+        if sigma_transition >= sigma_max:
+            raise ValueError(
+                f"sigma_transition must be smaller than sigma_max, got {sigma_transition} >= {sigma_max}"
+            )
+
+        default_low = num_steps // 2
+        default_high = num_steps - default_low
+        self.num_steps_high = default_high if num_steps_high is None else num_steps_high
+        self.num_steps_low = default_low if num_steps_low is None else num_steps_low
+
+        if self.num_steps_high < 1 or self.num_steps_low < 1:
+            raise ValueError(
+                f"num_steps_high and num_steps_low must both be >= 1, got {self.num_steps_high}, {self.num_steps_low}"
+            )
+        if self.num_steps_high + self.num_steps_low != num_steps:
+            raise ValueError(
+                "num_steps_high + num_steps_low must equal num_steps, got "
+                f"{self.num_steps_high} + {self.num_steps_low} != {num_steps}"
+            )
+
+        self.sigma_transition = sigma_transition
+        self.high_schedule_type = high_schedule_type
+        self.low_schedule_type = low_schedule_type
+        self.rho_high = rho if rho_high is None else rho_high
+        self.rho_low = rho if rho_low is None else rho_low
+
+    def get_schedule(
+        self,
+        device: torch.device = None,
+        dtype_compute: torch.dtype = torch.float64,
+        **kwargs,
+    ) -> torch.Tensor:
+        high = _build_segment(
+            self.high_schedule_type,
+            self.sigma_max,
+            self.sigma_transition,
+            self.num_steps_high + 1,
+            rho=self.rho_high,
+            device=device,
+            dtype_compute=dtype_compute,
+        )
+        low = _build_segment(
+            self.low_schedule_type,
+            self.sigma_transition,
+            self.sigma_min,
+            self.num_steps_low,
+            rho=self.rho_low,
+            device=device,
+            dtype_compute=dtype_compute,
+        )
+        sigmas = torch.cat([high, low[1:], torch.zeros(1, device=device, dtype=dtype_compute)])
         return sigmas
 
 
@@ -382,6 +541,8 @@ NOISE_SCHEDULERS = {
     "linear": LinearScheduler,
     "cosine": CosineScheduler,
     "exponential": ExponentialScheduler,
+    "experimental_sampler": ExperimentalSamplerScheduler,
+    "experimental_piecewise": ExperimentalSamplerScheduler,
 }
 
 DIFFUSION_SAMPLERS = {
