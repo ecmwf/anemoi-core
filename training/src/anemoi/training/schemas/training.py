@@ -15,6 +15,7 @@ from typing import Literal
 from typing import Self
 
 from pydantic import AfterValidator
+from pydantic import ConfigDict
 from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -22,8 +23,6 @@ from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 from pydantic import field_validator
 from pydantic import model_validator
-
-from pydantic import ConfigDict
 
 from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
