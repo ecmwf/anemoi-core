@@ -168,7 +168,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # Handle dictionary of graph_data
         graph_data = graph_data.to(self.device)
-        self.dataset_names = list(data_indices.keys())
+        data_nodes = model.data_nodes_name
+        self.dataset_names = [data_nodes] if isinstance(data_nodes, str) else list(data_nodes)
 
         # Create output_mask dictionary for each dataset
         self.output_mask = {
@@ -282,9 +283,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.shard_shapes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[dataset_name][
-                self.config.graph.data
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
+            self.grid_sizes[dataset_name] = graph_data[dataset_name].num_nodes
             self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
                 reader_group_size,

@@ -72,6 +72,8 @@ class Model(BaseModel):
     "Model object defined in anemoi.models.model."
     hidden_nodes_name: str | list[str] = Field(examples=["hidden", ["hidden1", "hidden2"]])
     "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
+    data_nodes_name: str | list[str] = Field(examples=["data", ["data1", "data2"]])
+    "Name of the data nodes. If multi-dataset, it can be a list of names."
     latent_skip: bool = Field(default=True)
     "Add skip connection in latent space before/after processor."
     convert_: str = Field("all", alias="_convert_")

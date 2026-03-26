@@ -36,10 +36,12 @@ class NaiveModel(torch.nn.Module):
         n_output: int,
         n_step_input: int,
         n_step_output: int,
+        data_nodes_name: str | list[str] = "data",
         **_,
     ) -> None:
         super().__init__()
 
+        self.data_nodes_name = data_nodes_name
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
         self._n_output = n_output

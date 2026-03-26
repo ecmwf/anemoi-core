@@ -64,6 +64,8 @@ class BaseGraphModel(nn.Module):
 
         model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.backbone.hidden_nodes_name
+        self.hidden_nodes_name = self._graph_name_hidden
+        self.data_nodes_name = model_config.model.backbone.data_nodes_name
 
         self.n_step_input = model_config.model.multistep_input
         self.n_step_output = model_config.model.multistep_output
@@ -73,13 +75,13 @@ class BaseGraphModel(nn.Module):
         trainable_parameters = broadcast_config_keys(
             model_config.model.trainable_parameters,
             data=self.dataset_names,
-            hidden=self._graph_name_hidden,
+            hidden=self.hidden_nodes_name,
         )
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
-        self._assert_hidden_nodes_name(self._graph_name_hidden)
+        self._assert_hidden_nodes_name(self.hidden_nodes_name)
 
         # build networks
         self._build_networks(model_config)
@@ -129,7 +131,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
+        nodes_name = self.hidden_nodes_name if isinstance(self.hidden_nodes_name, str) else self.hidden_nodes_name[0]
         return self.node_attributes.attr_ndims[nodes_name]
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:

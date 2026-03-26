@@ -16,6 +16,7 @@ keep_batch_sharded: True
 
 backbone:
   _target_: anemoi.models.models.AnemoiDiffusionTendModelEncProcDec
+  data_nodes_name: "data"
   hidden_nodes_name: "hidden"
   latent_skip: True
   # Diffusion parameters

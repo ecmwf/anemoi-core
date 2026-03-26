@@ -19,6 +19,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 class ModelInterface(Protocol):
     """Interface for Anemoi models."""
 
+    data_nodes_name: str | list[str]
+    "Name(s) of data nodes in the graph. The model declares which graph nodes it uses."
+
     def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Apply pre-processing (e.g. normalisation) to model inputs."""
         ...

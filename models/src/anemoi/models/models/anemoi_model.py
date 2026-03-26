@@ -62,6 +62,8 @@ class AnemoiModel(torch.nn.Module):
             graph_data=graph_data,
             _recursive_=False,
         )
+        self.data_nodes_name = self.backbone.data_nodes_name
+        self.hidden_nodes_name = self.backbone.hidden_nodes_name
 
     def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         return {name: self.pre_processors[name](x[name], in_place=False) for name in x}
