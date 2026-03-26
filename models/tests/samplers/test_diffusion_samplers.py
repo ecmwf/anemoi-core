@@ -21,7 +21,6 @@ from anemoi.models.samplers.diffusion_samplers import EDMHeunSampler
 from anemoi.models.samplers.diffusion_samplers import ExperimentalSamplerScheduler
 from anemoi.models.samplers.diffusion_samplers import KarrasScheduler
 
-
 # ============================================================
 # Helpers
 # ============================================================
@@ -97,8 +96,12 @@ def test_dpmpp2m_sampler_basic():
 def test_piecewise_schedule():
     """ExperimentalSamplerScheduler: monotonic, correct endpoints, transition point, terminal zero."""
     sched = ExperimentalSamplerScheduler(
-        sigma_max=100000.0, sigma_min=0.02, num_steps=30,
-        sigma_transition=10.0, num_steps_high=10, num_steps_low=20,
+        sigma_max=100000.0,
+        sigma_min=0.02,
+        num_steps=30,
+        sigma_transition=10.0,
+        num_steps_high=10,
+        num_steps_low=20,
     )
     sigmas = sched.get_schedule()
 

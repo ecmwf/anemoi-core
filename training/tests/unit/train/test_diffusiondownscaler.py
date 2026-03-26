@@ -17,7 +17,6 @@ from omegaconf import DictConfig
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.tasks.diffusiondownscaler import GraphDiffusionDownscaler
 
-
 # ============================================================
 # Helpers
 # ============================================================
@@ -73,7 +72,12 @@ def test_get_noise_level_dict():
 
     shape = {"out_hres": (4, 1, 1, 1, 1)}
     sigma, weight = ds._get_noise_level(
-        shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
+        shape=shape,
+        sigma_max=100000.0,
+        sigma_min=0.02,
+        sigma_data=1.0,
+        rho=7.0,
+        device=torch.device("cpu"),
     )
     assert isinstance(sigma, dict) and "out_hres" in sigma
     assert sigma["out_hres"].shape == (4, 1, 1, 1, 1)
