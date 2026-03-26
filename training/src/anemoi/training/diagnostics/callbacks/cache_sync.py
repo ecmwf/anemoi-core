@@ -3,6 +3,7 @@
 import logging
 
 import pytorch_lightning as pl
+import torch.distributed as dist
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ class CacheSyncCallback(pl.Callback):
         self.cache=cache # need to consume cache arg
 
     def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """Called when the validation epoch ends."""
+    #def on_train_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, outputs, batch, batch_idx) -> None:
         if not self.sync_done:
             # Check if datamodule has the cache functionality
             if hasattr(trainer.datamodule, "update_global_view"):

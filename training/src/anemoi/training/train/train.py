@@ -30,7 +30,6 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 
-from anemoi.training.diagnostics.callbacks.cache_sync import CacheSyncCallback
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
@@ -621,7 +620,6 @@ class AnemoiTrainer(ABC):
             #breakpoint()
             dataset_path=f"{self.config.system.input.dataset}"
             self.datamodule = DatasetCache(ds=self.datamodule, cache_root=self.config.system.hardware.cache_dir, dataset_path=dataset_path)
-            #self.datamodule.ds_train = DatasetCache(ds=self.datamodule.ds_train, cache_root=self.config.hardware.paths.cache_dir, dataset_path=self.config.hardware.paths.data)
 
         self.prepare_compilation()
 

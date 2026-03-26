@@ -172,7 +172,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         # once the dataset is loaded, this will become an array of len(dates) where the value corresponds to which processes cache a file is in
         # -1 => filesystem
-        self.global_cache_registry=None
         self.cache_registry=None
         self._init_cache()
        
@@ -240,7 +239,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         if self.cache_registry is None:
             # Keep cache_registry on CPU with shared memory for DataLoader worker access
-            self.cache_registry = torch.zeros(dates, dtype=torch.int32, device='cpu')
+            self.cache_registry = torch.zeros(dates, dtype=torch.int32, device='cpu').share_memory_()
             self.cache_registry[:] = -1
             LOGGER.info(f"Rank {self.rank}: Created cache registry on CPU with shared memory for {dates} dates")
             
@@ -347,31 +346,11 @@ class DatasetCache(AnemoiDatasetsDataModule):
         LOGGER.info(f"Starting all gather (local cache registry: {self.cache_registry})")
         dist.all_gather(all_gather_buffer, self.cache_registry, group=self.proc_group)
 
-        self.global_cache_registry = self.priority_reduce(torch.stack(all_gather_buffer), self.cache_registry, self.rank)
-        num_cached = (self.global_cache_registry != -1).sum().item()
-        LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {(self.global_cache_registry != -1).sum().item()} cached items across all ranks ({self.global_cache_registry=})")
+        self.cache_registry.copy_(self.priority_reduce(torch.stack(all_gather_buffer), self.cache_registry, self.rank))
+        num_cached = (self.cache_registry != -1).sum().item()
+        LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {(self.cache_registry != -1).sum().item()} cached items across all ranks ({self.cache_registry=})")
 
 
-    def print_cache_stats(self) -> None:
-        """Print cache statistics."""
-        total = self.total_fetches.value
-        
-        if total == 0:
-            LOGGER.info(f"Rank {self.rank}: No cache accesses yet")
-            return
-        
-        hit_rate_local = (self.cache_hits_local.value / total) * 100 if total > 0 else 0
-        hit_rate_remote = (self.cache_hits_remote.value / total) * 100 if total > 0 else 0
-        miss_rate = (self.cache_misses.value / total) * 100 if total > 0 else 0
-        
-        LOGGER.info(f"Rank {self.rank}: Cache Statistics:")
-        LOGGER.info(f"  Total fetches: {total}")
-        LOGGER.info(f"  Local hits: {self.cache_hits_local.value} ({hit_rate_local:.1f}%)")
-        LOGGER.info(f"  Remote hits: {self.cache_hits_remote.value} ({hit_rate_remote:.1f}%)")
-        LOGGER.info(f"  Misses: {self.cache_misses.value} ({miss_rate:.1f}%)")
-        LOGGER.info(f"  Items in local cache: {(self.cache_registry != -1).sum().item()}")
-        
-            
     def _get_remote_cache_url(self, remote_rank):
         remote_host = self._get_hostname(remote_rank)
         port = self.root_port + remote_rank
@@ -383,16 +362,12 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
     def check_cache(self, date) -> list[int]:
         """ checks either local or global registry. returns list of procs containing file in their SSD"""
-        if self.global_cache_registry is not None:
-            # Slice from torch tensor → convert to 1D numpy array
-            cache_subset = self.global_cache_registry[:, date].detach().cpu().numpy().ravel()
-        else:
-            # Local cache registry is a torch tensor
-            cache_subset = [self.cache_registry[date].item()]
+        # Local cache registry is a torch tensor
+        cache_subset = [self.cache_registry[date].item()]
 
         # Convert numpy values to Python int and filter out -1
         cache_hits = [int(x) for x in cache_subset if int(x) != -1]
-        #LOGGER.info(f"{self.rank=} {cache_hits=}")
+        LOGGER.info(f"{self.rank=} {self.cache_registry=} {cache_subset=} {cache_hits=}")
         return cache_hits
 
     def fetch(self, date, verbose=False) -> np.ndarray:
