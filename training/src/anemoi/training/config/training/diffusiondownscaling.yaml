@@ -25,9 +25,9 @@ swa:
 # keep multids-style optimizer factory (do NOT revert to optimizer.kwargs unless you also revert the codepath)
 optimizer:
   _target_: torch.optim.AdamW
-  weight_decay: 0.1
+  weight_decay: 0.01
   betas: [0.9, 0.95]
-  eps: 1e-7
+  eps: 1e-8
 
 # switch task to downscaler
 model_task: anemoi.training.train.tasks.GraphDiffusionDownscaler
@@ -100,8 +100,8 @@ max_steps: 1000000
 lr:
   warmup: 1000
   rate: 10e-4            # ported from your config
-  iterations: ${training.max_steps}
-  min: 3e-7
+  iterations: 100000
+  min: 0
 
 submodules_to_freeze: []
 

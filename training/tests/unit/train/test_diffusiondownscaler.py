@@ -118,46 +118,34 @@ class TestGetNoiseLevel:
         return ds
 
     def test_probabilistic_low_noise(self, downscaler):
-        shape = (4, 1, 1, 1, 1)
+        shape = {"out_hres": (4, 1, 1, 1, 1)}
         sigma, weight = downscaler._get_noise_level(
             shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
         )
-        assert sigma.shape == shape
-        assert weight.shape == shape
-        assert (sigma > 0).all()
-        assert (weight > 0).all()
+        assert isinstance(sigma, dict) and "out_hres" in sigma
+        assert isinstance(weight, dict) and "out_hres" in weight
+        assert sigma["out_hres"].shape == (4, 1, 1, 1, 1)
+        assert weight["out_hres"].shape == (4, 1, 1, 1, 1)
+        assert (sigma["out_hres"] > 0).all()
+        assert (weight["out_hres"] > 0).all()
 
     def test_probabilistic_high_noise(self, downscaler):
         downscaler.training_approach = "probabilistic_high_noise"
-        shape = (4, 1, 1, 1, 1)
+        shape = {"out_hres": (4, 1, 1, 1, 1)}
         sigma, weight = downscaler._get_noise_level(
             shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
         )
-        assert sigma.shape == shape
-        assert (sigma >= 0.02).all()
-        assert (sigma <= 100000.0).all()
+        assert sigma["out_hres"].shape == (4, 1, 1, 1, 1)
+        assert (sigma["out_hres"] >= 0.02).all()
+        assert (sigma["out_hres"] <= 100000.0).all()
 
     def test_deterministic(self, downscaler):
         downscaler.training_approach = "deterministic"
-        shape = (4, 1, 1, 1, 1)
+        shape = {"out_hres": (4, 1, 1, 1, 1)}
         sigma, weight = downscaler._get_noise_level(
             shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
         )
-        assert torch.allclose(sigma, torch.full(shape, 500000.0))
-
-    def test_sigma_override(self, downscaler):
-        shape = (4, 1, 1, 1, 1)
-        override_val = 42.0
-        sigma, weight = downscaler._get_noise_level(
-            shape=shape,
-            sigma_max=100000.0,
-            sigma_min=0.02,
-            sigma_data=1.0,
-            rho=7.0,
-            device=torch.device("cpu"),
-            sigma_override=override_val,
-        )
-        assert torch.allclose(sigma, torch.full(shape, override_val))
+        assert torch.allclose(sigma["out_hres"], torch.full((4, 1, 1, 1, 1), 500000.0))
 
 
 # ============================================================
@@ -216,31 +204,32 @@ class TestNoiseTarget:
 
     def test_noise_adds_gaussian(self):
         ds = GraphDiffusionDownscaler.__new__(GraphDiffusionDownscaler)
-        x = torch.zeros(2, 1, 1, 10, 3)
-        sigma = torch.ones(2, 1, 1, 1, 1)
+        x = {"out_hres": torch.zeros(2, 1, 1, 10, 3)}
+        sigma = {"out_hres": torch.ones(2, 1, 1, 1, 1)}
 
         torch.manual_seed(42)
         result = ds._noise_target(x, sigma)
 
+        assert isinstance(result, dict) and "out_hres" in result
         # With x=0, result should be ~ N(0, sigma) = N(0, 1)
-        assert result.shape == x.shape
+        assert result["out_hres"].shape == x["out_hres"].shape
         # The noise should be non-zero
-        assert not torch.allclose(result, x)
+        assert not torch.allclose(result["out_hres"], x["out_hres"])
 
     def test_noise_scales_with_sigma(self):
         ds = GraphDiffusionDownscaler.__new__(GraphDiffusionDownscaler)
-        x = torch.zeros(2, 1, 1, 10, 3)
+        x = {"out_hres": torch.zeros(2, 1, 1, 10, 3)}
 
         torch.manual_seed(42)
-        sigma_small = torch.full((2, 1, 1, 1, 1), 0.01)
+        sigma_small = {"out_hres": torch.full((2, 1, 1, 1, 1), 0.01)}
         result_small = ds._noise_target(x, sigma_small)
 
         torch.manual_seed(42)
-        sigma_large = torch.full((2, 1, 1, 1, 1), 100.0)
+        sigma_large = {"out_hres": torch.full((2, 1, 1, 1, 1), 100.0)}
         result_large = ds._noise_target(x, sigma_large)
 
         # Larger sigma should produce larger magnitude noise
-        assert result_large.abs().mean() > result_small.abs().mean()
+        assert result_large["out_hres"].abs().mean() > result_small["out_hres"].abs().mean()
 
 
 # ============================================================
