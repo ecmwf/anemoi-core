@@ -176,7 +176,11 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             grid_shard_shapes=None,
             model_comm_group=self.model_comm_group,
         )[
-            :, :, None, :, :,
+            :,
+            :,
+            None,
+            :,
+            :,
         ]  # Add ensemble dim: (batch, time, ensemble=1, grid, features)
 
         # Compute training target on raw data

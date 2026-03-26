@@ -120,7 +120,12 @@ class TestGetNoiseLevel:
     def test_probabilistic_low_noise(self, downscaler):
         shape = {"out_hres": (4, 1, 1, 1, 1)}
         sigma, weight = downscaler._get_noise_level(
-            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
+            shape=shape,
+            sigma_max=100000.0,
+            sigma_min=0.02,
+            sigma_data=1.0,
+            rho=7.0,
+            device=torch.device("cpu"),
         )
         assert isinstance(sigma, dict) and "out_hres" in sigma
         assert isinstance(weight, dict) and "out_hres" in weight
@@ -133,7 +138,12 @@ class TestGetNoiseLevel:
         downscaler.training_approach = "probabilistic_high_noise"
         shape = {"out_hres": (4, 1, 1, 1, 1)}
         sigma, weight = downscaler._get_noise_level(
-            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
+            shape=shape,
+            sigma_max=100000.0,
+            sigma_min=0.02,
+            sigma_data=1.0,
+            rho=7.0,
+            device=torch.device("cpu"),
         )
         assert sigma["out_hres"].shape == (4, 1, 1, 1, 1)
         assert (sigma["out_hres"] >= 0.02).all()
@@ -143,7 +153,12 @@ class TestGetNoiseLevel:
         downscaler.training_approach = "deterministic"
         shape = {"out_hres": (4, 1, 1, 1, 1)}
         sigma, weight = downscaler._get_noise_level(
-            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
+            shape=shape,
+            sigma_max=100000.0,
+            sigma_min=0.02,
+            sigma_data=1.0,
+            rho=7.0,
+            device=torch.device("cpu"),
         )
         assert torch.allclose(sigma["out_hres"], torch.full((4, 1, 1, 1, 1), 500000.0))
 
