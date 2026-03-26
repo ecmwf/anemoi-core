@@ -7,6 +7,7 @@
 
 import logging
 import os
+from collections.abc import Mapping
 from functools import cached_property
 
 import numpy as np
@@ -17,86 +18,146 @@ LOGGER = logging.getLogger(__name__)
 
 
 class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
-    """Anemoi Downscaling Datasets data module for PyTorch Lightning."""
+    """Anemoi Downscaling Datasets data module for PyTorch Lightning.
+
+    Handles residual statistics for diffusion downscaling by loading them from
+    an external file and exposing them via `statistics_tendencies`.
+
+    The model interface uses these to build separate normalizers:
+    - `pre_processors[target]`: normalizes with state statistics (for direct prediction)
+    - `pre_processors_tendencies[target]`: normalizes with residual statistics (for residual prediction)
+
+    Configuration:
+    - system.input.residual_statistics: Path to .npy file with residual statistics
+      Format: dict with keys "mean", "stdev", "maximum", "minimum",
+      each mapping variable names to scalar values.
+    - model.model.residual_prediction: dict mapping target_dataset -> source_dataset,
+      or True (defaults to {"out_hres": "in_lres"}), or False (no residual).
+    """
 
     @cached_property
-    def statistics(self) -> dict:
-        """Return statistics, optionally using residual statistics for specified variables.
+    def _residual_target_datasets(self) -> list[str]:
+        """Determine which datasets are residual targets from config.
 
-        Configuration:
-        - system.input.residual_statistics: Path to residual statistics file
-        - data.use_residual_normalization_for: List of variable names that should use residual statistics
-          If not specified or empty, ALL variables will use residual statistics (backward compatible)
+        Reads model.model.residual_prediction which must be:
+        - dict: {target: source} — keys are the target datasets
+        - False/empty: no residual prediction
         """
-        statistics = self.ds_train.statistics
+        raw = self.config.model.model.get("residual_prediction", False)
+        if isinstance(raw, Mapping):
+            return list(raw.keys())
+        return []
 
-        # Check if residual statistics are configured
+    def _load_residual_statistics(self) -> dict | None:
+        """Load residual statistics from the configured file path.
+
+        Returns
+        -------
+        dict or None
+            Dict keyed by variable name: {"mean": {"10u": val, ...}, "stdev": {...}, ...}
+            or None if not configured.
+        """
         if not hasattr(self.config.system.input, "residual_statistics"):
-            LOGGER.warning("No residual_statistics path configured, using base statistics only")
-            return tuple(statistics)
+            return None
 
-        # Load residual statistics from file
-        residual_statistics = np.load(
-            os.path.join(self.config.system.input.residual_statistics),
-            allow_pickle=True,
-        ).item()
+        path = self.config.system.input.residual_statistics
+        if path is None:
+            return None
 
-        # Get the name_to_index mapping for the high-res dataset (index 2)
-        reduced_name_to_index = self.ds_train.name_to_index["out_hres"].keys()
+        LOGGER.info("Loading residual statistics from %s", path)
+        return np.load(os.path.join(path), allow_pickle=True).item()
 
-        # Get list of variables that should use residual normalization
-        # If not specified, default to ALL variables (backward compatible)
-        use_residual_for = getattr(self.config.data, "use_residual_normalization_for", None)
+    def _residual_stats_to_array(self, residual_stats: dict, dataset_name: str) -> dict:
+        """Convert residual statistics from {stat: {var: val}} to {stat: np.array}.
 
-        if use_residual_for is None:
-            # Backward compatible: use residual stats for ALL variables
-            LOGGER.info("Using residual statistics for ALL variables (no filter specified)")
-            variables_to_use_residual = reduced_name_to_index
-        else:
-            # Only use residual stats for specified variables
-            variables_to_use_residual = [var for var in use_residual_for if var in reduced_name_to_index]
-            LOGGER.info(
-                f"Using residual statistics for {len(variables_to_use_residual)} variables: {variables_to_use_residual}",
-            )
+        Reorders to match the target dataset's variable ordering. Variables not present in
+        residual statistics are filled with neutral defaults (mean=0, stdev=1).
 
-            # Log variables that were specified but not found
-            missing_vars = [var for var in use_residual_for if var not in reduced_name_to_index]
-            if missing_vars:
-                LOGGER.warning(
-                    f"Variables specified for residual normalization but not found in dataset: {missing_vars}",
-                )
+        Parameters
+        ----------
+        residual_stats : dict
+            Raw residual statistics: {"mean": {"10u": val, ...}, ...}
+        dataset_name : str
+            Name of the target dataset to match variable ordering.
 
-        # Build statistics arrays, selectively using residual stats
-        base_stats = statistics["out_hres"]  # Original high-res statistics
-        field_names_ordered = list(reduced_name_to_index)
+        Returns
+        -------
+        dict
+            {"mean": np.array, "stdev": np.array, "maximum": np.array, "minimum": np.array}
+        """
+        field_names = list(self.ds_train.name_to_index[dataset_name].keys())
 
         mean_array = []
         stdev_array = []
         maximum_array = []
         minimum_array = []
 
-        for field_name in field_names_ordered:
-            if field_name in variables_to_use_residual:
-                # Use residual statistics for this variable
-                mean_array.append(residual_statistics["mean"][field_name])
-                stdev_array.append(residual_statistics["stdev"][field_name])
-                maximum_array.append(residual_statistics["maximum"][field_name])
-                minimum_array.append(residual_statistics["minimum"][field_name])
+        for field_name in field_names:
+            if field_name in residual_stats.get("mean", {}):
+                mean_array.append(residual_stats["mean"][field_name])
+                stdev_array.append(residual_stats["stdev"][field_name])
+                maximum_array.append(residual_stats["maximum"][field_name])
+                minimum_array.append(residual_stats["minimum"][field_name])
             else:
-                # Use base statistics for this variable
-                idx = field_names_ordered.index(field_name)
-                mean_array.append(base_stats["mean"][idx])
-                stdev_array.append(base_stats["stdev"][idx])
-                maximum_array.append(base_stats["maximum"][idx])
-                minimum_array.append(base_stats["minimum"][idx])
+                # Variable not in residual stats — use neutral defaults
+                # (mean=0, stdev=1 means no normalization change for these channels)
+                LOGGER.debug("Variable %s not in residual statistics, using neutral defaults", field_name)
+                mean_array.append(0.0)
+                stdev_array.append(1.0)
+                maximum_array.append(1.0)
+                minimum_array.append(-1.0)
 
-        # Create the combined statistics dictionary
-        combined_statistics = {
+        return {
             "mean": np.array(mean_array),
             "stdev": np.array(stdev_array),
             "maximum": np.array(maximum_array),
             "minimum": np.array(minimum_array),
         }
 
-        statistics["out_hres"] = combined_statistics
-        return statistics
+    @cached_property
+    def statistics_tendencies(self) -> dict[str, dict | None] | None:
+        """Return residual statistics as tendency statistics for residual target datasets.
+
+        This hooks into the existing tendency processor infrastructure:
+        the model interface builds `pre_processors_tendencies[target]` from these stats,
+        which is then used by compute_residuals/add_interp_to_state to normalize
+        residual channels separately from direct prediction channels.
+
+        The returned format wraps residual stats in the lead_times structure expected
+        by both tendency processors and tendency scalers:
+        {dataset_name: {"lead_times": [lt], lt: {mean: ..., stdev: ...}} or None}
+
+        Returns
+        -------
+        dict or None
+            {dataset_name: stats_or_None, ...} for all datasets
+        """
+        residual_stats = self._load_residual_statistics()
+        if residual_stats is None:
+            LOGGER.info("No residual statistics configured, tendency processors will not be built")
+            return None
+
+        target_datasets = self._residual_target_datasets
+
+        # Use lead_time from config to wrap stats in the expected format
+        lead_time = self._lead_time_for_step(1)
+
+        # Build the dict keyed by dataset name (matching statistics dict structure)
+        stats = {}
+        for dataset_name in self.ds_train.statistics.keys():
+            if dataset_name in target_datasets:
+                array_stats = self._residual_stats_to_array(residual_stats, dataset_name)
+                stats[dataset_name] = {
+                    "lead_times": [lead_time],
+                    lead_time: array_stats,
+                }
+                LOGGER.info(
+                    "Residual statistics loaded for %s (%d variables, lead_time=%s)",
+                    dataset_name,
+                    len(array_stats["mean"]),
+                    lead_time,
+                )
+            else:
+                stats[dataset_name] = None
+
+        return stats

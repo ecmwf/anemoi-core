@@ -10,6 +10,7 @@ deterministic: False
 precision: bf16-mixed
 
 multistep_input: 1          # ported from your config
+multistep_output: 1         # required by time_steps scaler in diffusiondownscaling scalers
 accum_grad_batches: 1
 num_sanity_val_steps: 1     # ported from your config
 
@@ -57,8 +58,11 @@ validation_metrics:
         scalers: ["node_weights"]
         ignore_nans: True
 
-# if the downscaling branch still supports this key, keep it; otherwise remove (it will error if unknown)
+# Diffusion downscaling training approach
 training_approach: probabilistic_low_noise
+
+# Note: residual_prediction is configured in the model config (model.model.residual_prediction)
+# as a dict mapping target_dataset -> source_dataset, e.g. {out_hres: in_lres}.
 
 variable_groups:
   datasets:

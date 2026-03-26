@@ -9,6 +9,11 @@ model:
   # For downscaling: only in_hres needs encoder, only out_hres needs decoder
   encoder_datasets: [out_hres]
   decoder_datasets: [out_hres]
+  # Residual prediction: maps target_dataset -> source_dataset.
+  # The model predicts (target - interpolated_source) for prognostic channels.
+  # Also accepts True (defaults to {out_hres: in_lres}) or False (no residual).
+  residual_prediction:
+    out_hres: in_lres
   # Diffusion parameters
   diffusion:
     sigma_data: 1.0

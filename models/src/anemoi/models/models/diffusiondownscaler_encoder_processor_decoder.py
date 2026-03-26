@@ -9,7 +9,7 @@
 
 
 import logging
-import warnings
+from collections.abc import Mapping
 from typing import Callable
 from typing import Optional
 from typing import Union
@@ -21,9 +21,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
@@ -53,8 +51,25 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         self._encoder_datasets = model_config["model"]["model"].get("encoder_datasets", None)
         self._decoder_datasets = model_config["model"]["model"].get("decoder_datasets", None)
 
+        # Residual prediction: maps target_dataset -> source_dataset for residual computation.
+        # Must be a dict {target: source} e.g. {"out_hres": "in_lres"}, or False/empty for none.
+        raw = model_config["model"]["model"].get("residual_prediction", False)
+        if isinstance(raw, Mapping):
+            self._residual_pairs = dict(raw)
+        elif raw:
+            raise ValueError(
+                f"residual_prediction must be a dict mapping target->source datasets "
+                f"(e.g. {{out_hres: in_lres}}) or False, got: {raw}"
+            )
+        else:
+            self._residual_pairs = {}
+
+        # multi_step for input dimension calculation (always 1 for diffusion downscaling)
+        self.multi_step = model_config["training"].get("multistep_input", 1)
+
         LOGGER.info(f"Encoder datasets configured: {self._encoder_datasets}")
         LOGGER.info(f"Decoder datasets configured: {self._decoder_datasets}")
+        LOGGER.info(f"Residual prediction pairs: {self._residual_pairs}")
 
         super().__init__(
             model_config=model_config,
@@ -63,23 +78,45 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             graph_data=graph_data,
         )
 
-        self.register_buffer(
-            "x_in_matching_channel_indices",
-            self._build_matching_channel_indices(),
-            persistent=True,
-        )
+        # Build per-pair matching indices (one buffer per residual pair)
+        self._matching_indices_keys = []
+        for target_ds, source_ds in self._residual_pairs.items():
+            buf_name = f"_matching_channel_indices_{target_ds}"
+            indices = self._build_matching_channel_indices(target_ds, source_ds)
+            self.register_buffer(buf_name, indices, persistent=True)
+            self._matching_indices_keys.append((target_ds, source_ds, buf_name))
 
-    def _build_matching_channel_indices(self) -> torch.Tensor:
-        """Build indices to reorder in_lres channels to out_hres output order."""
-        input_name_to_index = self.data_indices["in_lres"].name_to_index
-        output_name_to_index = self.data_indices["out_hres"].name_to_index
+    def _build_matching_channel_indices(self, target_dataset: str, source_dataset: str) -> torch.Tensor:
+        """Build indices to reorder source channels to match target's prognostic output order.
+
+        Only maps channels that exist in both source and target (prognostic outputs).
+        Output variables not present in source are treated as diagnostic (direct prediction)
+        and are excluded from this mapping.
+
+        Parameters
+        ----------
+        target_dataset : str
+            Name of the target dataset (e.g. "out_hres").
+        source_dataset : str
+            Name of the source dataset (e.g. "in_lres").
+
+        Returns
+        -------
+        torch.Tensor
+            Tensor of length == number of prognostic output channels.
+        """
+        input_name_to_index = self.data_indices[source_dataset].name_to_index
+        output_name_to_index = self.data_indices[target_dataset].name_to_index
         channel_indices = self._match_tensor_channels(input_name_to_index, output_name_to_index)
-        if channel_indices.numel() != len(output_name_to_index):
-            missing = [name for name in output_name_to_index.keys() if name not in input_name_to_index]
-            raise ValueError(
-                "Could not fully map in_lres channels to out_hres channels for residual reconstruction. "
-                f"Missing channels in in_lres: {missing}"
-            )
+
+        # Log which channels are residual vs direct prediction
+        common = [name for name in output_name_to_index if name in input_name_to_index]
+        direct = [name for name in output_name_to_index if name not in input_name_to_index]
+        if common:
+            LOGGER.info("Residual channels (%s ∩ %s): %s", target_dataset, source_dataset, common)
+        if direct:
+            LOGGER.info("Direct prediction channels (%s only): %s", target_dataset, direct)
+
         return channel_indices
 
     def _match_tensor_channels(
@@ -95,6 +132,11 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 channel_mapping.append(input_name_to_index[channel_name])
         return torch.tensor(channel_mapping, dtype=torch.long)
 
+    def get_matching_channel_indices(self, target_dataset: str) -> torch.Tensor:
+        """Get channel matching indices for a residual pair by target dataset name."""
+        buf_name = f"_matching_channel_indices_{target_dataset}"
+        return getattr(self, buf_name)
+
     def _load_from_state_dict(
         self,
         state_dict,
@@ -105,10 +147,11 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         unexpected_keys,
         error_msgs,
     ):
-        """Backwards-compatible loading for checkpoints created before this buffer existed."""
-        key = f"{prefix}x_in_matching_channel_indices"
-        if key not in state_dict:
-            state_dict[key] = self.x_in_matching_channel_indices
+        """Ensure all per-pair buffers exist when loading from checkpoint."""
+        for _target_ds, _source_ds, buf_name in self._matching_indices_keys:
+            key = f"{prefix}{buf_name}"
+            if key not in state_dict:
+                state_dict[key] = getattr(self, buf_name)
         super()._load_from_state_dict(
             state_dict,
             prefix,
@@ -118,6 +161,84 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             unexpected_keys,
             error_msgs,
         )
+
+    def compute_residuals(
+        self,
+        y: torch.Tensor,
+        x_interp: torch.Tensor,
+        pre_processors_state: Callable,
+        pre_processors_tendencies: Callable,
+        target_dataset: str = "out_hres",
+        input_post_processor: Optional[Callable] = None,
+        skip_imputation: bool = False,
+    ) -> torch.Tensor:
+        """Compute the residual target for training.
+
+        Mirrors compute_tendency but for downscaling: residual = y - x_interp.
+
+        - Prognostic channels (in both source and target): residual = y - x_interp,
+          normalized with tendency/residual statistics.
+        - Diagnostic channels (only in target): direct prediction = y,
+          normalized with state statistics.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            The target tensor, raw.
+        x_interp : torch.Tensor
+            The interpolated source input on the target grid. Must already have channels
+            selected via matching_channel_indices.
+        pre_processors_state : callable
+            State normalizer for the target dataset.
+        pre_processors_tendencies : callable or None
+            Residual/tendency normalizer for the target dataset.
+        target_dataset : str
+            Name of the target dataset (default "out_hres").
+        input_post_processor : Optional[Callable]
+            Not used, kept for interface compatibility.
+        skip_imputation : bool
+            Whether to skip imputation. Defaults to False.
+
+        Returns
+        -------
+        torch.Tensor
+            The normalized target: residuals for prognostic, state-normalized for diagnostic.
+        """
+        target_indices = self.data_indices[target_dataset]
+        prognostic_out = target_indices.model.output.prognostic
+        diagnostic_out = target_indices.model.output.diagnostic
+
+        target = y.clone()
+
+        # Prognostic channels: compute residual, normalize with residual/tendency stats
+        if len(prognostic_out) > 0:
+            target[..., prognostic_out] = y[..., prognostic_out] - x_interp
+
+            if pre_processors_tendencies is not None:
+                target[..., prognostic_out] = pre_processors_tendencies(
+                    target[..., prognostic_out],
+                    in_place=False,
+                    data_index=target_indices.data.output.prognostic,
+                    skip_imputation=skip_imputation,
+                )
+            else:
+                target[..., prognostic_out] = pre_processors_state(
+                    target[..., prognostic_out],
+                    in_place=False,
+                    data_index=target_indices.data.output.prognostic,
+                    skip_imputation=skip_imputation,
+                )
+
+        # Diagnostic channels: direct prediction, normalize with state stats
+        if len(diagnostic_out) > 0:
+            target[..., diagnostic_out] = pre_processors_state(
+                y[..., diagnostic_out],
+                in_place=False,
+                data_index=target_indices.data.output.diagnostic,
+                skip_imputation=skip_imputation,
+            )
+
+        return target
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components with optional dataset filtering for encoder/decoder."""
@@ -210,7 +331,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         import torch.nn as nn
         from hydra.utils import instantiate
 
-        if isinstance(residual_config, dict) and "_target_" not in residual_config:
+        if isinstance(residual_config, Mapping) and "_target_" not in residual_config:
             # Per-dataset configs provided
             self.residual = nn.ModuleDict()
             for dataset_name in self._graph_data.keys():
@@ -296,9 +417,20 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
+        # Embed sigma into noise conditioning space (matching parent's _build_conditioning_kwargs pattern)
+        # sigma_tensor may be 4D (batch, 1, 1, 1) or 5D (batch, time, ens, grid, 1)
+        # Extract scalar sigma per batch element and embed it
+        sigma_flat = sigma_tensor.reshape(batch_size, -1)[:, 0].unsqueeze(-1)  # (batch, 1)
+        noise_cond_base = self._embed_noise_conditioning(sigma_flat)  # (batch, cond_dim)
+        cond_dim = noise_cond_base.shape[-1]
+        # Expand to 5D: (batch, 1, ensemble, 1, cond_dim) for _generate_noise_conditioning
+        noise_cond = noise_cond_base[:, None, None, None, :].expand(
+            batch_size, 1, ensemble_size, 1, cond_dim
+        )
+
         # Prepare noise conditioning
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
-            sigma_tensor, dataset_name=dataset_name, edge_conditioning=False
+            noise_cond, dataset_name=dataset_name, edge_conditioning=False
         )
         shape_c_data = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
         shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
@@ -535,118 +667,6 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         return x_data_latent, x_skip, shard_shapes_data
 
-    def compute_residuals_advanced(
-        self,
-        y: torch.Tensor,
-        x_in_interp_to_hres: torch.Tensor,
-        pre_processors_state: Callable,
-        list_indices_direct_prediction: list,
-    ) -> torch.Tensor:
-        """Compute the tendency from two states.
-
-        Parameters
-        ----------
-        y : torch.Tensor
-            The high-resolution target tensor with shape (bs, ens, latlon, nvar)
-        x_in_interp_to_hres : torch.Tensor
-            The interpolated low-resolution input tensor with shape (bs, ens, latlon, nvar)
-        pre_processors_state : callable
-            Function to pre-process the state variables.
-        list_indices_direct_prediction : list
-            List of indices for direct prediction (not computed as residuals).
-
-        Returns
-        -------
-        torch.Tensor
-            The residuals tensor output from model.
-        """
-
-        inverse_indices = [
-            i for i in self.data_indices.data.output.full if i not in set(list_indices_direct_prediction)
-        ]
-
-        mask = y.new_zeros(y.shape[-1])  # dtype/device matches y
-        mask[inverse_indices] = 1
-
-        # residuals = y for direct channels, and y - x for inverse channels
-        residuals = (
-            y[..., self.data_indices.data.output.full]
-            - x_in_interp_to_hres[..., self.data_indices.data.output.full] * mask
-        )
-
-        norm_target = pre_processors_state(residuals, dataset="output", in_place=False)
-        return norm_target
-
-    def compute_residuals(
-        self,
-        y: torch.Tensor,
-        x_in_interp_to_hres: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute residuals between high-res target and interpolated low-res input.
-
-        Parameters
-        ----------
-        y : torch.Tensor
-            The high-resolution target tensor with shape (bs, ens, latlon, nvar)
-        x_in_interp_to_hres : torch.Tensor
-            The interpolated low-resolution input tensor with shape (bs, ens, latlon, nvar)
-
-        Returns
-        -------
-        torch.Tensor
-            The residuals tensor output from model.
-        """
-        residuals = (
-            y[..., self.data_indices.data.output.full] - x_in_interp_to_hres[..., self.data_indices.data.output.full]
-        )
-
-        # to deal with residuals or direct prediction, see compute_tendency
-        # in diffusion_encoder_processor_decoder.py
-        return residuals
-
-    def _interpolate_to_high_res(self, x, grid_shard_shapes=None, model_comm_group=None):
-
-        if grid_shard_shapes is not None:
-            shard_shapes = self._get_shard_shapes(x, 0, grid_shard_shapes, model_comm_group)
-            # grid-sharded input: reshard to channel-shards to apply truncation
-            x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
-
-        # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
-        # hence we check that they are on the correct device ; copy should only happen in the first forward run
-        if self.A_down is not None:
-
-            self.A_down = self.A_down.to(x.device)
-            x = self._truncate_fields(x, self.A_down)  # back to high resolution
-        else:
-            raise ValueError("A_up not defined at model level.")
-
-        if grid_shard_shapes is not None:
-            # back to grid-sharding as before
-            x = gather_channels(x, shard_shapes, model_comm_group)
-
-        return x
-
-    def apply_interpolate_to_high_res(
-        self, x: torch.Tensor, grid_shard_shapes: list, model_comm_group: ProcessGroup
-    ) -> torch.Tensor:
-        """Apply interpolate to high res to the low res input tensor.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor with shape (bs, ens, latlon, nvar)
-
-        Returns
-        -------
-        torch.Tensor
-            Truncated tensor with same shape as input
-        """
-        bs, ens, _, _ = x.shape
-        x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
-
-        x_trunc = self._interpolate_to_high_res(x_trunc, grid_shard_shapes, model_comm_group)
-        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
-
     def _before_sampling(
         self,
         batch: dict[str, torch.Tensor],
@@ -802,8 +822,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             else:
                 remaining_kwargs[key] = value
 
-        print("noise_scheduler_params (after config merge):", noise_scheduler_config)
-        print("sampler_params (after config merge):", sampler_config)
+        LOGGER.debug("noise_scheduler_params (after config merge): %s", noise_scheduler_config)
+        LOGGER.debug("sampler_params (after config merge): %s", sampler_config)
 
         with torch.no_grad():
 
@@ -900,8 +920,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         if noise_scheduler_params is not None:
             noise_scheduler_config.update(noise_scheduler_params)
 
-        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}")
-        print(f"noise_scheduler_config: {noise_scheduler_config}")
+        LOGGER.debug("noise_scheduler_config: %s", noise_scheduler_config)
 
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
@@ -929,7 +948,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
         y_init = torch.randn(shape, device=x_in_lres_upsampled.device, dtype=sigmas.dtype) * sigmas[0]
 
-        print("sigmas", sigmas)
+        LOGGER.debug("sigmas: %s", sigmas)
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
@@ -938,7 +957,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
 
-        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}")
+        LOGGER.debug("diffusion_sampler_config: %s", diffusion_sampler_config)
 
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
@@ -968,42 +987,77 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def add_interp_to_state(
         self,
         state_inp: torch.Tensor,
-        residuals: torch.Tensor,
+        model_output: torch.Tensor,
         post_processors_state: Callable,
         post_processors_tendencies: Callable,
+        target_dataset: str = "out_hres",
+        source_dataset: str = "in_lres",
         output_pre_processor: Optional[Callable] = None,
+        skip_imputation: bool = False,
     ) -> torch.Tensor:
-        """Add the tendency to the state.
+        """Reconstruct the full output state from the model output.
+
+        Uses the same prognostic/diagnostic split as tendency models:
+        - Prognostic channels (in both source and target): denorm with residual/tendency stats, add x_interp
+        - Diagnostic channels (only in target): denorm with state stats (direct prediction)
 
         Parameters
         ----------
         state_inp : torch.Tensor
-            The normalized input state tensor with full input variables.
-        residuals : torch.Tensor
-            The normalized residuals tensor output from model.
-        post_processors_state : callable
-            Function to post-process the state variables.
-        post_processors_tendencies : callable
-            Function to post-process the tendency variables.
-            Not used for downscaling but kept for compatibility
+            The normalized interpolated source input (on target grid).
+        model_output : torch.Tensor
+            The normalized model output (residuals for prognostic, direct for diagnostic).
+        post_processors_state : dict[str, callable]
+            Per-dataset post-processors using state statistics.
+        post_processors_tendencies : dict[str, callable] or None
+            Per-dataset post-processors using residual/tendency statistics.
+        target_dataset : str
+            Name of the target dataset (default "out_hres").
+        source_dataset : str
+            Name of the source dataset (default "in_lres").
         output_pre_processor : Optional[Callable], optional
-            Function to pre-process the output state. If provided,
-            the output state will be pre-processed before returning.
-            If None, the output state is returned directly. Default is None.
+            Not used, kept for interface compatibility.
+        skip_imputation : bool, optional
+            When True, skip imputation in processors. Defaults to False.
 
         Returns
         -------
         torch.Tensor
-            the de-normalised state
+            The de-normalised output state.
         """
-        state_outp = post_processors_state["out_hres"](residuals, in_place=False)
+        if target_dataset not in self._residual_pairs:
+            return post_processors_state[target_dataset](model_output, in_place=False)
 
-        x_in_lres_denorm = post_processors_state["in_lres"](
-            state_inp,
-            in_place=False,
-        )
-        channel_indices = self.x_in_matching_channel_indices.to(x_in_lres_denorm.device)
-        state_outp += x_in_lres_denorm[..., channel_indices]
+        target_indices = self.data_indices[target_dataset]
+        prognostic_out = target_indices.model.output.prognostic
+        diagnostic_out = target_indices.model.output.diagnostic
+
+        # Denorm the model output using residual/tendency stats if available, else state stats
+        if post_processors_tendencies is not None and target_dataset in post_processors_tendencies:
+            state_outp = post_processors_tendencies[target_dataset](
+                model_output,
+                in_place=False,
+                data_index=target_indices.data.output.full,
+                skip_imputation=skip_imputation,
+            )
+        else:
+            state_outp = post_processors_state[target_dataset](model_output, in_place=False)
+
+        # Diagnostic channels: direct prediction, denorm with state stats (overwrite)
+        if len(diagnostic_out) > 0:
+            state_outp[..., diagnostic_out] = post_processors_state[target_dataset](
+                model_output[..., diagnostic_out],
+                in_place=False,
+                data_index=target_indices.data.output.diagnostic,
+                skip_imputation=skip_imputation,
+            )
+
+        # Prognostic channels: add denormalized x_interp
+        if len(prognostic_out) > 0:
+            x_source_denorm = post_processors_state[source_dataset](state_inp, in_place=False)
+            channel_indices = self.get_matching_channel_indices(target_dataset).to(x_source_denorm.device)
+            state_outp[..., prognostic_out] += x_source_denorm[..., channel_indices]
+
         return state_outp
 
     def _after_sampling(
@@ -1026,11 +1080,17 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         else:
             raise ValueError("Expected before_sampling_data to contain x_in_interp")
 
+        # Use the first (typically only) residual pair
+        target_ds = self._decoder_datasets[0]
+        source_ds = self._residual_pairs.get(target_ds, None)
+
         out = self.add_interp_to_state(
             x_in_interp,
             out,
             post_processors,
             post_processors_tendencies,
+            target_dataset=target_ds,
+            source_dataset=source_ds or self._decoder_datasets[0],
         )
 
         # Gather if needed
@@ -1038,7 +1098,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             out = gather_tensor(
                 out,
                 -2,
-                apply_shard_shapes(out, -2, grid_shard_shapes["out_hres"]),
+                apply_shard_shapes(out, -2, grid_shard_shapes[target_ds]),
                 model_comm_group,
             )
 

@@ -16,12 +16,9 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.train.tasks.base import BaseGraphModule
-from anemoi.training.utils.enums import TensorDim
+from .base import BaseGraphModule
 
 if TYPE_CHECKING:
-
     from collections.abc import Mapping
 
     from torch_geometric.data import HeteroData
@@ -33,7 +30,20 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GraphDiffusionDownscaler(BaseGraphModule):
-    """Graph neural network downscaler for diffusion."""
+    """Graph neural network downscaler for diffusion.
+
+    Follows the same patterns as GraphDiffusionTendForecaster where applicable:
+    - Dict-based sigma/weights through the full pipeline
+    - Dict-based forward() interface to model
+    - Structured residual processor validation
+
+    Key differences from the forecaster (by design):
+    - Batch is NOT pre-normalized: compute_residuals needs raw y and x_interp
+      to compute y_raw - x_interp_raw before normalizing with residual stats.
+      Input normalization happens explicitly in _step after residual computation.
+    - Two separate inputs (in_lres upsampled + in_hres) instead of single input
+    - Residual prediction (y - interp(x)) instead of tendency prediction (y_t1 - y_t0)
+    """
 
     task_type = "downscaler"
 
@@ -42,19 +52,17 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        # truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
-
         super().__init__(
             config=config,
             graph_data=graph_data,
             statistics=statistics,
-            statistics_tendencies=None,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
@@ -64,383 +72,248 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
         self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
-        reader_group_size = self.config.dataloader.read_group_size
 
-        fields_direct_prediction = getattr(config.data, "direct_prediction", None)
-        self.indices_direct_prediction = ...
+        # Residual pairs: read from the model (single source of truth)
+        self._residual_pairs = self.model.model._residual_pairs
+
+        # Validate and cache residual processors (mirrors _validate_tendency_processors in forecaster)
+        self._residual_pre_processors: dict[str, object] = {}
+        self._residual_post_processors: dict[str, object] = {}
+        self._validate_residual_processors()
+
+    def _validate_residual_processors(self) -> None:
+        """Validate and cache residual/tendency processors for each residual pair.
+
+        Mirrors GraphDiffusionTendForecaster._validate_tendency_processors.
+        """
+        pre_tend = getattr(self.model, "pre_processors_tendencies", None)
+        post_tend = getattr(self.model, "post_processors_tendencies", None)
+
+        for target_ds in self._residual_pairs:
+            if pre_tend is not None and target_ds in pre_tend:
+                self._residual_pre_processors[target_ds] = pre_tend[target_ds]
+                LOGGER.info("Using residual/tendency pre-processor for %s normalization", target_ds)
+            else:
+                LOGGER.warning(
+                    "No residual/tendency pre-processor for %s — falling back to state normalization. "
+                    "This may cause training instability with diffusion loss weights.",
+                    target_ds,
+                )
+
+            if post_tend is not None and target_ds in post_tend:
+                self._residual_post_processors[target_ds] = post_tend[target_ds]
+                LOGGER.info("Using residual/tendency post-processor for %s denormalization", target_ds)
+            else:
+                LOGGER.warning("No residual/tendency post-processor for %s", target_ds)
 
     def forward(
         self,
-        x_in_lres_interp_hres: torch.Tensor,
-        x_in_hres: torch.Tensor,
-        y_noised: torch.Tensor,
-        sigma: torch.Tensor,
-    ) -> torch.Tensor:
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         """Forward pass for training.
 
-        Note: All inputs are at HRES resolution at this point:
-        - x_in_lres_interp_hres: upsampled from lres to hres
-        - x_in_hres: native hres forcings
-        - y_noised: native hres target (noised)
+        Follows the forecaster pattern: all inputs/outputs are dicts keyed by dataset name.
         """
-        # Wrap inputs as dicts for model interface
-        x_dict = {"in_lres": x_in_lres_interp_hres, "in_hres": x_in_hres}
-        y_dict = {"out_hres": y_noised}
-        sigma_dict = {"out_hres": sigma}
-
-        result = self.model.model.fwd_with_preconditioning(
-            x_dict,
-            y_dict,
-            sigma_dict,
+        return self.model.model.fwd_with_preconditioning(
+            x,
+            y_noised,
+            sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=None,
+            grid_shard_shapes=self.grid_shard_shapes,
         )
-
-        return result["out_hres"]
-
-    def _prepare_tensors_for_loss(
-        self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        validation_mode: bool = False,
-        dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
-        """Prepare tensors for loss computation, squeezing time dimension.
-
-        Override base method to squeeze time dimension (always 1) before loss computation,
-        since scalers expect 4D tensors (batch, ensemble, grid, vars).
-
-        Parameters
-        ----------
-        y_pred : torch.Tensor
-            Predicted values with shape (batch, time=1, ensemble, grid, vars)
-        y : torch.Tensor
-            Target values with shape (batch, time=1, ensemble, grid, vars)
-        validation_mode : bool
-            Whether in validation mode
-        dataset_name : str | None
-            Dataset name for multi-dataset setups
-
-        Returns
-        -------
-        tuple[torch.Tensor, torch.Tensor, slice | None]
-            Prepared y_pred (4D), y (4D), and grid_shard_slice
-        """
-        # Call base class to handle sharding
-        y_pred_full, y_full, grid_shard_slice = super()._prepare_tensors_for_loss(
-            y_pred,
-            y,
-            validation_mode,
-            dataset_name,
-        )
-
-        # Squeeze time dimension (always 1) to get 4D tensors for loss computation
-        # (batch, time=1, ensemble, grid, vars) -> (batch, ensemble, grid, vars)
-        assert y_pred_full.shape[2] == 1, f"Expected ensemble dimension to be 1, got {y_pred_full.shape[2]}"
-        assert y_full.shape[2] == 1, f"Expected ensemble dimension to be 1, got {y_full.shape[2]}"
-
-        y_pred_full = y_pred_full.squeeze(2)  # Remove ensemble dimension
-        y_full = y_full.squeeze(2)  # Remove ensemble dimension
-
-        return y_pred_full, y_full, grid_shard_slice
 
     def _compute_loss(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        weights: torch.Tensor,
+        dataset_name: str,
+        weights: dict[str, torch.Tensor] | None = None,
         grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the diffusion loss with noise weighting.
 
-        Parameters
-        ----------
-        y_pred : torch.Tensor
-            Predicted values
-        y : torch.Tensor
-            Target values
-        grid_shard_slice : slice | None
-            Grid shard slice for distributed training
-        weights : dict[str, torch.Tensor]
-            Noise weights for diffusion loss computation (per dataset)
-        dataset_name : str | None
-            Dataset name for multi-dataset setups
-        **_kwargs
-            Additional arguments
-
-        Returns
-        -------
-        torch.Tensor
-            Computed loss with noise weighting applied
+        Signature aligned with BaseDiffusionForecaster._compute_loss.
         """
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
-        assert (
-            weights is not None
-        ), f"weights must be provided for diffusion loss computation in {self.__class__.__name__}"
+        assert weights is not None, f"{self.__class__.__name__} requires weights for diffusion loss computation."
 
-        # Extract weights for this dataset (handle both dict and tensor for backwards compatibility)
-        dataset_weights = weights[dataset_name] if isinstance(weights, dict) else weights
-
-        # Handle both per-dataset losses (ModuleDict) and single loss function
-        loss_fn = self.loss[dataset_name] if isinstance(self.loss, torch.nn.ModuleDict) else self.loss
-
-        # No transpose needed - loss expects (..., grid, vars) format
-        return loss_fn(
+        return self.loss[dataset_name](
             y_pred,
             y,
-            weights=dataset_weights,
+            weights=weights[dataset_name],
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )
 
     def _step(
         self,
-        batch: list[torch.Tensor],
-        training_mode: bool = True,
+        batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        """Process batch size of len 3 with each item of dimensions:
-        [batch_size, dates, ensemble, gridpoints, variables].
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+        """Process batch with dimensions [batch_size, dates, ensemble, gridpoints, variables].
+
+        Note: Unlike the forecaster, the batch is NOT pre-normalized here.
+        compute_residuals needs raw y and x_interp to compute the raw residual
+        before normalizing with residual-specific statistics. Input normalization
+        happens explicitly after residual computation.
+
+        Handles mixed residual/direct prediction:
+        - Prognostic output channels (in both source and target): residual prediction
+        - Diagnostic output channels (only in target): direct prediction
         """
         x_in_lres = batch["in_lres"]
         x_in_hres = batch["in_hres"]
         y = batch["out_hres"]
 
-        if x_in_lres.ndim != 5:
-            raise ValueError(f"Expected x_in_lres to have 5 dimensions, got {x_in_lres.ndim}")
-        if x_in_hres.ndim != 5:
-            raise ValueError(f"Expected x_in_hres to have 5 dimensions, got {x_in_hres.ndim}")
-        if y.ndim != 5:
-            raise ValueError(f"Expected y to have 5 dimensions, got {y.ndim}")
+        target_ds = self.model.model._decoder_datasets[0]  # e.g. "out_hres"
+        source_ds = self._residual_pairs.get(target_ds)     # e.g. "in_lres", or None
 
-        # Interpolate in_lres from lres to hres resolution
+        # Interpolate source dataset to target resolution
         x_in_lres_upsampled = self.model.model.residual["in_lres"](
-            x_in_lres,  # (batch, multistep, ensemble, grid, features)
+            x_in_lres,
             grid_shard_shapes=None,
             model_comm_group=self.model_comm_group,
-        )[
-            :,
-            :,
-            None,
-            :,
-            :,
-        ]  # Add ensemble back: (batch, time, ensemble=1, grid, features)
+        )[:, :, None, :, :]  # Add ensemble dim: (batch, time, ensemble=1, grid, features)
 
-        # Compute residuals: high-res target minus upsampled low-res input
-        # Select only the matching channels from upsampled lres
-        channel_indices = self.model.model.x_in_matching_channel_indices.to(x_in_lres_upsampled.device)
-        resid = y - x_in_lres_upsampled[..., channel_indices]
+        # Compute training target on raw data
+        if source_ds is not None:
+            channel_indices = self.model.model.get_matching_channel_indices(target_ds).to(
+                x_in_lres_upsampled.device,
+            )
+            target = self.model.model.compute_residuals(
+                y=y,
+                x_interp=x_in_lres_upsampled[..., channel_indices],
+                pre_processors_state=self.model.pre_processors[target_ds],
+                pre_processors_tendencies=self._residual_pre_processors.get(target_ds),
+                target_dataset=target_ds,
+            )
+        else:
+            target = self.model.pre_processors[target_ds](y, in_place=False)
 
-        x_in_lres_upsampled = self.model.pre_processors["in_lres"](x_in_lres_upsampled)
-        x_in_hres = self.model.pre_processors["in_hres"](x_in_hres)
-        resid = self.model.pre_processors["out_hres"](resid)
+        # Normalize inputs (after residual computation which needs raw data)
+        x_in_lres_upsampled = self.model.pre_processors["in_lres"](x_in_lres_upsampled, in_place=False)
+        x_in_hres = self.model.pre_processors["in_hres"](x_in_hres, in_place=False)
 
-        # get noise level and associated loss weights
+        # Wrap as dicts for the rest of the pipeline (aligned with forecaster)
+        target_dict = {target_ds: target}
+        x_dict = {"in_lres": x_in_lres_upsampled, "in_hres": x_in_hres}
+
+        # Get noise level and loss weights (dict-based, like forecaster)
+        shapes = {k: v.shape for k, v in target_dict.items()}
         sigma, noise_weights = self._get_noise_level(
-            shape=(resid.shape[0],) + (1,) * (resid.ndim - 2),
+            shape=shapes,
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
             rho=self.rho,
-            device=resid.device,
+            device=target.device,
         )
 
-        # get targets and noised targets
-        resid_noised = self._noise_target(resid, sigma)
+        # Add noise to targets (dict-based, like forecaster)
+        y_noised = self._noise_target(target_dict, sigma)
 
-        # Validate input dimensions
-        assert (
-            x_in_lres_upsampled.ndim == x_in_hres.ndim == resid_noised.ndim == 5
-        ), f"Expected 5D tensors, got shapes {x_in_lres_upsampled.shape}, {x_in_hres.shape}, {resid_noised.shape}"
+        # Forward pass with preconditioning
+        y_pred = self(x_dict, y_noised, sigma)  # dict: {target_ds: (bs, time, ens, latlon, nvar)}
 
-        # All inputs keep time dimension for future multi-step support
-        y_pred = self(
-            x_in_lres_upsampled,
-            x_in_hres,
-            resid_noised,
-            sigma,
-        )  # shape is (bs, time, ens, latlon, nvar)
-
-        # Wrap tensors in dictionaries for multi-dataset compute_loss_metrics
-        y_pred_dict = {"out_hres": y_pred}
-        resid_dict = {"out_hres": resid}
-        weights_dict = {"out_hres": noise_weights}
-
-        # Compute loss and metrics with checkpoint (keeping time dimension)
-        loss, metrics_next, y_pred_denorm_dict = checkpoint(
+        # Compute loss and metrics
+        loss, metrics_next, y_pred_out = checkpoint(
             self.compute_loss_metrics,
-            y_pred_dict,
-            resid_dict,
+            y_pred,
+            target_dict,
             validation_mode=validation_mode,
-            weights=weights_dict,
+            weights=noise_weights,
             use_reentrant=False,
         )
 
-        # Extract denormalized prediction from dictionary
-        y_pred_denorm = y_pred_denorm_dict["out_hres"]  # (bs, time, ens, latlon, nvar)
+        # Reconstruct full prediction (denorm + add interpolated source)
+        if source_ds is not None:
+            y_pred_full = self.model.model.add_interp_to_state(
+                state_inp=x_in_lres_upsampled,
+                model_output=y_pred[target_ds],
+                post_processors_state=self.model.post_processors,
+                post_processors_tendencies=(
+                    dict(self.model.post_processors_tendencies)
+                    if hasattr(self.model, "post_processors_tendencies")
+                    and self.model.post_processors_tendencies is not None
+                    else None
+                ),
+                target_dataset=target_ds,
+                source_dataset=source_ds,
+            )
+        else:
+            y_pred_full = y_pred_out[target_ds]
 
-        # Reconstruct full prediction: baseline (upsampled lres) + predicted residual
-        # Denormalize baseline (upsampled lres)
-        x_in_lres_upsampled_denorm = self.model.post_processors["in_lres"](x_in_lres_upsampled)
+        return loss, metrics_next, [y_pred_full]
 
-        # Full prediction = baseline + residual
-        y_pred_full = (
-            x_in_lres_upsampled_denorm[
-                ..., self.model.model.x_in_matching_channel_indices.to(x_in_lres_upsampled_denorm.device)
-            ]
-            + y_pred_denorm
-        )
-
-        return loss, metrics_next, [y_pred_full, y_pred_denorm]
-
-    def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-        """Add noise to the state."""
-        return x + torch.randn_like(x) * sigma
+    def _noise_target(
+        self, x: dict[str, torch.Tensor], sigma: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Add noise to the state (dict-based, aligned with forecaster)."""
+        return {name: x[name] + torch.randn_like(x[name]) * sigma[name] for name in x}
 
     def _get_noise_level(
         self,
-        shape: torch.shape,
+        shape: dict[str, tuple[int, ...]],
         sigma_max: float,
         sigma_min: float,
         sigma_data: float,
         rho: float,
         device: torch.device,
-        sigma_override: float | None = None,
-    ) -> tuple[torch.Tensor]:
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """Get noise level for diffusion training.
 
-        Parameters
-        ----------
-        shape : torch.shape
-            Shape for the noise tensor
-        sigma_max : float
-            Maximum noise level
-        sigma_min : float
-            Minimum noise level
-        sigma_data : float
-            Data scaling factor
-        rho : float
-            Distribution parameter
-        device : torch.device
-            Device for tensor creation
-        sigma_override : float | None
-            If provided, use this fixed sigma instead of sampling. Useful for testing.
-
-        Returns
-        -------
-        tuple[torch.Tensor]
-            Sigma and weight tensors
+        Dict-based interface aligned with BaseDiffusionForecaster._get_noise_level.
+        Extends the forecaster with support for multiple noise schedules
+        (probabilistic_low_noise, probabilistic_high_noise, deterministic).
         """
-        if sigma_override is not None:
-            # Use fixed sigma for testing/debugging
-            sigma = torch.full(shape, fill_value=sigma_override, device=device)
-        elif self.training_approach == "probabilistic_high_noise":
-            rnd_uniform = torch.rand(shape, device=device)
-            sigma = (
+        dataset_names = list(shape.keys())
+        ref_shape = shape[dataset_names[0]]
+        assert len(ref_shape) == 5, "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for diffusion noise."
+        batch_size = ref_shape[0]
+        ensemble_size = ref_shape[2]
+
+        base_shape = (batch_size, ensemble_size)
+
+        if self.training_approach == "probabilistic_high_noise":
+            rnd_uniform = torch.rand(base_shape, device=device)
+            sigma_base = (
                 sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
             ) ** rho
-
         elif self.training_approach == "probabilistic_low_noise":
             log_sigma = torch.normal(
                 mean=self.lognormal_mean,
                 std=self.lognormal_std,
-                size=shape,
+                size=base_shape,
                 device=device,
             )
-            sigma = torch.exp(log_sigma)
+            sigma_base = torch.exp(log_sigma)
         elif self.training_approach == "deterministic":
-            sigma = torch.full(
-                shape,
-                fill_value=500000.0,
-                device=device,
-            )
+            sigma_base = torch.full(base_shape, fill_value=500000.0, device=device)
+        else:
+            raise ValueError(f"Unknown training_approach: {self.training_approach}")
 
-        weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+        weight_base = (sigma_base**2 + sigma_data**2) / (sigma_base * sigma_data) ** 2
+
+        # Reshape to broadcast: (batch, 1_time, ensemble, 1_grid, 1_vars)
+        sigma_base = sigma_base[:, None, :, None, None]
+        weight_base = weight_base[:, None, :, None, None]
+
+        sigma, weight = {}, {}
+        for dataset_name in shape:
+            sigma[dataset_name] = sigma_base
+            weight[dataset_name] = weight_base
         return sigma, weight
 
-    def calculate_val_metrics(
-        self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        rollout_step: int = 0,
-        grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Calculate metrics on the validation output.
+    def on_after_batch_transfer(self, batch: dict[str, torch.Tensor], _: int) -> dict[str, torch.Tensor]:
+        """Prepare batch after GPU transfer.
 
-        Parameters
-        ----------
-        y_pred: torch.Tensor
-            Predicted ensemble
-        y: torch.Tensor
-            Ground truth (target).
-        rollout_step: int
-            Rollout step
-        grid_shard_slice: slice | None
-            Grid shard slice for distributed training
-        dataset_name: str | None
-            Dataset name for multi-dataset setups
-
-        Returns
-        -------
-        val_metrics : dict[str, torch.Tensor]
-            validation metrics and predictions
+        Unlike the forecaster, we intentionally skip _normalize_batch here.
+        compute_residuals needs raw y and x_interp to compute y_raw - x_interp_raw
+        before normalizing with residual-specific statistics. Input normalization
+        is done explicitly in _step after residual computation.
         """
-        metrics = {}
-
-        # Use dataset_name for multi-dataset support
-        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-
-        y_postprocessed = self.model.post_processors[dataset_name](y, in_place=False)
-        y_pred_postprocessed = self.model.post_processors[dataset_name](y_pred, in_place=False)
-
-        metrics_dict = self.metrics[dataset_name]
-        val_metric_ranges = self.val_metric_ranges[dataset_name]
-
-        for metric_name, metric in metrics_dict.items():
-            if not isinstance(metric, BaseLoss):
-                # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
-                continue
-
-            for mkey, indices in val_metric_ranges.items():
-                metric_step_name = f"{metric_name}_metric/{mkey}/{rollout_step + 1}"
-                if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
-                    exception_msg = (
-                        "Validation metrics cannot be scaled over the variable dimension"
-                        " in the post processed space."
-                    )
-                    raise ValueError(exception_msg)
-
-                metrics[metric_step_name] = metric(
-                    y_pred_postprocessed,
-                    y_postprocessed,
-                    scaler_indices=[..., indices],
-                    grid_shard_slice=grid_shard_slice,
-                    group=self.model_comm_group,
-                )
-
-        return metrics
-
-    def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
-        """Assemble batch after transfer to GPU by gathering the batch shards if needed.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch to transfer
-
-        Returns
-        -------
-        torch.Tensor
-            Batch after transfer
-        """
-        # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
-
-        # Prepare scalers, e.g. init delayed scalers and update scalers
         self._prepare_loss_scalers()
-
         return batch
