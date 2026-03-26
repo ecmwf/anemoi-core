@@ -11,6 +11,7 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
@@ -156,3 +157,170 @@ def test_loss_variable_mapper_propagates_needs_shard_layout_info() -> None:
     )
 
     assert loss.needs_shard_layout_info is True
+
+# =============================================================================
+# LossVariableMapper behaviour tests
+#
+# The tests below exercise LossVariableMapper directly, bypassing get_loss_function.
+# They use a shared fixture (data_indices_forcing_gaps) that deliberately has
+# multiple forcing variables interspersed between predicted variables, creating
+# non-contiguous gaps in the DATA_FULL index space. This is the common layout
+# and is the main source of
+# off-by-one bugs in scaler slicing and target index resolution.
+#
+# _mapper() is a thin helper that constructs and initialises a LossVariableMapper
+# without going through the full get_loss_function factory, so each test can focus
+# on a single behaviour in isolation.
+# =============================================================================
+
+
+@pytest.fixture
+def data_indices_forcing_gaps() -> IndexCollection:
+    """var_0..1, f_0..1(forcing), var_2..3, f_2..3(forcing), var_4, imerg(target).
+
+    model.output.full = [0,1,4,5,8]  |  data.output.full = [0,1,4,5,8,9]
+    """
+    return IndexCollection(
+        DictConfig({"forcing": ["f_0", "f_1", "f_2", "f_3"], "diagnostic": [], "target": ["imerg"]}),
+        {"var_0": 0, "var_1": 1, "f_0": 2, "f_1": 3, "var_2": 4, "var_3": 5, "f_2": 6, "f_3": 7, "var_4": 8, "imerg": 9},
+    )
+
+
+def _mapper(data_indices: IndexCollection, predicted: list[str], target: list[str] | None = None) -> LossVariableMapper:
+    w = LossVariableMapper(loss=MSELoss(), predicted_variables=predicted, target_variables=target or predicted)
+    w.set_data_indices(data_indices)
+    return w
+
+
+# --- VARIABLE-axis scaler filtering ------------------------------------------
+
+
+class TestVariableAxisScalerFiltering:
+
+    def test_mixed_dim_scaler_filtered_to_predicted(self, data_indices_forcing_gaps: IndexCollection) -> None:
+        """Multi-dim (BATCH, GRID, VARIABLE) scaler is sliced on the VARIABLE axis."""
+        w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
+        n_model_vars = len(data_indices_forcing_gaps.model.output.full)
+        w.add_scaler(dimension=(0, 3, 4), scaler=torch.ones(2, 8, n_model_vars), name="mixed")
+
+        assert w.loss.scaler.tensors["mixed"][1].shape == (2, 8, 1)
+
+    def test_broadcast_variable_axis_untouched(self, data_indices_forcing_gaps: IndexCollection) -> None:
+        """Broadcast VARIABLE axis (size 1) must not be index-selected."""
+        w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
+        w.add_scaler(dimension=(0, 3, 4), scaler=torch.ones(2, 8, 1), name="bc")
+
+        assert w.loss.scaler.tensors["bc"][1].shape == (2, 8, 1)
+
+    def test_data_full_scaler_with_forcing_gap(self) -> None:
+        """DATA_FULL-sized scaler correctly resolves through forcing gaps."""
+        di = IndexCollection(
+            DictConfig({"forcing": ["f0"], "diagnostic": [], "target": []}),
+            {"f0": 0, "var_0": 1, "var_1": 2},
+        )
+        w = _mapper(di, ["var_1"])
+        w.add_scaler(dimension=4, scaler=torch.tensor([10.0, 20.0, 30.0]), name="full")
+
+        # var_1 is at data-full index 2 → value 30.0
+        torch.testing.assert_close(w.loss.scaler.tensors["full"][1], torch.tensor([30.0]))
+
+    def test_update_scaler_refilters(self, data_indices_forcing_gaps: IndexCollection) -> None:
+        """update_scaler with override re-applies VARIABLE-axis filtering."""
+        w = _mapper(data_indices_forcing_gaps, ["var_2"])
+        w.add_scaler(dimension=4, scaler=torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0]), name="vw")
+        torch.testing.assert_close(w.loss.scaler.tensors["vw"][1], torch.tensor([3.0]))
+
+        w.update_scaler("vw", torch.tensor([10.0, 20.0, 30.0, 40.0, 50.0]), override=True)
+        torch.testing.assert_close(w.loss.scaler.tensors["vw"][1], torch.tensor([30.0]))
+
+
+# --- variable ordering and defaults ------------------------------------------
+
+
+def test_scaler_preserves_reversed_variable_order() -> None:
+    """Reversed predicted_variables → scaler values in matching reversed order."""
+    di = IndexCollection(
+        DictConfig({"forcing": [], "diagnostic": [], "target": ["imerg"]}),
+        {f"var_{i}": i for i in range(10)} | {"imerg": 10},
+    )
+    reversed_vars = [f"var_{i}" for i in range(9, -1, -1)]
+    loss = get_loss_function(
+        DictConfig({
+            "_target_": "anemoi.training.losses.MSELoss",
+            "predicted_variables": reversed_vars,
+            "target_variables": reversed_vars,
+            "scalers": ["pl"],
+        }),
+        scalers={"pl": (4, torch.tensor([0.1 * (i + 1) for i in range(11)]))},
+        data_indices=di,
+    )
+
+    expected = torch.tensor([0.1 * (i + 1) for i in range(9, -1, -1)])
+    torch.testing.assert_close(loss.loss.scaler.tensors["pl"][1], expected)
+
+
+def test_default_target_inherits_predicted_order(data_indices_forcing_gaps: IndexCollection) -> None:
+    """target_variables=None copies predicted_variables list and resolves indices."""
+    w = LossVariableMapper(loss=MSELoss(), predicted_variables=["var_3", "var_0"], target_variables=None)
+    w.set_data_indices(data_indices_forcing_gaps)
+
+    assert w.target_variables == ["var_3", "var_0"]
+    assert w.target_indices_by_layout[IndexSpace.DATA_FULL] == [5, 0]
+
+
+# --- layout validation -------------------------------------------------------
+
+
+def test_rejects_unavailable_target_layout(data_indices_forcing_gaps: IndexCollection) -> None:
+    """Target-only variable makes MODEL_OUTPUT unavailable as target_layout."""
+    w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
+    with pytest.raises(ValueError, match="target_layout 'model_output' is not available"):
+        w(torch.zeros(1, 1, 1, 2, 6), torch.zeros(1, 1, 1, 2, 10),
+          pred_layout=IndexSpace.DATA_OUTPUT, target_layout=IndexSpace.MODEL_OUTPUT)
+
+
+def test_rejects_invalid_layout_string(data_indices_forcing_gaps: IndexCollection) -> None:
+    """Invalid layout name raises ValueError with clear message."""
+    w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
+    with pytest.raises(ValueError, match="Invalid pred_layout"):
+        w(torch.zeros(1, 1, 1, 2, 6), torch.zeros(1, 1, 1, 2, 10),
+          pred_layout="not_a_layout", target_layout=IndexSpace.DATA_FULL)
+
+
+# --- scaler_indices remapping ------------------------------------------------
+
+
+class TestScalerIndicesRemapping:
+
+    def test_global_to_local_remap(self, data_indices_forcing_gaps: IndexCollection) -> None:
+        """Global scaler_indices are translated to filtered-tensor-local positions."""
+        w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])
+        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=4, scaler=torch.tensor([2.0, 3.0]), name="var_w")
+
+        pred = torch.zeros(1, 1, 1, 8, 6)
+        target = torch.zeros(1, 1, 1, 8, 10)
+        pred[..., 0] = 1.0  # var_0
+        pred[..., 3] = 1.0  # var_3
+
+        # Request global index 3 (var_3) → should remap to local index 1
+        loss = w(pred, target, scaler_indices=(..., [3]),
+                 pred_layout=IndexSpace.DATA_OUTPUT, target_layout=IndexSpace.DATA_FULL)
+
+        # MSE=(1-0)²=1, var_w[1]=3, 8 grid points → 24
+        torch.testing.assert_close(loss, torch.tensor(24.0))
+
+    def test_empty_remap_returns_zero(self, data_indices_forcing_gaps: IndexCollection) -> None:
+        """scaler_indices selecting no filtered variables → zero tensor."""
+        w = _mapper(data_indices_forcing_gaps, ["var_0"])
+        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=4, scaler=torch.tensor([2.0]), name="var_w")
+
+        pred = torch.zeros(1, 1, 1, 8, 6)
+        target = torch.zeros(1, 1, 1, 8, 10)
+        pred[..., 0] = 1.0
+
+        # Global index 3 not in filtered set ["var_0"]
+        loss = w(pred, target, scaler_indices=(..., [3]),
+                 pred_layout=IndexSpace.DATA_OUTPUT, target_layout=IndexSpace.DATA_FULL)
+        torch.testing.assert_close(loss, torch.tensor(0.0))

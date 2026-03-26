@@ -122,11 +122,26 @@ def test_combined_loss_seperate_scalers() -> None:
 
 
 def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapping() -> None:
-    """CombinedLoss should keep target-only wrapped losses small and stable."""
+    """CombinedLoss correctly isolates per-subloss variable filtering and scaler remapping.
+
+    The scenario mirrors a realistic training setup:
+    - A forcing variable (f0) creates a non-contiguous gap in the DATA_FULL index space:
+      indices [tp=0, f0=1(forcing), t2m=2, msl=3, imerg=4] → model only outputs [0, 2, 3].
+    - A target-only variable (imerg) can appear as a prediction target but never as a
+      model output, exercising the cross-variable subloss path.
+    - A per-variable dynamic scaler is defined over all DATA_FULL variables (including f0),
+      so each child LossVariableMapper must independently slice it to its own predicted
+      variable subset, correctly skipping the forcing-variable slot.
+
+    What this guards against:
+    - Scaler values leaking across sublosses (wrong indexing into the shared scaler tensor).
+    - The forcing gap corrupting non-contiguous target index resolution.
+    - Numerical error in the weighted forward pass when pred/target layouts differ.
+    """
     from anemoi.models.data_indices.collection import IndexCollection
 
-    data_config = {"forcing": [], "diagnostic": [], "target": ["imerg"]}
-    name_to_index = {"tp": 0, "imerg": 1}
+    data_config = {"forcing": ["f0"], "diagnostic": [], "target": ["imerg"]}
+    name_to_index = {"tp": 0, "f0": 1, "t2m": 2, "msl": 3, "imerg": 4}
     data_indices = IndexCollection(DictConfig(data_config), name_to_index)
 
     loss = get_loss_function(
@@ -136,8 +151,8 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
                 "losses": [
                     {
                         "_target_": "anemoi.training.losses.MSELoss",
-                        "predicted_variables": ["tp"],
-                        "target_variables": ["tp"],
+                        "predicted_variables": ["tp", "t2m", "msl"],
+                        "target_variables": ["tp", "t2m", "msl"],
                         "scalers": ["grid_uniform", "dynamic"],
                     },
                     {
@@ -153,7 +168,8 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
         ),
         scalers={
             "grid_uniform": (3, torch.ones(4)),
-            "dynamic": (4, torch.tensor([2.0, 7.0])),
+            # dynamic has one value per DATA_FULL variable: tp=2, f0=99(ignored), t2m=3, msl=5, imerg=7
+            "dynamic": (4, torch.tensor([2.0, 99.0, 3.0, 5.0, 7.0])),
         },
         data_indices=data_indices,
     )
@@ -161,13 +177,31 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
     assert isinstance(loss, CombinedLoss)
     assert isinstance(loss.losses[0], LossVariableMapper)
     assert isinstance(loss.losses[1], LossVariableMapper)
-    for child_loss in loss.losses:
-        torch.testing.assert_close(child_loss.loss.scaler.tensors["dynamic"][1], torch.tensor([2.0]))
 
-    pred = torch.full((1, 1, 1, 4, 1), 2.0)
-    target = torch.zeros((1, 1, 1, 4, 2))
-    target[..., 0] = 1.0
-    target[..., 1] = 3.0
+    # First subloss predicts [tp, t2m, msl] → dynamic scaler filtered to [2.0, 3.0, 5.0]
+    torch.testing.assert_close(
+        loss.losses[0].loss.scaler.tensors["dynamic"][1],
+        torch.tensor([2.0, 3.0, 5.0]),
+    )
+    # Second subloss predicts [tp] → dynamic scaler filtered to [2.0]
+    torch.testing.assert_close(
+        loss.losses[1].loss.scaler.tensors["dynamic"][1],
+        torch.tensor([2.0]),
+    )
+
+    # Verify non-contiguous target indices through the forcing gap
+    assert loss.losses[0].target_indices_by_layout[IndexSpace.DATA_FULL] == [0, 2, 3]
+    assert loss.losses[1].target_indices_by_layout[IndexSpace.DATA_FULL] == [4]
+
+    # Numerical forward check using DATA_OUTPUT layout (pred tensor covers model output only)
+    # pred shape: (batch=1, ens=1, step=1, grid=4, model_output_vars=3)
+    # target shape: (batch=1, ens=1, step=1, grid=4, data_full_vars=5)
+    pred = torch.full((1, 1, 1, 4, 3), 2.0)
+    target = torch.zeros((1, 1, 1, 4, 5))
+    target[..., 0] = 1.0   # tp: (2-1)²=1
+    target[..., 2] = 2.0   # t2m: (2-2)²=0
+    target[..., 3] = 4.0   # msl: (2-4)²=4
+    target[..., 4] = 5.0   # imerg: (2-5)²=9 for second subloss
 
     out = loss(
         pred,
@@ -177,14 +211,10 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
         target_layout=IndexSpace.DATA_FULL,
     )
 
-    assert out.ndim == 0
-    assert torch.isfinite(out)
-
-    loss.update_scaler("dynamic", torch.tensor([5.0, 11.0]), override=True)
-    for child_loss in loss.losses:
-        updated = child_loss.loss.scaler.tensors["dynamic"][1]
-        assert updated.shape == (1,)
-        torch.testing.assert_close(updated, torch.tensor([5.0]))
+    # First subloss (weight=1): grid=4, per-var MSE×dynamic=[1×2, 0×3, 4×5]=[2,0,20] → sum=22×4=88
+    # Second subloss (weight=0.5): 9×dynamic[tp]=9×2=18 per point, ×4=72 → 72×0.5=36
+    # Total: 88 + 36 = 124
+    torch.testing.assert_close(out, torch.tensor(124.0))
 
 
 def test_combined_loss_propagates_needs_shard_layout_info() -> None:
