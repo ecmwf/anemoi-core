@@ -13,11 +13,11 @@ import pytest
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.samplers.diffusion_samplers import NOISE_SCHEDULERS
 from anemoi.models.samplers.diffusion_samplers import DPMpp2MSampler
 from anemoi.models.samplers.diffusion_samplers import EDMHeunSampler
 from anemoi.models.samplers.diffusion_samplers import ExperimentalSamplerScheduler
 from anemoi.models.samplers.diffusion_samplers import KarrasScheduler
-from anemoi.models.samplers.diffusion_samplers import NOISE_SCHEDULERS
 from anemoi.models.samplers.diffusion_samplers import _build_segment
 from anemoi.models.samplers.diffusion_samplers import _exponential_segment
 from anemoi.models.samplers.diffusion_samplers import _karras_segment
@@ -623,8 +623,12 @@ class TestExperimentalSamplerScheduler:
     def test_basic_schedule(self):
         """Basic piecewise schedule should have correct length and be monotonically decreasing."""
         sched = ExperimentalSamplerScheduler(
-            sigma_max=100000.0, sigma_min=0.02, num_steps=30,
-            sigma_transition=10.0, num_steps_high=10, num_steps_low=20,
+            sigma_max=100000.0,
+            sigma_min=0.02,
+            num_steps=30,
+            sigma_transition=10.0,
+            num_steps_high=10,
+            num_steps_low=20,
         )
         sigmas = sched.get_schedule()
         assert len(sigmas) == 31  # num_steps + terminal zero
@@ -634,8 +638,12 @@ class TestExperimentalSamplerScheduler:
     def test_endpoints(self):
         """Schedule should start at sigma_max and end at zero."""
         sched = ExperimentalSamplerScheduler(
-            sigma_max=50000.0, sigma_min=0.05, num_steps=20,
-            sigma_transition=5.0, num_steps_high=10, num_steps_low=10,
+            sigma_max=50000.0,
+            sigma_min=0.05,
+            num_steps=20,
+            sigma_transition=5.0,
+            num_steps_high=10,
+            num_steps_low=10,
         )
         sigmas = sched.get_schedule()
         assert torch.isclose(sigmas[0], torch.tensor(50000.0, dtype=torch.float64))
@@ -646,8 +654,12 @@ class TestExperimentalSamplerScheduler:
     def test_transition_point(self):
         """Schedule should pass through the transition sigma."""
         sched = ExperimentalSamplerScheduler(
-            sigma_max=100000.0, sigma_min=0.02, num_steps=30,
-            sigma_transition=10.0, num_steps_high=10, num_steps_low=20,
+            sigma_max=100000.0,
+            sigma_min=0.02,
+            num_steps=30,
+            sigma_transition=10.0,
+            num_steps_high=10,
+            num_steps_low=20,
         )
         sigmas = sched.get_schedule()
         # The transition point is at index num_steps_high (end of high segment)
@@ -656,7 +668,9 @@ class TestExperimentalSamplerScheduler:
     def test_default_step_split(self):
         """When num_steps_high/low not specified, should split evenly."""
         sched = ExperimentalSamplerScheduler(
-            sigma_max=100000.0, sigma_min=0.02, num_steps=30,
+            sigma_max=100000.0,
+            sigma_min=0.02,
+            num_steps=30,
             sigma_transition=10.0,
         )
         assert sched.num_steps_high == 15
@@ -666,9 +680,14 @@ class TestExperimentalSamplerScheduler:
         """Test with different high/low schedule types."""
         for high_type, low_type in [("exponential", "karras"), ("karras", "exponential"), ("karras", "karras")]:
             sched = ExperimentalSamplerScheduler(
-                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
-                sigma_transition=10.0, num_steps_high=10, num_steps_low=10,
-                high_schedule_type=high_type, low_schedule_type=low_type,
+                sigma_max=100000.0,
+                sigma_min=0.02,
+                num_steps=20,
+                sigma_transition=10.0,
+                num_steps_high=10,
+                num_steps_low=10,
+                high_schedule_type=high_type,
+                low_schedule_type=low_type,
             )
             sigmas = sched.get_schedule()
             assert len(sigmas) == 21
@@ -677,10 +696,16 @@ class TestExperimentalSamplerScheduler:
     def test_different_rho_per_segment(self):
         """Test with different rho values for high and low segments."""
         sched = ExperimentalSamplerScheduler(
-            sigma_max=100000.0, sigma_min=0.02, num_steps=20,
-            sigma_transition=10.0, num_steps_high=10, num_steps_low=10,
-            high_schedule_type="karras", low_schedule_type="karras",
-            rho_high=3.0, rho_low=14.0,
+            sigma_max=100000.0,
+            sigma_min=0.02,
+            num_steps=20,
+            sigma_transition=10.0,
+            num_steps_high=10,
+            num_steps_low=10,
+            high_schedule_type="karras",
+            low_schedule_type="karras",
+            rho_high=3.0,
+            rho_low=14.0,
         )
         sigmas = sched.get_schedule()
         assert len(sigmas) == 21
@@ -690,7 +715,9 @@ class TestExperimentalSamplerScheduler:
         """sigma_transition <= sigma_min should raise."""
         with pytest.raises(ValueError, match="sigma_transition must be greater than sigma_min"):
             ExperimentalSamplerScheduler(
-                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
+                sigma_max=100000.0,
+                sigma_min=0.02,
+                num_steps=20,
                 sigma_transition=0.01,
             )
 
@@ -698,7 +725,9 @@ class TestExperimentalSamplerScheduler:
         """sigma_transition >= sigma_max should raise."""
         with pytest.raises(ValueError, match="sigma_transition must be smaller than sigma_max"):
             ExperimentalSamplerScheduler(
-                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
+                sigma_max=100000.0,
+                sigma_min=0.02,
+                num_steps=20,
                 sigma_transition=200000.0,
             )
 
@@ -706,16 +735,24 @@ class TestExperimentalSamplerScheduler:
         """num_steps_high + num_steps_low != num_steps should raise."""
         with pytest.raises(ValueError, match="must equal num_steps"):
             ExperimentalSamplerScheduler(
-                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
-                sigma_transition=10.0, num_steps_high=5, num_steps_low=10,
+                sigma_max=100000.0,
+                sigma_min=0.02,
+                num_steps=20,
+                sigma_transition=10.0,
+                num_steps_high=5,
+                num_steps_low=10,
             )
 
     def test_invalid_step_zero(self):
         """Zero steps in either segment should raise."""
         with pytest.raises(ValueError, match="must both be >= 1"):
             ExperimentalSamplerScheduler(
-                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
-                sigma_transition=10.0, num_steps_high=0, num_steps_low=20,
+                sigma_max=100000.0,
+                sigma_min=0.02,
+                num_steps=20,
+                sigma_transition=10.0,
+                num_steps_high=0,
+                num_steps_low=20,
             )
 
     def test_registry_entries(self):
@@ -726,8 +763,12 @@ class TestExperimentalSamplerScheduler:
     def test_works_with_heun_sampler(self):
         """Piecewise schedule should produce valid sigmas for the Heun sampler."""
         sched = ExperimentalSamplerScheduler(
-            sigma_max=100000.0, sigma_min=0.02, num_steps=10,
-            sigma_transition=10.0, num_steps_high=5, num_steps_low=5,
+            sigma_max=100000.0,
+            sigma_min=0.02,
+            num_steps=10,
+            sigma_transition=10.0,
+            num_steps_high=5,
+            num_steps_low=5,
         )
         sigmas = sched.get_schedule()
 
