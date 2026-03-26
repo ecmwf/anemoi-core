@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
+from anemoi.training.diagnostics.callbacks.cache_sync import CacheSyncCallback
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
@@ -54,6 +55,10 @@ CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bo
         lambda config: nestedget(config, "diagnostics.log.wandb.enabled", False)
         or nestedget(config, "diagnostics.log.mlflow.enabled", False),
         LearningRateMonitor,
+    ),
+    (
+        lambda config: nestedget(config, "system.hardware.cache_dir", None) is not None,
+        CacheSyncCallback,
     ),
 ]
 

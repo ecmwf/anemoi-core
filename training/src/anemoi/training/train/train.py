@@ -29,6 +29,8 @@ from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
+
+from anemoi.training.diagnostics.callbacks.cache_sync import CacheSyncCallback
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks

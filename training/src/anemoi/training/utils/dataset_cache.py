@@ -1,4 +1,5 @@
 import os
+import errno
 import shutil
 import torch
 import torch.distributed as dist
@@ -86,7 +87,7 @@ class CachedDataWrapper:
             # Fallback for other index types
             LOGGER.warning(f"CachedDataWrapper: Unhandled index type: {type(index).__name__}, falling back to original data")
             return self.original_data[index]
-    
+
     def __len__(self):
         return len(self.original_data)
     
@@ -143,7 +144,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         if not dist.is_initialized(): #TODO and check proc_group is valid
             raise ValueError("Torch distributed is not initalised, can't use distributed cache")
                 
-        self.rank = dist.get_rank(self.proc_group)
+        self.rank = dist.get_rank(self.proc_group) % 4
         #self.local_rank = int(os.environ.get("SLURM_LOCALID", (int(os.environ.get("LOCAL_RANK", 0)))))
         
         #self.device = torch.device(f"cuda:{self.local_rank if self.local_rank != -1 else self.rank}" if torch.cuda.is_available() else "cpu")
@@ -157,6 +158,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         self.world_size = dist.get_world_size(self.proc_group)
         self.hostnames = self._get_all_hostnames()
+        self.proc_group = dist.new_group(ranks=None, backend="gloo")
 
         # Determine which dataset(s) we're working with
         # For MultiDataset, cache the first dataset by default
@@ -230,6 +232,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         shutil.copy2(f"{self.filesystem}/.zgroup", self.cache_path)
         
         self.cache = zarr.open(self.cache_path, mode="w")
+        self.cache_full=False # prevents subsequent writing when cache is full
        
         dates = len(self) + 2 # build in some buffer to avoid out of bounds errors, will be cleaned up in the future with a more robust solution than using integers for cache registry
         #dates = self.ds.size
@@ -237,7 +240,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         if self.cache_registry is None:
             # Keep cache_registry on CPU with shared memory for DataLoader worker access
-            self.cache_registry = torch.zeros(dates, dtype=torch.int32, device='cpu').share_memory_()
+            self.cache_registry = torch.zeros(dates, dtype=torch.int32, device='cpu')
             self.cache_registry[:] = -1
             LOGGER.info(f"Rank {self.rank}: Created cache registry on CPU with shared memory for {dates} dates")
             
@@ -309,14 +312,46 @@ class DatasetCache(AnemoiDatasetsDataModule):
 
     def __del__(self):
        self._shutdown_server()
-            
+
+    def priority_reduce(self, stacked, cache_registry, rank):
+        """ reduces global cache registries by taking local first then any other elements"""
+        valid_mask = stacked != -1
+        self_mask = stacked == rank
+        has_self = self_mask.any(dim=0)
+
+        global_cache_registry = torch.full_like(cache_registry, -1)
+
+        # Prefer self
+        global_cache_registry[has_self] = rank
+
+        # Fallback to any other rank
+        remaining = ~has_self
+        if remaining.any():
+            temp = stacked.clone()
+            temp[~valid_mask] = -1
+            fallback = temp.max(dim=0).values
+            global_cache_registry[remaining] = fallback[remaining]
+
+        return global_cache_registry
+
     def update_global_view(self) -> None:
         """ Communicate with other procs and share who has what files in their caches. Should be called after an epoch."""
-        all_gather_buffer = [torch.zeros_like(self.cache_registry) for _ in range(self.world_size)]
-        dist.all_gather(all_gather_buffer, self.cache_registry, self.proc_group)
-        self.global_cache_registry = torch.stack(all_gather_buffer).share_memory_()  # Keep on CPU with shared memory
-        LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {(self.global_cache_registry != -1).sum().item()} cached items across all ranks")
-    
+        #backend = dist.get_backend(proc_group)
+        #print(f"[Rank {rank}] backend={backend}")
+
+        all_gather_buffer = [
+            torch.zeros_like(self.cache_registry, device="cpu")
+            for _ in range(self.world_size)
+        ]
+
+        LOGGER.info(f"Starting all gather (local cache registry: {self.cache_registry})")
+        dist.all_gather(all_gather_buffer, self.cache_registry, group=self.proc_group)
+
+        self.global_cache_registry = self.priority_reduce(torch.stack(all_gather_buffer), self.cache_registry, self.rank)
+        num_cached = (self.global_cache_registry != -1).sum().item()
+        LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {(self.global_cache_registry != -1).sum().item()} cached items across all ranks ({self.global_cache_registry=})")
+
+
     def print_cache_stats(self) -> None:
         """Print cache statistics."""
         total = self.total_fetches.value
@@ -357,6 +392,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
 
         # Convert numpy values to Python int and filter out -1
         cache_hits = [int(x) for x in cache_subset if int(x) != -1]
+        #LOGGER.info(f"{self.rank=} {cache_hits=}")
         return cache_hits
 
     def fetch(self, date, verbose=False) -> np.ndarray:
@@ -365,6 +401,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         #LOGGER.info(f"Rank {self.rank}: Fetching date {date} (verbose={verbose})")
         
         self.total_fetches.value += 1
+
         cache_hits = self.check_cache(date)
         
         # Get the primary dataset's raw data for caching
@@ -375,6 +412,10 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Check if we're accessing the wrapper itself (avoid infinite recursion)
         if isinstance(primary_data, CachedDataWrapper):
             primary_data = primary_data.original_data
+
+        local_data_allowed=False
+        if not local_data_allowed and self.rank in cache_hits:
+            cache_hits.remove(self.rank)
         
         if len(cache_hits) == 0:
         #if cache_hits.numel() == 0:
@@ -383,10 +424,20 @@ class DatasetCache(AnemoiDatasetsDataModule):
             self.cache_misses.value += 1
             data = primary_data[date]
             
-            # add data to local cache
-            #TODO can i do this async while i return data
-            self.cache[date] = data
-            self.cache_registry[date] = self.rank
+            if not self.cache_full:
+                # add data to local cache
+                try:
+                    self.cache[date] = data
+                    self.cache_registry[date] = self.rank
+                    #LOGGER.info(f"{self.rank=} {self.cache_registry=}")
+
+                # TODO should not use try catch as program logic
+                except OSError as e:
+                    if e.errno == errno.ENOSPC: # No space left on device
+                        self.cache_full=True
+                        LOGGER.info(f"Rank {self.rank}: Cache full! No more writing")
+                    else:
+                        raise e
             
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
@@ -443,6 +494,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Use self.ds_train to access our cached property
         return len(self.ds_train.valid_date_indices)
     
+    #TODO currently does not get called
     def on_validation_epoch_end(
         self,
         trainer: pl.Trainer,
