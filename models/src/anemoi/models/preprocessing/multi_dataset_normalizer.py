@@ -149,6 +149,7 @@ class FieldNormalizer(nn.Module):
             # assert name in name_to_index, f"{name} is not a valid variable name"
             assert method in [
                 "mean-std",
+                "std",
                 # "robust",
                 "min-max",
                 "max",
@@ -168,6 +169,15 @@ class FieldNormalizer(nn.Module):
                     )
                 _norm_mul[i] = 1 / stdev[i]
                 _norm_add[i] = -mean[i] / stdev[i]
+
+            elif m == "std":
+                LOGGER.debug(f"Normalizing: {name} is std-normalised.")
+                if stdev[i] < (mean[i] * 1e-6):
+                    warnings.warn(
+                        f"Normalizing: the field seems to have only one value {mean[i]}"
+                    )
+                _norm_mul[i] = 1 / stdev[i]
+                _norm_add[i] = 0
 
             elif m == "min-max":
                 LOGGER.debug(f"Normalizing: {name} is min-max-normalised to [0, 1].")
