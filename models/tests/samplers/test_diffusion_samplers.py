@@ -15,6 +15,12 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.samplers.diffusion_samplers import DPMpp2MSampler
 from anemoi.models.samplers.diffusion_samplers import EDMHeunSampler
+from anemoi.models.samplers.diffusion_samplers import ExperimentalSamplerScheduler
+from anemoi.models.samplers.diffusion_samplers import KarrasScheduler
+from anemoi.models.samplers.diffusion_samplers import NOISE_SCHEDULERS
+from anemoi.models.samplers.diffusion_samplers import _build_segment
+from anemoi.models.samplers.diffusion_samplers import _exponential_segment
+from anemoi.models.samplers.diffusion_samplers import _karras_segment
 
 DATASET_NAME = "test_dataset"
 
@@ -40,25 +46,21 @@ class MockDenoisingFunction:
         self,
         x: dict[str, torch.Tensor],
         y: dict[str, torch.Tensor],
-        sigma: torch.Tensor,
+        sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[dict[str, Optional[list]]] = None,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Mock denoising function that reduces noise proportionally to sigma."""
         self.call_count += 1
 
-        # Simple denoising: reduce noise proportional to sigma
-        # At high sigma (high noise), return mostly the conditioning x
-        # At low sigma (low noise), return mostly the noisy y
-        sigma_normalized = sigma / (sigma.max() + 1e-8)
-
         denoised = {}
         for dataset_name, y_ in y.items():
+            sigma_val = sigma[dataset_name]
+            sigma_normalized = sigma_val / (sigma_val.max() + 1e-8)
+
             if self.deterministic:
-                # Deterministic denoising for reproducible tests
                 denoised[dataset_name] = (1 - sigma_normalized * self.noise_reduction_factor) * y_
             else:
-                # Add some controlled randomness
                 denoised[dataset_name] = (1 - sigma_normalized * self.noise_reduction_factor) * y_
                 denoised[dataset_name] += 0.01 * sigma_normalized * torch.randn_like(y_)
 
@@ -556,3 +558,198 @@ class TestSamplerEdgeCases:
             assert result_dpmpp[dataset_name].shape == y[dataset_name].shape
             assert torch.isfinite(result_heun[dataset_name]).all()
             assert torch.isfinite(result_dpmpp[dataset_name]).all()
+
+
+class TestSegmentHelpers:
+    """Test segment helper functions used by piecewise schedulers."""
+
+    def test_karras_segment_endpoints(self):
+        """Karras segment should include both start and end values."""
+        seg = _karras_segment(100.0, 1.0, 5, rho=7.0)
+        assert len(seg) == 5
+        assert torch.isclose(seg[0], torch.tensor(100.0, dtype=torch.float64))
+        assert torch.isclose(seg[-1], torch.tensor(1.0, dtype=torch.float64))
+
+    def test_karras_segment_monotonic(self):
+        """Karras segment should be monotonically decreasing."""
+        seg = _karras_segment(1000.0, 0.1, 20, rho=7.0)
+        assert all(seg[i] > seg[i + 1] for i in range(len(seg) - 1))
+
+    def test_karras_segment_single_point(self):
+        """Single-point segment should return just the start value."""
+        seg = _karras_segment(42.0, 1.0, 1, rho=7.0)
+        assert len(seg) == 1
+        assert torch.isclose(seg[0], torch.tensor(42.0, dtype=torch.float64))
+
+    def test_exponential_segment_endpoints(self):
+        """Exponential segment should include both start and end values."""
+        seg = _exponential_segment(100.0, 1.0, 5)
+        assert len(seg) == 5
+        assert torch.isclose(seg[0], torch.tensor(100.0, dtype=torch.float64))
+        assert torch.isclose(seg[-1], torch.tensor(1.0, dtype=torch.float64))
+
+    def test_exponential_segment_monotonic(self):
+        """Exponential segment should be monotonically decreasing."""
+        seg = _exponential_segment(1000.0, 0.1, 20)
+        assert all(seg[i] > seg[i + 1] for i in range(len(seg) - 1))
+
+    def test_exponential_segment_single_point(self):
+        """Single-point segment should return just the start value."""
+        seg = _exponential_segment(42.0, 1.0, 1)
+        assert len(seg) == 1
+        assert torch.isclose(seg[0], torch.tensor(42.0, dtype=torch.float64))
+
+    def test_build_segment_karras(self):
+        """_build_segment with 'karras' should delegate to _karras_segment."""
+        seg = _build_segment("karras", 100.0, 1.0, 5, rho=7.0)
+        expected = _karras_segment(100.0, 1.0, 5, rho=7.0)
+        assert torch.allclose(seg, expected)
+
+    def test_build_segment_exponential(self):
+        """_build_segment with 'exponential' should delegate to _exponential_segment."""
+        seg = _build_segment("exponential", 100.0, 1.0, 5)
+        expected = _exponential_segment(100.0, 1.0, 5)
+        assert torch.allclose(seg, expected)
+
+    def test_build_segment_unknown_raises(self):
+        """_build_segment with unknown type should raise ValueError."""
+        with pytest.raises(ValueError, match="Unsupported schedule_type"):
+            _build_segment("unknown", 100.0, 1.0, 5)
+
+
+class TestExperimentalSamplerScheduler:
+    """Test the piecewise ExperimentalSamplerScheduler."""
+
+    def test_basic_schedule(self):
+        """Basic piecewise schedule should have correct length and be monotonically decreasing."""
+        sched = ExperimentalSamplerScheduler(
+            sigma_max=100000.0, sigma_min=0.02, num_steps=30,
+            sigma_transition=10.0, num_steps_high=10, num_steps_low=20,
+        )
+        sigmas = sched.get_schedule()
+        assert len(sigmas) == 31  # num_steps + terminal zero
+        assert sigmas[-1] == 0.0
+        assert all(sigmas[i] >= sigmas[i + 1] for i in range(len(sigmas) - 1))
+
+    def test_endpoints(self):
+        """Schedule should start at sigma_max and end at zero."""
+        sched = ExperimentalSamplerScheduler(
+            sigma_max=50000.0, sigma_min=0.05, num_steps=20,
+            sigma_transition=5.0, num_steps_high=10, num_steps_low=10,
+        )
+        sigmas = sched.get_schedule()
+        assert torch.isclose(sigmas[0], torch.tensor(50000.0, dtype=torch.float64))
+        assert sigmas[-1] == 0.0
+        # Last positive sigma should be close to sigma_min
+        assert torch.isclose(sigmas[-2], torch.tensor(0.05, dtype=torch.float64), atol=1e-6)
+
+    def test_transition_point(self):
+        """Schedule should pass through the transition sigma."""
+        sched = ExperimentalSamplerScheduler(
+            sigma_max=100000.0, sigma_min=0.02, num_steps=30,
+            sigma_transition=10.0, num_steps_high=10, num_steps_low=20,
+        )
+        sigmas = sched.get_schedule()
+        # The transition point is at index num_steps_high (end of high segment)
+        assert torch.isclose(sigmas[10], torch.tensor(10.0, dtype=torch.float64), atol=1e-4)
+
+    def test_default_step_split(self):
+        """When num_steps_high/low not specified, should split evenly."""
+        sched = ExperimentalSamplerScheduler(
+            sigma_max=100000.0, sigma_min=0.02, num_steps=30,
+            sigma_transition=10.0,
+        )
+        assert sched.num_steps_high == 15
+        assert sched.num_steps_low == 15
+
+    def test_different_segment_types(self):
+        """Test with different high/low schedule types."""
+        for high_type, low_type in [("exponential", "karras"), ("karras", "exponential"), ("karras", "karras")]:
+            sched = ExperimentalSamplerScheduler(
+                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
+                sigma_transition=10.0, num_steps_high=10, num_steps_low=10,
+                high_schedule_type=high_type, low_schedule_type=low_type,
+            )
+            sigmas = sched.get_schedule()
+            assert len(sigmas) == 21
+            assert all(sigmas[i] >= sigmas[i + 1] for i in range(len(sigmas) - 1))
+
+    def test_different_rho_per_segment(self):
+        """Test with different rho values for high and low segments."""
+        sched = ExperimentalSamplerScheduler(
+            sigma_max=100000.0, sigma_min=0.02, num_steps=20,
+            sigma_transition=10.0, num_steps_high=10, num_steps_low=10,
+            high_schedule_type="karras", low_schedule_type="karras",
+            rho_high=3.0, rho_low=14.0,
+        )
+        sigmas = sched.get_schedule()
+        assert len(sigmas) == 21
+        assert all(sigmas[i] >= sigmas[i + 1] for i in range(len(sigmas) - 1))
+
+    def test_invalid_transition_too_low(self):
+        """sigma_transition <= sigma_min should raise."""
+        with pytest.raises(ValueError, match="sigma_transition must be greater than sigma_min"):
+            ExperimentalSamplerScheduler(
+                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
+                sigma_transition=0.01,
+            )
+
+    def test_invalid_transition_too_high(self):
+        """sigma_transition >= sigma_max should raise."""
+        with pytest.raises(ValueError, match="sigma_transition must be smaller than sigma_max"):
+            ExperimentalSamplerScheduler(
+                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
+                sigma_transition=200000.0,
+            )
+
+    def test_invalid_step_sum(self):
+        """num_steps_high + num_steps_low != num_steps should raise."""
+        with pytest.raises(ValueError, match="must equal num_steps"):
+            ExperimentalSamplerScheduler(
+                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
+                sigma_transition=10.0, num_steps_high=5, num_steps_low=10,
+            )
+
+    def test_invalid_step_zero(self):
+        """Zero steps in either segment should raise."""
+        with pytest.raises(ValueError, match="must both be >= 1"):
+            ExperimentalSamplerScheduler(
+                sigma_max=100000.0, sigma_min=0.02, num_steps=20,
+                sigma_transition=10.0, num_steps_high=0, num_steps_low=20,
+            )
+
+    def test_registry_entries(self):
+        """Both registry aliases should resolve to ExperimentalSamplerScheduler."""
+        assert NOISE_SCHEDULERS["experimental_sampler"] is ExperimentalSamplerScheduler
+        assert NOISE_SCHEDULERS["experimental_piecewise"] is ExperimentalSamplerScheduler
+
+    def test_works_with_heun_sampler(self):
+        """Piecewise schedule should produce valid sigmas for the Heun sampler."""
+        sched = ExperimentalSamplerScheduler(
+            sigma_max=100000.0, sigma_min=0.02, num_steps=10,
+            sigma_transition=10.0, num_steps_high=5, num_steps_low=5,
+        )
+        sigmas = sched.get_schedule()
+
+        x = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
+        y = {DATASET_NAME: torch.randn(1, 2, 1, 5, 3)}
+
+        mock_fn = MockDenoisingFunction(deterministic=True)
+        sampler = EDMHeunSampler()
+        result = sampler.sample(x, y, sigmas.float(), mock_fn)
+
+        for dataset_name in result:
+            assert result[dataset_name].shape == y[dataset_name].shape
+            assert torch.isfinite(result[dataset_name]).all()
+
+
+class TestKarrasSchedulerTerminalZero:
+    """Test that KarrasScheduler appends a terminal zero."""
+
+    def test_terminal_zero(self):
+        """Karras schedule should end with zero."""
+        sched = KarrasScheduler(sigma_max=80.0, sigma_min=0.002, num_steps=10)
+        sigmas = sched.get_schedule()
+        assert len(sigmas) == 11  # num_steps + terminal zero
+        assert sigmas[-1] == 0.0
+        assert sigmas[-2] > 0.0
