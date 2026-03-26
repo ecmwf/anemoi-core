@@ -424,9 +424,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         noise_cond_base = self._embed_noise_conditioning(sigma_flat)  # (batch, cond_dim)
         cond_dim = noise_cond_base.shape[-1]
         # Expand to 5D: (batch, 1, ensemble, 1, cond_dim) for _generate_noise_conditioning
-        noise_cond = noise_cond_base[:, None, None, None, :].expand(
-            batch_size, 1, ensemble_size, 1, cond_dim
-        )
+        noise_cond = noise_cond_base[:, None, None, None, :].expand(batch_size, 1, ensemble_size, 1, cond_dim)
 
         # Prepare noise conditioning
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(

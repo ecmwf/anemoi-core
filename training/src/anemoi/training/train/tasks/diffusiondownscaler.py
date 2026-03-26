@@ -168,14 +168,16 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         y = batch["out_hres"]
 
         target_ds = self.model.model._decoder_datasets[0]  # e.g. "out_hres"
-        source_ds = self._residual_pairs.get(target_ds)     # e.g. "in_lres", or None
+        source_ds = self._residual_pairs.get(target_ds)  # e.g. "in_lres", or None
 
         # Interpolate source dataset to target resolution
         x_in_lres_upsampled = self.model.model.residual["in_lres"](
             x_in_lres,
             grid_shard_shapes=None,
             model_comm_group=self.model_comm_group,
-        )[:, :, None, :, :]  # Add ensemble dim: (batch, time, ensemble=1, grid, features)
+        )[
+            :, :, None, :, :,
+        ]  # Add ensemble dim: (batch, time, ensemble=1, grid, features)
 
         # Compute training target on raw data
         if source_ds is not None:
@@ -248,7 +250,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         return loss, metrics_next, [y_pred_full]
 
     def _noise_target(
-        self, x: dict[str, torch.Tensor], sigma: dict[str, torch.Tensor],
+        self,
+        x: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
         """Add noise to the state (dict-based, aligned with forecaster)."""
         return {name: x[name] + torch.randn_like(x[name]) * sigma[name] for name in x}

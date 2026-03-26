@@ -13,13 +13,10 @@ from __future__ import annotations
 
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.preprocessing import Processors
-from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.train.tasks.diffusiondownscaler import GraphDiffusionDownscaler
-
 
 # ============================================================
 # Test helpers
@@ -32,11 +29,13 @@ def _make_index_collection(
     diagnostic: list[str] | None = None,
 ) -> IndexCollection:
     """Create a minimal IndexCollection for testing."""
-    cfg = DictConfig({
-        "forcing": forcing or [],
-        "diagnostic": diagnostic or [],
-        "target": [],
-    })
+    cfg = DictConfig(
+        {
+            "forcing": forcing or [],
+            "diagnostic": diagnostic or [],
+            "target": [],
+        },
+    )
     return IndexCollection(cfg, name_to_index)
 
 
@@ -121,7 +120,7 @@ class TestGetNoiseLevel:
     def test_probabilistic_low_noise(self, downscaler):
         shape = (4, 1, 1, 1, 1)
         sigma, weight = downscaler._get_noise_level(
-            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu")
+            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
         )
         assert sigma.shape == shape
         assert weight.shape == shape
@@ -132,7 +131,7 @@ class TestGetNoiseLevel:
         downscaler.training_approach = "probabilistic_high_noise"
         shape = (4, 1, 1, 1, 1)
         sigma, weight = downscaler._get_noise_level(
-            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu")
+            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
         )
         assert sigma.shape == shape
         assert (sigma >= 0.02).all()
@@ -142,7 +141,7 @@ class TestGetNoiseLevel:
         downscaler.training_approach = "deterministic"
         shape = (4, 1, 1, 1, 1)
         sigma, weight = downscaler._get_noise_level(
-            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu")
+            shape=shape, sigma_max=100000.0, sigma_min=0.02, sigma_data=1.0, rho=7.0, device=torch.device("cpu"),
         )
         assert torch.allclose(sigma, torch.full(shape, 500000.0))
 
@@ -192,7 +191,7 @@ class TestResidualPredictionConfig:
             elif raw:
                 raise ValueError(
                     f"residual_prediction must be a dict mapping target->source datasets "
-                    f"(e.g. {{out_hres: in_lres}}) or False, got: {raw}"
+                    f"(e.g. {{out_hres: in_lres}}) or False, got: {raw}",
                 )
 
     def test_residual_prediction_false_gives_empty(self):
@@ -256,9 +255,7 @@ class TestChannelMatching:
         """When input and output have same channels in same order, indices should be identity."""
         model = type("Model", (), {})()
         model._match_tensor_channels = (
-            lambda self, inp, out: torch.tensor(
-                [inp[name] for name in out.keys() if name in inp], dtype=torch.long
-            )
+            lambda self, inp, out: torch.tensor([inp[name] for name in out.keys() if name in inp], dtype=torch.long)
         ).__get__(model)
 
         input_idx = {"a": 0, "b": 1, "c": 2}
@@ -399,10 +396,7 @@ class TestMixedResidualDirect:
         """out_hres should have 10u as prognostic and tp as diagnostic."""
         out_indices = data_indices["out_hres"]
         # 10u is prognostic (not in forcing, not in diagnostic)
-        assert "10u" in [
-            name for name, idx in out_indices.name_to_index.items()
-            if name not in out_indices.diagnostic
-        ]
+        assert "10u" in [name for name, idx in out_indices.name_to_index.items() if name not in out_indices.diagnostic]
         # tp is diagnostic
         assert "tp" in out_indices.diagnostic
 
