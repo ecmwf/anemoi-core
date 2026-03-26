@@ -48,6 +48,23 @@ LOGGER = logging.getLogger(__name__)
 PL_VERSION = version.parse(pl.__version__)
 
 
+def _instantiate_model(model_config: DictConfig, runtime_artifacts: Any) -> Any:
+    """Instantiate the model builder from a Hydra model config and runtime artifacts.
+
+    Hydra's instantiate() merges kwargs into the OmegaConf config before calling
+    the target, which fails for non-serializable objects like HeteroData. This
+    resolves _target_ manually and calls the builder directly.
+    """
+    from hydra.utils import get_method
+
+    cfg = OmegaConf.to_container(model_config, resolve=True)
+    target = cfg.pop("_target_")
+    cfg.pop("_recursive_", None)
+    cfg.pop("_convert_", None)
+    constructor = get_method(target)
+    return constructor(runtime_artifacts=runtime_artifacts, **cfg)
+
+
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
@@ -245,7 +262,7 @@ class AnemoiTrainer(ABC):
         """Provide the model instance."""
         model_task = get_class(self.config.training.model_task)
 
-        model = instantiate(self.config.model, runtime_artifacts=self.runtime_artifacts)
+        model = _instantiate_model(self.config.model, self.runtime_artifacts)
 
         self.metadata["metadata_inference"]["task"] = model_task.task_type
 

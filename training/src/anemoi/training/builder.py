@@ -156,10 +156,9 @@ def build_anemoi_model(
 ) -> AnemoiModel:
     """Build and return a fully constructed AnemoiModel.
 
-    Called by Hydra instantiate(config.model, runtime_artifacts=...) from train.py.
+    Called via instantiate_model() from train.py.
     YAML kwargs (backbone, processors, multistep_input, multistep_output, **model_arch_kwargs)
-    come from OmegaConf interpolations in the model yaml.
-    runtime_artifacts is injected from Python — not declared in the YAML.
+    come from the model YAML. runtime_artifacts is injected from Python.
     """
 
     def _to_container(v):
