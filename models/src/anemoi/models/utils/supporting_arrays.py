@@ -12,13 +12,19 @@ from typing import Any
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
-from anemoi.models.utils.config import get_multiple_datasets_config
 
-
-def build_combined_supporting_arrays(config: Any, graph_data: HeteroData, supporting_arrays: dict) -> dict:
+def build_combined_supporting_arrays(
+    config: Any,
+    graph_data: HeteroData,
+    supporting_arrays: dict,
+    dataset_names: list[str] | None = None,
+) -> dict:
     """Merge output-mask supporting arrays into supporting_arrays."""
     combined = {name: arrays.copy() for name, arrays in supporting_arrays.items()}
-    dataset_names = get_multiple_datasets_config(config.data).keys()
+    if dataset_names is None:
+        from anemoi.models.utils.config import get_multiple_datasets_config
+
+        dataset_names = list(get_multiple_datasets_config(config.data).keys())
     for name in dataset_names:
         combined.setdefault(name, {})
         mask = instantiate(config.model.output_mask, nodes=graph_data[name])

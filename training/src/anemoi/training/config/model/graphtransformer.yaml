@@ -1,7 +1,7 @@
 defaults:
   - /processors@processors: default
 
-_target_: anemoi.training.builder.build_anemoi_model
+_target_: anemoi.models.builder.build_anemoi_model
 _recursive_: false
 
 multistep_input: ${training.multistep_input}

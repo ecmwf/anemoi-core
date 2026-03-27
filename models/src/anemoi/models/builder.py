@@ -12,8 +12,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from dataclasses import field
 
 import torch
 from hydra.utils import instantiate
@@ -23,28 +21,10 @@ from omegaconf import OmegaConf
 from anemoi.models.models import AnemoiModel
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.utils.runtime_artifacts import RuntimeArtifacts
+from anemoi.models.utils.supporting_arrays import build_combined_supporting_arrays
 
 LOGGER = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Runtime artifacts
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class RuntimeArtifacts:
-    """Pure runtime data passed from AnemoiTrainer to the model builder.
-
-    All fields are plain dicts — no config objects.
-    """
-
-    statistics: dict  # keyed by dataset name
-    data_indices: dict  # keyed by dataset name
-    supporting_arrays: dict  # raw from datamodule; combined with graph masks inside builder
-    graph_data: dict
-    metadata: dict
-    statistics_tendencies: dict | None = field(default=None)  # keyed by dataset name
 
 
 # ---------------------------------------------------------------------------
@@ -184,13 +164,11 @@ def build_anemoi_model(
         n_step_output=multistep_output,
     )
 
-    # Combine supporting arrays with output-mask arrays
-    from anemoi.training.utils.supporting_arrays import build_combined_supporting_arrays
-
     supporting_arrays = build_combined_supporting_arrays(
         config=model_config,
         graph_data=runtime_artifacts.graph_data,
         supporting_arrays=runtime_artifacts.supporting_arrays,
+        dataset_names=list(runtime_artifacts.statistics.keys()),
     )
 
     return AnemoiModel(

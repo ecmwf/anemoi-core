@@ -375,7 +375,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def runtime_artifacts(self):
         """Package raw runtime data for the model builder."""
-        from anemoi.training.builder import RuntimeArtifacts
+        from anemoi.models.utils.runtime_artifacts import RuntimeArtifacts
 
         return RuntimeArtifacts(
             statistics=self.datamodule.statistics,
@@ -419,7 +419,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def supporting_arrays(self) -> dict:
-        from anemoi.training.utils.supporting_arrays import build_combined_supporting_arrays
+        from anemoi.models.utils.supporting_arrays import build_combined_supporting_arrays
 
         return build_combined_supporting_arrays(self.config, self.graph_data, self.datamodule.supporting_arrays)
 
