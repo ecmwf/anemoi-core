@@ -18,6 +18,7 @@ from abc import ABC
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,6 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from matplotlib.colors import Colormap
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
@@ -45,9 +45,32 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
-from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class PlottingSettings:
+    """Settings for plotting callbacks.
+
+    TODO: Move this to Pydantic schema and inject settings in each callback.
+
+    Parameters
+    ----------
+    datashader : bool
+        Whether to use datashader for plotting
+    projection_kind : str
+        Map projection kind (e.g., "equirectangular")
+    asynchronous : bool
+        Whether to plot asynchronously in background thread
+    save_basedir : str | None
+        Base directory for saving plot files
+    """
+
+    datashader: bool = True
+    projection_kind: str = "equirectangular"
+    asynchronous: bool = True
+    save_basedir: str | None = None
 
 
 class BasePlotCallback(Callback, ABC):
@@ -55,20 +78,25 @@ class BasePlotCallback(Callback, ABC):
 
     def __init__(
         self,
-        config: BaseSchema,
         dataset_names: list[str] | None = None,
+        plotting_settings: PlottingSettings | None = None,
     ) -> None:
         """Initialise the BasePlotCallback abstract base class.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None (uses ["data"])
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings, by default None (uses defaults)
 
         """
         super().__init__()
-        self.config = config
-        self.save_basedir = config.system.output.plots
+        if plotting_settings is None:
+            plotting_settings = PlottingSettings()
+        self.plotting_settings = plotting_settings
+
+        self.save_basedir = plotting_settings.save_basedir
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
         self.post_processors = None
@@ -79,15 +107,24 @@ class BasePlotCallback(Callback, ABC):
         self.plot = self._plot
         self._executor = None
         self._error: BaseException = None
-        self.datashader_plotting = config.diagnostics.plot.datashader
-        self.projection_kind = getattr(config.diagnostics.plot, "projection_kind", "equirectangular")
+        self.datashader_plotting = plotting_settings.datashader
+        self.projection_kind = plotting_settings.projection_kind
+        self.asynchronous = plotting_settings.asynchronous
 
-        if self.config.diagnostics.plot.asynchronous:
+        if self.asynchronous:
             LOGGER.info("Setting up asynchronous plotting ...")
             self.plot = self._async_plot
             self._executor = ThreadPoolExecutor(max_workers=1)
             self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
             self.loop_thread.start()
+
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Check for NCCL timeout risk with asynchronous plotting."""
+        del pl_module
+        if self.asynchronous:
+            read_group_size = trainer.strategy.read_group_size
+            if read_group_size > 1:
+                LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
 
     def start_event_loop(self) -> None:
         """Start the event loop in a separate thread."""
@@ -155,10 +192,10 @@ class BasePlotCallback(Callback, ABC):
             save_path.parent.mkdir(parents=True, exist_ok=True)
             anim.save(save_path, writer="pillow", fps=8)
 
-            if self.config.diagnostics.log.wandb.enabled:
+            if logger and logger.logger_name == "wandb":
                 LOGGER.warning("Saving gif animations not tested for wandb.")
 
-            if self.config.diagnostics.log.mlflow.enabled:
+            if logger and logger.logger_name == "mlflow":
                 run_id = logger.run_id
                 logger.experiment.log_artifact(run_id, str(save_path), artifact_path=self.artifact_subfolder)
 
@@ -243,26 +280,45 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 
     def __init__(
         self,
-        config: OmegaConf,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility: accept individual parameters if plotting_settings not provided
+        save_basedir: str | None = None,
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
     ):
         """Initialise the BasePerBatchPlotCallback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
         every_n_batches : int, optional
-            Batch Frequency to plot at, by default None
-            If not given, uses default from config at `diagnostics.plot.frequency.batch`
+            Batch Frequency to plot at, by default None (uses 750)
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
 
         """
-        super().__init__(config, dataset_names=dataset_names)
-        self.every_n_batches = every_n_batches or self.config.diagnostics.plot.frequency.batch
-
-        if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
-            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
+        # Support both new (plotting_settings) and old (individual params) interfaces
+        if plotting_settings is None:
+            plotting_settings = PlottingSettings(
+                save_basedir=save_basedir,
+                datashader=datashader,
+                projection_kind=projection_kind,
+                asynchronous=asynchronous,
+            )
+        super().__init__(dataset_names=dataset_names, plotting_settings=plotting_settings)
+        self.every_n_batches = every_n_batches or 750
 
     def on_validation_batch_end(
         self,
@@ -325,22 +381,46 @@ class BasePerEpochPlotCallback(BasePlotCallback):
 
     def __init__(
         self,
-        config: OmegaConf,
         every_n_epochs: int | None = None,
         dataset_names: list[str] | None = None,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility
+        save_basedir: str | None = None,
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
     ):
         """Initialise the BasePerEpochPlotCallback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
         every_n_epochs : int, optional
-            Epoch frequency to plot at, by default None
-            If not given, uses default from config at `diagnostics.plot.frequency.epoch`
+            Epoch frequency to plot at, by default None (uses 1)
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
         """
-        super().__init__(config, dataset_names=dataset_names)
-        self.every_n_epochs = every_n_epochs or self.config.diagnostics.plot.frequency.epoch
+        if plotting_settings is None:
+            plotting_settings = PlottingSettings(
+                save_basedir=save_basedir,
+                datashader=datashader,
+                projection_kind=projection_kind,
+                asynchronous=asynchronous,
+            )
+        super().__init__(dataset_names=dataset_names, plotting_settings=plotting_settings)
+        self.every_n_epochs = every_n_epochs or 1
+
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        super().on_fit_start(trainer, pl_module)
 
     @rank_zero_only
     def on_validation_epoch_end(
@@ -388,7 +468,6 @@ class LongRolloutPlots(BasePlotCallback):
 
     def __init__(
         self,
-        config: OmegaConf,
         rollout: list[int],
         sample_idx: int,
         parameters: list[str],
@@ -398,13 +477,17 @@ class LongRolloutPlots(BasePlotCallback):
         per_sample: int = 6,
         every_n_epochs: int = 1,
         animation_interval: int = 400,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise LongRolloutPlots callback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
         rollout : list[int]
             Rollout steps to plot at
         sample_idx : int
@@ -423,8 +506,25 @@ class LongRolloutPlots(BasePlotCallback):
             Epoch frequency to plot at, by default 1
         animation_interval : int, optional
             Delay between frames in the animation in milliseconds, by default 400
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
         """
-        super().__init__(config)
+        if plotting_settings is None:
+            plotting_settings = PlottingSettings(
+                datashader=datashader,
+                projection_kind=projection_kind,
+                asynchronous=asynchronous,
+                save_basedir=save_basedir,
+            )
+        super().__init__(plotting_settings=plotting_settings)
 
         self.every_n_epochs = every_n_epochs
 
@@ -455,9 +555,6 @@ class LongRolloutPlots(BasePlotCallback):
             every_n_epochs,
         )
 
-        if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
-            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
-
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -472,10 +569,13 @@ class LongRolloutPlots(BasePlotCallback):
         logger = trainer.logger
 
         # Initialize required variables for plotting
+        input_data = pl_module.data_indices.data.input.todict()
+        index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
+        diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
         plot_parameters_dict = {
             pl_module.data_indices.model.output.name_to_index[name]: (
                 name,
-                name in self.config.data.get("diagnostic", []),
+                name in diagnostics,
             )
             for name in self.parameters
         }
@@ -706,7 +806,7 @@ class LongRolloutPlots(BasePlotCallback):
             dtype = precision_mapping.get(prec)
             context = torch.autocast(device_type=batch.device.type, dtype=dtype) if dtype is not None else nullcontext()
 
-            if self.config.diagnostics.plot.asynchronous:
+            if self.asynchronous:
                 LOGGER.warning("Asynchronous plotting not supported for long rollout plots.")
 
             with context:
@@ -719,21 +819,47 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
 
     def __init__(
         self,
-        config: OmegaConf,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
+        q_extreme_limit: float = 0.05,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
-        every_n_epochs: int | None, optional
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        every_n_epochs : int | None, optional
             Override for frequency to plot at, by default None
+        q_extreme_limit : float, optional
+            Quantile edges to represent, by default 0.05
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
         """
-        super().__init__(config, dataset_names=dataset_names, every_n_epochs=every_n_epochs)
-        self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
+        super().__init__(
+            dataset_names=dataset_names,
+            every_n_epochs=every_n_epochs,
+            plotting_settings=plotting_settings,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
+        )
+        self.q_extreme_limit = q_extreme_limit
 
     def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
         return {
@@ -848,23 +974,46 @@ class PlotLoss(BasePerBatchPlotCallback):
 
     def __init__(
         self,
-        config: OmegaConf,
         parameter_groups: dict[dict[str, list[str]]],
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotLoss callback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Object with configuration settings
         parameter_groups : dict
             Dictionary with parameter groups with parameter names as keys
         every_n_batches : int, optional
             Override for batch frequency, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
         """
-        super().__init__(config, every_n_batches=every_n_batches, dataset_names=dataset_names)
+        super().__init__(
+            every_n_batches=every_n_batches,
+            dataset_names=dataset_names,
+            plotting_settings=plotting_settings,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
+        )
         self.parameter_groups = parameter_groups
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
         if self.parameter_groups is None:
@@ -1069,13 +1218,46 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
     def __init__(
         self,
-        config: BaseSchema,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
+        """Initialise the BasePlotAdditionalMetrics callback.
 
-        super().__init__(config, every_n_batches=every_n_batches, dataset_names=dataset_names)
+        Parameters
+        ----------
+        every_n_batches : int | None, optional
+            Override for batch frequency, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        focus_area : list[dict] | None, optional
+            Focus area configuration, by default None
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
+        """
+        super().__init__(
+            every_n_batches=every_n_batches,
+            dataset_names=dataset_names,
+            plotting_settings=plotting_settings,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
+        )
 
         # Build focus mask
         self.focus_mask = build_spatial_mask(
@@ -1168,7 +1350,6 @@ class PlotSample(BasePlotAdditionalMetrics):
 
     def __init__(
         self,
-        config: OmegaConf,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -1179,14 +1360,17 @@ class PlotSample(BasePlotAdditionalMetrics):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
-        **kwargs: Any,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotSample callback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
         sample_idx : int
             Sample to plot
         parameters : list[str]
@@ -1203,9 +1387,31 @@ class PlotSample(BasePlotAdditionalMetrics):
             Number of plots per sample, by default 6
         every_n_batches : int, optional
             Batch frequency to plot at, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        focus_area : list[dict] | None, optional
+            Focus area configuration, by default None
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
         """
-        del kwargs
-        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
+        super().__init__(
+            dataset_names=dataset_names,
+            every_n_batches=every_n_batches,
+            focus_area=focus_area,
+            plotting_settings=plotting_settings,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
+        )
         self.sample_idx = sample_idx
         self.parameters = parameters
 
@@ -1235,11 +1441,9 @@ class PlotSample(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            input_data = pl_module.data_indices[dataset_name].data.input.todict()
+            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
+            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
@@ -1309,7 +1513,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
     def __init__(
         self,
-        config: OmegaConf,
         sample_idx: int,
         parameters: list[str],
         output_steps: int,
@@ -1317,13 +1520,17 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
         sample_idx : int
             Sample to plot
         parameters : list[str]
@@ -1332,8 +1539,31 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             Max number of output steps to plot per rollout in forecast mode
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        focus_area : list[dict] | None, optional
+            Focus area configuration, by default None
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
         """
-        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
+        super().__init__(
+            dataset_names=dataset_names,
+            every_n_batches=every_n_batches,
+            focus_area=focus_area,
+            plotting_settings=plotting_settings,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
+        )
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.output_steps = output_steps
@@ -1368,11 +1598,9 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            input_data = pl_module.data_indices[dataset_name].data.input.todict()
+            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
+            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
             plot_parameters_dict_spectrum = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
@@ -1423,7 +1651,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
     def __init__(
         self,
-        config: OmegaConf,
         sample_idx: int,
         parameters: list[str],
         output_steps: int,
@@ -1432,13 +1659,17 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        plotting_settings: PlottingSettings | None = None,
+        # Backward compatibility
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback.
 
         Parameters
         ----------
-        config : OmegaConf
-            Config object
         sample_idx : int
             Sample to plot
         parameters : list[str]
@@ -1447,11 +1678,36 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             Max number of output steps to plot per rollout in forecast mode
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
+        log_scale : bool, optional
+            Whether to use logarithmic scale, by default False
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        focus_area : list[dict] | None, optional
+            Focus area configuration, by default None
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings. If provided, individual plotting parameters are ignored.
+        datashader : bool, optional
+            (Deprecated) Whether to use datashader for plotting, by default True
+        projection_kind : str, optional
+            (Deprecated) Projection kind for plots, by default "equirectangular"
+        asynchronous : bool, optional
+            (Deprecated) Whether to plot asynchronously, by default True
+        save_basedir : str | None, optional
+            (Deprecated) Base directory for saving plots, by default None
 
         """
-        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
+        super().__init__(
+            dataset_names=dataset_names,
+            every_n_batches=every_n_batches,
+            focus_area=focus_area,
+            plotting_settings=plotting_settings,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
+        )
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.output_steps = output_steps
@@ -1483,11 +1739,9 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            input_data = pl_module.data_indices[dataset_name].data.input.todict()
+            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
+            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
             # Apply spatial mask
             _, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,

@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from typing import Union
 
     import pytorch_lightning as pl
-    from omegaconf import DictConfig
 
 
 LOGGER = logging.getLogger(__name__)
@@ -140,6 +139,10 @@ class EnsemblePlotMixin:
 class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
     """Mixin for per-batch ensemble plotting callbacks."""
 
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        # Call parent's on_fit_start to check NCCL conditions
+        super().on_fit_start(trainer, pl_module)
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -149,13 +152,6 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
         batch_idx: int,
         **kwargs,
     ) -> None:
-        if (
-            self.config.diagnostics.plot.asynchronous
-            and self.config.dataloader.read_group_size > 1
-            and pl_module.local_rank == 0
-        ):
-            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
-
         if batch_idx % self.every_n_batches == 0:
             processed_batch, processed_output = self._handle_ensemble_batch_and_output(pl_module, output, batch)
             # When running in Async mode, it might happen that in the last epoch these tensors
@@ -218,7 +214,6 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -230,12 +225,15 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         dataset_names: list[str] | None = None,
         members: list | None = None,
         focus_area: list[dict] | None = None,
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
         **kwargs: Any,
     ) -> None:
         # Initialize PlotSample first
         _PlotSample.__init__(
             self,
-            config,
             sample_idx,
             parameters,
             accumulation_levels_plot,
@@ -246,6 +244,10 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             every_n_batches,
             dataset_names,
             focus_area,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
             **kwargs,
         )
         self.plot_members = members
@@ -268,11 +270,9 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         for dataset_name in dataset_names:
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            input_data = pl_module.data_indices[dataset_name].data.input.todict()
+            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
+            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
                 for name in self.parameters
@@ -361,7 +361,6 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
         output_steps: int,
@@ -369,11 +368,14 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback."""
         _PlotSpectrum.__init__(
             self,
-            config,
             sample_idx,
             parameters,
             output_steps,
@@ -381,6 +383,10 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
             every_n_batches,
             dataset_names,
             focus_area,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
         )
 
 
@@ -389,7 +395,6 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -400,12 +405,15 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback."""
         _PlotSample.__init__(
             self,
-            config,
             sample_idx,
             parameters,
             accumulation_levels_plot,
@@ -416,6 +424,10 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
             every_n_batches,
             dataset_names,
             focus_area,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
             **kwargs,
         )
 
@@ -425,7 +437,6 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
         output_steps: int,
@@ -434,11 +445,14 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback."""
         _PlotHistogram.__init__(
             self,
-            config,
             sample_idx,
             parameters,
             output_steps,
@@ -447,6 +461,10 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
             every_n_batches,
             dataset_names,
             focus_area,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
         )
 
 
@@ -455,9 +473,20 @@ class GraphTrainableFeaturesPlot(_GraphTrainableFeaturesPlot):
 
     def __init__(
         self,
-        config: DictConfig,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
+        datashader: bool = True,
+        projection_kind: str = "equirectangular",
+        asynchronous: bool = True,
+        save_basedir: str | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback."""
-        _GraphTrainableFeaturesPlot.__init__(self, config, dataset_names, every_n_epochs)
+        _GraphTrainableFeaturesPlot.__init__(
+            self,
+            dataset_names=dataset_names,
+            every_n_epochs=every_n_epochs,
+            datashader=datashader,
+            projection_kind=projection_kind,
+            asynchronous=asynchronous,
+            save_basedir=save_basedir,
+        )
