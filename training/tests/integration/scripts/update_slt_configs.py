@@ -171,14 +171,14 @@ branch, commit, dirty = get_git_info(anemoi_core_repo_path)
 print("=== Anemoi-core repo state ===")
 print(f"Branch : {branch}")
 print(f"Commit : {commit}")
-print(f"Dirty  : {dirty}")
+print(f"Uncommitted changes  : {dirty}")
 print("===========================")
 
 metadata = {
     "source_repo": "anemoi-core",
     "branch": branch,
     "commit": commit,
-    "dirty": dirty,
+    "uncommitted_changes": dirty,
 }
 
 
