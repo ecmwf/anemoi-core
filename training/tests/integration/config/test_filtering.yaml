@@ -38,10 +38,6 @@ diagnostics:
         precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
         parameters: [tp]
 
-training:
-  max_epochs: 1
-  max_steps: 2
-
   training_loss:
     datasets:
       data:
