@@ -486,3 +486,41 @@ error reported is not very intuitive and indeed hides the real issue. We
 will work on improving this on future releases, but mean time we
 recommend to double check the schemas and the config files to make sure
 they are correctly defined.
+
+*****************
+ Model Modifiers
+*****************
+
+Model modifiers allow you to transform models during training setup.
+They provide composable, configuration-driven model modifications.
+
+Configuration
+=============
+
+.. code:: yaml
+
+   training:
+      model_modifier:
+         modifiers:
+            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+              submodules_to_freeze: ["encoder", "processor.0"]
+
+Available Modifiers
+===================
+
+**FreezingModifierStage**
+   Freeze specific submodules to exclude them from training.
+   Supports dot notation for nested modules (e.g., ``processor.0``).
+
+Combined Fine-tuning Workflow
+=============================
+
+Parameter freezing with multiple layers:
+
+.. code:: yaml
+
+   training:
+      model_modifier:
+         modifiers:
+            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+              submodules_to_freeze: ["encoder"]

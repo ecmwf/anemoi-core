@@ -528,64 +528,45 @@ The above can be adapted depending on the use case and taking advantage
 of hydra, you can also reuse ``config.training.run_id`` or
 ``config.training.fork_run_id`` to define the path to the checkpoint.
 
-*******************
- Transfer Learning
-*******************
+*****************
+ Model Modifiers
+*****************
 
-Transfer learning allows the model to reuse knowledge from a previously
-trained checkpoint. This is particularly useful when the new task is
-related to the old one, enabling faster convergence and often improving
-model performance.
+Composable model modifications for transfer learning and parameter
+control.
 
-To enable transfer learning, set the config.training.transfer_learning
-flag to True in the configuration file.
+Parameter Freezing
+==================
 
-.. code:: yaml
-
-   training:
-      # start the training from a checkpoint of a previous run
-      fork_run_id: ...
-      load_weights_only: True
-      transfer_learning: True
-
-When this flag is active and a checkpoint path is specified in
-config.system.input.warm_start or self.last_checkpoint, the system loads
-the pre-trained weights using the `transfer_learning_loading` function.
-This approach ensures only compatible weights are loaded and mismatched
-layers are handled appropriately.
-
-For example, transfer learning might be used to adapt a weather
-forecasting model trained on one geographic region to another region
-with similar characteristics.
-
-****************
- Model Freezing
-****************
-
-Model freezing is a technique where specific parts (submodules) of a
-model are excluded from training. This is useful when certain parts of
-the model have been sufficiently trained or should remain unchanged for
-the current task.
-
-To specify which submodules to freeze, use the
-config.training.submodules_to_freeze field in the configuration. List
-the names of submodules to be frozen. During model initialization, these
-submodules will have their parameters frozen, ensuring they are not
-updated during training.
-
-For example with the following configuration, the processor will be
-frozen and only the encoder and decoder will be trained:
+Freeze specific layers during fine-tuning:
 
 .. code:: yaml
 
    training:
-      # start the training from a checkpoint of a previous run
-      fork_run_id: ...
-      load_weights_only: True
+      model_modifier:
+         modifiers:
+            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+              submodules_to_freeze:
+                 - "encoder"        # freeze encoder
+                 - "processor.0"    # freeze first processor
 
-      submodules_to_freeze:
-         - processor
+The ``FreezingModifierStage`` supports:
 
-Freezing can be particularly beneficial in scenarios such as fine-tuning
-when only specific components (e.g., the encoder, the decoder) need to
-adapt to a new task while keeping others (e.g., the processor) fixed.
+-  Dot notation for nested modules (e.g., ``processor.0``, ``encoder.attention``)
+-  Strict mode to raise errors on missing modules
+-  Gradient validation to verify frozen parameters
+
+Example
+=======
+
+Parameter freezing with multiple layers:
+
+.. code:: yaml
+
+   training:
+      model_modifier:
+         modifiers:
+            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+              submodules_to_freeze: ["encoder", "processor.0"]
+              strict: false
+              validate_gradients: true
