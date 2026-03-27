@@ -39,7 +39,7 @@ from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
 
 if is_triton_available():
-    from anemoi.models.triton.gt import GraphTransformerFunction
+    from anemoi.models.triton.gt import GraphTransformer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -450,7 +450,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         num_heads: int,
         edge_dim: int,
         bias: bool = True,
-        qk_norm: bool = False,
+        qk_norm: Union[str, bool] = "none",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         attn_channels: Optional[int] = None,
@@ -475,8 +475,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Edge dimension
         bias : bool, by default True,
             Add bias or not
-        qk_norm : bool, by default False
-            Normalize query and key
+        qk_norm : Union[str, bool], by default "none"
+            Normalize query and key. Options are 'none', 'layer_norm', 'rms_norm'. Bools are supported for backward compatibility. If True, 'layer_norm' is used for normalization.
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
         layer_kernels : DotDict
@@ -501,6 +501,9 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.out_channels_conv = self.attn_channels // num_heads
         self.num_heads = num_heads
+
+        if isinstance(qk_norm, bool):
+            qk_norm = "layer_norm" if qk_norm else "none"
         self.qk_norm = qk_norm
 
         Linear = layer_kernels.Linear
@@ -513,10 +516,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
 
         self.projection = Linear(self.attn_channels, out_channels)
-
-        if self.qk_norm:
-            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
-            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
 
         self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
@@ -547,11 +546,27 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             )
             self.graph_attention_backend = "pyg"
 
+        self.unfused_qk_norm = False  # Will be set to true only if using qk_norm with pyg backend. no qk_norm or qk_norm with triton backend will not use unfused qk norm
         if self.graph_attention_backend == "triton":
-            LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
-            self.conv = GraphTransformerFunction.apply
+            assert self.qk_norm in [
+                "none",
+                "rms_norm",
+                "layer_norm",
+            ], f"Invalid qk_norm {self.qk_norm} for triton backend. Valid options are 'none', 'rms_norm' and 'layer_norm'."
+            LOGGER.info(
+                f"{self.__class__.__name__} using triton graph attention backend with qk_normalisation mode: {self.qk_norm}."
+            )
+
+            self.conv = GraphTransformer(self.out_channels_conv, self.qk_norm)
         else:
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+            if self.qk_norm != "none":
+                LOGGER.info(
+                    f"Normalizing query with {layer_kernels.QueryNorm.__name__} and key with {layer_kernels.KeyNorm.__name__}."
+                )
+                self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
+                self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
+                self.unfused_qk_norm = True
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
@@ -618,7 +633,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
     ) -> Tensor:
-        # self.conv requires size to be a tuple
+
         conv_size = (size, size) if isinstance(size, int) else size
 
         if self.graph_attention_backend == "triton":
@@ -825,7 +840,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         else:
             query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
 
-        if self.qk_norm:
+        if self.unfused_qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
 
@@ -935,7 +950,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
-        if self.qk_norm:
+        # Triton graphtransformer has a fused qk_norm option which is used instead
+        if self.unfused_qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
 
