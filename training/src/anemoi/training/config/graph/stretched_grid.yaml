@@ -5,11 +5,7 @@ overwrite: True
 
 
 nodes:
-  data:
-    node_builder:
-      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.data.dataset_config}
-    attributes: ${graph.attributes.nodes}
+  # Hidden Nodes
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.StretchedTriNodes
