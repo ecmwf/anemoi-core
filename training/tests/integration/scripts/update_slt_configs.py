@@ -22,7 +22,7 @@ from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
 
-INTEGRATION_ROOT = Path(__file__).resolve().parent
+INTEGRATION_ROOT = Path(__file__).resolve().parent.parent
 
 parser = argparse.ArgumentParser(
     description="Update the training configs used in the system-level tests. "
@@ -182,7 +182,7 @@ metadata = {
 }
 
 
-hydra_config_path = "../../src/anemoi/training/config"
+hydra_config_path = "../../../src/anemoi/training/config"
 global_config = generate_global_config(hydra_config_path)
 lam_config = generate_lam_config(hydra_config_path)
 
