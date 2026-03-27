@@ -7,23 +7,24 @@ from timm.scheduler import CosineLRScheduler
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
 from anemoi.training.train.tasks.base import BaseGraphModule
 
+_ADAM_CFG = OmegaConf.create({"_target_": "torch.optim.Adam", "betas": [0.9, 0.95], "weight_decay": 0.1})
+
 
 @pytest.fixture
 def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
     """Create a lightweight mock BaseGraphModule instance with real methods bound."""
     module = mocker.MagicMock(spec=BaseGraphModule)
 
-    # Inject minimal attributes required by the tested functions
-    module.lr = 0.001
-    module.lr_min = 1e-5
-    module.lr_iterations = 1000
-    module.lr_warmup = 100
+    module.effective_lr = 0.001
     module.parameters.return_value = [torch.nn.Parameter(torch.randn(2, 2))]
 
+    # Default config: no scheduler
+    module.config = mocker.MagicMock()
+    module.config.training.optimization.lr_scheduler = None
+
     # Bind real methods from the class so they work on this mock
-    module._create_optimizer_from_config = BaseGraphModule._create_optimizer_from_config.__get__(module)
-    module._create_scheduler = BaseGraphModule._create_scheduler.__get__(module)
     module.configure_optimizers = BaseGraphModule.configure_optimizers.__get__(module)
+    module.log_optimizer = BaseGraphModule.log_optimizer
 
     return module
 
@@ -32,32 +33,19 @@ def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
 
 
 def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
+    mocked_module.config.training.optimization.optimizer = _ADAM_CFG
 
-    optimizer_cfg = OmegaConf.create(
-        {
-            "_target_": "torch.optim.Adam",
-            "betas": [0.9, 0.95],
-            "weight_decay": 0.1,
-        },
-    )
+    result = mocked_module.configure_optimizers()
 
-    expected_wd = optimizer_cfg.weight_decay
-    expected_betas = tuple(optimizer_cfg.betas)
-
-    cfg_copy = OmegaConf.create(OmegaConf.to_container(optimizer_cfg, resolve=True))
-
-    optimizer = mocked_module._create_optimizer_from_config(cfg_copy)
-
-    param_group = optimizer.param_groups[0]
-    assert isinstance(optimizer, torch.optim.Adam)
-    assert param_group["lr"] == pytest.approx(mocked_module.lr)
-    assert param_group["weight_decay"] == pytest.approx(expected_wd)
-    assert optimizer.defaults["betas"] == expected_betas
+    assert isinstance(result, torch.optim.Adam)
+    param_group = result.param_groups[0]
+    assert param_group["lr"] == pytest.approx(mocked_module.effective_lr)
+    assert param_group["weight_decay"] == pytest.approx(0.1)
+    assert result.defaults["betas"] == (0.9, 0.95)
 
 
 def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -> None:
-
-    optimizer_cfg = OmegaConf.create(
+    mocked_module.config.training.optimization.optimizer = OmegaConf.create(
         {
             "_target_": "anemoi.training.optimizers.AdEMAMix.AdEMAMix",
             "betas": [0.9, 0.95, 0.9999],
@@ -65,38 +53,44 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -
         },
     )
 
-    expected_wd = optimizer_cfg.weight_decay
-    expected_betas = tuple(optimizer_cfg.betas)
+    result = mocked_module.configure_optimizers()
 
-    cfg_copy = OmegaConf.create(OmegaConf.to_container(optimizer_cfg, resolve=True))
-
-    optimizer = mocked_module._create_optimizer_from_config(cfg_copy)
-
-    param_group = optimizer.param_groups[0]
-    assert isinstance(optimizer, torch.optim.Optimizer)
-    assert param_group["lr"] == pytest.approx(mocked_module.lr)
-    assert param_group["weight_decay"] == pytest.approx(expected_wd)
-    assert optimizer.defaults["betas"] == expected_betas
+    assert isinstance(result, torch.optim.Optimizer)
+    param_group = result.param_groups[0]
+    assert param_group["lr"] == pytest.approx(mocked_module.effective_lr)
+    assert param_group["weight_decay"] == pytest.approx(0.1)
+    assert result.defaults["betas"] == (0.9, 0.95, 0.9999)
 
 
 def test_create_optimizer_from_config_invalid(mocked_module: BaseGraphModule) -> None:
-    bad_cfg = OmegaConf.create(
-        {
-            "_target_": "nonexistent.OptimizerClass",
-        },
+    mocked_module.config.training.optimization.optimizer = OmegaConf.create(
+        {"_target_": "nonexistent.OptimizerClass"},
     )
     with pytest.raises(Exception, match="Error locating target"):
-        mocked_module._create_optimizer_from_config(bad_cfg)
+        mocked_module.configure_optimizers()
 
 
 def test_create_scheduler(mocked_module: BaseGraphModule) -> None:
-    """Ensure cosine scheduler is constructed correctly."""
-    optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.lr)
-    sched_dict = mocked_module._create_scheduler(optimizer)
-    scheduler = sched_dict["scheduler"]
-    assert isinstance(scheduler, CosineLRScheduler)
-    # Quick sanity check: scheduler should expose optimizer
-    assert scheduler.optimizer is optimizer
+    """Ensure cosine scheduler is constructed correctly via configure_optimizers."""
+    mocked_module.config.training.optimization.optimizer = _ADAM_CFG
+    mocked_module.config.training.optimization.lr_scheduler = OmegaConf.create(
+        {
+            "_target_": "timm.scheduler.CosineLRScheduler",
+            "lr_min": 1e-5,
+            "t_initial": 1000,
+            "warmup_t": 100,
+        },
+    )
+    mocked_module.config.training.optimization.pl_lr_scheduler = OmegaConf.create({"interval": "epoch"})
+
+    optimizers, schedulers = mocked_module.configure_optimizers()
+    optimizer = optimizers[0]
+    scheduler_dict = schedulers[0]
+
+    assert isinstance(optimizer, torch.optim.Adam)
+    assert isinstance(scheduler_dict.scheduler, CosineLRScheduler)
+    assert scheduler_dict.scheduler.optimizer is optimizer
+    assert scheduler_dict.interval == "epoch"
 
 
 def test_ademamix_single_step_numerical() -> None:
