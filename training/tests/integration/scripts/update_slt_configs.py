@@ -76,6 +76,10 @@ def generate_global_config(hydra_config_path: Path) -> OmegaConf:
         imputer_modifications,
     )
 
+    # We are overriding the number of input and output time steps here to test a slightly more general configuration
+    # Similarly, we are adding an additional scaler for the output time steps to test that functionality as well
+    # Generally, we want the system-level tests to cover different configurations but not diverge too much from the
+    # default settings.
     cfg.training.multistep_input = 3
     cfg.training.multistep_output = 2
 
