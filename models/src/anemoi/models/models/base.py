@@ -10,6 +10,7 @@
 
 import logging
 from abc import abstractmethod
+from pyexpat import model
 from typing import Optional
 
 import torch
@@ -60,6 +61,30 @@ class BaseGraphModel(nn.Module):
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
+
+        self.interpolate_batch = model_config.model.interpolate_batch if model_config.model.interpolate_batch else False
+        self._graph_name_data = model_config.graph.data if not self.interpolate_batch else model_config.graph.data_intp
+        if self.interpolate_batch:
+            from anemoi.models.layers.sparse_projector import build_sparse_projector
+            #from anemoi.models.layers.residual import TruncatedConnection
+            truncation_up_file_path=model_config.model.interp_batch_file_path
+            # up_edges, _ =  TruncatedConnection._get_edges_name(
+            #     graph_data,
+            #     None,
+            #     None,
+            #     truncation_up_file_path,
+            #     None,
+            #     None,
+            # )
+
+            self.project_up = build_sparse_projector(
+                graph=graph_data,
+                edges_name=None,
+                edge_weight_attribute=None,
+                file_path=truncation_up_file_path,
+                autocast=False,
+            )
+
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
@@ -73,6 +98,7 @@ class BaseGraphModel(nn.Module):
 
         # build residual connection
         self.residual = instantiate(model_config.model.residual, graph=graph_data)
+
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)

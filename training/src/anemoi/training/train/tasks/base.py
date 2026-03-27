@@ -38,6 +38,11 @@ from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
+from anemoi.training.data.grid_indices import FullGrid
+from anemoi.models.distributed.graph import shard_channels
+from anemoi.models.distributed.graph import gather_channels
+import einops
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -277,6 +282,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 "This may lead to increased memory usage and slower training.",
                 ", ".join(self.metrics.keys()),
             )
+
+        self.interpolate_batch = config.model.interpolate_batch
+
+        if self.interpolate_batch:
+            self.grid_indices_intp = FullGrid(nodes_name="data_intp", reader_group_size=reader_group_size)
+            self.grid_indices_intp.setup(graph_data)
 
         LOGGER.debug("Multistep: %d", self.multi_step)
 
@@ -534,6 +545,49 @@ class BaseGraphModule(pl.LightningModule, ABC):
         else:
             batch = self.allgather_batch(batch)
             self.grid_shard_shapes, self.grid_shard_slice = None, None
+
+        if self.interpolate_batch:
+            batch = self._interpolate_batch(batch)
+
+        return batch
+
+    def _interpolate_batch(self, batch: torch.Tensor) -> tuple[torch.Tensor, list[int] | None, slice | None]:
+        """Interpolate the batch to the full grid size if needed.
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to interpolate
+        Returns
+        -------
+        tuple[torch.Tensor, list[int] | None, slice | None]
+            Interpolated batch, grid shard shapes, and grid shard slice
+        """
+        batch_size, multi_step, ensemble_size, _, _ = batch.shape
+        batch = einops.rearrange(batch, "batch steps ensemble grid vars -> (batch steps ensemble) grid vars")
+
+        if self.grid_shard_shapes is not None:
+            shard_shapes = apply_shard_shapes(batch, self.grid_dim, self.grid_shard_shapes)
+            batch = shard_channels(batch, shard_shapes, self.model_comm_group)
+
+        batch = self.model.model.project_up(batch)
+
+        if self.grid_shard_shapes is not None:
+            # adjust shapes to interpolated grid
+            for i, shape in enumerate(self.grid_indices_intp.shard_shapes):
+                shard_shapes[i][self.grid_dim] = shape
+            batch = gather_channels(batch, shard_shapes, self.model_comm_group)
+
+        batch = einops.rearrange(
+            batch,
+            "(batch steps ensemble) grid vars -> batch steps ensemble grid vars",
+            batch=batch_size,
+            steps=multi_step,
+            ensemble=ensemble_size,
+        )
+
+        self.grid_shard_shapes = self.grid_indices_intp.shard_shapes
+        self.grid_shard_slice = self.grid_indices_intp.get_shard_indices(self.reader_group_rank)
+
         return batch
 
     def _normalize_batch(self, batch: torch.Tensor) -> torch.Tensor:
