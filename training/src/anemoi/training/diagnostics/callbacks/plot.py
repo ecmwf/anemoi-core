@@ -65,12 +65,24 @@ class PlottingSettings:
         Whether to plot asynchronously in background thread
     save_basedir : str | None
         Base directory for saving plot files
+    colormaps : dict | None
+        Color mappings for different variables and error types
+    precip_and_related_fields : list[str] | None
+        List of precipitation and related field names
+    focus_areas : dict | None
+        Spatial focus areas for plotting (lat/lon bounding boxes)
+    dataset_names : list[str] | None
+        Dataset names to plot from
     """
 
     datashader: bool = True
     projection_kind: str = "equirectangular"
     asynchronous: bool = True
     save_basedir: str | None = None
+    colormaps: dict | None = None
+    precip_and_related_fields: list[str] | None = None
+    focus_areas: dict | None = None
+    dataset_names: list[str] | None = None
 
 
 class BasePlotCallback(Callback, ABC):
@@ -283,11 +295,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility: accept individual parameters if plotting_settings not provided
-        save_basedir: str | None = None,
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
     ):
         """Initialise the BasePerBatchPlotCallback.
 
@@ -298,25 +305,9 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         dataset_names : list[str] | None, optional
             Dataset names, by default None
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
+            Plotting configuration settings, by default None (uses defaults)
 
         """
-        # Support both new (plotting_settings) and old (individual params) interfaces
-        if plotting_settings is None:
-            plotting_settings = PlottingSettings(
-                save_basedir=save_basedir,
-                datashader=datashader,
-                projection_kind=projection_kind,
-                asynchronous=asynchronous,
-            )
         super().__init__(dataset_names=dataset_names, plotting_settings=plotting_settings)
         self.every_n_batches = every_n_batches or 750
 
@@ -384,11 +375,6 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         every_n_epochs: int | None = None,
         dataset_names: list[str] | None = None,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility
-        save_basedir: str | None = None,
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
     ):
         """Initialise the BasePerEpochPlotCallback.
 
@@ -399,23 +385,8 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         dataset_names : list[str] | None, optional
             Dataset names, by default None
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
+            Plotting configuration settings, by default None (uses defaults)
         """
-        if plotting_settings is None:
-            plotting_settings = PlottingSettings(
-                save_basedir=save_basedir,
-                datashader=datashader,
-                projection_kind=projection_kind,
-                asynchronous=asynchronous,
-            )
         super().__init__(dataset_names=dataset_names, plotting_settings=plotting_settings)
         self.every_n_epochs = every_n_epochs or 1
 
@@ -478,11 +449,6 @@ class LongRolloutPlots(BasePlotCallback):
         every_n_epochs: int = 1,
         animation_interval: int = 400,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
     ) -> None:
         """Initialise LongRolloutPlots callback.
 
@@ -507,23 +473,8 @@ class LongRolloutPlots(BasePlotCallback):
         animation_interval : int, optional
             Delay between frames in the animation in milliseconds, by default 400
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
+            Plotting configuration settings, by default None (uses defaults)
         """
-        if plotting_settings is None:
-            plotting_settings = PlottingSettings(
-                datashader=datashader,
-                projection_kind=projection_kind,
-                asynchronous=asynchronous,
-                save_basedir=save_basedir,
-            )
         super().__init__(plotting_settings=plotting_settings)
 
         self.every_n_epochs = every_n_epochs
@@ -823,11 +774,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         every_n_epochs: int | None = None,
         q_extreme_limit: float = 0.05,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback.
 
@@ -840,24 +786,12 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         q_extreme_limit : float, optional
             Quantile edges to represent, by default 0.05
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
+            Plotting configuration settings, by default None (uses defaults)
         """
         super().__init__(
             dataset_names=dataset_names,
             every_n_epochs=every_n_epochs,
             plotting_settings=plotting_settings,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
         )
         self.q_extreme_limit = q_extreme_limit
 
@@ -978,11 +912,6 @@ class PlotLoss(BasePerBatchPlotCallback):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotLoss callback.
 
@@ -995,24 +924,12 @@ class PlotLoss(BasePerBatchPlotCallback):
         dataset_names : list[str] | None, optional
             Dataset names, by default None
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
+            Plotting configuration settings, by default None (uses defaults)
         """
         super().__init__(
             every_n_batches=every_n_batches,
             dataset_names=dataset_names,
             plotting_settings=plotting_settings,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
         )
         self.parameter_groups = parameter_groups
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
@@ -1222,11 +1139,6 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
     ) -> None:
         """Initialise the BasePlotAdditionalMetrics callback.
 
@@ -1239,24 +1151,12 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         focus_area : list[dict] | None, optional
             Focus area configuration, by default None
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
+            Plotting configuration settings, by default None (uses defaults)
         """
         super().__init__(
             every_n_batches=every_n_batches,
             dataset_names=dataset_names,
             plotting_settings=plotting_settings,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
         )
 
         # Build focus mask
@@ -1361,11 +1261,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotSample callback.
 
@@ -1392,25 +1287,13 @@ class PlotSample(BasePlotAdditionalMetrics):
         focus_area : list[dict] | None, optional
             Focus area configuration, by default None
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
+            Plotting configuration settings, by default None (uses defaults)
         """
         super().__init__(
             dataset_names=dataset_names,
             every_n_batches=every_n_batches,
             focus_area=focus_area,
             plotting_settings=plotting_settings,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
         )
         self.sample_idx = sample_idx
         self.parameters = parameters
@@ -1521,11 +1404,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback.
 
@@ -1544,25 +1422,13 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         focus_area : list[dict] | None, optional
             Focus area configuration, by default None
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
+            Plotting configuration settings, by default None (uses defaults)
         """
         super().__init__(
             dataset_names=dataset_names,
             every_n_batches=every_n_batches,
             focus_area=focus_area,
             plotting_settings=plotting_settings,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
         )
         self.sample_idx = sample_idx
         self.parameters = parameters
@@ -1660,11 +1526,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
         plotting_settings: PlottingSettings | None = None,
-        # Backward compatibility
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback.
 
@@ -1687,15 +1548,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         focus_area : list[dict] | None, optional
             Focus area configuration, by default None
         plotting_settings : PlottingSettings, optional
-            Plotting configuration settings. If provided, individual plotting parameters are ignored.
-        datashader : bool, optional
-            (Deprecated) Whether to use datashader for plotting, by default True
-        projection_kind : str, optional
-            (Deprecated) Projection kind for plots, by default "equirectangular"
-        asynchronous : bool, optional
-            (Deprecated) Whether to plot asynchronously, by default True
-        save_basedir : str | None, optional
-            (Deprecated) Base directory for saving plots, by default None
+            Plotting configuration settings, by default None (uses defaults)
 
         """
         super().__init__(
@@ -1703,10 +1556,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             every_n_batches=every_n_batches,
             focus_area=focus_area,
             plotting_settings=plotting_settings,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
         )
         self.sample_idx = sample_idx
         self.parameters = parameters

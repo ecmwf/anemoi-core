@@ -225,10 +225,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         dataset_names: list[str] | None = None,
         members: list | None = None,
         focus_area: list[dict] | None = None,
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
+        plotting_settings: Any | None = None,
         **kwargs: Any,
     ) -> None:
         # Initialize PlotSample first
@@ -244,10 +241,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             every_n_batches,
             dataset_names,
             focus_area,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
+            plotting_settings=plotting_settings,
             **kwargs,
         )
         self.plot_members = members
@@ -368,10 +362,7 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
+        plotting_settings: Any | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback."""
         _PlotSpectrum.__init__(
@@ -383,10 +374,7 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
             every_n_batches,
             dataset_names,
             focus_area,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
+            plotting_settings=plotting_settings,
         )
 
 
@@ -405,10 +393,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
+        plotting_settings: Any | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback."""
@@ -424,10 +409,7 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
             every_n_batches,
             dataset_names,
             focus_area,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
+            plotting_settings=plotting_settings,
             **kwargs,
         )
 
@@ -445,10 +427,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
+        plotting_settings: Any | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback."""
         _PlotHistogram.__init__(
@@ -461,10 +440,7 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
             every_n_batches,
             dataset_names,
             focus_area,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
+            plotting_settings=plotting_settings,
         )
 
 
@@ -475,18 +451,12 @@ class GraphTrainableFeaturesPlot(_GraphTrainableFeaturesPlot):
         self,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
-        datashader: bool = True,
-        projection_kind: str = "equirectangular",
-        asynchronous: bool = True,
-        save_basedir: str | None = None,
+        plotting_settings: Any | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback."""
         _GraphTrainableFeaturesPlot.__init__(
             self,
             dataset_names=dataset_names,
             every_n_epochs=every_n_epochs,
-            datashader=datashader,
-            projection_kind=projection_kind,
-            asynchronous=asynchronous,
-            save_basedir=save_basedir,
+            plotting_settings=plotting_settings,
         )

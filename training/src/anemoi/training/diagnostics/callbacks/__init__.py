@@ -238,7 +238,8 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     will only be added if `context.diagnostics.plot.enabled` is set to True.
 
     Plotting callbacks automatically receive global plotting settings from `context.diagnostics.plot`
-    (datashader, projection_kind, asynchronous, save_basedir) via the `plotting_settings` parameter.
+    (datashader, projection_kind, asynchronous, save_basedir, colormaps, precip_and_related_fields,
+    focus_areas, dataset_names) via the `plotting_settings` parameter.
 
     User-configurable callbacks (under `diagnostics.callbacks`) are instantiated as-is from YAML.
     Callbacks added programmatically (see CONFIG_ENABLED_CALLBACKS and the fixed callbacks at
@@ -273,6 +274,10 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
         projection_kind=diagnostics_cfg.plot.projection_kind,
         asynchronous=diagnostics_cfg.plot.asynchronous,
         save_basedir=context.plots_output,
+        colormaps=getattr(diagnostics_cfg.plot, "colormaps", None),
+        precip_and_related_fields=getattr(diagnostics_cfg.plot, "precip_and_related_fields", None),
+        focus_areas=getattr(diagnostics_cfg.plot, "focus_areas", None),
+        dataset_names=getattr(diagnostics_cfg.plot, "datasets_to_plot", None),
     )
     for callback_cfg in diagnostics_cfg.plot.callbacks:
         # Merge global plotting settings into callback config
