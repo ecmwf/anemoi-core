@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .anemoi_model import AnemoiDiffusionModel
+from .anemoi_model import AnemoiDiffusionTendencyModel
 from .anemoi_model import AnemoiModel
 from .base import BaseGraphModel
 from .encoder_processor_decoder import AnemoiModelEncProcDec
@@ -22,6 +24,8 @@ from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProc
 
 __all__ = [
     "AnemoiModel",
+    "AnemoiDiffusionModel",
+    "AnemoiDiffusionTendencyModel",
     "BaseGraphModel",
     "NaiveModel",
     "AnemoiModelEncProcDec",
