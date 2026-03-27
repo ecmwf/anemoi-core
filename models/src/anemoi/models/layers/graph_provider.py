@@ -17,6 +17,9 @@ from typing import Union
 
 import numpy as np
 import torch
+from scipy.sparse import coo_matrix
+from scipy.sparse import load_npz
+from scipy.sparse import spmatrix
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -433,6 +436,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         src_node_weight_attribute: Optional[str] = None,
         file_path: Optional[str | Path] = None,
         row_normalize: bool = False,
+        sparse_format: str = "csr",
     ) -> None:
         """Initialize ProjectionGraphProvider.
 
@@ -450,8 +454,14 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Path to .npz file with projection matrix
         row_normalize : bool
             Whether to normalize weights per row (target node) so each row sums to 1
+        sparse_format : str
+            Sparse storage format to use for the projection matrix. Supported
+            values are ``"csr"`` and ``"coo"``. Defaults to ``"csr"``.
         """
         super().__init__()
+        sparse_format = sparse_format.lower()
+        assert sparse_format in {"csr", "coo"}, "sparse_format must be either 'csr' or 'coo'."
+        self.sparse_format = sparse_format
 
         if file_path is not None:
             if src_node_weight_attribute is not None:
@@ -470,14 +480,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
     def _build_from_file(self, file_path: str | Path, row_normalize: bool) -> None:
         """Load projection matrix from file."""
-        from scipy.sparse import load_npz
-
-        truncation_data = load_npz(file_path)
-        edge_index = torch.tensor(np.vstack(truncation_data.nonzero()), dtype=torch.long)
-        weights = torch.tensor(truncation_data.data, dtype=torch.float32)
-        src_size, dst_size = truncation_data.shape
-
-        self._create_matrix(edge_index, weights, src_size, dst_size, row_normalize)
+        self._create_matrix_from_scipy(load_npz(file_path), row_normalize)
 
     def _build_from_graph(
         self,
@@ -498,47 +501,47 @@ class ProjectionGraphProvider(BaseGraphProvider):
         if src_node_weight_attribute:
             weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
 
-        # PyG convention: edge_index[0]=source, edge_index[1]=target
-        # For M @ x, we need matrix shape (targets, sources) with:
-        #   - row indices = targets
-        #   - col indices = sources
-        # -> swap edge_index to [targets, sources] for COO tensor
-        edge_index_for_coo = torch.stack([sub_graph.edge_index[1], sub_graph.edge_index[0]])
-
-        self._create_matrix(
-            edge_index_for_coo,
-            weights,
-            graph[edges_name[2]].num_nodes,  # dst_size (targets) = rows
-            graph[edges_name[0]].num_nodes,  # src_size (sources) = cols
-            row_normalize,
+        self._create_matrix_from_graph(
+            row_index=sub_graph.edge_index[1],
+            col_index=sub_graph.edge_index[0],
+            weights=weights,
+            num_rows=graph[edges_name[2]].num_nodes,  # dst_size (targets) = rows
+            num_cols=graph[edges_name[0]].num_nodes,  # src_size (sources) = cols
+            row_normalize=row_normalize,
         )
 
-    def _create_matrix(
+    def _create_matrix_from_graph(
         self,
-        edge_index: Tensor,
+        row_index: Tensor,
+        col_index: Tensor,
         weights: Tensor,
-        src_size: int,
-        dst_size: int,
+        num_rows: int,
+        num_cols: int,
         row_normalize: bool,
     ) -> None:
-        """Create sparse projection matrix."""
-        row_index = edge_index[0].long()
-        edge_index = torch.stack([row_index, edge_index[1].long()])
+        """Create sparse projection matrix from graph edge lists."""
+        matrix = coo_matrix(
+            (
+                weights.detach().to(dtype=torch.float32, device="cpu").contiguous().numpy(),
+                (
+                    row_index.detach().cpu().contiguous().numpy(),
+                    col_index.detach().cpu().contiguous().numpy(),
+                ),
+            ),
+            shape=(num_rows, num_cols),
+            dtype=np.float32,
+        )
+        self._create_matrix_from_scipy(matrix, row_normalize)
+
+    def _create_matrix_from_scipy(self, matrix: spmatrix, row_normalize: bool) -> None:
+        """Create sparse projection matrix from a SciPy sparse matrix."""
+        matrix = matrix.astype(np.float32, copy=False).tocsr()
 
         if row_normalize:
-            weights = self._row_normalize_weights(edge_index, weights, src_size)
+            matrix = self._row_normalize_matrix(matrix)
 
-        self.projection_matrix = torch.sparse_coo_tensor(
-            edge_index,
-            weights,
-            (src_size, dst_size),
-            device=edge_index.device,
-        ).coalesce()
-
-        self._edge_dim = self.projection_matrix.shape[1]
-
-        row_sums = torch.zeros(src_size, device=weights.device).scatter_add_(0, row_index, weights)
-        if not torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5):
+        row_sums = np.asarray(matrix.sum(axis=1)).ravel()
+        if not np.allclose(row_sums, np.ones_like(row_sums), atol=1e-5):
             LOGGER.warning(
                 "Projection matrix rows do not sum to 1 (min=%.4f, max=%.4f, mean=%.4f). "
                 "This is unexpected; please check your matrix. "
@@ -548,15 +551,33 @@ class ProjectionGraphProvider(BaseGraphProvider):
                 row_sums.mean().item(),
             )
 
+        if self.sparse_format == "csr":
+            self.projection_matrix = torch.sparse_csr_tensor(
+                torch.from_numpy(matrix.indptr),
+                torch.from_numpy(matrix.indices),
+                torch.from_numpy(matrix.data),
+                size=matrix.shape,
+            )
+        else:
+            matrix = matrix.tocoo()
+            self.projection_matrix = torch.sparse_coo_tensor(
+                torch.stack([torch.from_numpy(matrix.row), torch.from_numpy(matrix.col)]),
+                torch.from_numpy(matrix.data),
+                size=matrix.shape,
+            ).coalesce()
+
+        self._edge_dim = self.projection_matrix.shape[1]
+
     @staticmethod
-    def _row_normalize_weights(edge_index: Tensor, weights: Tensor, num_rows: int) -> Tensor:
+    def _row_normalize_matrix(matrix: spmatrix) -> spmatrix:
         """Normalize weights per row (target node) so each row sums to 1."""
-        total = torch.zeros(num_rows, device=weights.device)
-        row_index = edge_index[0].long()
-        # edge_index[0] contains row indices (targets) for COO tensor format
-        norm = total.scatter_add_(0, row_index, weights)
-        norm = norm[row_index]
-        return weights / (norm + 1e-8)
+        matrix = matrix.tocsr(copy=True)
+        row_sums = np.asarray(matrix.sum(axis=1)).ravel()
+        inv_row_sums = np.zeros_like(row_sums, dtype=np.float32)
+        non_zero = row_sums != 0
+        inv_row_sums[non_zero] = 1.0 / row_sums[non_zero]
+        matrix = matrix.multiply(inv_row_sums[:, None])
+        return matrix.tocsr()
 
     @property
     def edge_dim(self) -> int:

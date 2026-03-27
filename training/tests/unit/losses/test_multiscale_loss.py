@@ -147,6 +147,33 @@ def test_multiscale_graph_based(
     assert multiscale_loss.smoothing_matrices[-1] is None
 
 
+def test_multiscale_graph_based_can_override_sparse_format(
+    loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    multiscale_graph_data: HeteroData,
+) -> None:
+    per_scale_loss = MSELoss()
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=per_scale_loss,
+        weights=[1.0, 1.0],
+        keep_batch_sharded=False,
+        loss_matrices_graph=[
+            {
+                "edges_name": ["smooth_8x", "to", "smooth_8x"],
+                "edge_weight_attribute": "edge_weight",
+                "sparse_format": "coo",
+            },
+            None,
+        ],
+        graph_data=multiscale_graph_data,
+    )
+
+    pred, target, _ = loss_inputs_multiscale
+    loss = multiscale_loss(pred, target)
+
+    assert isinstance(loss, torch.Tensor)
+    assert multiscale_loss.smoothing_matrices[0].get_edges().layout == torch.sparse_coo
+
+
 @pytest.mark.parametrize("per_scale_loss", [AlmostFairKernelCRPS(), MSELoss()])
 @pytest.mark.parametrize("weights", [torch.tensor([0.3, 0.7]), torch.tensor([1.0, 2.0])])
 def test_multi_scale(

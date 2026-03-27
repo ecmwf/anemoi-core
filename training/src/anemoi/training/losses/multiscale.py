@@ -154,6 +154,7 @@ class MultiscaleLossWrapper(BaseLoss):
                 edge_weight_attribute=entry.get("edge_weight_attribute"),
                 src_node_weight_attribute=entry.get("src_node_weight_attribute"),
                 row_normalize=entry.get("row_normalize", False),
+                sparse_format=entry.get("sparse_format", "csr"),
             )
             smoothing_matrices.append(provider)
             LOGGER.info("Loss smoothing (graph): %s", provider.get_edges().shape)
