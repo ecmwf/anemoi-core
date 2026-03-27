@@ -14,8 +14,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from anemoi.training.losses.combined import CombinedLoss
+from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
-from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -64,9 +64,9 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     if isinstance(loss, MultiscaleLossWrapper):
         return print_variable_scaling(loss.loss, data_indices)
 
-    if isinstance(loss, LossVariableMapper):
+    if isinstance(loss, FilteringLossWrapper):
         subset_vars = enumerate(loss.predicted_variables)
-        # LossVariableMapper forwards scalers to its inner loss, so get scaling from there
+        # FilteringLossWrapper forwards scalers to its inner loss, so get scaling from there
         scaler_source = loss.loss.scaler
     else:
         subset_vars = enumerate(data_indices.model.output.name_to_index.keys())
@@ -81,8 +81,8 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
         scaling_values[name] = value
         scaling_sum += value
 
-    log_text += f"Total scaling sum: {scaling_sum:.4g}, "
-    scaling_values["total_sum"] = scaling_sum
+        log_text += f"Total scaling sum: {scaling_sum:.4g}, "
+        scaling_values["total_sum"] = scaling_sum
     LOGGER.debug(log_text)
 
     return scaling_values

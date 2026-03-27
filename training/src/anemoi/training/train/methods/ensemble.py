@@ -240,9 +240,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             y = {}
             for dataset_name, dataset_batch in batch.items():
                 start = self.n_step_input + rollout_step * self.n_step_output
-                y_time = dataset_batch.narrow(1, start, self.n_step_output)[:, :, 0, :, :]
-                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-                y[dataset_name] = y_time.index_select(-1, var_idx)
+                y[dataset_name] = dataset_batch.narrow(1, start, self.n_step_output)[:, :, 0, :, :]
                 LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
 
             loss, metrics_next, y_pred_ens_group = checkpoint(
@@ -251,6 +249,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 y,
                 step=rollout_step,
                 validation_mode=validation_mode,
+                input_context=x,
                 use_reentrant=False,
             )
 

@@ -19,7 +19,7 @@ class WeightedSoftWetAreaLoss(FunctionalLoss):
         self,
         threshold: float = 0.0,
         temperature: float = 0.1,
-        false_positive_weight: float = 1.5,
+        false_positive_weight: float = 1.0,
         false_negative_weight: float = 1.0,
         **kwargs,
     ) -> None:

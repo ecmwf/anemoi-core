@@ -117,6 +117,8 @@ class SpectralLoss(BaseLoss):
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
         _ = scalers  # intentionally unused
         kwargs.pop("scalers", None)
+        x_dim = kwargs.get("x_dim")
+        y_dim = kwargs.get("y_dim")
 
         # Sharding over grid dimension is not supported for spectral transforms.
         # Enforce loss to be calculated on full grids.
@@ -125,9 +127,13 @@ class SpectralLoss(BaseLoss):
         if transform == "fft2d":
             LOGGER.info("Using FFT2D spectral transform in spectral loss.")
             self.transform = FFT2D(**kwargs)
+            self.x_dim = int(x_dim) if x_dim is not None else None
+            self.y_dim = int(y_dim) if y_dim is not None else None
         elif transform == "dct2d":
             LOGGER.info("Using DCT2D spectral transform in spectral loss.")
             self.transform = DCT2D(**kwargs)
+            self.x_dim = int(x_dim) if x_dim is not None else None
+            self.y_dim = int(y_dim) if y_dim is not None else None
         elif transform == "reduced_sht":
             # expected additional args: grid
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
@@ -182,6 +188,7 @@ class SpectralL2Loss(SpectralLoss):
         **kwargs,
     ) -> torch.Tensor:
         del kwargs  # unused
+        del kwargs  # unused
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
@@ -219,6 +226,7 @@ class LogSpectralDistance(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -261,7 +269,9 @@ class FourierCorrelationLoss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        **kwargs,
     ) -> torch.Tensor:
+        del kwargs  # unused
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps

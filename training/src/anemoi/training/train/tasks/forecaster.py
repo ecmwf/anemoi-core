@@ -75,10 +75,8 @@ class GraphForecaster(BaseRolloutGraphModule):
             y = {}
             for dataset_name, dataset_batch in batch.items():
                 start = self.n_step_input + rollout_step * self.n_step_output
-                y_time = dataset_batch.narrow(1, start, self.n_step_output)
-                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-                y[dataset_name] = y_time.index_select(-1, var_idx)
-            # y includes the auxiliary variables, so we must leave those out when computing the loss
+                y[dataset_name] = dataset_batch.narrow(1, start, self.n_step_output)
+            # y can include auxiliary variables; the loss wrapper handles any required filtering.
             # Compute loss for each dataset and sum them up
             loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
@@ -86,6 +84,7 @@ class GraphForecaster(BaseRolloutGraphModule):
                 y,
                 step=rollout_step,
                 validation_mode=validation_mode,
+                input_context=x,
                 use_reentrant=False,
             )
 

@@ -55,6 +55,30 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def _metric_scalar_value(metric_value: Any) -> float | None:
+    if isinstance(metric_value, torch.Tensor):
+        if metric_value.numel() != 1:
+            return None
+        return metric_value.detach().float().cpu().item()
+    if isinstance(metric_value, int | float):
+        return float(metric_value)
+    return None
+
+
+def _friendly_component_name(name: str) -> str:
+    aliases = {
+        "logspectraldistance": "LSD",
+        "log_spectral_distance": "LSD",
+        "huber": "Huber",
+        "weighted_soft_wet_area": "WetArea",
+        "rolling_accumulation_huber": "RollingAccum",
+        "optical_flow_consistency": "OptFlow",
+        "opticalflowconsistencyloss": "OptFlow",
+        "ssim": "SSIM",
+    }
+    return aliases.get(name, name.replace("_", " ").title().replace(" ", ""))
+
+
 class BaseGraphModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 
@@ -431,6 +455,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 del state_dict[key]
 
         model_state_dict = self.model.state_dict()
+        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
         for key, value in model_state_dict.items():
             full_key = f"model.{key}"
             if full_key.startswith(processor_prefixes):
@@ -574,9 +599,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
-        pred_layout: IndexSpace | str | None = None,
-        target_layout: IndexSpace | str | None = None,
-        **_kwargs,
+        **kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
 
@@ -607,6 +630,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y,
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
+            dataset_name=dataset_name,
+            **kwargs,
         )
 
     def _compute_loss_component_metrics(
@@ -615,7 +640,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
-        **_kwargs,
+        **kwargs,
     ) -> dict[str, torch.Tensor]:
         if dataset_name is None:
             return {}
@@ -634,6 +659,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y,
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
+            dataset_name=dataset_name,
+            **kwargs,
         )
 
     def _compute_metrics(
@@ -700,12 +727,29 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_name=dataset_name,
         )
 
+        loss_kwargs = dict(kwargs)
+        input_context = loss_kwargs.get("input_context")
+        if dataset_name is not None and input_context is not None:
+            dataset_input_context = input_context.get(dataset_name) if isinstance(input_context, dict) else input_context
+            if dataset_input_context is not None:
+                raw_grid_shard_slice = self.grid_shard_slice[dataset_name]
+                grid_shard_shapes = self.grid_shard_shapes[dataset_name]
+                if raw_grid_shard_slice is not None and grid_shard_slice is None:
+                    shard_shapes = apply_shard_shapes(dataset_input_context, self.grid_dim, grid_shard_shapes)
+                    dataset_input_context = gather_tensor(
+                        torch.clone(dataset_input_context),
+                        self.grid_dim,
+                        shard_shapes,
+                        self.model_comm_group,
+                    )
+            loss_kwargs["input_context"] = dataset_input_context
+
         loss = self._compute_loss(
             y_pred=y_pred_full,
             y=y_full,
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
-            **kwargs,
+            **loss_kwargs,
         )
 
         # Compute metrics if in validation mode
@@ -716,7 +760,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 y_full,
                 grid_shard_slice=grid_shard_slice,
                 dataset_name=dataset_name,
-                **kwargs
+                **loss_kwargs,
             )
             metrics_next.update(
                 self._compute_metrics(
@@ -724,7 +768,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     y_full,
                     grid_shard_slice=grid_shard_slice,
                     dataset_name=dataset_name,
-                    **kwargs,
+                    **loss_kwargs,
                 )
             )
 
@@ -1027,30 +1071,67 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         callback_metrics = getattr(self.trainer, "callback_metrics", {})
         summary_parts: list[str] = []
+        component_metrics: list[tuple[str, str, float]] = []
+        component_weights: dict[str, dict[str, float]] = {}
+        total_losses: dict[str, float] = {}
+        fallback_total: float | None = None
+
+        for dataset_name, loss_obj in self.loss.items():
+            if hasattr(loss_obj, "component_weights"):
+                component_weights[dataset_name] = loss_obj.component_weights()
+
         for metric_name, metric_value in sorted(callback_metrics.items(), key=lambda item: str(item[0])):
             metric_name = str(metric_name)
             if not metric_name.startswith("val_"):
                 continue
             if "_scale_" in metric_name and not metric_name.endswith("_scale_0"):
                 continue
-            if "_loss_component_" in metric_name and not metric_name.endswith("_weighted_scale_0"):
-                continue
-            if not ("_loss_component_" in metric_name or "_metric/" in metric_name or metric_name.endswith("_loss")):
+
+            scalar_value = _metric_scalar_value(metric_value)
+            if scalar_value is None:
                 continue
 
-            if isinstance(metric_value, torch.Tensor):
-                if metric_value.numel() != 1:
+            if metric_name == "val_multi_dataset_loss" or metric_name == "val_multi_dataset_loss_epoch":
+                fallback_total = scalar_value
+            elif metric_name.endswith("_combinedloss_loss_scale_0"):
+                dataset_name = metric_name[len("val_") : -len("_combinedloss_loss_scale_0")]
+                total_losses[dataset_name] = scalar_value
+
+            if "_loss_component_" in metric_name:
+                if not metric_name.endswith("_weighted_scale_0"):
                     continue
-                metric_value = metric_value.detach().float().cpu().item()
-            elif isinstance(metric_value, int | float):
-                metric_value = float(metric_value)
-            else:
+                dataset_name, component_name = metric_name[len("val_") : -len("_weighted_scale_0")].split(
+                    "_loss_component_",
+                    1,
+                )
+                component_metrics.append((dataset_name, component_name, scalar_value))
                 continue
 
-            summary_parts.append(f"{metric_name}={metric_value:.4g}")
+            if not ("_metric/" in metric_name or metric_name.endswith("_loss")):
+                continue
+
+            summary_parts.append(f"{metric_name}={scalar_value:.4g}")
 
         if summary_parts:
             LOGGER.info("Validation summary: %s", ", ".join(summary_parts))
+
+        for dataset_name, component_name, component_value in component_metrics:
+            total_value = total_losses.get(dataset_name, fallback_total)
+            if total_value is None or total_value == 0:
+                continue
+            label = _friendly_component_name(component_name)
+            if dataset_name != "data":
+                label = f"{dataset_name}:{label}"
+            loss_weight = component_weights.get(dataset_name, {}).get(component_name)
+            if loss_weight is None:
+                LOGGER.info("Relative contribution metric %s: %.2f%%", label, 100.0 * component_value / total_value)
+                continue
+            LOGGER.info(
+                "Relative contribution metric %s for loss weight %.6g: %.2f%%",
+                label,
+                loss_weight,
+                100.0 * component_value / total_value,
+            )
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         del batch_idx

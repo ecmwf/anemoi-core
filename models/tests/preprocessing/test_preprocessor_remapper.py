@@ -76,6 +76,37 @@ def test_monomap_inverse_transform(input_remapper_1d) -> None:
     )
 
 
+def test_boxcox_with_configurable_lambda() -> None:
+    lambd = 0.2
+    config = DictConfig(
+        {
+            "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
+            "data": {
+                "remapper": {
+                    "boxcox": {
+                        "variables": ["rain"],
+                        "lambd": lambd,
+                    }
+                },
+                "forcing": [],
+                "diagnostic": [],
+            },
+        },
+    )
+    statistics = {}
+    name_to_index = {"rain": 0}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    remapper = Remapper(config=config.data.remapper, data_indices=data_indices, statistics=statistics)
+
+    x = torch.Tensor([[0.25], [4.0]])
+    expected_transformed = torch.Tensor((np.power(x.numpy(), lambd) - 1) / lambd)
+
+    transformed = remapper.transform(x, in_place=False)
+    assert torch.allclose(transformed, expected_transformed)
+    assert torch.allclose(remapper.inverse_transform(transformed, in_place=False), x)
+    assert remapper.method_parameters["rain"] == {"lambd": lambd}
+
+
 def test_unsupported_remapper():
     config = DictConfig(
         {

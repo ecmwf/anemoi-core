@@ -128,6 +128,8 @@ class BaseAnemoiReader:
             x = x[..., grid_shard_indices]  # select the grid shard
 
         x = np.asarray(x)
+        if np.issubdtype(x.dtype, np.floating) and x.dtype != np.float32:
+            x = x.astype(np.float32, copy=False)
         n_variables = len(self.variables)
 
         if x.ndim == 4:

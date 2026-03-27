@@ -136,25 +136,18 @@ class CombinedLoss(BaseLoss):
         if loss_weights is None:
             loss_weights = (1.0,) * len(losses)
 
+        data_indices = kwargs.pop("data_indices", None)
+        scalers = kwargs.pop("scalers", {})
+
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
         for i, loss in enumerate(losses):
             if isinstance(loss, DictConfig | dict):
-                loss_config = dict(loss)
-                scaler_spec = loss_config.pop("scalers", ["*"])
-                self._loss_scaler_specification[i] = scaler_spec
-                # Only propagate scaler declarations when explicitly provided.
-                if available_scalers:
-                    loss_config["scalers"] = scaler_spec
-                self.losses.append(
-                    get_loss_function(
-                        DictConfig(loss_config),
-                        scalers=available_scalers,
-                        data_indices=data_indices,
-                        **dict(kwargs),
-                    ),
-                )
+                if "scalers" not in loss:
+                    loss.update({"scalers": ["*"]})
+                self.losses.append(get_loss_function(loss, scalers=scalers, data_indices=data_indices, **dict(kwargs)))
+                self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
             elif isinstance(loss, type):
                 self._loss_scaler_specification[i] = ["*"]
                 self.losses.append(loss(**kwargs))
@@ -220,8 +213,15 @@ class CombinedLoss(BaseLoss):
                 loss = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
         return loss
 
+    @staticmethod
+    def _unwrap_loss_name(loss_fn: BaseLoss) -> str:
+        current = loss_fn
+        while current.__class__.__name__ == "FilteringLossWrapper" and hasattr(current, "loss"):
+            current = current.loss
+        return getattr(current, "name", current.__class__.__name__.lower())
+
     def _component_name(self, loss_fn: BaseLoss, seen_names: dict[str, int]) -> str:
-        base_name = getattr(loss_fn, "name", loss_fn.__class__.__name__.lower())
+        base_name = self._unwrap_loss_name(loss_fn)
         seen_names[base_name] = seen_names.get(base_name, 0) + 1
         if seen_names[base_name] == 1:
             return base_name
@@ -245,6 +245,16 @@ class CombinedLoss(BaseLoss):
         except TypeError:
             return None
 
+    def component_names(self) -> list[str]:
+        seen_names: dict[str, int] = {}
+        return [self._component_name(loss_fn, seen_names) for loss_fn in self.losses]
+
+    def component_weights(self) -> dict[str, float]:
+        return {
+            component_name: float(self.loss_weights[i])
+            for i, component_name in enumerate(self.component_names())
+        }
+
     def component_metrics(
         self,
         pred: torch.Tensor,
@@ -252,10 +262,9 @@ class CombinedLoss(BaseLoss):
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         metrics: dict[str, torch.Tensor] = {}
-        seen_names: dict[str, int] = {}
+        component_names = self.component_names()
 
-        for i, loss_fn in enumerate(self.losses):
-            component_name = self._component_name(loss_fn, seen_names)
+        for i, (loss_fn, component_name) in enumerate(zip(self.losses, component_names, strict=False)):
             scaled = loss_fn(pred, target, **kwargs)
             metrics[f"loss_component_{component_name}_scaled"] = scaled
             metrics[f"loss_component_{component_name}_weighted"] = self.loss_weights[i] * scaled

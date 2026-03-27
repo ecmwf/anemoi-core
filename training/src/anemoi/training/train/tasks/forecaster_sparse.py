@@ -349,8 +349,7 @@ class GraphForecasterSparse(BaseRolloutGraphModule):
                 pred_index = torch.tensor(pred_positions, device=dataset_batch.device, dtype=torch.long)
                 batch_index = torch.tensor(batch_positions, device=dataset_batch.device, dtype=torch.long)
                 y_time = dataset_batch.index_select(1, batch_index)
-                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-                y[dataset_name] = y_time.index_select(-1, var_idx)
+                y[dataset_name] = y_time
                 y_pred[dataset_name] = y_pred_full[dataset_name].index_select(1, pred_index)
 
             loss, metrics_next, y_pred = checkpoint(
@@ -359,6 +358,7 @@ class GraphForecasterSparse(BaseRolloutGraphModule):
                 y,
                 step=rollout_step,
                 validation_mode=validation_mode,
+                input_context=x,
                 use_reentrant=False,
             )
 

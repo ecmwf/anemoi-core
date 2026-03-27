@@ -16,6 +16,7 @@ from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
+from .optical_flow import OpticalFlowConsistencyLoss
 from .rmse import RMSELoss
 from .rolling_accumulation import RollingAccumulationHuberLoss
 from .spectral import FourierCorrelationLoss
@@ -39,6 +40,7 @@ __all__ = [
     "MAELoss",
     "MSELoss",
     "MultiscaleLossWrapper",
+    "OpticalFlowConsistencyLoss",
     "RMSELoss",
     "RollingAccumulationHuberLoss",
     "SpectralCRPSLoss",

@@ -257,10 +257,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
                 self.data_indices[dataset_name].data.input.full,
             ]  # (bs, time, ens, latlon, nvar)
 
-            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)][
-                ...,
-                self.data_indices[dataset_name].data.output.full,
-            ]
+            y[dataset_name] = dataset_batch[:, itemgetter(*self.interp_times)(self.imap)]
 
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
@@ -271,6 +268,7 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             y_pred,
             y,
             validation_mode=validation_mode,
+            input_context=x_bound,
             use_reentrant=False,
         )
 

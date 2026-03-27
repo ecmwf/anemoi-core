@@ -232,7 +232,19 @@ def inverse_asinh_converter(x, c=1.0):
 # --------------------------------------------------------
 def log1p_converter(x):
     """Convert positive var in to log(1+var)."""
-    return torch.log1p_(x)
+    return torch.log1p(x)
+
+
+def boxcox_converter(x, lambd=0.05):
+    """Convert positive var in to boxcox(var)."""
+    if lambd == 0:
+        return torch.log(x)
+    return (torch.pow(x, lambd) - 1) / lambd
+
+
+def sqrt_converter(x):
+    """Convert positive var in to sqrt(var)."""
+    return torch.sqrt(x)
 
 
 def expm1_converter(x):
@@ -248,6 +260,8 @@ def sqrt_converter(x):
     return power_transform(x, lambd=0.5)
 
 
-def inverse_sqrt_converter(x):
-    """Inverse sqrt transform"""
-    return inverse_power_transform(x, lambd=0.5)
+def inverse_boxcox_converter(x, lambd=0.05):
+    """Convert back boxcox(var) to var."""
+    if lambd == 0:
+        return torch.exp(x)
+    return torch.pow(x * lambd + 1, 1 / lambd)

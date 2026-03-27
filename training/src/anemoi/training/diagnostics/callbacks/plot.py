@@ -1140,9 +1140,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             for rollout_step in range(output_times):
                 y_hat = outputs[1][rollout_step][dataset_name]
                 start = pl_module.n_step_input + rollout_step * pl_module.n_step_output
-                y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
-                var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
-                y_true = y_time.index_select(-1, var_idx)
+                y_true = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
@@ -1175,7 +1173,8 @@ class PlotLoss(BasePerBatchPlotCallback):
             # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
             for dataset in self.loss:
                 if (
-                    hasattr(self.loss[dataset].scaler, "nan_mask_weights")
+                    not hasattr(self.loss[dataset], "losses")
+                    and hasattr(self.loss[dataset].scaler, "nan_mask_weights")
                     and self.loss[dataset].scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
                 ):
                     self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(

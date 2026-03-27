@@ -20,6 +20,7 @@ from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
+from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.losses.spectral import SpectralCRPSLoss
 
 
@@ -107,6 +108,98 @@ def test_combined_loss_seperate_scalers() -> None:
     assert isinstance(loss.losses[1], MAELoss)
     assert "test" not in loss.losses[1].scaler
     assert "test2" in loss.losses[1].scaler
+
+
+def test_combined_loss_with_data_indices_and_filtering() -> None:
+    from anemoi.models.data_indices.collection import IndexCollection
+
+    data_config = {"data": {"forcing": [], "diagnostic": []}}
+    name_to_index = {"tp": 0, "other_var": 1}
+    data_indices = IndexCollection(DictConfig(data_config), name_to_index)
+    tensordim = (2, 1, 1, 4, 2)
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.CombinedLoss",
+                "losses": [
+                    {
+                        "_target_": "anemoi.training.losses.MSELoss",
+                        "predicted_variables": ["tp"],
+                        "target_variables": ["tp"],
+                    },
+                    {"_target_": "anemoi.training.losses.MAELoss"},
+                ],
+                "loss_weights": [1.0, 0.5],
+            },
+        ),
+        data_indices=data_indices,
+    )
+    assert isinstance(loss, CombinedLoss)
+    assert isinstance(loss.losses[0], FilteringLossWrapper)
+    assert loss.losses[0].predicted_variables == ["tp"]
+    assert loss.losses[0].target_variables == ["tp"]
+    loss_value = loss(
+        torch.ones(tensordim),
+        torch.zeros(tensordim),
+        squash_mode="sum",
+    )
+    assert loss_value == torch.tensor(8.0)
+
+
+def test_combined_loss_filtered_and_unfiltered_with_scalers() -> None:
+    """Test CombinedLoss with one filtered loss and one unfiltered loss with scalers."""
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.utils import print_variable_scaling
+
+    n_vars = 3
+    data_config = {"data": {"forcing": [], "diagnostic": []}}
+    name_to_index = {
+        "var1": 0,
+        "var2": 1,
+        "tp": 2,
+    }
+    data_indices = IndexCollection(DictConfig(data_config), name_to_index)
+
+    scaler_pressure = (4, torch.ones(n_vars) * 2.0)
+    scaler_general = (4, torch.ones(n_vars) * 0.5)
+
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.CombinedLoss",
+                "losses": [
+                    {
+                        "_target_": "anemoi.training.losses.MSELoss",
+                        "predicted_variables": ["tp"],
+                        "target_variables": ["tp"],
+                        "scalers": ["pressure_level", "general_variable"],
+                    },
+                    {
+                        "_target_": "anemoi.training.losses.MSELoss",
+                        "scalers": ["pressure_level", "general_variable"],
+                    },
+                ],
+                "loss_weights": [1.0, 1.0],
+                "scalers": ["*"],
+            },
+        ),
+        scalers={"pressure_level": scaler_pressure, "general_variable": scaler_general},
+        data_indices=data_indices,
+    )
+
+    assert isinstance(loss, CombinedLoss)
+    assert isinstance(loss.losses[0], FilteringLossWrapper)
+    assert loss.losses[0].predicted_variables == ["tp"]
+
+    batch_size, ensemble, grid_points = 1, 1, 4
+    pred = torch.ones(batch_size, 1, ensemble, grid_points, n_vars)
+    target = torch.zeros(batch_size, 1, ensemble, grid_points, n_vars)
+
+    loss_value = loss(pred, target, squash_mode="sum")
+    assert loss_value.item() > 0
+
+    scaling_values = print_variable_scaling(loss, data_indices)
+    assert "tp" in scaling_values["FilteringLossWrapper"]
 
 
 def test_combined_loss_with_spectral_crps_backward() -> None:

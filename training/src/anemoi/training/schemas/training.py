@@ -299,6 +299,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
     spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
     spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
+    optical_flow = "anemoi.training.losses.optical_flow.OpticalFlowConsistencyLoss"
 
 
 class BaseLossSchema(BaseModel):
@@ -358,8 +359,17 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
+class OpticalFlowConsistencyLossSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.optical_flow.OpticalFlowConsistencyLoss"] = Field(..., alias="_target_")
+    x_dim: int
+    y_dim: int
+
+    class Config(BaseModel.Config):
+        extra = "allow"
+
+
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
+    losses: list[BaseLossSchema | SpectralLossSchema | OpticalFlowConsistencyLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -392,6 +402,8 @@ LossSchemas = (
     | CombinedLossSchema
     | AlmostFairKernelCRPSSchema
     | KernelCRPSSchema
+    | SpectralLossSchema
+    | OpticalFlowConsistencyLossSchema
     | MultiScaleLossSchema
 )
 

@@ -72,9 +72,9 @@ class BaseLoss(nn.Module, ABC):
 
         self.add_module("scaler", ScaleTensor())
 
-        self.avg_function = torch.mean
-        self.sum_function = torch.sum
         self.ignore_nans = ignore_nans
+        self.avg_function = torch.nanmean if ignore_nans else torch.mean
+        self.sum_function = torch.nansum if ignore_nans else torch.sum
 
         self.supports_sharding = True
         self.num_scales = 1
@@ -132,7 +132,7 @@ class BaseLoss(nn.Module, ABC):
                 "Scaler tensor must be at least applied to the GRID dimension. "
                 "Please add a scaler here, use `UniformWeights` for simple uniform scaling.",
             )
-            raise RuntimeError(error_msg)
+            LOGGER.warning(error_msg)
 
         scale_tensor = self.scaler
         if without_scalers is not None and len(without_scalers) > 0:
@@ -171,8 +171,6 @@ class BaseLoss(nn.Module, ABC):
             Mode to use for squashing the variable dimension, by default "avg"
             If "avg", the last dimension is averaged.
             If "sum", the last dimension is summed.
-        group : ProcessGroup | None, optional
-            Distributed group to reduce over, by default None
 
         Returns
         -------
@@ -266,8 +264,6 @@ class BaseLoss(nn.Module, ABC):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group to reduce over, by default None
-        **kwargs
-            Additional keyword arguments
 
         Returns
         -------
@@ -326,8 +322,6 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
-        **kwargs
-            Additional keyword arguments
 
         Returns
         -------
@@ -335,16 +329,7 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         is_sharded = grid_shard_slice is not None
-        if self.ignore_nans:
-            nan_mask = torch.isnan(target)
-            target = target.masked_fill(nan_mask, 0.0)
-            pred = pred.masked_fill(nan_mask, 0.0)
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
-        return self.reduce(
-            out,
-            squash,
-            group=group if is_sharded else None,
-            squash_mode=kwargs.get("squash_mode", "avg"),
-        )
+        squash_mode = kwargs.get("squash_mode", "avg")
+        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)
