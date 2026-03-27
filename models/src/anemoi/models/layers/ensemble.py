@@ -127,7 +127,7 @@ class NoiseConditioning(BaseNoiseInjector):
             noise_mlp_hidden_dim,
             noise_channels_dim,
             layer_kernels=self.layer_factory,
-            n_extra_layers=-1,
+            n_extra_layers=0,
             final_activation=False,
             layer_norm=True,
         )

@@ -27,6 +27,8 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
@@ -155,7 +157,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         num_layers: int,
         num_channels: int,
         num_chunks: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         cpu_offload: bool = False,
         dropout_p: float = 0.0,
         layer_kernels: DotDict,
@@ -173,7 +175,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         self.build_layers(
             PointWiseMLPProcessorBlock,
             num_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
         )
@@ -210,11 +212,12 @@ class TransformerProcessor(BaseProcessor):
         num_channels: int,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         attn_channels: Optional[int] = None,
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
@@ -234,7 +237,7 @@ class TransformerProcessor(BaseProcessor):
             Number of chunks in processor
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v projections. If None,
@@ -248,6 +251,8 @@ class TransformerProcessor(BaseProcessor):
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default None
         use_alibi_slopes : bool
@@ -275,7 +280,7 @@ class TransformerProcessor(BaseProcessor):
         self.build_layers(
             TransformerProcessorBlock,
             num_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             attn_channels=attn_channels,
             num_heads=num_heads,
             qk_norm=qk_norm,
@@ -283,6 +288,7 @@ class TransformerProcessor(BaseProcessor):
             layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
+            mlp_implementation=mlp_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
         )
@@ -322,6 +328,7 @@ class GNNProcessor(BaseProcessor):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -340,6 +347,8 @@ class GNNProcessor(BaseProcessor):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -358,6 +367,7 @@ class GNNProcessor(BaseProcessor):
 
         kwargs_build = {
             "mlp_extra_layers": mlp_extra_layers,
+            "mlp_implementation": mlp_implementation,
             "layer_kernels": self.layer_factory,
             "edge_dim": None,
         }
@@ -418,10 +428,11 @@ class GraphTransformerProcessor(BaseProcessor):
         num_channels: int,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         edge_dim: int,
         attn_channels: Optional[int] = None,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
@@ -440,7 +451,7 @@ class GraphTransformerProcessor(BaseProcessor):
             Number of chunks in processor
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
@@ -451,6 +462,8 @@ class GraphTransformerProcessor(BaseProcessor):
             the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -474,12 +487,13 @@ class GraphTransformerProcessor(BaseProcessor):
         self.build_layers(
             GraphTransformerProcessorBlock,
             in_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             out_channels=num_channels,
             attn_channels=attn_channels,
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             graph_attention_backend=graph_attention_backend,
             edge_dim=edge_dim,
             edge_pre_mlp=edge_pre_mlp,

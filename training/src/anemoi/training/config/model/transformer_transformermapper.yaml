@@ -28,7 +28,8 @@ processor:
   _convert_: all
   num_layers: 16
   num_chunks: 2
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0 # GraphTransformer
@@ -47,7 +48,8 @@ encoder:
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   num_chunks: 2
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: -1
   dropout_p: 0.0
@@ -65,7 +67,8 @@ decoder:
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   num_chunks: 2
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: -1
   dropout_p: 0.0

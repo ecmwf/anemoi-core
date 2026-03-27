@@ -7,11 +7,13 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Literal
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
+from pydantic import PositiveFloat
 from pydantic import PositiveInt
 
 from anemoi.utils.schemas import BaseModel
@@ -35,8 +37,10 @@ class TransformerModelComponent(PydanticBaseModel):
     "Enable gradient checkpointing to reduce memory usage. Default to True."
     num_chunks: NonNegativeInt = Field(example=1)
     "Number of chunks to divide the layer into. Default to 1."
-    mlp_hidden_ratio: NonNegativeInt = Field(example=4)
-    "Ratio of mlp hidden dimension to embedding dimension. Default to 4."
+    mlp_hidden_ratio: PositiveFloat = Field(example=4)
+    "Ratio of MLP hidden dimension to embedding dimension. Use 4 for `mlp`, and ~2.67 for gated variants (`glu`, `swiglu`, `geglu`, `reglu`) to keep model size similar."
+    mlp_implementation: Literal["mlp", "glu", "swiglu", "geglu", "reglu"] = Field(default="mlp", example="mlp")
+    "Implementation of feed-forward blocks (`mlp`, `glu`, `swiglu`, `geglu`, `reglu`). Default to `mlp`."
     num_heads: NonNegativeInt = Field(example=16)
     "Number of attention heads. Default to 16."
     attn_channels: Union[PositiveInt, None] = Field(default=None)
@@ -60,6 +64,8 @@ class GNNModelComponent(BaseModel):
     "Edge attributes to consider in the model component features."
     mlp_extra_layers: NonNegativeInt = Field(example=0)
     "The number of extra hidden layers in MLP. Default to 0."
+    mlp_implementation: Literal["mlp", "glu", "swiglu", "geglu", "reglu"] = Field(default="mlp", example="mlp")
+    "Implementation of feed-forward blocks (`mlp`, `glu`, `swiglu`, `geglu`, `reglu`). Default to `mlp`."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 

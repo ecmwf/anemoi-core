@@ -17,6 +17,7 @@ import torch
 
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.processor import TransformerProcessor
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -103,3 +104,12 @@ def test_transformer_processor_forward(transformer_processor, transformer_proces
         assert (
             param.grad.shape == param.shape
         ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+
+def test_transformer_processor_accepts_fractional_mlp_hidden_ratio(transformer_processor_init):
+    cfg = asdict(transformer_processor_init)
+    cfg["mlp_hidden_ratio"] = 2.67
+    processor = TransformerProcessor(**cfg)
+
+    expected_hidden_dim = compute_mlp_hidden_dim(transformer_processor_init.num_channels, 2.67)
+    assert processor.proc[0].mlp.mlp[0].out_features == expected_hidden_dim

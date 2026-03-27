@@ -34,6 +34,8 @@ from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
@@ -73,7 +75,6 @@ class BaseMapper(nn.Module, ABC):
         self.out_channels_dst = out_channels_dst
         self.gradient_checkpointing = gradient_checkpointing
         self.layer_factory = load_layer_kernels(layer_kernels)
-        self.activation = self.layer_factory.Activation()
 
         self.proc = NotImplemented
 
@@ -147,10 +148,11 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         edge_dim: int,
         attn_channels: Optional[int] = None,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
@@ -174,7 +176,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Number of chunks to split into
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
@@ -185,6 +187,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict, optional
@@ -213,12 +217,13 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         self.proc = GraphTransformerMapperBlock(
             in_channels=hidden_dim,
-            hidden_dim=mlp_hidden_ratio * hidden_dim,
+            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
             out_channels=hidden_dim,
             attn_channels=attn_channels,
             num_heads=num_heads,
             edge_dim=edge_dim,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             layer_kernels=self.layer_factory,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
@@ -507,10 +512,11 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         hidden_dim: int,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         edge_dim: int,
         attn_channels: Optional[int] = None,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
@@ -532,7 +538,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Number of chunks to split into
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
@@ -543,6 +549,8 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -565,6 +573,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
+            mlp_implementation=mlp_implementation,
             attn_channels=attn_channels,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
@@ -632,10 +641,11 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         edge_dim: int,
         attn_channels: Optional[int] = None,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -660,7 +670,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Number of chunks to split into
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
@@ -671,6 +681,8 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         initialise_data_extractor_zero : bool, default False:
             Whether to initialise the data extractor to zero
         cpu_offload : bool, optional
@@ -696,6 +708,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
+            mlp_implementation=mlp_implementation,
             attn_channels=attn_channels,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
@@ -745,6 +758,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         **kwargs,
@@ -767,6 +781,8 @@ class GNNBaseMapper(BaseMapper, ABC):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict, optional
@@ -788,7 +804,8 @@ class GNNBaseMapper(BaseMapper, ABC):
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
             layer_kernels=self.layer_factory,
-            n_extra_layers=mlp_extra_layers,
+            n_extra_layers=mlp_extra_layers + 1,
+            mlp_implementation=mlp_implementation,
         )
 
     def mapper_forward(
@@ -882,6 +899,7 @@ class GNNForwardMapper(GNNBaseMapper):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -904,6 +922,8 @@ class GNNForwardMapper(GNNBaseMapper):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -919,6 +939,7 @@ class GNNForwardMapper(GNNBaseMapper):
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,
+            mlp_implementation=mlp_implementation,
             layer_kernels=layer_kernels,
         )
 
@@ -927,6 +948,7 @@ class GNNForwardMapper(GNNBaseMapper):
             out_channels=hidden_dim,
             layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
+            mlp_implementation=mlp_implementation,
             update_src_nodes=True,
             num_chunks=num_chunks,
         )
@@ -938,7 +960,8 @@ class GNNForwardMapper(GNNBaseMapper):
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
             layer_kernels=self.layer_factory,
-            n_extra_layers=mlp_extra_layers,
+            n_extra_layers=mlp_extra_layers + 1,
+            mlp_implementation=mlp_implementation,
         )
 
         self.emb_nodes_dst = MLP(
@@ -946,7 +969,8 @@ class GNNForwardMapper(GNNBaseMapper):
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
             layer_kernels=self.layer_factory,
-            n_extra_layers=mlp_extra_layers,
+            n_extra_layers=mlp_extra_layers + 1,
+            mlp_implementation=mlp_implementation,
         )
 
     def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
@@ -979,6 +1003,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -1001,6 +1026,8 @@ class GNNBackwardMapper(GNNBaseMapper):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -1016,6 +1043,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,
+            mlp_implementation=mlp_implementation,
             layer_kernels=layer_kernels,
         )
 
@@ -1024,6 +1052,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             out_channels=hidden_dim,
             layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
+            mlp_implementation=mlp_implementation,
             update_src_nodes=False,
             num_chunks=num_chunks,
         )
@@ -1035,9 +1064,10 @@ class GNNBackwardMapper(GNNBaseMapper):
             hidden_dim=self.hidden_dim,
             out_features=self.out_channels_dst,
             layer_kernels=self.layer_factory,
-            n_extra_layers=mlp_extra_layers,
+            n_extra_layers=mlp_extra_layers + 1,
             layer_norm=False,
             final_activation=False,
+            mlp_implementation=mlp_implementation,
         )
 
     def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
@@ -1098,11 +1128,12 @@ class TransformerBaseMapper(BaseMapper, ABC):
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         attn_channels: Optional[int] = None,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
@@ -1122,7 +1153,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v projections. If None,
@@ -1133,6 +1164,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Normalize query and key, by default False
         dropout_p: float, optional
             Dropout probability used for multi-head self attention, default 0.1
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
@@ -1160,13 +1193,14 @@ class TransformerBaseMapper(BaseMapper, ABC):
 
         self.proc = TransformerMapperBlock(
             num_channels=hidden_dim,
-            hidden_dim=mlp_hidden_ratio * hidden_dim,
+            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
             attn_channels=attn_channels,
             num_heads=num_heads,
             window_size=window_size,
             layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
@@ -1249,10 +1283,11 @@ class TransformerForwardMapper(TransformerBaseMapper):
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
+        mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: float = None,
         use_alibi_slopes: bool = False,
@@ -1274,7 +1309,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v projections. If None,
@@ -1285,6 +1320,8 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Normalize query and key, by default False
         dropout_p: float, optional
             Dropout probability used for multi-head self attention, default 0.1
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
@@ -1314,6 +1351,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             window_size=window_size,
             dropout_p=dropout_p,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
@@ -1380,10 +1418,11 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
+        mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: float = None,
         use_alibi_slopes: bool = False,
@@ -1405,7 +1444,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v projections. If None,
@@ -1416,6 +1455,8 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Normalize query and key, by default False
         dropout_p: float, optional
             Dropout probability used for multi-head self attention, default 0.1
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
@@ -1445,6 +1486,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             window_size=window_size,
             dropout_p=dropout_p,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
