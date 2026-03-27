@@ -376,7 +376,9 @@ class TestScalerIndicesRemapping:
         )
         torch.testing.assert_close(loss, torch.tensor(0.0))
 
-    def test_partial_remap_logs_debug(self, data_indices_forcing_gaps: IndexCollection, caplog: pytest.LogCaptureFixture) -> None:
+    def test_partial_remap_logs_debug(
+        self, data_indices_forcing_gaps: IndexCollection, caplog: pytest.LogCaptureFixture,
+    ) -> None:
         """Partially dropped scaler indices should be visible at DEBUG level."""
         w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])
         w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
