@@ -20,6 +20,7 @@ from omegaconf import OmegaConf
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -42,8 +43,11 @@ class LossFactoryContext:
         context_keys = getattr(loss_class, "factory_context_keys", frozenset())
 
         constructor_kwargs = {}
-        takes_scalers = "available_scalers" in context_keys
-        takes_data_indices = self.data_indices is not None and "data_indices" in context_keys
+        takes_scalers = _has_factory_context_key(context_keys, LossFactoryContextKey.AVAILABLE_SCALERS)
+        takes_data_indices = self.data_indices is not None and _has_factory_context_key(
+            context_keys,
+            LossFactoryContextKey.DATA_INDICES,
+        )
 
         if takes_scalers:
             constructor_kwargs["available_scalers"] = self.available_scalers
@@ -52,6 +56,14 @@ class LossFactoryContext:
             constructor_kwargs["data_indices"] = self.data_indices
 
         return constructor_kwargs, takes_scalers, takes_data_indices
+
+
+def _has_factory_context_key(
+    context_keys: frozenset[LossFactoryContextKey | str],
+    key: LossFactoryContextKey,
+) -> bool:
+    """Accept enum keys while remaining compatible with any existing string declarations."""
+    return key in context_keys or key.value in context_keys
 
 
 def _filter_scalers(
@@ -162,7 +174,8 @@ def get_loss_function(
             loss=loss_function,
             predicted_variables=predicted_variables,
             target_variables=target_variables,
-        ).set_data_indices(data_indices)
+            data_indices=data_indices,
+        )
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
     return loss_function
 

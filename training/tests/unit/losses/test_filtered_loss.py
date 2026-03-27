@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -159,6 +161,11 @@ def test_loss_variable_mapper_propagates_needs_shard_layout_info() -> None:
     assert loss.needs_shard_layout_info is True
 
 
+def test_loss_variable_mapper_rejects_non_base_loss() -> None:
+    with pytest.raises(TypeError, match="Expected BaseLoss"):
+        LossVariableMapper(loss=object())  # type: ignore[arg-type]
+
+
 # =============================================================================
 # LossVariableMapper behaviour tests
 #
@@ -282,6 +289,18 @@ def test_default_target_inherits_predicted_order(data_indices_forcing_gaps: Inde
     assert w.target_indices_by_layout[IndexSpace.DATA_FULL] == [5, 0]
 
 
+def test_constructor_can_eagerly_set_data_indices(data_indices_forcing_gaps: IndexCollection) -> None:
+    w = LossVariableMapper(
+        loss=MSELoss(),
+        predicted_variables=["var_3", "var_0"],
+        target_variables=None,
+        data_indices=data_indices_forcing_gaps,
+    )
+
+    assert w.target_variables == ["var_3", "var_0"]
+    assert w.target_indices_by_layout[IndexSpace.DATA_FULL] == [5, 0]
+
+
 # --- layout validation -------------------------------------------------------
 
 
@@ -356,3 +375,51 @@ class TestScalerIndicesRemapping:
             target_layout=IndexSpace.DATA_FULL,
         )
         torch.testing.assert_close(loss, torch.tensor(0.0))
+
+    def test_partial_remap_logs_debug(self, data_indices_forcing_gaps: IndexCollection, caplog: pytest.LogCaptureFixture) -> None:
+        """Partially dropped scaler indices should be visible at DEBUG level."""
+        w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])
+        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=4, scaler=torch.tensor([2.0, 3.0]), name="var_w")
+
+        pred = torch.zeros(1, 1, 1, 8, 6)
+        target = torch.zeros(1, 1, 1, 8, 10)
+        pred[..., 0] = 1.0
+        pred[..., 3] = 1.0
+
+        with caplog.at_level(logging.DEBUG, logger="anemoi.training.losses.variable_mapper"):
+            w(
+                pred,
+                target,
+                scaler_indices=(..., [0, 5]),
+                pred_layout=IndexSpace.DATA_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
+            )
+
+        assert "dropped scaler variable indices during filtering" in caplog.text
+
+    def test_empty_remap_logs_warning(
+        self,
+        data_indices_forcing_gaps: IndexCollection,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Fully dropped scaler indices should warn because forward returns zeros."""
+        w = _mapper(data_indices_forcing_gaps, ["var_0"])
+        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=4, scaler=torch.tensor([2.0]), name="var_w")
+
+        pred = torch.zeros(1, 1, 1, 8, 6)
+        target = torch.zeros(1, 1, 1, 8, 10)
+        pred[..., 0] = 1.0
+
+        with caplog.at_level(logging.WARNING, logger="anemoi.training.losses.variable_mapper"):
+            loss = w(
+                pred,
+                target,
+                scaler_indices=(..., [3]),
+                pred_layout=IndexSpace.DATA_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
+            )
+
+        torch.testing.assert_close(loss, torch.tensor(0.0))
+        assert "Metric selection is empty; forward() will return zeros for this call." in caplog.text

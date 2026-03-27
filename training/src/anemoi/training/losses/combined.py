@@ -18,6 +18,7 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scaler_tensor import ScaleTensor
@@ -29,7 +30,9 @@ class CombinedLoss(BaseLoss):
 
     # CombinedLoss builds child losses itself, so it needs the filtered scaler
     # set and data indices during construction.
-    factory_context_keys = frozenset({"available_scalers", "data_indices"})
+    factory_context_keys = frozenset(
+        {LossFactoryContextKey.AVAILABLE_SCALERS, LossFactoryContextKey.DATA_INDICES},
+    )
     _initial_set_scaler: bool = False
 
     def __init__(

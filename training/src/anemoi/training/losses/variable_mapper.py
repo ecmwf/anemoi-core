@@ -8,11 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 import functools
-from collections.abc import Callable
 from typing import Any
 
 import torch
+from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
@@ -20,26 +21,31 @@ from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
+LOGGER = logging.getLogger(__name__)
+
 
 class LossVariableMapper(BaseLoss):
     """Loss wrapper to filter variables to compute the loss on."""
 
     def __init__(
         self,
-        loss: dict[str, Any] | Callable | BaseLoss,
+        loss: BaseLoss,
         predicted_variables: list[str] | None = None,
         target_variables: list[str] | None = None,
-    ):
+        data_indices: IndexCollection | None = None,
+    ) -> None:
         """Loss wrapper to filter variables to compute the loss on.
 
         Parameters
         ----------
-        loss : Type[torch.nn.Module] | dict[str, Any]
-            wrapped loss
+        loss : BaseLoss
+            Wrapped loss module.
         predicted_variables : list[str] | None
-            predicted variables to keep, if None, all variables are kept
+            Predicted variables to keep. If None, all model-output variables are kept.
         target_variables : list[str] | None
-            target variables to keep, if None, all variables are kept
+            Target variables to keep. If None, predicted_variables are reused.
+        data_indices : IndexCollection | None
+            Optional tensor index metadata used to initialise layout-aware filtering eagerly.
         """
         if predicted_variables and target_variables:
             assert len(predicted_variables) == len(
@@ -49,20 +55,22 @@ class LossVariableMapper(BaseLoss):
         super().__init__()
 
         self._loss_scaler_specification = {}
-        assert isinstance(
-            loss,
-            BaseLoss,
-        ), f"Invalid loss type provided: {type(loss)}. Expected a str or dict or BaseLoss."
+        if not isinstance(loss, BaseLoss):
+            msg = f"Invalid loss type provided: {type(loss)}. Expected BaseLoss."
+            raise TypeError(msg)
         self.loss = loss
         if hasattr(self.loss, "scaler"):
             # Share the inner loss scaler so scaler membership and updates remain visible
             # to training/task utilities that inspect `loss.scaler`.
             self.scaler = self.loss.scaler
         self.supports_sharding = getattr(self.loss, "supports_sharding", False)
-        self.predicted_variables = predicted_variables
-        self.target_variables = target_variables
+        self.predicted_variables = list(predicted_variables) if predicted_variables is not None else None
+        self.target_variables = list(target_variables) if target_variables is not None else None
+        self.data_indices: IndexCollection | None = None
         self.predicted_indices_by_layout: dict[IndexSpace, list[int]] = {}
         self.target_indices_by_layout: dict[IndexSpace, list[int]] = {}
+        if data_indices is not None:
+            self.set_data_indices(data_indices)
 
     @property
     def needs_shard_layout_info(self) -> bool:
@@ -74,7 +82,10 @@ class LossVariableMapper(BaseLoss):
             # Broadcast scalers do not need filtering.
             return None
         if not self.predicted_indices_by_layout:
-            msg = "LossVariableMapper data indices must be set before adding variable scalers."
+            msg = (
+                "LossVariableMapper must be initialised with data_indices before adding variable scalers. "
+                "Pass data_indices to the constructor or call set_data_indices()."
+            )
             raise RuntimeError(msg)
 
         layout_variable_sizes: dict[IndexSpace, int] = {
@@ -277,12 +288,50 @@ class LossVariableMapper(BaseLoss):
 
         pred_index_to_local = {index: pos for pos, index in enumerate(pred_indices)}
         mapped_indices = [pred_index_to_local[index] for index in requested_indices if index in pred_index_to_local]
+        dropped_indices = [index for index in requested_indices if index not in pred_index_to_local]
+        if dropped_indices:
+            if len(mapped_indices) == 0:
+                LOGGER.warning(
+                    "LossVariableMapper dropped all requested scaler variable indices during filtering: "
+                    "requested=%s dropped=%s filtered_predicted_indices=%s. "
+                    "Metric selection is empty; forward() will return zeros for this call.",
+                    requested_indices,
+                    dropped_indices,
+                    pred_indices,
+                )
+            else:
+                LOGGER.debug(
+                    "LossVariableMapper dropped scaler variable indices during filtering: "
+                    "requested=%s kept_local=%s dropped=%s filtered_predicted_indices=%s",
+                    requested_indices,
+                    mapped_indices,
+                    dropped_indices,
+                    pred_indices,
+                )
         remapped_scaler_indices = (*scaler_indices[:-1], self._restore_indexer_type(mapped_indices, variable_indexer))
         return remapped_scaler_indices, len(mapped_indices) == 0
 
-    def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs) -> torch.Tensor:
-        pred_layout = kwargs.pop("pred_layout", None)
-        target_layout = kwargs.pop("target_layout", None)
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[Any, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        if self.data_indices is None:
+            msg = (
+                "LossVariableMapper must be initialised with data_indices before use. "
+                "Pass data_indices to the constructor or call set_data_indices()."
+            )
+            raise RuntimeError(msg)
         if pred_layout is None or target_layout is None:
             msg = "LossVariableMapper requires both 'pred_layout' and 'target_layout' kwargs."
             raise ValueError(msg)
@@ -308,15 +357,24 @@ class LossVariableMapper(BaseLoss):
         pred_filtered = pred[..., pred_indices]
         target_filtered = target[..., target_indices]
 
-        scaler_indices = kwargs.get("scaler_indices")
+        loss_kwargs = dict(kwargs)
+        loss_kwargs.update(
+            {
+                "scaler_indices": scaler_indices,
+                "without_scalers": without_scalers,
+                "grid_shard_slice": grid_shard_slice,
+                "group": group,
+                "squash_mode": squash_mode,
+            },
+        )
+
         empty_metric_selection = False
         if isinstance(scaler_indices, tuple):
-            kwargs["scaler_indices"], empty_metric_selection = self._remap_scaler_indices_for_filtered_pred(
+            loss_kwargs["scaler_indices"], empty_metric_selection = self._remap_scaler_indices_for_filtered_pred(
                 scaler_indices,
                 pred_indices,
             )
 
-        squash = kwargs.get("squash", True)
         if empty_metric_selection:
             if squash:
                 return torch.zeros((), dtype=pred.dtype, device=pred.device, requires_grad=False)
@@ -324,13 +382,14 @@ class LossVariableMapper(BaseLoss):
             return torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         if squash:
-            return self.loss(pred_filtered, target_filtered, **kwargs)
+            return self.loss(pred_filtered, target_filtered, squash=squash, **loss_kwargs)
         len_model_output = pred.shape[-1]
         loss = torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
         loss_per_variable = self.loss(
             pred_filtered,
             target_filtered,
-            **kwargs,
+            squash=squash,
+            **loss_kwargs,
         )
         loss[pred_indices] = loss_per_variable
         return loss

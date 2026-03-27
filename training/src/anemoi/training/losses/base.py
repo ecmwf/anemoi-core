@@ -13,6 +13,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
+from enum import StrEnum
 from typing import ClassVar
 
 import torch
@@ -26,12 +27,19 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
+class LossFactoryContextKey(StrEnum):
+    """Named constructor-context inputs that selected loss classes can request."""
+
+    AVAILABLE_SCALERS = "available_scalers"
+    DATA_INDICES = "data_indices"
+
+
 class BaseLoss(nn.Module, ABC):
     """Base loss."""
 
     # Most losses are built from config alone. Subclasses can list any
     # extra inputs they need from get_loss_function() here.
-    factory_context_keys: ClassVar[frozenset[str]] = frozenset()
+    factory_context_keys: ClassVar[frozenset[LossFactoryContextKey | str]] = frozenset()
     scaler: ScaleTensor
 
     def __init__(
