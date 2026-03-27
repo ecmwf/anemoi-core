@@ -54,15 +54,18 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         """
         # start rollout of preprocessed batch
+        dataset_contexts = self._build_dataset_contexts()  # static only used here
         rollout_steps = rollout or self.rollout
         required_time_steps = rollout_steps * self.n_step_output + self.n_step_input
         x = {}
-        for dataset_name, dataset_batch in batch.items():
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
+            dataset_batch = batch[dataset_name]
             x[dataset_name] = dataset_batch[
                 :,
                 0 : self.n_step_input,
                 ...,
-                self.data_indices[dataset_name].data.input.full,
+                dataset_ctx.static.data_indices.data.input.full,
             ]  # (bs, n_step_input, latlon, nvar)
             msg = (
                 f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
@@ -73,10 +76,12 @@ class GraphForecaster(BaseRolloutGraphModule):
         for rollout_step in range(rollout_steps):
             y_pred = self(x)
             y = {}
-            for dataset_name, dataset_batch in batch.items():
+            for dataset_ctx in dataset_contexts.values():
+                dataset_name = dataset_ctx.static.name
+                dataset_batch = batch[dataset_name]
                 start = self.n_step_input + rollout_step * self.n_step_output
                 y_time = dataset_batch.narrow(1, start, self.n_step_output)
-                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+                var_idx = dataset_ctx.static.data_indices.data.output.full.to(device=dataset_batch.device)
                 y[dataset_name] = y_time.index_select(-1, var_idx)
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
@@ -90,6 +95,6 @@ class GraphForecaster(BaseRolloutGraphModule):
             )
 
             # Advance input state for each dataset
-            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step, dataset_contexts=dataset_contexts)
 
             yield loss, metrics_next, y_pred
