@@ -62,12 +62,6 @@ dataloader:
     select: [tp]
     rename:
       tp: imerg
-  batch_size:
-    training: 1
-    validation: 1
-  limit_batches:
-    training: 1
-    validation: 1
   training:
     datasets:
       data:
