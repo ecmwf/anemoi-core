@@ -23,6 +23,8 @@ from typing import Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from anemoi.training.tasks.base import BaseTask
+
 
 class BasePlotAdapter(ABC):
     """Abstract plotting contract. Subclasses define output_times, get_init_step, iter_plot_samples."""

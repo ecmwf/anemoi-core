@@ -9,10 +9,6 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
-from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
-from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
-from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
-from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorMultiOutPlotAdapter
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
@@ -246,7 +242,6 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     training_module.loss = {"data": DummyLoss()}
     training_module.loss_supports_sharding = False
     training_module.metrics_support_sharding = True
-    training_module._plot_adapter = ForecasterPlotAdapter(task)
     for i in range(task.rollout.maximum):
         task.rollout.step = i + 1
         assert training_module.plot_adapter.output_times == i + 1
@@ -729,7 +724,7 @@ _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}}
 
 
 class _InterpolatorStub:
-    """Minimal stub with attributes needed by InterpolatorMultiOutPlotAdapter."""
+    """Minimal stub with attributes needed by TemporalDownscalingPlotAdapter."""
 
     def __init__(self, n_step_input: int, n_step_output: int, interp_times: list) -> None:
         self.n_step_input = n_step_input
@@ -750,7 +745,6 @@ def test_interpolator_output_times_and_get_init_step() -> None:
         n_step_output=len(interp_times),
         interp_times=interp_times,
     )
-    stub._plot_adapter = InterpolatorMultiOutPlotAdapter(stub)
 
     assert stub.plot_adapter.output_times == 2
     for i in range(stub.plot_adapter.output_times):
@@ -766,7 +760,6 @@ def test_graphdiffusionforecaster_output_times_and_get_init_step() -> None:
     pl.LightningModule.__init__(forecaster)
     forecaster.n_step_input = 1
     forecaster.n_step_output = 1
-    forecaster._plot_adapter = DiffusionPlotAdapter(forecaster)
     assert forecaster.plot_adapter.output_times == 1
     assert forecaster.plot_adapter.get_init_step(0) == 0
 
@@ -779,7 +772,7 @@ def test_graphforecaster_get_init_step() -> None:
         timestep="6h",
         rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
     )
-    adapter = ForecasterPlotAdapter(task)
+    adapter = task._plot_adapter
     assert adapter.output_times == 1
     assert adapter.get_init_step(0) == 0
     assert adapter.get_init_step(1) == 0
@@ -791,7 +784,6 @@ def test_graphautoencoder_output_times() -> None:
     ae = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(ae)
     _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE)
-    ae._plot_adapter = AutoencoderPlotAdapter(ae)
     assert ae.plot_adapter.output_times == 1
 
 
