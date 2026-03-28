@@ -11,6 +11,8 @@
 import importlib
 import logging
 
+import networkx as nx
+import numpy as np
 import torch
 from torch_geometric.data.storage import NodeStorage
 
@@ -80,7 +82,10 @@ class MultiScaleEdges(BaseEdgeBuilder):
         node_cls = getattr(module, node_type, None)
 
         if node_cls is None:
-            raise ValueError(f"Invalid node_type, {node_type}, for building multi scale edges.")
+            module = importlib.import_module("anemoi.graphs.nodes.builders.from_concentric")
+            node_cls = getattr(module, node_type, None)
+            if node_cls is None:
+                raise ValueError(f"Invalid node_type, {node_type}, for building multi scale edges.")
 
         # Instantiate the BaseIcosahedronEdgeStrategy based on the node type
         module_name = ".".join(node_cls.multi_scale_edge_cls.split(".")[:-1])
@@ -100,10 +105,10 @@ class MultiScaleEdges(BaseEdgeBuilder):
             )
 
         # Add edges
-        edge_index = edge_builder_cls().get_edges(
-            source_nodes,
-            self.x_hops,
-            scale_resolutions=scale_resolutions,
-        )
+        source_nodes = edge_builder_cls().add_edges(source_nodes, self.x_hops, scale_resolutions=scale_resolutions)
+        adjmat = nx.to_scipy_sparse_array(source_nodes["_nx_graph"], format="coo")
+
+        # Get source & target indices of the edges
+        edge_index = np.stack([adjmat.col, adjmat.row], axis=0)
 
         return torch.from_numpy(edge_index).to(torch.int32)
