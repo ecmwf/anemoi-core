@@ -7,11 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .anemoi_model import AnemoiDiffusionModel
+from .anemoi_model import AnemoiDiffusionTendencyModel
+from .anemoi_model import AnemoiModel
 from .base import BaseGraphModel
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
 from .interpolator import AnemoiModelEncProcDecMultiOutInterpolator
+from .naive import NaiveModel
 
 from .autoencoder import AnemoiModelAutoEncoder  # isort: skip
 from .hierarchical_autoencoder import AnemoiModelHierarchicalAutoEncoder  # isort: skip
@@ -19,7 +23,11 @@ from .diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec 
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec  # isort: skip
 
 __all__ = [
+    "AnemoiModel",
+    "AnemoiDiffusionModel",
+    "AnemoiDiffusionTendencyModel",
     "BaseGraphModel",
+    "NaiveModel",
     "AnemoiModelEncProcDec",
     "AnemoiEnsModelEncProcDec",
     "AnemoiDiffusionModelEncProcDec",

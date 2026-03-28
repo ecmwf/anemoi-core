@@ -3,7 +3,7 @@ cpu_offload: False
 
 keep_batch_sharded: True
 
-model:
+backbone:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
   hidden_nodes_name: "hidden"
   latent_skip: True

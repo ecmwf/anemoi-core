@@ -4,6 +4,7 @@ defaults:
 - diagnostics: evaluation_multi
 - system: example
 - graph: multi
+- model_builder: anemoi
 - model: graphtransformer
 - training: multi
 - _self_

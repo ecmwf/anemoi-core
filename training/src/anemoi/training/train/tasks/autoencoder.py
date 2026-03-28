@@ -20,10 +20,10 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     import torch
-    from omegaconf import DictConfig
-    from torch_geometric.data import HeteroData
 
-    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import ModelInterface
+    from anemoi.training.config_bundle import TaskConfigBundle
+    from anemoi.training.runtime import TaskRuntimeArtifacts
 
 
 LOGGER = logging.getLogger(__name__)
@@ -37,40 +37,27 @@ class GraphAutoEncoder(BaseGraphModule):
     def __init__(
         self,
         *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict,
-        supporting_arrays: dict,
+        model: ModelInterface,
+        config_bundle: TaskConfigBundle,
+        runtime_artifacts: TaskRuntimeArtifacts,
+        **kwargs,
     ) -> None:
         """Initialize graph neural network interpolator.
 
         Parameters
         ----------
-        config : DictConfig
-            Job configuration
-        graph_data : HeteroData
-            Graph object
-        statistics : dict
-            Statistics of the training data
-        data_indices : IndexCollection
-            Indices of the training data,
-        metadata : dict
-            Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
+        model : ModelInterface
+        config_bundle : TaskConfigBundle
+            Parts of the config used by this task.
+        runtime_artifacts : TaskRuntimeArtifacts
+            Data prepared by the trainer for this task.
 
         """
         super().__init__(
-            config=config,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            model=model,
+            config_bundle=config_bundle,
+            runtime_artifacts=runtime_artifacts,
+            **kwargs,
         )
 
         assert (
@@ -78,6 +65,15 @@ class GraphAutoEncoder(BaseGraphModule):
         ), "Autoencoders must have the same number of input and output steps."
 
         self._plot_adapter = AutoencoderPlotAdapter(self)
+
+        self.fill_metadata(self.metadata)
+
+    def fill_metadata(self, metadata: dict) -> None:
+        for dataset_name in self.dataset_names:
+            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
+            rel = ts["relative_date_indices_training"]
+            ts["input_relative_date_indices"] = rel[: self.n_step_input]
+            ts["output_relative_date_indices"] = rel[-self.n_step_output :]
 
     def _step(
         self,

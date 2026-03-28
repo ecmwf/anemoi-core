@@ -49,7 +49,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         model_config_local = DotDict(model_config)
 
-        diffusion_config = model_config_local.model.model.diffusion
+        diffusion_config = model_config_local.model.backbone.diffusion
         self.noise_channels = diffusion_config.noise_channels
         self.noise_cond_dim = diffusion_config.noise_cond_dim
         self.sigma_data = diffusion_config.sigma_data
@@ -745,24 +745,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             model_comm_group,
             grid_shard_shapes=grid_shard_shapes,
         )
-
-    def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
-
-            rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
-            input_rel_date_indices = rel_date_indices[: self.n_step_input]
-            output_rel_date_indices = rel_date_indices[-self.n_step_output :]
-            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
-            md_dict["metadata_inference"][dataset]["timesteps"][
-                "output_relative_date_indices"
-            ] = output_rel_date_indices
 
 
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):

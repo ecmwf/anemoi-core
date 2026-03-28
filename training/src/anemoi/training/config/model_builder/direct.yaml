@@ -1,0 +1,2 @@
+_target_: anemoi.training.builder.build_direct_model
+_recursive_: false

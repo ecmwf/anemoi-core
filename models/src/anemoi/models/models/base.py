@@ -31,6 +31,16 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
+def _get_backbone_config(model_config: DotDict) -> DotDict:
+    """Return the backbone config."""
+    backbone_config = model_config.model.get("backbone")
+    if backbone_config is not None:
+        return DotDict(backbone_config)
+
+    msg = "Expected model config to define `model.backbone`."
+    raise KeyError(msg)
+
+
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
@@ -63,12 +73,13 @@ class BaseGraphModel(nn.Module):
         self.dataset_names = list(data_indices.keys())
 
         model_config = DotDict(model_config)
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        backbone_config = _get_backbone_config(model_config)
+        self._graph_name_hidden = backbone_config.hidden_nodes_name
 
         self.n_step_input = model_config.training.multistep_input
         self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
-        self.latent_skip = model_config.model.model.latent_skip
+        self.latent_skip = backbone_config.latent_skip
 
         trainable_parameters = broadcast_config_keys(
             model_config.model.trainable_parameters,
@@ -332,8 +343,3 @@ class BaseGraphModel(nn.Module):
                     y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
 
         return y_hat
-
-    @abstractmethod
-    def fill_metadata(self, md_dict) -> None:
-        """To be implemented in subclasses to fill model-specific metadata."""
-        pass

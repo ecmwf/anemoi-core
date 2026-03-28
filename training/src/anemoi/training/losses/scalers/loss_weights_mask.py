@@ -12,7 +12,7 @@ import logging
 
 import torch
 
-from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.interface import ModelInterface
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
@@ -36,7 +36,7 @@ class NaNMaskScaler(BaseUpdatingScaler):
         self.use_processors_tendencies = use_processors_tendencies
         del kwargs
 
-    def on_batch_start(self, model: AnemoiModelInterface, dataset_name: str | None = None) -> torch.Tensor | None:
+    def on_batch_start(self, model: ModelInterface, dataset_name: str | None = None) -> torch.Tensor | None:
         """Update loss scaling.
 
         Get mask multiplying NaN locations with zero.
@@ -46,7 +46,7 @@ class NaNMaskScaler(BaseUpdatingScaler):
 
         Parameters
         ----------
-        model : AnemoiModelInterface
+        model : ModelInterface
             The model.
         dataset_name : str, optional
             The dataset name for multi-dataset scenarios.

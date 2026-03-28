@@ -22,6 +22,7 @@ from anemoi.training.diagnostics.callbacks.plot import PlotHistogram as _PlotHis
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss as _PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample as _PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum as _PlotSpectrum
+from anemoi.training.diagnostics.callbacks.plot import _get_dataset_latlons
 
 if TYPE_CHECKING:
     from typing import Any
@@ -102,7 +103,7 @@ class EnsemblePlotMixin:
             members = [members]
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+            self.latlons[dataset_name] = _get_dataset_latlons(pl_module, dataset_name)
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         total_targets = pl_module.plot_adapter.get_total_plot_targets()
@@ -274,7 +275,10 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 else self.config.data.datasets[dataset_name].diagnostic
             )
             plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
+                    name,
+                    name in diagnostics,
+                )
                 for name in self.parameters
             }
 
@@ -288,7 +292,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
             # Apply spatial mask
             _, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
+                pl_module.model.backbone._graph_data,
                 self.latlons[dataset_name],
                 data,
                 output_tensor,

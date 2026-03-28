@@ -18,6 +18,7 @@ import numpy as np
 import omegaconf
 import pytest
 import torch
+from torch_geometric.data import HeteroData
 
 from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot
 from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
@@ -260,13 +261,9 @@ def _make_pl_module_forecaster(
     data_indices.model.output.name_to_index = {"a": 0, "b": 1}
     pl_module.data_indices = {"data": data_indices}
     # Latlons for graph (radians), converted to deg in process
-    pl_module.model.model._graph_data = {
-        "data": MagicMock(),
-    }
-    pl_module.model.model._graph_data["data"].__getitem__ = lambda _self, _k: MagicMock()
-    graph_data = pl_module.model.model._graph_data["data"]
-    pl_module.model.model._graph_name_data = "x"
-    graph_data.__getitem__ = lambda k: torch.zeros(nlatlon, 2) if k == pl_module.model.model._graph_name_data else None
+    graph_data = HeteroData()
+    graph_data["data"].x = torch.zeros(nlatlon, 2)
+    pl_module.model.backbone._graph_data = graph_data
     # output_mask equal to identity
     pl_module.output_mask = {"data": MagicMock()}
     pl_module.output_mask["data"].apply.side_effect = lambda x, **_kwargs: x
@@ -324,9 +321,9 @@ def _make_pl_module_interpolator(*, output_times=2, nlatlon=50) -> MagicMock:
     data_indices.data.output.full = slice(None)
     data_indices.model.output.name_to_index = {"a": 0, "b": 1}
     pl_module.data_indices = {"data": data_indices}
-    pl_module.model.model._graph_data = {"data": MagicMock()}
-    pl_module.model.model._graph_data["data"].__getitem__ = lambda _k: torch.zeros(nlatlon, 2)
-    pl_module.model.model._graph_name_data = "x"
+    graph_data = HeteroData()
+    graph_data["data"].x = torch.zeros(nlatlon, 2)
+    pl_module.model.backbone._graph_data = graph_data
     pl_module.output_mask = {"data": MagicMock()}
     pl_module.output_mask["data"].apply.side_effect = lambda x, **_kwargs: x
 
