@@ -13,11 +13,10 @@ import pytest
 import torch
 
 from anemoi.models.layers.conv import GraphTransformerConv
-from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
-    from anemoi.models.triton.gt import GraphTransformerFunction
+    from anemoi.models.triton.gt import sparse_graph_attention_coo
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +40,30 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
     return edge_index, edge_index.shape[1]
 
 
+@pytest.mark.parametrize(
+    "n_src,n_dst,h,d",
+    [
+        (4, 10, 2, 4),
+        (4, 10, 6, 4),  # tests num_heads != pow_of_2
+        (4, 10, 2, 6),  # tests  num_channels != pow_of_2
+        (4, 10, 6, 6),  # tests num_heads * num_channels != pow_of_2
+    ],
+)
+def test_graph_transformer_opcheck(n_src: int, n_dst: int, h: int, d: int):
+    """Test if operator has been registered properly"""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    edge_index, m = build_bipartite_graph(n_src, n_dst)
+
+    query = torch.randn((n_dst, h, d), requires_grad=True)
+    key = torch.randn((n_src, h, d), requires_grad=True)
+    value = torch.randn((n_src, h, d), requires_grad=True)
+    edge_attr = torch.randn((m, h, d), requires_grad=True)
+
+    torch.library.opcheck(sparse_graph_attention_coo, (query, key, value, edge_attr, edge_index))
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
@@ -57,15 +80,13 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
         pytest.skip("CUDA not available")
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
     query = torch.randn((n_dst, h, d), requires_grad=True)
     key = torch.randn((n_src, h, d), requires_grad=True)
     value = torch.randn((n_src, h, d), requires_grad=True)
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
-    edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton, _ = sparse_graph_attention_coo(query, key, value, edge_attr, edge_index)
 
     # Verify output shape
     assert out_triton.shape == (n_dst, h, d), f"Expected shape {(n_dst, h, d)}, got {out_triton.shape}"
@@ -87,15 +108,13 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
         pytest.skip("CUDA not available")
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
     query = torch.randn((n_dst, h, d), requires_grad=True)
     key = torch.randn((n_src, h, d), requires_grad=True)
     value = torch.randn((n_src, h, d), requires_grad=True)
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
-    edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton, _ = sparse_graph_attention_coo(query, key, value, edge_attr, edge_index)
     loss = out_triton.pow(2).sum()
     loss.backward()
 
@@ -114,15 +133,20 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
         (4, 10, 6, 4),
         (4, 10, 2, 6),
         (4, 10, 6, 6),
+        (4, 10, 32, 128),
+        (4, 10, 8, 127),
     ],
 )
-def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int):
+@pytest.mark.parametrize(
+    "deterministic",
+    [False, True],
+)
+def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int, deterministic: bool):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
     # Custom implementation
     query = torch.randn((n_dst, h, d), requires_grad=True)
@@ -130,8 +154,10 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     value = torch.randn((n_src, h, d), requires_grad=True)
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
-    edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    prev_det_mode = torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(deterministic, warn_only=True)
+
+    out_triton, _ = sparse_graph_attention_coo(query, key, value, edge_attr, edge_index)
 
     # Reference pyg implementation
     gt_ref = GraphTransformerConv(out_channels=d)
@@ -139,6 +165,8 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
 
     tolerance = 1e-4
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
+
+    torch.use_deterministic_algorithms(prev_det_mode)
 
 
 @pytest.mark.slow
@@ -149,15 +177,20 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
         (4, 10, 6, 4),
         (4, 10, 2, 6),
         (4, 10, 6, 6),
+        (4, 10, 32, 128),
+        (4, 10, 8, 127),
     ],
 )
-def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int):
+@pytest.mark.parametrize(
+    "deterministic",
+    [False, True],
+)
+def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int, deterministic: bool):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
     # Custom implementation
     query = torch.randn((n_dst, h, d), requires_grad=True)
@@ -165,8 +198,10 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     value = torch.randn((n_src, h, d), requires_grad=True)
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
-    edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    prev_det_mode = torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(deterministic, warn_only=True)
+
+    out_triton, _ = sparse_graph_attention_coo(query, key, value, edge_attr, edge_index)
     loss_triton = out_triton.pow(2).sum()
     loss_triton.backward()
     grads_triton = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
@@ -190,3 +225,5 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
     torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
     torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
+
+    torch.use_deterministic_algorithms(prev_det_mode)
