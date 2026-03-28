@@ -39,7 +39,7 @@ dependencies = [
   "anemoi-models[migrations]>=0.9.5",
   "anemoi-training[mlflow]",
   "anemoi-transform>=0.1.11",
-  "anemoi-utils[provenance]>=0.4.37",
+  "anemoi-utils[provenance]>=0.5.1",
   "datashader>=0.17",
   "einops>=0.6.1",
   "hydra-core>=1.3",
