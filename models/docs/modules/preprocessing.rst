@@ -83,13 +83,11 @@ Example configuration:
       processors:
          normalizer:
            _target_: anemoi.models.preprocessing.multi_dataset_normalizer.TopNormalizer
-           _convert_: all
            config:
              default: "mean-std"
              max: ["tp","tcc"]
          remapper1:
            _target_: anemoi.models.preprocessing.remapper.Remapper
-           _convert_: all
            config:
              power: ["tp"]
              atanh: ["tcc"]
@@ -101,7 +99,6 @@ Example configuration:
                  rho: 3.0
          remapper2:
            _target_: anemoi.models.preprocessing.remapper.Remapper
-           _convert_: all
            config:
              affine: ["tp"]
              displace_boundary_atoms: ["tcc"]
@@ -116,7 +113,6 @@ Example configuration:
                  eps: 1e-4
          remapper3:
            _target_: anemoi.models.preprocessing.remapper.Remapper
-           _convert_: all
            config:
              displace_boundary_atoms: ["tp"]
              method_kwargs:
