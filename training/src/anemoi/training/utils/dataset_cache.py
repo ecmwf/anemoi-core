@@ -1,6 +1,7 @@
 import os
 import io
 import errno
+import fcntl
 import shutil
 import torch
 import torch.distributed as dist
@@ -139,10 +140,10 @@ class DatasetCache(AnemoiDatasetsDataModule):
         if not dist.is_initialized(): #TODO and check proc_group is valid
             raise ValueError("Torch distributed is not initalised, can't use distributed cache")
                 
-        self.rank = dist.get_rank(self.proc_group) % 4 # TODO pass system.hardware.gpus_per_node here
-        #self.local_rank = int(os.environ.get("SLURM_LOCALID", (int(os.environ.get("LOCAL_RANK", 0)))))
+        self.global_rank = dist.get_rank(self.proc_group)
+        self.rank = self.global_rank % 4 # TODO pass system.hardware.gpus_per_node here
+        self.local_rank = self.rank  # alias for clarity
         
-        #self.device = torch.device(f"cuda:{self.local_rank if self.local_rank != -1 else self.rank}" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(f"cuda:{self.rank}" if torch.cuda.is_available() else "cpu")
         
         # Set the CUDA device before any collective operations (required for NCCL)
@@ -155,6 +156,23 @@ class DatasetCache(AnemoiDatasetsDataModule):
         self.hostnames = self._get_all_hostnames()
         self.proc_group = dist.new_group(ranks=None, backend="gloo")
 
+        # Build a mapping from hostname -> node_id (integer) and figure out
+        # which node this rank lives on.  All ranks on the same node share
+        # the same node_id and the same cache directory.
+        unique_hosts = sorted(set(self.hostnames))
+        self._host_to_node_id = {h: i for i, h in enumerate(unique_hosts)}
+        self.node_id = self._host_to_node_id[self.hostnames[self.global_rank]]
+        self.num_nodes = len(unique_hosts)
+        # For each node pick the lowest global rank on that node – that rank
+        # is responsible for creating the cache dir and running the HTTP server.
+        self._node_leader_rank = {}
+        for grank, host in enumerate(self.hostnames):
+            nid = self._host_to_node_id[host]
+            if nid not in self._node_leader_rank:
+                self._node_leader_rank[nid] = grank
+        self.is_node_leader = (self.global_rank == self._node_leader_rank[self.node_id])
+        LOGGER.info(f"Rank {self.rank} (global {self.global_rank}): node_id={self.node_id}, is_node_leader={self.is_node_leader}")
+
         # Determine which dataset(s) we're working with
         # For MultiDataset, cache the first dataset by default
         # Use self.ds_train which uses our cached property
@@ -165,19 +183,23 @@ class DatasetCache(AnemoiDatasetsDataModule):
         #creates space under self.cache_dir
         self.filesystem= f"{self.dataset_path}" #TODO read from zarr metadata
         
-        # once the dataset is loaded, this will become an array of len(dates) where the value corresponds to which processes cache a file is in
+        # once the dataset is loaded, this will become an array of len(dates) where the value corresponds to which node's cache a file is in
         # -1 => filesystem
         self.cache_registry=None
         self._init_cache()
        
+        # One HTTP server per node, run by the node leader only
         self.root_port = 8000
-        self.port = self.root_port + self.rank 
-        self._start_server()
+        self.port = self.root_port + self.node_id
+        if self.is_node_leader:
+            self._start_server()
+        # Barrier so all local ranks wait for the server to be up
+        dist.barrier(self.proc_group)
         
         # Inject cache wrapper into the underlying datasets
         self._inject_cache_wrapper()
         
-        LOGGER.info(f"{self.rank=}: Initalised a cache under {self.cache_path}")
+        LOGGER.info(f"{self.rank=}: Initalised a shared cache under {self.cache_path}")
         self.is_initalised=True
     
     def _inject_cache_wrapper(self):
@@ -209,15 +231,22 @@ class DatasetCache(AnemoiDatasetsDataModule):
             LOGGER.info("Cache root not given, defaulting to $TMPDIR")
             self.cache_root=Path(os.getenv("TMPDIR"))
         
-        #create space under cache_root for cache
+        #create space under cache_root for cache — single shared dir per node
         assert self.cache_root.exists()
-        self.cache_path = Path(f"{self.cache_root}/cache_rank_{self.rank}")
-        if self.cache_path.exists() and delete_existing_cache:
-            LOGGER.info(f"Existing cache found under {self.cache_path}. Deleting because {delete_existing_cache=}")
-            shutil.rmtree(self.cache_path)
-        self.cache_path.mkdir(exist_ok=True)
+        self.cache_path = Path(f"{self.cache_root}/cache")
+        
+        # Only the node leader creates/cleans the directory; others wait.
+        if self.is_node_leader:
+            if self.cache_path.exists() and delete_existing_cache:
+                LOGGER.info(f"Existing cache found under {self.cache_path}. Deleting because {delete_existing_cache=}")
+                shutil.rmtree(self.cache_path)
+            self.cache_path.mkdir(exist_ok=True)
+        # Barrier so non-leaders don't use the dir before it exists
+        dist.barrier(self.proc_group)
         
         self.cache_full=False # prevents subsequent writing when cache is full
+        # File-based lock so multiple local ranks don't write the same .npy concurrently
+        self._write_lock_path = self.cache_path / ".write_lock"
        
         dates = len(self) + 2 # build in some buffer to avoid out of bounds errors, will be cleaned up in the future with a more robust solution than using integers for cache registry
         #dates = self.ds.size
@@ -225,6 +254,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         if self.cache_registry is None:
             # Keep cache_registry on CPU with shared memory for DataLoader worker access
+            # Values are node_ids (not ranks); -1 => not cached anywhere
             self.cache_registry = torch.zeros(dates, dtype=torch.int32, device='cpu').share_memory_()
             self.cache_registry[:] = -1
             LOGGER.info(f"Rank {self.rank}: Created cache registry on CPU with shared memory for {dates} dates")
@@ -297,31 +327,32 @@ class DatasetCache(AnemoiDatasetsDataModule):
         return roots
     
     def _shutdown_server(self):
-        """Stop the threaded HTTP server."""
+        """Stop the threaded HTTP server (only called on node leader)."""
         try:
             if hasattr(self, 'httpd') and self.httpd is not None:
                 LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
-                #self.httpd.shutdown()
-                #self.httpd.server_close()
+                self.httpd.shutdown()
+                self.httpd.server_close()
                 LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
         except Exception as e:
             LOGGER.warning(f"Rank {self.rank}: Error shutting down server: {e}")
 
     def __del__(self):
-       self._shutdown_server()
+       if getattr(self, 'is_node_leader', False):
+           self._shutdown_server()
 
-    def priority_reduce(self, stacked, cache_registry, rank):
-        """ reduces global cache registries by taking local first then any other elements"""
+    def priority_reduce(self, stacked, cache_registry, node_id):
+        """ reduces global cache registries by taking local node first then any other node"""
         valid_mask = stacked != -1
-        self_mask = stacked == rank
+        self_mask = stacked == node_id
         has_self = self_mask.any(dim=0)
 
         global_cache_registry = torch.full_like(cache_registry, -1)
 
-        # Prefer self
-        global_cache_registry[has_self] = rank
+        # Prefer own node
+        global_cache_registry[has_self] = node_id
 
-        # Fallback to any other rank
+        # Fallback to any other node
         remaining = ~has_self
         if remaining.any():
             temp = stacked.clone()
@@ -333,8 +364,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
 
     def update_global_view(self) -> None:
         """ Communicate with other procs and share who has what files in their caches. Should be called after an epoch."""
-        #backend = dist.get_backend(proc_group)
-        #print(f"[Rank {rank}] backend={backend}")
 
         all_gather_buffer = [
             torch.zeros_like(self.cache_registry, device="cpu")
@@ -344,27 +373,26 @@ class DatasetCache(AnemoiDatasetsDataModule):
         LOGGER.info(f"Starting all gather (local cache registry: {self.cache_registry})")
         dist.all_gather(all_gather_buffer, self.cache_registry, group=self.proc_group)
 
-        self.cache_registry.copy_(self.priority_reduce(torch.stack(all_gather_buffer), self.cache_registry, self.rank))
+        self.cache_registry.copy_(self.priority_reduce(torch.stack(all_gather_buffer), self.cache_registry, self.node_id))
         num_cached = (self.cache_registry != -1).sum().item()
-        LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {(self.cache_registry != -1).sum().item()} cached items across all ranks ({self.cache_registry=})")
+        LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {num_cached} cached items across all nodes")
 
 
-    def _get_remote_file_url(self, remote_rank, date):
-        """Build the URL for a single .npy file on a remote rank's HTTP server."""
-        remote_host = self._get_hostname(remote_rank)
-        port = self.root_port + remote_rank
-        return f"http://{remote_host}:{port}/cache_rank_{remote_rank}/{date}.npy"
+    def _get_remote_file_url(self, remote_node_id, date):
+        """Build the URL for a single .npy file on a remote node's HTTP server."""
+        # Pick any rank on that node to get the hostname
+        remote_global_rank = self._node_leader_rank[remote_node_id]
+        remote_host = self._get_hostname(remote_global_rank)
+        port = self.root_port + remote_node_id
+        return f"http://{remote_host}:{port}/cache/{date}.npy"
         
     def check_cache(self, date) -> list[int]:
-        """ checks either local or global registry. returns list of procs containing file in their SSD"""
-        # Local cache registry is a torch tensor
-        cache_subset = [self.cache_registry[date].item()]
-
-        # Convert numpy values to Python int and filter out -1
-        cache_hits = [int(x) for x in cache_subset if int(x) != -1]
-        #LOGGER.info(f"{self.rank=} {self.cache_registry=} {cache_subset=} {cache_hits=}")
-        #LOGGER.info(f"{self.rank=} {cache_subset=} {cache_hits=}")
-        return cache_hits
+        """ checks either local or global registry. returns list of node_ids containing file in their SSD"""
+        # cache_registry stores node_ids, not ranks
+        cached_node = self.cache_registry[date].item()
+        if cached_node == -1:
+            return []
+        return [cached_node]
 
     def fetch(self, date, verbose=False) -> np.ndarray:
         """ Reads cache regsitry, based on result fetches file from local SSD, remote SSD or filesytem"""
@@ -384,10 +412,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
         if isinstance(primary_data, CachedDataWrapper):
             primary_data = primary_data.original_data
 
-        local_data_allowed=True
-        if not local_data_allowed and self.rank in cache_hits:
-            cache_hits.remove(self.rank)
-        
         if len(cache_hits) == 0:
             #Cache miss, go to filesystem
             
@@ -395,26 +419,39 @@ class DatasetCache(AnemoiDatasetsDataModule):
             data = primary_data[date]
             
             if not self.cache_full:
-                # add data to local cache as .npy file
-                try:
-                    np.save(self.cache_path / f"{date}.npy", data)
-                    self.cache_registry[date] = self.rank
+                # add data to the shared node cache as .npy file
+                # use a file lock so multiple local ranks don't write the same date concurrently
+                npy_path = self.cache_path / f"{date}.npy"
+                if not npy_path.exists():  # quick non-locked check to skip if already written by peer
+                    try:
+                        lock_fd = open(self._write_lock_path, 'w')
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                        try:
+                            if not npy_path.exists():  # double-check under lock
+                                np.save(npy_path, data)
+                                self.cache_registry[date] = self.node_id
+                        finally:
+                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                            lock_fd.close()
 
-                except OSError as e:
-                    if e.errno == errno.ENOSPC or "Not enough free space" in str(e):
-                        self.cache_full=True
-                        # Clean up the partial .npy file so it doesn't get served
-                        partial = self.cache_path / f"{date}.npy"
-                        partial.unlink(missing_ok=True)
-                        LOGGER.info(f"Rank {self.rank}: Cache full! No more writing")
-                    else:
-                        raise e
+                    #TODO calculate and manage space rather then relying on catching an error
+                    except OSError as e:
+                        if e.errno == errno.ENOSPC or "Not enough free space" in str(e):
+                            self.cache_full=True
+                            # Clean up the partial .npy file so it doesn't get served
+                            npy_path.unlink(missing_ok=True)
+                            LOGGER.info(f"Rank {self.rank}: Cache full! No more writing")
+                        else:
+                            raise e
+                else:
+                    # Another local rank already wrote this date
+                    self.cache_registry[date] = self.node_id
             
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
-        elif self.rank in cache_hits:
-            #Cache hit on local SSD – read .npy straight from disk
+        elif self.node_id in cache_hits:
+            #Cache hit on local node SSD – read .npy straight from disk
             
             self.cache_hits_local.value += 1
             data = np.load(self.cache_path / f"{date}.npy")
@@ -423,21 +460,21 @@ class DatasetCache(AnemoiDatasetsDataModule):
                 LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
                 
         else:
-            #cache hit on remote SSD – single HTTP GET via nginx
+            #cache hit on remote node SSD – single HTTP GET
             
             self.cache_hits_remote.value += 1
-            remote_rank = cache_hits[0] # TODO could be smarter by picking local ranks 
-            url = self._get_remote_file_url(remote_rank, date)
+            remote_node_id = cache_hits[0]
+            url = self._get_remote_file_url(remote_node_id, date)
             
             try:
                 with urllib.request.urlopen(url) as resp:
                     data = np.load(io.BytesIO(resp.read()))
             except Exception as e:
-                LOGGER.warning(f"Rank {self.rank}: Failed to fetch date {date} from rank {remote_rank} ({url}): {e}. Falling back to filesystem.")
+                LOGGER.warning(f"Rank {self.rank}: Failed to fetch date {date} from node {remote_node_id} ({url}): {e}. Falling back to filesystem.")
                 data = primary_data[date]
             
             if verbose or (self.total_fetches.value % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (rank {remote_rank}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
+                LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (node {remote_node_id}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
         return data
 
