@@ -146,8 +146,8 @@ def global_config(
         get_tmp_path,
     )
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
 
     OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
     cfg.training.scalers.datasets.data["output_steps"] = {
@@ -207,8 +207,8 @@ def multidatasets_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
 
     return cfg, [url_dataset, url_dataset_b]
 
@@ -292,8 +292,8 @@ def ensemble_config(
     cfg = handle_truncation_matrices(cfg, get_test_data)
     assert isinstance(cfg, DictConfig)
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
     return cfg, url_dataset
 
 
@@ -393,7 +393,7 @@ def benchmark_config(
     elif test_case == "diffusiontend":
         overrides = [
             "model=graphtransformer_diffusiontend",
-            "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+            "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
         ]
         base_config = "diffusion"
     else:
@@ -466,7 +466,7 @@ def interpolator_config(
 ) -> tuple[DictConfig, str]:
     """Compose a runnable configuration for the temporal-interpolation model with multiple output steps.
 
-    It is based on `interpolator_multiout.yaml` and only patches paths pointing to the
+    It is based on `temoral_downscaling.yaml` and only patches paths pointing to the
     sample dataset that the tests download locally.
     """
     # No model override here - the template already sets the dedicated
@@ -476,7 +476,7 @@ def interpolator_config(
         config_path="../../src/anemoi/training/config",
         job_name="test_interpolator",
     ):
-        template = compose(config_name="interpolator")
+        template = compose(config_name="temporal_downscaling.yaml")
 
     use_case_modifications = OmegaConf.load(
         Path.cwd() / "training/tests/integration/config/test_interpolator.yaml",
@@ -496,7 +496,7 @@ def interpolator_config(
         [],
         [
             "model=graphtransformer_diffusiontend",
-            "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+            "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
         ],
     ],
     ids=["diffusion", "diffusiontend"],
@@ -525,14 +525,14 @@ def diffusion_config(
         pytest.param(
             [
                 "model=graphtransformer_diffusion",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
+                "training.training_method=anemoi.training.train.methods.DiffusionTraining",
             ],
             id="diffusion",
         ),
         pytest.param(
             [
                 "model=graphtransformer_diffusiontend",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+                "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
             ],
             id="diffusiontend",
         ),
@@ -560,11 +560,11 @@ def multidatasets_diffusion_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     if is_tendency:
-        cfg.training.multistep_input = 3
-        cfg.training.multistep_output = 2
+        cfg.task.multistep_input = 3
+        cfg.task.multistep_output = 2
     else:
-        cfg.training.multistep_input = 2
-        cfg.training.multistep_output = 1
+        cfg.task.multistep_input = 2
+        cfg.task.multistep_output = 1
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 

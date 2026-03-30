@@ -5,7 +5,8 @@ defaults:
 - system: example
 - graph: encoder_decoder_only
 - model: graphtransformer
-- training: autoencoder
+- task: autoencoding
+- training: single
 - _self_
 
 config_validation: True
@@ -28,9 +29,6 @@ model:
   processor:
     _target_: anemoi.models.layers.processor.NoOpProcessor
 
-training:
-  model_task: anemoi.training.train.tasks.GraphAutoEncoder
-
 diagnostics:
   plot:
     callbacks:
@@ -45,7 +43,7 @@ diagnostics:
         - v_850
         - 2t
         - tp
-        output_steps: ${training.multistep_output}
+        output_steps: 1
         every_n_batches: ${diagnostics.plot.frequency.batch}
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
         precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}

@@ -49,7 +49,7 @@ def test_ensemble_plot_mixin_handle_batch_and_output():
 
     # Mock lightning module: allgather_batch(tensor, grid_indices, grid_dim) -> tensor
     pl_module = MagicMock()
-    pl_module.allgather_batch.side_effect = lambda x, *_args: x
+    pl_module.allgather_batch.side_effect = lambda x, _y: x
     pl_module.grid_indices = {dataset_name: MagicMock()}
     pl_module.grid_dim = -2
 

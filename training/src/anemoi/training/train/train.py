@@ -37,6 +37,7 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -104,9 +105,14 @@ class AnemoiTrainer(ABC):
         self._log_information()
 
     @cached_property
+    def task(self) -> BaseTask:
+        """Task instance."""
+        return instantiate(self.config.task)
+
+    @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(self.config)
+        datamodule = AnemoiDatasetsDataModule(self.config, self.task)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -261,6 +267,7 @@ class AnemoiTrainer(ABC):
 
         kwargs = {
             "config": self.config,
+            "task": self.task,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
@@ -269,8 +276,8 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        model_task = get_class(self.config.training.model_task)
-        model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
+        training_method = get_class(self.config.training.training_method)
+        model = training_method(**kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -283,7 +290,7 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(
+                model = training_method.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,
@@ -372,7 +379,7 @@ class AnemoiTrainer(ABC):
             "seed": self.initial_seed,
             "run_id": self.run_id,
             "dataset_names": None,  # will be populated in DataModule
-            "task": None,  # will be populated in BaseGraphModule
+            "task": None,  # will be populated in BaseTrainingModule
         }
         # Store metadata needed in inference in a separate dict "metadata_inference"
         # For each group, we add a dictionary with:
@@ -382,10 +389,11 @@ class AnemoiTrainer(ABC):
         # - timesteps, specifying the time steps used during training for input and output
 
         md_dict = {
-            "version": "2.0",
+            "version": "3.0",
             "config": self.config,
             "seed": self.initial_seed,
             "run_id": self.run_id,
+            "task": None,  # will be populated in Task
             "dataset": None,  # will be populated in DataModule
             "data_indices": None,  # will be populated in DataModule
             "provenance_training": gather_provenance_info(),
@@ -394,6 +402,7 @@ class AnemoiTrainer(ABC):
             "uuid": None,  # will be populated in checkpoint callback
         }
         self.datamodule.fill_metadata(md_dict)
+        self.task.fill_metadata(md_dict)
         return map_config_to_primitives(md_dict)
 
     @cached_property
@@ -623,7 +632,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path="../config", config_name="ensemble_crps")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 

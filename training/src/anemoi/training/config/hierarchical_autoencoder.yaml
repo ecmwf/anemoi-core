@@ -18,9 +18,6 @@ model:
   enable_hierarchical_level_processing: False
   keep_batch_sharded: True
 
-training:
-  model_task: anemoi.training.train.tasks.GraphAutoEncoder
-
 diagnostics:
   plot:
     callbacks:

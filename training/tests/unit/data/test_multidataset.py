@@ -19,19 +19,8 @@ class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
 
     @pytest.fixture
-    def dataset_config(self) -> dict:
-        """Fixture to provide dataset configuration."""
-        return {
-            "timestep": "6h",
-            "relative_date_indices": [0, 1, 3],  # e.g. f([t, t-6h]) = t+12h
-            "shuffle": True,
-        }
-
-    @pytest.fixture
-    def multi_dataset(self, mocker: MockFixture, dataset_config: dict) -> MultiDataset:
+    def multi_dataset(self, mocker: MockFixture) -> MultiDataset:
         """Fixture to provide a MultiDataset instance with mocked datasets."""
-        data_readers = {"dataset_a": None, "dataset_b": None}
-
         # Mock create_dataset to return mock datasets
         mock_dataset_a = mocker.MagicMock()
         mock_dataset_a.missing = set()
@@ -45,22 +34,14 @@ class TestMultiDataset:
         mock_dataset_b.has_trajectories = False
         mock_dataset_b.frequency = "3h"
 
-        mocker.patch(
-            "anemoi.training.data.multidataset.create_dataset",
-            side_effect=[mock_dataset_a, mock_dataset_b],
-        )
+        data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
+        relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
-        return MultiDataset(data_readers=data_readers, **dataset_config)
-
-    def test_timeincrement(self, multi_dataset: MultiDataset) -> None:
-        """Test that timeincrement is correctly computed from timestep."""
-        expected_timeincrement = 2  # 6H (timestep) in 3h steps (frequency)
-        assert multi_dataset.timeincrement == expected_timeincrement
+        return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
     def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
         """Test that valid_date_indices returns the intersection of indices from all datasets."""
-        # relative_date_indices: [0, 1, 3] (for 6H timestep)
-        # data (3h) -> data_relative_time_indices: [0, 2, 6]
+        # relative_date_indices are: [0, 2, 6]
         # dataset_a|b has dates [0, 1, 2, ..., 29]
         # dataset_a has indices [0, 1, 2, 3, 4, ..., 22, 23], where 23 = 29 - max(data_relative_time_indices)
         # dataset_b has missing indices {7, 8, 9, 10}
@@ -91,7 +72,9 @@ class TestMultiDataset:
         )
 
         # Accessing valid_date_indices should raise ValueError
-        with pytest.raises(ValueError, match="No valid date indices found for dataset 'dataset_b'"):
+        empty_dataset = multi_dataset.data_readers["dataset_b"]
+        err_msg = f"No valid date indices found for data reader 'dataset_b': {empty_dataset}"
+        with pytest.raises(ValueError, match=err_msg):
             _ = multi_dataset.valid_date_indices
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
@@ -115,3 +98,7 @@ class TestMultiDataset:
         # Accessing valid_date_indices should raise ValueError
         with pytest.raises(ValueError, match="No valid date indices found after intersection across all datasets"):
             _ = multi_dataset.valid_date_indices
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

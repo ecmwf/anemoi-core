@@ -7,14 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import numpy as np
 
 
 def get_usable_indices(
     missing_indices: set[int],
     series_length: int,
-    relative_indices: np.ndarray,
+    relative_indices: np.ndarray | list[int],
     trajectory_ids: np.ndarray | None = None,
 ) -> np.ndarray:
     """Get the usable indices of a series with missing indices.
@@ -22,12 +21,12 @@ def get_usable_indices(
     Parameters
     ----------
     missing_indices : set[int]
-        Dataset to be used.
+        Set of missing indices in the series.
     series_length : int
         Length of the series.
-    relative_indices: array[np.int64]
+    relative_indices: np.ndarray | list[int]
         Array of relative indices requested at each index i.
-    trajectory_ids: array[np.int64]
+    trajectory_ids: np.ndarray | None
         Array of integers of length series length that indicates which forecast trajectory a time index belongs to.
         When training on analysis: None
 
@@ -36,7 +35,15 @@ def get_usable_indices(
     usable_indices : np.array
         Array of usable indices.
     """
-    usable_indices = np.arange(series_length - max(relative_indices))
+    if isinstance(relative_indices, list):
+        relative_indices = np.array(relative_indices)
+
+    usable_indices = np.arange(series_length)
+
+    # Restrict to indices where all relative positions are within bounds
+    max_offset = int(max(relative_indices))
+    min_offset = int(min(relative_indices))
+    usable_indices = usable_indices[(usable_indices + min_offset >= 0) & (usable_indices + max_offset < series_length)]
 
     # Avoid crossing model runs by selecting only relative indices with the same model run id
     if trajectory_ids is not None:

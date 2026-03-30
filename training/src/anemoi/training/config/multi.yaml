@@ -5,6 +5,7 @@ defaults:
 - system: example
 - graph: multi
 - model: graphtransformer
+- task: forecasting
 - training: multi
 - _self_
 

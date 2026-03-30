@@ -371,14 +371,14 @@ class LongRolloutPlots(BasePlotCallback):
 
         - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
             rollout:
-            - ${dataloader.validation_rollout}
-            video_rollout: ${dataloader.validation_rollout}
+            - ${task.validation_rollout}
+            video_rollout: ${task.validation_rollout}
             every_n_epochs: 1
             sample_idx: ${diagnostics.plot.sample_idx}
             parameters: ${diagnostics.plot.parameters}
 
-    The selected rollout steps for plots and video need to be lower or equal to dataloader.validation_rollout.
-    Increasing dataloader.validation_rollout has no effect on the rollout steps during training.
+    The selected rollout steps for plots and video need to be lower or equal to task.validation_rollout.
+    Increasing task.validation_rollout has no effect on the rollout steps during training.
     It ensures, that enough time steps are available for the plots and video in the validation batches.
 
     The runtime of creating one animation of one variable for 56 rollout steps is about 1 minute.
@@ -1007,9 +1007,9 @@ class PlotLoss(BasePerBatchPlotCallback):
                 )
 
             adapter = pl_module.plot_adapter
-            for rollout_step in range(adapter.loss_plot_times):
-                y_hat = outputs[1][rollout_step][dataset_name]
-                start = adapter.get_loss_plot_batch_start(rollout_step)
+            for i, metric_name in enumerate(adapter.step_names):
+                y_hat = outputs[1][i][dataset_name]
+                start = adapter.get_loss_plot_batch_start(i)
                 y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
                 var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
                 y_true = y_time.index_select(-1, var_idx)
@@ -1025,8 +1025,8 @@ class PlotLoss(BasePerBatchPlotCallback):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"loss_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
-                    exp_log_tag=f"loss_sample_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
+                    tag=f"loss_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                    exp_log_tag=f"loss_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
                 )
 
     def on_validation_batch_end(
@@ -1127,7 +1127,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = pl_module.plot_adapter.get_total_plot_targets()
+        total_targets = pl_module.plot_adapter.output_times
 
         input_tensor = (
             batch[dataset_name][

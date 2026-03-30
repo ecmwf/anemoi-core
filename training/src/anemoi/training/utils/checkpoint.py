@@ -22,7 +22,7 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.utils.checkpoints import save_metadata
 
 chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
@@ -44,7 +44,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata
 
     """
-    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
+    module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
     model = module.model
 
     metadata = dict(**model.metadata)

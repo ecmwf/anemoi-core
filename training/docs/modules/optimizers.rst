@@ -11,7 +11,7 @@ allowing full flexibility to specify both standard PyTorch optimizers
 and custom implementations.
 
 The optimizer configuration is handled internally by the
-``BaseGraphModule`` class through its ``_create_optimizer_from_config``
+``BaseTrainingModule`` class through its ``_create_optimizer_from_config``
 method, which reads the provided configuration and creates the
 corresponding optimizer object. Additional settings, such as learning
 rate schedulers and warm-up phases, are also defined and managed within
@@ -32,7 +32,7 @@ Adam optimizer:
       betas: [0.9, 0.95]
       weight_decay: 0.1
 
-The ``BaseGraphModule`` automatically injects the learning rate from
+The ``BaseTrainingModule`` automatically injects the learning rate from
 ``config.training.lr``. The optimizer configuration can therefore focus
 on algorithm-specific parameters.
 
@@ -45,7 +45,7 @@ evolution of the learning rate during training. By default,
 ``anemoi-training`` uses a ``CosineLRScheduler`` from ``timm.scheduler``
 with optional warm-up steps and minimum learning rate.
 
-The scheduler is created by ``BaseGraphModule._create_scheduler`` and
+The scheduler is created by ``BaseTrainingModule._create_scheduler`` and
 returned to the trainer together with the optimizer in
 ``configure_optimizers``. Currently, the scheduler is hard-coded to
 ``CosineLRScheduler``, but in the future this will be made more flexible

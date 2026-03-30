@@ -9,14 +9,25 @@
 
 import types
 from typing import Any
+from typing import Never
 from unittest.mock import MagicMock
 
 import pytest
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.train.tasks.forecaster import GraphForecaster
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
+
+
+class DummyTrainingModule(BaseTrainingModule):
+    task_type = "forecaster"
+
+    def __init__(self) -> None:
+        pass
+
+    def _step(self, batch, validation_mode: bool = False) -> Never:  # noqa: ANN001
+        raise NotImplementedError
 
 
 @pytest.fixture
@@ -233,9 +244,9 @@ def test_on_epoch_wrong_validation(
 
 def test_on_load_checkpoint_restores_name_to_index() -> None:
     """Test that on_load_checkpoint correctly restores _ckpt_model_name_to_index."""
-    model = GraphForecaster.__new__(GraphForecaster)
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
     dataset_name = "test_dataset"
-    model.config = types.SimpleNamespace(
+    module.config = types.SimpleNamespace(
         training=types.SimpleNamespace(
             update_ds_stats_on_ckpt_load=types.SimpleNamespace(states=False, tendencies=False),
         ),
@@ -250,7 +261,7 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
         },
     }
     # Act
-    model.on_load_checkpoint(mock_checkpoint)
+    module.on_load_checkpoint(mock_checkpoint)
 
     # Assert
-    assert model._ckpt_model_name_to_index == {dataset_name: mock_name_to_index}
+    assert module._ckpt_model_name_to_index == {dataset_name: mock_name_to_index}
