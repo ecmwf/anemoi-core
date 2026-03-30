@@ -29,7 +29,7 @@ the following classes:
 Remapper
 **********
 
-The remapper module is used to do online transformations of the data using a set of predefined transforms and their inverses. This process is crucial for variables with pathological distributions, such as variables with a sharp peaks, long tails or other non-Gaussian shapes. It is especially important for diffusion models where the data distribution interacts with the noise distribution.
+The remapper module is used to do in-place transformations of the data using a set of predefined transforms and their inverses. This process is crucial for variables with pathological distributions, such as variables with sharp peaks, long tails or other non-Gaussian shapes. It is especially important for diffusion models where the data distribution interacts with the noise distribution.
 
 .. note::
    The remapper module enables only single-variable transformations.
