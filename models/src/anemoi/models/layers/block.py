@@ -232,11 +232,15 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         shapes: list,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
     ) -> tuple[Tensor, Tensor]:
-        x_src = self.layer_norm_attention_src(x[0])
-        x_dst = self.layer_norm_attention_dst(x[1])
+        cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
+        cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}
+
+        x_src = self.layer_norm_attention_src(x[0], **cond_src_kwargs)
+        x_dst = self.layer_norm_attention_dst(x[1], **cond_dst_kwargs)
         x_dst = x_dst + self.attention((x_src, x_dst), shapes, batch_size, model_comm_group=model_comm_group)
-        x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst))
+        x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst, **cond_dst_kwargs))
         return (x_src, x_dst), None  # logic expects return of edge_attr
 
 
@@ -842,7 +846,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         nodes_new_dst = self.run_node_dst_mlp(out, **cond_dst_kwargs) + out
 
         if self.update_src_nodes:
-            nodes_new_src = self.run_node_src_mlp(x_skip[0], **cond_dst_kwargs) + x_skip[0]
+            nodes_new_src = self.run_node_src_mlp(x_skip[0], **cond_src_kwargs) + x_skip[0]
         else:
             nodes_new_src = x_skip[0]
 
