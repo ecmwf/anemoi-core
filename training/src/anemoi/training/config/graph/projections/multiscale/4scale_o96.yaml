@@ -1,0 +1,26 @@
+---
+defaults:
+  - _self_
+
+# 4-scale multiscale smoothing for o96 (~100 km) using KNN=16/32/64/128.
+smoothers:
+  smooth_1x:
+    edge_weight_attribute: gauss_weight
+    gaussian_norm: l1
+    num_nearest_neighbours: 16
+    sigma: 0.01570
+  smooth_2x:
+    edge_weight_attribute: gauss_weight
+    gaussian_norm: l1
+    num_nearest_neighbours: 32
+    sigma: 0.03140
+  smooth_4x:
+    edge_weight_attribute: gauss_weight
+    gaussian_norm: l1
+    num_nearest_neighbours: 64
+    sigma: 0.06280
+  smooth_8x:
+    edge_weight_attribute: gauss_weight
+    gaussian_norm: l1
+    num_nearest_neighbours: 128
+    sigma: 0.12560

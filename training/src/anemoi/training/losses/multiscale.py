@@ -14,18 +14,23 @@ from pathlib import Path
 import einops
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.utils.projection_helpers import (
+    multiscale_loss_matrices_graph as derive_multiscale_loss_matrices_graph,
+)
 from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
 class MultiscaleLossWrapper(BaseLoss):
+    """Apply the same base loss across progressively smoothed target fields."""
 
     name: str = "MultiscaleLossWrapper"
 
@@ -36,6 +41,11 @@ class MultiscaleLossWrapper(BaseLoss):
         keep_batch_sharded: bool,
         loss_matrices_path: Path | str | None = None,
         loss_matrices: list[Path | str] | None = None,
+        loss_matrices_graph: bool | list[dict | None] | None = None,
+        graph_data: HeteroData | None = None,
+        multiscale_projection_config: object | None = None,
+        dataset_name: str | None = None,
+        dataset_names: list[str] | None = None,
         autocast: bool = False,
     ) -> None:
         """Wrapper for multi-scale loss computation.
@@ -56,12 +66,31 @@ class MultiscaleLossWrapper(BaseLoss):
             Path to the directory containing smoothing matrices
         loss_matrices : list[Path | str] | None
             Filenames of the smoothing matrices (must preserve grid size)
+        loss_matrices_graph : bool | list[dict | None] | None
+            If True, derive graph-based smoothing matrix definitions from the multiscale projection config.
+            If a list is provided, use those explicit graph-based smoothing matrix definitions.
+        graph_data : HeteroData | None
+            Graph data used to build graph-based smoothing matrices
+        multiscale_projection_config : object | None
+            Multiscale projection configuration used when deriving graph-based smoothing matrices.
+        dataset_name : str | None
+            Dataset name used to resolve graph-based smoothing matrices in fused graphs.
+        dataset_names : list[str] | None
+            Dataset names available in the fused graph.
         autocast : bool
             Whether to use automatic mixed precision for the projections
         """
         super().__init__()
 
-        self.smoothing_matrices = self._load_smoothing_matrices(loss_matrices_path, loss_matrices)
+        self.smoothing_matrices = self._load_smoothing_matrices(
+            loss_matrices_path,
+            loss_matrices,
+            loss_matrices_graph,
+            graph_data,
+            multiscale_projection_config,
+            dataset_name,
+            dataset_names,
+        )
         self.num_scales = len(self.smoothing_matrices)
         assert (
             len(weights) == self.num_scales
@@ -100,32 +129,127 @@ class MultiscaleLossWrapper(BaseLoss):
 
     def _load_smoothing_matrices(
         self,
-        loss_matrices_path: Path | str,
+        loss_matrices_path: Path | str | None,
         loss_matrices: list[Path | str] | None,
+        loss_matrices_graph: bool | list[dict | None] | None,
+        graph_data: HeteroData | None,
+        multiscale_projection_config: object | None,
+        dataset_name: str | None,
+        dataset_names: list[str] | None,
     ) -> list[ProjectionGraphProvider | None]:
         """Load smoothing matrices for multi-scale loss computation.
 
         These matrices apply spatial smoothing while preserving grid size.
         """
-        smoothing_matrices = []
+        resolved_loss_matrices_graph = self._resolve_graph_smoothing_matrices(
+            loss_matrices=loss_matrices,
+            loss_matrices_graph=loss_matrices_graph,
+            graph_data=graph_data,
+            multiscale_projection_config=multiscale_projection_config,
+            dataset_name=dataset_name,
+            dataset_names=dataset_names,
+        )
+
+        if resolved_loss_matrices_graph is not None:
+            return self._load_graph_smoothing_matrices(resolved_loss_matrices_graph, graph_data)
 
         # Handle None, empty list, or falsy values - default to single scale with no smoothing
+        return self._load_file_smoothing_matrices(loss_matrices_path, loss_matrices)
+
+    def _resolve_graph_smoothing_matrices(
+        self,
+        *,
+        loss_matrices: list[Path | str] | None,
+        loss_matrices_graph: bool | list[dict | None] | None,
+        graph_data: HeteroData | None,
+        multiscale_projection_config: object | None,
+        dataset_name: str | None,
+        dataset_names: list[str] | None,
+    ) -> list[dict | None] | None:
+        """Choose the graph-based smoothing matrices from the config."""
+        if isinstance(loss_matrices_graph, list):
+            assert not loss_matrices, "Specify either loss_matrices or loss_matrices_graph, not both."
+            return loss_matrices_graph
+
+        if loss_matrices_graph is True:
+            assert not loss_matrices, "Specify either loss_matrices or loss_matrices_graph=True, not both."
+            assert graph_data is not None, "graph_data must be provided when using loss_matrices_graph=True."
+            assert dataset_name is not None, "dataset_name is required when using loss_matrices_graph=True."
+            assert dataset_names is not None, "dataset_names are required when using loss_matrices_graph=True."
+
+            derived_loss_matrices = derive_multiscale_loss_matrices_graph(
+                multiscale_projection_config,
+                dataset_name=dataset_name,
+                graph_or_config=graph_data,
+                dataset_names=dataset_names,
+            )
+            assert (
+                derived_loss_matrices is not None
+            ), "loss_matrices_graph=True requires graph.projections.multiscale to be configured."
+            return derived_loss_matrices
+
+        if loss_matrices_graph is False:
+            assert loss_matrices is not None, "Specify either loss_matrices_graph=True or provide loss_matrices."
+            return None
+
+        return loss_matrices_graph
+
+    def _load_graph_smoothing_matrices(
+        self,
+        loss_matrices_graph: list[dict | None],
+        graph_data: HeteroData | None,
+    ) -> list[ProjectionGraphProvider | None]:
+        """Create graph-backed projection providers from explicit edge references."""
+        assert graph_data is not None, "graph_data must be provided when using loss_matrices_graph."
+
+        smoothing_matrices: list[ProjectionGraphProvider | None] = []
+        for entry in loss_matrices_graph:
+            if entry is None or entry is False or entry == "None":
+                smoothing_matrices.append(None)
+                LOGGER.info("Loss smoothing (graph): %s", None)
+                continue
+
+            edges_name = entry.get("edges_name")
+            assert edges_name is not None, "Each loss_matrices_graph entry must include 'edges_name'."
+            edges_name = tuple(edges_name)
+
+            provider = ProjectionGraphProvider(
+                graph=graph_data,
+                edges_name=edges_name,
+                edge_weight_attribute=entry.get("edge_weight_attribute"),
+                src_node_weight_attribute=entry.get("src_node_weight_attribute"),
+                row_normalize=entry.get("row_normalize", False),
+            )
+            smoothing_matrices.append(provider)
+            LOGGER.info("Loss smoothing (graph): %s", provider.get_edges().shape)
+
+        return smoothing_matrices
+
+    def _load_file_smoothing_matrices(
+        self,
+        loss_matrices_path: Path | str | None,
+        loss_matrices: list[Path | str] | None,
+    ) -> list[ProjectionGraphProvider | None]:
+        """Create file-backed projection providers from serialized sparse matrices."""
         if not loss_matrices:
             LOGGER.info("No smoothing files specified, using single scale without smoothing")
             return [None]
 
+        smoothing_matrices: list[ProjectionGraphProvider | None] = []
         for filename in loss_matrices:
             # Skip None, False, or the string "None"
             if filename is None or filename is False or filename == "None":
                 smoothing_matrices.append(None)
                 LOGGER.info("Loss smoothing: %s", None)
-            else:
-                provider = ProjectionGraphProvider(
-                    file_path=Path(loss_matrices_path, filename),
-                    row_normalize=False,
-                )
-                smoothing_matrices.append(provider)
-                LOGGER.info("Loss smoothing: %s", provider.get_edges().shape)
+                continue
+
+            file_path = Path(filename) if loss_matrices_path is None else Path(loss_matrices_path, filename)
+            provider = ProjectionGraphProvider(
+                file_path=file_path,
+                row_normalize=False,
+            )
+            smoothing_matrices.append(provider)
+            LOGGER.info("Loss smoothing: %s", provider.get_edges().shape)
 
         return smoothing_matrices
 
@@ -158,7 +282,11 @@ class MultiscaleLossWrapper(BaseLoss):
             shard_shapes_y: list | None
                 Target shard shapes for later gathering
         """
-        batch_size, out_times, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1], y_pred_ens.shape[2]
+        batch_size, out_times, ensemble_size = (
+            y_pred_ens.shape[0],
+            y_pred_ens.shape[1],
+            y_pred_ens.shape[2],
+        )
         y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) g (c t)")
         shard_shapes = apply_shard_shapes(y_pred_ens_interp, grid_dim, grid_shard_shapes)
         y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, group)
