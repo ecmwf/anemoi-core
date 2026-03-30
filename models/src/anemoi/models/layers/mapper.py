@@ -1198,6 +1198,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
     ) -> PairTensor:
 
         x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
@@ -1213,6 +1214,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             (shapes_src, shapes_dst),
             batch_size,
             model_comm_group,
+            cond=cond,
         )
 
         x_dst = self.post_process(
