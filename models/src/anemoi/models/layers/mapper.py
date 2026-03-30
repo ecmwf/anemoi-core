@@ -205,6 +205,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.num_chunks = num_chunks
@@ -505,6 +506,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
@@ -528,6 +530,8 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int, optional
+            Must remain ``None`` for forward graph-transformer mappers.
         num_chunks : int
             Number of chunks to split into
         num_heads: int
@@ -554,6 +558,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         edge_pre_mlp: bool, by default False
             Allow for edge feature mixing
         """
+        assert out_channels_dst is None, "GraphTransformerForwardMapper does not support out_channels_dst."
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
@@ -570,6 +575,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
         )
 
         self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
@@ -701,6 +707,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
         )
 
         self.node_data_extractor = nn.Sequential(
@@ -781,6 +788,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.emb_edges = MLP(
@@ -920,6 +928,7 @@ class GNNForwardMapper(GNNBaseMapper):
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.proc = GraphConvMapperBlock(
@@ -1017,6 +1026,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.proc = GraphConvMapperBlock(
@@ -1109,6 +1119,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        **kwargs,
     ) -> None:
         """Initialize TransformerBaseMapper.
 
@@ -1156,6 +1167,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             num_chunks=num_chunks,
             layer_kernels=layer_kernels,
             cpu_offload=cpu_offload,
+            **kwargs,
         )
 
         self.proc = TransformerMapperBlock(
@@ -1318,6 +1330,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            **kwargs,
         )
 
         self.emb_nodes_src = nn.Linear(self.in_channels_src, self.hidden_dim)
@@ -1449,6 +1462,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            **kwargs,
         )
 
         self.node_data_extractor = nn.Sequential(
