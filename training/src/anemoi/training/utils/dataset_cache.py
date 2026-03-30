@@ -1,24 +1,19 @@
 import os
+import io
 import errno
 import shutil
 import torch
 import torch.distributed as dist
 from pathlib import Path
-import http.server
-import socketserver
-from functools import partial
+import urllib.request
 from multiprocessing import Value
 
 from anemoi.datasets import open_dataset
 
-import zarr
-from zarr.convenience import PathNotFoundError
-from pathlib import Path
-import threading
-
 import numpy as np
 import socket
-import subprocess
+import threading
+import http.server
 
 
 import pytorch_lightning as pl
@@ -165,7 +160,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Use self.ds_train which uses our cached property
         self.dataset_names = list(self.ds_train.datasets.keys())
         self.primary_dataset_name = self.dataset_names[0]
-        LOGGER.info(f"DatasetCache: Found datasets {self.dataset_names}, using '{self.primary_dataset_name}' for zarr metadata")
+        LOGGER.info(f"DatasetCache: Found datasets {self.dataset_names}, using '{self.primary_dataset_name}' for caching")
         
         #creates space under self.cache_dir
         self.filesystem= f"{self.dataset_path}" #TODO read from zarr metadata
@@ -177,16 +172,13 @@ class DatasetCache(AnemoiDatasetsDataModule):
        
         self.root_port = 8000
         self.port = self.root_port + self.rank 
-        self._start_server(self.cache_root, self.port) #need to use cache root so that other local caches can be found
+        self._start_server()
         
         # Inject cache wrapper into the underlying datasets
         self._inject_cache_wrapper()
         
         LOGGER.info(f"{self.rank=}: Initalised a cache under {self.cache_path}")
         self.is_initalised=True
-
-        # Open remote zarrs once, store the open handles here
-        self.remote_zarrs=[None] * self.world_size
     
     def _inject_cache_wrapper(self):
         """Replace the underlying dataset's data accessor with cached version."""
@@ -225,15 +217,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
             shutil.rmtree(self.cache_path)
         self.cache_path.mkdir(exist_ok=True)
         
-        #copy zarr metadata from filesystem
-        # This is needed so we can load chunks from the cache like we would from the remote zarr
-        # BUT we will have a lot of gaps in the local copy, so we will have a seperate list self.cache_registry of which elements are present or not
-        #TODO replace with zarr.empty_like()
-        shutil.copy2(f"{self.filesystem}/data/.zarray", self.cache_path)
-        #shutil.copy2(f"{self.filesystem}/data/.zattrs", self.cache_path) #some datasets dont have, not sure if its needed tbh
-        shutil.copy2(f"{self.filesystem}/.zgroup", self.cache_path)
-        
-        self.cache = zarr.open(self.cache_path, mode="w")
         self.cache_full=False # prevents subsequent writing when cache is full
        
         dates = len(self) + 2 # build in some buffer to avoid out of bounds errors, will be cleaned up in the future with a more robust solution than using integers for cache registry
@@ -249,28 +232,44 @@ class DatasetCache(AnemoiDatasetsDataModule):
         self.remote_cache_roots=self._get_all_cache_roots()
         
     
-    def _start_server(self, directory, port):
-        #directory = Path("/").resolve()
-        directory = Path(self.cache_root).resolve()
-        handler=http.server.SimpleHTTPRequestHandler
-        
-        def no_logging(*args):
-            return
-        handler.log_message=no_logging #by default the http server LOGGER.infos a lot to stdout, this silences it
-        
-        handler = partial(handler, directory=str(directory))
-        
-        # Allow socket reuse to avoid "Address already in use" errors
-        socketserver.TCPServer.allow_reuse_address = True
-        httpd = socketserver.TCPServer(("", port), handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        
-        # Store server metadata for proper shutdown
-        self.httpd = httpd
-        self.server_thread = thread
-        
-        LOGGER.info(f"Serving {directory} on http://{self._get_hostname(self.rank)}:{port}")
+    def _start_server(self):
+        """Start a threaded HTTP server to serve the cache directory.
+
+        Uses http.server.ThreadingHTTPServer so concurrent requests from
+        multiple ranks are handled in parallel threads instead of
+        sequentially (the main bottleneck of the old single-threaded
+        TCPServer approach).  Combined with serving single .npy files
+        (one GET per date) this is comparable to nginx for this workload.
+        """
+        directory = str(Path(self.cache_root).resolve())
+
+        # Build a handler rooted at cache_root with logging suppressed
+        handler_cls = type(
+            "_QuietHandler",
+            (http.server.SimpleHTTPRequestHandler,),
+            {"log_message": lambda *_args, **_kw: None},
+        )
+        # Python 3.7+ – set the directory the handler serves
+        original_init = handler_cls.__init__
+
+        def _patched_init(self_h, *args, **kwargs):
+            kwargs["directory"] = directory
+            original_init(self_h, *args, **kwargs)
+
+        handler_cls.__init__ = _patched_init
+
+        self.httpd = http.server.ThreadingHTTPServer(("", self.port), handler_cls)
+        # Allow fast restart after crashes
+        self.httpd.allow_reuse_address = True
+        # TCP_NODELAY on the listening socket for lower latency
+        self.httpd.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+        self.server_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.server_thread.start()
+        LOGGER.info(
+            f"Rank {self.rank}: Threaded HTTP server serving {directory} "
+            f"on http://{self._get_hostname(self.rank)}:{self.port}"
+        )
         
     def _get_hostname(self, rank):
         return self.hostnames[rank]
@@ -298,15 +297,11 @@ class DatasetCache(AnemoiDatasetsDataModule):
         return roots
     
     def _shutdown_server(self):
-        """Shutdown the HTTP server and close the socket."""
+        """Stop the threaded HTTP server."""
         try:
             if hasattr(self, 'httpd') and self.httpd is not None:
                 LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
                 #self.httpd.shutdown()
-                #TODO doesnt kill server, use pkill instead
-                #if hasattr(self, 'server_thread') and self.server_thread is not None:
-                #    self.server_thread.join(timeout=5)
-                # Close the socket to free the port
                 #self.httpd.server_close()
                 LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
         except Exception as e:
@@ -354,14 +349,11 @@ class DatasetCache(AnemoiDatasetsDataModule):
         LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {(self.cache_registry != -1).sum().item()} cached items across all ranks ({self.cache_registry=})")
 
 
-    def _get_remote_cache_url(self, remote_rank):
+    def _get_remote_file_url(self, remote_rank, date):
+        """Build the URL for a single .npy file on a remote rank's HTTP server."""
         remote_host = self._get_hostname(remote_rank)
         port = self.root_port + remote_rank
-        #remote_cache_path = f"{self.remote_cache_roots[remote_rank]}/cache_rank_{remote_rank}" #just need relative path here, will be aded to the root dir of our http server (e.g. $TMPDIR)
-        remote_cache_path = f"cache_rank_{remote_rank}" #just need relative path here, will be aded to the root dir of our http server (e.g. $TMPDIR)
-        #import pdb
-        #breakpoint()
-        return f"http://{remote_host}:{port}/{remote_cache_path}"
+        return f"http://{remote_host}:{port}/cache_rank_{remote_rank}/{date}.npy"
         
     def check_cache(self, date) -> list[int]:
         """ checks either local or global registry. returns list of procs containing file in their SSD"""
@@ -371,7 +363,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Convert numpy values to Python int and filter out -1
         cache_hits = [int(x) for x in cache_subset if int(x) != -1]
         #LOGGER.info(f"{self.rank=} {self.cache_registry=} {cache_subset=} {cache_hits=}")
-        LOGGER.info(f"{self.rank=} {cache_subset=} {cache_hits=}")
+        #LOGGER.info(f"{self.rank=} {cache_subset=} {cache_hits=}")
         return cache_hits
 
     def fetch(self, date, verbose=False) -> np.ndarray:
@@ -392,25 +384,22 @@ class DatasetCache(AnemoiDatasetsDataModule):
         if isinstance(primary_data, CachedDataWrapper):
             primary_data = primary_data.original_data
 
-        local_data_allowed=False
+        local_data_allowed=True
         if not local_data_allowed and self.rank in cache_hits:
             cache_hits.remove(self.rank)
         
         if len(cache_hits) == 0:
-        #if cache_hits.numel() == 0:
             #Cache miss, go to filesystem
             
             self.cache_misses.value += 1
             data = primary_data[date]
             
             if not self.cache_full:
-                # add data to local cache
+                # add data to local cache as .npy file
                 try:
-                    self.cache[date] = data
+                    np.save(self.cache_path / f"{date}.npy", data)
                     self.cache_registry[date] = self.rank
-                    #LOGGER.info(f"{self.rank=} {self.cache_registry=}")
 
-                # TODO should not use try catch as program logic
                 except OSError as e:
                     if e.errno == errno.ENOSPC: # No space left on device
                         self.cache_full=True
@@ -422,33 +411,27 @@ class DatasetCache(AnemoiDatasetsDataModule):
                 LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
         elif self.rank in cache_hits:
-            #Cache hit on local SSD
+            #Cache hit on local SSD – read .npy straight from disk
             
             self.cache_hits_local.value += 1
-            data = self.cache[date]            
+            data = np.load(self.cache_path / f"{date}.npy")
             
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
                 
         else:
-            #cache hit on remote SSD
+            #cache hit on remote SSD – single HTTP GET via nginx
             
             self.cache_hits_remote.value += 1
-            #take the first cache hit
             remote_rank = cache_hits[0] # TODO could be smarter by picking local ranks 
-            #LOGGER.info(f"Rank {self.rank}: accessing date={date} on rank {remote_rank} at {remote_cache_url=}")
+            url = self._get_remote_file_url(remote_rank, date)
             
-            if self.remote_zarrs[remote_rank] is None:
-                # need to open remote zarr
-                remote_cache_url=self._get_remote_cache_url(remote_rank)
-                try:
-                    self.remote_zarrs[remote_rank] = zarr.open(remote_cache_url, mode='r')
-                    LOGGER.info(f"Rank {self.rank}: Opened zarr interface to remote cache of rank {remote_rank}.")
-                except (PathNotFoundError, KeyError) as e:
-                    LOGGER.info(f"Error opening remote date {date} from {remote_rank} to {self.rank}. full error: {e}. falling back to filesystem.")
-                    data = primary_data[date]
-
-            data = self.remote_zarrs[remote_rank][date]
+            try:
+                with urllib.request.urlopen(url) as resp:
+                    data = np.load(io.BytesIO(resp.read()))
+            except Exception as e:
+                LOGGER.warning(f"Rank {self.rank}: Failed to fetch date {date} from rank {remote_rank} ({url}): {e}. Falling back to filesystem.")
+                data = primary_data[date]
             
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (rank {remote_rank}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
