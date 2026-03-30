@@ -401,8 +401,11 @@ class DatasetCache(AnemoiDatasetsDataModule):
                     self.cache_registry[date] = self.rank
 
                 except OSError as e:
-                    if e.errno == errno.ENOSPC: # No space left on device
+                    if e.errno == errno.ENOSPC or "Not enough free space" in str(e):
                         self.cache_full=True
+                        # Clean up the partial .npy file so it doesn't get served
+                        partial = self.cache_path / f"{date}.npy"
+                        partial.unlink(missing_ok=True)
                         LOGGER.info(f"Rank {self.rank}: Cache full! No more writing")
                     else:
                         raise e
