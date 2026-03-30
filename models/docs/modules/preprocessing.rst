@@ -82,7 +82,7 @@ Example configuration:
    data:
       processors:
          normalizer:
-           _target_: anemoi.models.preprocessing.multi_dataset_normalizer.TopNormalizer
+           _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
            config:
              default: "mean-std"
              max: ["tp","tcc"]
