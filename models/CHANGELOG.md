@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.13.2](https://github.com/ecmwf/anemoi-core/compare/models-0.13.1...models-0.13.2) (2026-03-30)
+
+
+### Bug Fixes
+
+* Models_conditioning ([#1002](https://github.com/ecmwf/anemoi-core/issues/1002)) ([700e1b9](https://github.com/ecmwf/anemoi-core/commit/700e1b9af9f5ef3781c9cb6da54dbbb593f6524c))
+
 ## [0.13.1](https://github.com/ecmwf/anemoi-core/compare/models-0.13.0...models-0.13.1) (2026-03-26)
 
 
