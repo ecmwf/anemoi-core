@@ -184,6 +184,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         LOGGER.info(f"{self.rank=}: Initalised a cache under {self.cache_path}")
         self.is_initalised=True
+
+        # Open remote zarrs once, store the open handles here
+        self.remote_zarrs=[None] * self.world_size
     
     def _inject_cache_wrapper(self):
         """Replace the underlying dataset's data accessor with cached version."""
@@ -433,15 +436,19 @@ class DatasetCache(AnemoiDatasetsDataModule):
             self.cache_hits_remote.value += 1
             #take the first cache hit
             remote_rank = cache_hits[0] # TODO could be smarter by picking local ranks 
-            remote_cache_url=self._get_remote_cache_url(remote_rank)
             #LOGGER.info(f"Rank {self.rank}: accessing date={date} on rank {remote_rank} at {remote_cache_url=}")
             
-            try:
-                data = zarr.open(remote_cache_url, mode="r")[date]
-                #TODO figure out why i get cache misses
-            except (PathNotFoundError, KeyError) as e:
-                LOGGER.info(f"Error loading remote date {date} from {remote_rank} to {self.rank}. full error: {e}. falling back to filesystem.")
-                data = primary_data[date]
+            if self.remote_zarrs[remote_rank] is None:
+                # need to open remote zarr
+                remote_cache_url=self._get_remote_cache_url(remote_rank)
+                try:
+                    self.remote_zarrs[remote_rank] = zarr.open(remote_cache_url, mode='r')
+                    LOGGER.info(f"Rank {self.rank}: Opened zarr interface to remote cache of rank {remote_rank}.")
+                except (PathNotFoundError, KeyError) as e:
+                    LOGGER.info(f"Error opening remote date {date} from {remote_rank} to {self.rank}. full error: {e}. falling back to filesystem.")
+                    data = primary_data[date]
+
+            data = self.remote_zarrs[remote_rank][date]
             
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (rank {remote_rank}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
