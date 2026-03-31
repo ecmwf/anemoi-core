@@ -81,17 +81,7 @@ class NoiseScheduler(ABC):
             **kwargs,
         )
         self._validate_schedule(sigmas)
-
-        if sigmas.numel() == self.num_steps + 1:
-            return sigmas
-
-        if sigmas.numel() != self.num_steps:
-            raise ValueError(
-                f"Sigma schedule must contain {self.num_steps} values before the final zero, "
-                f"or {self.num_steps + 1} including it; got {sigmas.numel()}.",
-            )
-
-        return torch.cat((sigmas, sigmas.new_zeros(1)))
+        return self._finalize_schedule(sigmas)
 
     @abstractmethod
     def _build_schedule(
@@ -125,6 +115,21 @@ class NoiseScheduler(ABC):
             last = sigmas[-1].item()
             if last < 0 or last > DEFAULT_FINAL_SIGMA_EPS:
                 raise ValueError("Sigma schedule with an explicit final value must end at zero.")
+
+    def _finalize_schedule(self, sigmas: torch.Tensor) -> torch.Tensor:
+        if sigmas.numel() == self.num_steps + 1:
+            if sigmas[-1].item() != 0.0:
+                sigmas = sigmas.clone()
+                sigmas[-1] = 0.0
+            return sigmas
+
+        if sigmas.numel() != self.num_steps:
+            raise ValueError(
+                f"Sigma schedule must contain {self.num_steps} values before the final zero, "
+                f"or {self.num_steps + 1} including it; got {sigmas.numel()}.",
+            )
+
+        return torch.cat((sigmas, sigmas.new_zeros(1)))
 
 
 class KarrasScheduler(NoiseScheduler):

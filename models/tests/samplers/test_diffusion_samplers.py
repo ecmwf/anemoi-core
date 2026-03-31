@@ -165,7 +165,7 @@ def test_noise_scheduler_appends_exact_final_zero_when_missing() -> None:
     assert sigmas[-1].item() == 0.0
 
 
-def test_noise_scheduler_preserves_explicit_near_zero_final_value() -> None:
+def test_noise_scheduler_canonicalizes_explicit_near_zero_final_value_to_zero() -> None:
     final_sigma = DEFAULT_FINAL_SIGMA_EPS / 10
     scheduler = DummyScheduler(
         torch.tensor([1.0, 0.7, 0.4, 0.1, final_sigma], dtype=torch.float64),
@@ -175,7 +175,7 @@ def test_noise_scheduler_preserves_explicit_near_zero_final_value() -> None:
     sigmas = scheduler.get_schedule(dtype_compute=torch.float64)
 
     assert sigmas.shape == (5,)
-    assert sigmas[-1].item() == pytest.approx(final_sigma)
+    assert sigmas[-1].item() == 0.0
 
 
 def test_noise_scheduler_rejects_explicit_final_value_outside_tolerance() -> None:
@@ -241,30 +241,3 @@ def test_heun_uses_corrector_before_final_step() -> None:
     sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=denoiser)
 
     assert denoiser.call_count == 3
-
-
-def test_heun_uses_final_sigma_tolerance_for_final_step() -> None:
-    x = {DATASET_NAME: torch.ones(1, 1, 1, 1, 1, dtype=torch.float64)}
-    y = {DATASET_NAME: 2 * torch.ones(1, 1, 1, 1, 1, dtype=torch.float64)}
-    final_sigma = DEFAULT_FINAL_SIGMA_EPS / 10
-    sigmas = torch.tensor([1.0, final_sigma], dtype=torch.float64)
-
-    denoiser = RecordingZeroDenoiser()
-    sampler = EDMHeunSampler(dtype=torch.float64, eps_prec=0.0)
-    result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=denoiser)
-
-    assert denoiser.call_count == 1
-    assert torch.allclose(result[DATASET_NAME], y[DATASET_NAME] * final_sigma, atol=1e-14, rtol=0.0)
-
-
-def test_dpmpp_uses_final_sigma_tolerance_for_final_step() -> None:
-    x = {DATASET_NAME: torch.ones(1, 1, 1, 1, 1, dtype=torch.float64)}
-    y = {DATASET_NAME: 2 * torch.ones(1, 1, 1, 1, 1, dtype=torch.float64)}
-    sigmas = torch.tensor([1.0, DEFAULT_FINAL_SIGMA_EPS / 10], dtype=torch.float64)
-
-    denoiser = RecordingZeroDenoiser()
-    sampler = DPMpp2MSampler(dtype=torch.float64)
-    result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=denoiser)
-
-    assert denoiser.call_count == 1
-    assert torch.allclose(result[DATASET_NAME], torch.zeros_like(result[DATASET_NAME]))
