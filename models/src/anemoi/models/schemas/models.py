@@ -85,6 +85,11 @@ class DiffusionModel(Model):
     "Diffusion configuration for diffusion models"
 
 
+class DisentangledModel(Model):
+    latent_rollout: bool = Field(default=False)
+    "Enable latent-space rollout instead of re-encoding at every rollout step."
+
+
 class TrainableParameters(PydanticBaseModel):
     data: NonNegativeInt = Field(example=8)
     "Size of the learnable data node tensor. Default to 8."
@@ -344,8 +349,8 @@ class HierarchicalModelSchema(BaseModelSchema):
 
 
 class DisentangledModelSchema(BaseModelSchema):
-    latent_rollout: bool = Field(default=False)
-    "Toggle to do enable latent rollout."
+    model: DisentangledModel = Field(default_factory=DisentangledModel)
+    "Disentangled model schema with latent rollout support."
 
 
 ModelSchema = Union[

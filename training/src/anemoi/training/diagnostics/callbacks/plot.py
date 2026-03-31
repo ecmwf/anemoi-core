@@ -67,6 +67,7 @@ class BasePlotCallback(Callback, ABC):
         super().__init__()
         self.config = config
         self.focus_area = None
+        self._focus_latlons = None
         self.save_basedir = config.system.output.plots
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
@@ -90,24 +91,24 @@ class BasePlotCallback(Callback, ABC):
 
     def get_focus_mask(self, pl_module: pl.LightningModule) -> np.ndarray | None:
         """Get the focus mask based on the focus area configuration."""
-        if self.latlons is None:
-            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
+        if self._focus_latlons is None:
+            self._focus_latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
+            self._focus_latlons = np.rad2deg(self._focus_latlons.cpu().numpy())
 
         # Compute focus mask
-        focus_mask = np.ones(self.latlons.shape[0], dtype=bool)
+        focus_mask = np.ones(self._focus_latlons.shape[0], dtype=bool)
         self.tag = None
 
         if self.focus_area is not None:
             if self.focus_area["spatial_mask"] is not None:
-                focus_mask = np.zeros(self.latlons.shape[0], dtype=bool)
+                focus_mask = np.zeros(self._focus_latlons.shape[0], dtype=bool)
                 spatial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spatial_mask"]]
                 focus_mask[spatial_mask_idxs.squeeze()] = True
                 self.tag = "_spatial_mask"
 
             elif self.focus_area["latlon_bounds"] is not None:
                 (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
-                lat, lon = self.latlons[:, 0], self.latlons[:, 1]
+                lat, lon = self._focus_latlons[:, 0], self._focus_latlons[:, 1]
                 focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
                 self.tag = "_latlon_bounds"
 
