@@ -95,7 +95,7 @@ model:
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
-    output: /project/home/p200177/DE_371/avritj/experiments_anemoi/training/uncond_diffusion_mean_sigmax1000/
+    output: /project/home/p200177/DE_371/avritj/experiments_anemoi/training/Training_complet/
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
     graph: /project/home/p200177/DE_371/avritj/multi_scale_res9.pt
