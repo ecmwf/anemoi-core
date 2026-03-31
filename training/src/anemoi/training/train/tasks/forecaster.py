@@ -102,8 +102,6 @@ class LatentGraphForecaster(GraphForecaster):
     ``AnemoiModelDisentangledEncProcDec``) to accumulate encoded states and
     advance the latent buffer instead of re-encoding at every step.
 
-    Only single-dataset configurations are supported (the underlying disentangled
-    model encodes one domain).
     """
 
     task_type = "latent_forecaster"
