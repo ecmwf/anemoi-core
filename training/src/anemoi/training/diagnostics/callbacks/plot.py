@@ -61,13 +61,10 @@ class BasePlotCallback(Callback, ABC):
         ----------
         config : OmegaConf
             Config object
-        dataset_names : list[str] | None, optional
-            Names of datasets, by default None
+
         """
         super().__init__()
         self.config = config
-        self.focus_area = None
-        self._focus_latlons = None
         self.save_basedir = config.system.output.plots
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
@@ -88,35 +85,6 @@ class BasePlotCallback(Callback, ABC):
             self._executor = ThreadPoolExecutor(max_workers=1)
             self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
             self.loop_thread.start()
-
-    def get_focus_mask(self, pl_module: pl.LightningModule) -> np.ndarray | None:
-        """Get the focus mask based on the focus area configuration."""
-        if self._focus_latlons is None:
-            self._focus_latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
-            self._focus_latlons = np.rad2deg(self._focus_latlons.cpu().numpy())
-
-        # Compute focus mask
-        focus_mask = np.ones(self._focus_latlons.shape[0], dtype=bool)
-        self.tag = None
-
-        if self.focus_area is not None:
-            if self.focus_area["spatial_mask"] is not None:
-                focus_mask = np.zeros(self._focus_latlons.shape[0], dtype=bool)
-                spatial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spatial_mask"]]
-                focus_mask[spatial_mask_idxs.squeeze()] = True
-                self.tag = "_spatial_mask"
-
-            elif self.focus_area["latlon_bounds"] is not None:
-                (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
-                lat, lon = self._focus_latlons[:, 0], self._focus_latlons[:, 1]
-                focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
-                self.tag = "_latlon_bounds"
-
-            else:
-                msg = "focus_area must contain either 'spatial_mask' or 'latlon_bounds'."
-                raise ValueError(msg)
-
-        return focus_mask
 
     def start_event_loop(self) -> None:
         """Start the event loop in a separate thread."""
@@ -878,10 +846,6 @@ class PlotSample(BasePlotAdditionalMetrics):
             Number of plots per sample, by default 6
         every_n_batches : int, optional
             Batch frequency to plot at, by default None
-        focus_area : dict | None, optional
-            Area or point indices to focus the plot on. Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
         """
         del kwargs
         super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
@@ -893,7 +857,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.output_steps = output_steps
         self.per_sample = per_sample
         self.colormaps = colormaps
-        self.focus_area = focus_area
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
@@ -1012,17 +975,12 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             Max number of output steps to plot per rollout in forecast mode
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
-        focus_area : dict | None, optional
-            Area or point indices to focus the plot on. Can be:
-            - {"spatial_mask": str}
-            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
         """
         super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.output_steps = output_steps
         self.min_delta = min_delta
-        self.focus_area = focus_area
 
     @rank_zero_only
     def _plot(
@@ -1051,7 +1009,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
-
 
             # Build dictionary of indices and parameters to be plotted
             diagnostics = (

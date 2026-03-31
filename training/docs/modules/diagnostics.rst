@@ -75,7 +75,6 @@ These adapters rely on the shared task ``_step`` return format
 ``(loss, metrics, predictions)`` where ``predictions`` is always a list
 of dataset-keyed dictionaries.
 
-
 **Focus Area**
 
 Plotting callbacks (such as ``PlotSample`` and ``PlotLoss``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
