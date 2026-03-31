@@ -6,7 +6,7 @@ import shutil
 import torch
 import torch.distributed as dist
 from pathlib import Path
-import urllib.request
+import urllib3
 from multiprocessing import Value
 
 from anemoi.datasets import open_dataset
@@ -201,6 +201,10 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         LOGGER.info(f"{self.rank=}: Initalised a shared cache under {self.cache_path}")
         self.is_initalised=True
+
+        # Per-node persistent HTTP connection pools for remote cache fetches.
+        # Keyed by node_id; created lazily on first remote hit.
+        self._http_pools: dict[int, urllib3.HTTPConnectionPool] = {}
     
     def _inject_cache_wrapper(self):
         """Replace the underlying dataset's data accessor with cached version."""
@@ -378,6 +382,22 @@ class DatasetCache(AnemoiDatasetsDataModule):
         LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {num_cached} cached items across all nodes")
 
 
+    def _get_http_pool(self, remote_node_id) -> urllib3.HTTPConnectionPool:
+        """Return (or lazily create) a persistent connection pool to a remote node."""
+        if remote_node_id not in self._http_pools:
+            remote_global_rank = self._node_leader_rank[remote_node_id]
+            remote_host = self._get_hostname(remote_global_rank)
+            port = self.root_port + remote_node_id
+            self._http_pools[remote_node_id] = urllib3.HTTPConnectionPool(
+                host=remote_host,
+                port=port,
+                maxsize=4,       # allow a few concurrent connections
+                block=False,
+                retries=1,
+            )
+            LOGGER.info(f"Rank {self.rank}: Opened persistent HTTP pool to node {remote_node_id} ({remote_host}:{port})")
+        return self._http_pools[remote_node_id]
+
     def _get_remote_file_url(self, remote_node_id, date):
         """Build the URL for a single .npy file on a remote node's HTTP server."""
         # Pick any rank on that node to get the hostname
@@ -467,10 +487,14 @@ class DatasetCache(AnemoiDatasetsDataModule):
             url = self._get_remote_file_url(remote_node_id, date)
             
             try:
-                with urllib.request.urlopen(url) as resp:
-                    data = np.load(io.BytesIO(resp.read()))
+                pool = self._get_http_pool(remote_node_id)
+                resp = pool.request("GET", f"/cache/{date}.npy", preload_content=True)
+                if resp.status == 200:
+                    data = np.load(io.BytesIO(resp.data))
+                else:
+                    raise urllib3.exceptions.HTTPError(f"HTTP {resp.status}")
             except Exception as e:
-                LOGGER.warning(f"Rank {self.rank}: Failed to fetch date {date} from node {remote_node_id} ({url}): {e}. Falling back to filesystem.")
+                LOGGER.warning(f"Rank {self.rank}: Failed to fetch date {date} from node {remote_node_id}: {e}. Falling back to filesystem.")
                 data = primary_data[date]
             
             if verbose or (self.total_fetches.value % 10 == 0):
