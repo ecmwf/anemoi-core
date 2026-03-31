@@ -222,9 +222,9 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             x_ds = x[dataset_name]
             in_out_sharded = grid_shard_shapes is not None and dataset_name in grid_shard_shapes
 
-            dec_edge_attr, dec_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+            dec_edge_attr, dec_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[dataset_name].get_edges(
+                batch_size=batch_size, model_comm_group=model_comm_group
+            )
 
             x_target_latent, shard_shapes_target = self._assemble_forcings(
                 x_ds, batch_size, grid_shard_shapes, model_comm_group, dataset_name=dataset_name

@@ -70,6 +70,39 @@ the depth of the hierarchy, enabling efficient handling of data.
    :no-undoc-members:
    :show-inheritance:
 
+*****************************************************
+ Disentangled Encoder-Processor-Decoder Model
+*****************************************************
+
+A multi-dataset architecture where each dataset is encoded independently,
+per timestep, and all resulting latent representations are blended before
+processing.
+
+Key features:
+
+#. Each dataset uses its own encoder; timesteps are encoded one at a time
+   (no stacking in the input dimension)
+
+#. All encoded latents — across datasets and timesteps — are accumulated
+   and concatenated, then fed to a learned ``latent_blender`` mapper that
+   projects them onto the hidden graph
+
+#. On ``rollout_step > 0`` (latent rollout), the latent buffer is shifted
+   and the previous processor output fills the last slot, avoiding
+   re-encoding from data space on every autoregressive step
+
+#. Decoding is performed independently per dataset
+
+This model is used together with the
+:class:`~anemoi.training.train.tasks.forecaster.LatentGraphForecaster`
+task, which passes the ``rollout_step`` index to the model at each
+autoregressive step.
+
+.. autoclass:: anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDec
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
 *************************
  Time Interpolator Model
 *************************

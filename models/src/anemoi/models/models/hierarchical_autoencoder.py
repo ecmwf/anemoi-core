@@ -145,7 +145,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     trainable_size=model_config.model.processor.get("trainable_size", 0),
                 )
 
-
                 self.up_level_processor[nodes_names] = instantiate(
                     model_config.model.processor,
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
