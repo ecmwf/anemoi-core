@@ -376,7 +376,7 @@ class EDMHeunSampler(DiffusionSampler):
                     y_solver[dataset_name] + (sigma_next - sigma_effective) * update_direction[dataset_name]
                 )
 
-            if sigma_next > DEFAULT_FINAL_SIGMA_EPS:
+            if sigma_next != 0:
                 y_next_model = {
                     # Second denoiser call also runs in model/input dtype (Heun corrector stage).
                     dataset_name: y_next_data.to(x[dataset_name].dtype)
@@ -451,13 +451,13 @@ class DPMpp2MSampler(DiffusionSampler):
             denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
             denoised_solver = {dataset_name: den.to(dtype) for dataset_name, den in denoised.items()}
 
-            if sigma_next <= DEFAULT_FINAL_SIGMA_EPS:
+            if sigma_next == 0:
                 y = {dataset_name: den.to(x[dataset_name].dtype) for dataset_name, den in denoised_solver.items()}
                 break
 
             y_solver = {dataset_name: y_data.to(dtype) for dataset_name, y_data in y.items()}
             t = -torch.log(sigma + 1e-10)
-            t_next = -torch.log(sigma_next + 1e-10) if sigma_next > DEFAULT_FINAL_SIGMA_EPS else float("inf")
+            t_next = -torch.log(sigma_next + 1e-10) if sigma_next != 0 else float("inf")
             h = t_next - t
 
             if old_denoised is None:
