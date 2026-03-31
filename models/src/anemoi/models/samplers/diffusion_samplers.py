@@ -270,7 +270,8 @@ class DiffusionSampler(ABC):
         y : dict[str, torch.Tensor]
             Initial noise tensor with shape (batch, time, ensemble, grid, vars)
         sigmas : torch.Tensor
-            Noise schedule with shape (num_steps + 1,)
+            Noise schedule with shape (num_steps + 1,). The final value is
+            expected to be exact zero after NoiseScheduler finalization.
         denoising_fn : Callable
             Function that performs denoising
         model_comm_group : Optional[ProcessGroup]
