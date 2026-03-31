@@ -248,7 +248,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
             sigma,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
-            loss_fn=self.loss
         )
 
 
@@ -265,7 +264,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         - Single-step prediction from noisy target
         """
         # Ground-truth output (only the target step, no multistep)
-        print('batch shape : ', batch.shape)
         x = batch[
             :,
             0 : self.multi_step,
@@ -274,8 +272,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         ]
         y= batch[:, self.multi_step, ..., self.data_indices.data.output.full]
 
-        print("self data input full ", self.data_indices.data.input.full)
-        
        # Sample noise level
         sigma, noise_weights = self._get_noise_level(
                 shape=(x.shape[0],) + (1,) * (x.ndim - 2),
@@ -312,7 +308,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         
         # print('DEBUG TEST POUR la prédiction shape et sigma', x.shape,y_pred.shape, sigma, y_pred.max())
         # print(x)  
-
         yield loss, metrics_next, y_pred
         
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:

@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
+import os
 from abc import ABC
 from abc import abstractmethod
 from typing import Callable
@@ -253,11 +253,30 @@ class EDMHeunSampler(DiffusionSampler):
                 model_comm_group,
                 grid_shard_shapes,
             ).to(dtype)
-            # plot_step(y_clean,[0,1,2,3],["10u", "10v", "2t", "tp"], i, sigma_i)
-            # loss = loss_fn(D1,y_clean)
+            #############################""
+            # target = np.load("/home/users/u102751/code/anemoi/anemoi-env/overfit_samples copy.npy")[-1,...]
+            # target=torch.from_numpy(target).to(device = x.device).to(dtype = x.dtype)
+            # print("target shape ", target.shape)
+            # target = target.unsqueeze(0)
+            # indices = torch.tensor([0,1,2,4], device= target.device)
+            # target = torch.index_select(target, dim=-1, index=indices)
+            # print('target sjaê ', target.shape)
+            # indices = torch.tensor([0,1,3,7]).to(target.device)
+            # mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean.npy")).to(target.device).to(target.dtype)[:78]
+            # stdev = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/stdev.npy")).to(target.device).to(target.dtype)[:78]
+            # mean_4vars = torch.index_select(mean,dim=0, index=indices)
+            # stdev_4vars = torch.index_select(stdev, dim=0, index=indices)
+
+            # target = (target - mean_4vars) / stdev_4vars
+            # print("target shape", target.shape)
+
+            # plot_step("D1.png", D1,[0,1,2,3],["10u", "10v", "2t", "tp"], sigma_i)
+
+            # loss = loss_fn(D1,target)
             # print("loss dans sampler : ", loss)
+            ####################################""
             d = (y - D1) / (sigma_effective + eps_prec)
-            # print(f"sigma next : {sigma_next} et sigma effective {sigma_effective} ")
+            print(f"sigma next : {sigma_next} et sigma effective {sigma_effective} ")
             y_next = y + (sigma_next - sigma_effective) * d
             # print(" eps prec adns heun sampler ", eps_prec)
             if sigma_next > eps_prec:
@@ -272,7 +291,7 @@ class EDMHeunSampler(DiffusionSampler):
                 y = y + (sigma_next - sigma_effective) * (d + d_prime) / 2
             else:
                 y = y_next
-
+        print("y denoised complet : ", y)
         return y
 
 
@@ -353,7 +372,7 @@ DIFFUSION_SAMPLERS = {
     "dpmpp_2m": DPMpp2MSampler,
 }
 
-def plot_step(y_denoise, idx_var, vars, denoising_step, sigma) -> None:
+def plot_step(path, y_denoise, idx_var, vars, sigma) -> None:
     """Write a step of the state.
 
     Parameters
@@ -393,7 +412,7 @@ def plot_step(y_denoise, idx_var, vars, denoising_step, sigma) -> None:
     title = f"sigma = {sigma: .2f}"
 
     fig.title(title)
-    fname = f'/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/plot_step_during_inf/x=0_1_image_sdedit/y_clean_{denoising_step}_sigma={sigma: .2f}.png'
+    fname =path
     # mpl_fig = getattr(fig, "figure", None)
     
     # mpl_fig = getattr(fig, "figure", None)

@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH -J DE371_diffusion
 #SBATCH -A p200177
-#SBATCH -N 8
+#SBATCH -N 1
 #SBATCH -p gpu
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
@@ -22,7 +22,7 @@ export PYTHONPATH=/home/users/u102751/code/anemoi-core/models/src:/home/users/u1
 echo $CUDA_VISIBLE_DEVICES
 cd /home/users/u102751/code/anemoi/anemoi-core/training/src/anemoi/training/config
 CUDA_VISIBLE_DEVICES=0,1,2,3
-srun puv run anemoi-training train --config-name=CONFIG_TR
+srun puv run anemoi-training train --config-name=overfit_test_2
 
 #   puv run torchrun  \
 #   --nnodes=2 \

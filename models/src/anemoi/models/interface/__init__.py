@@ -151,8 +151,8 @@ class AnemoiModelInterface(torch.nn.Module):
             'sigma_min': 0.02, 
             'rho': 7, 
             'num_steps': 100, 
-            'num_steps_sdedit': 30, 
-            'SDEdit': True
+            'num_steps_sdedit': 15, 
+            'SDEdit': False
         }
         }
         # Add tendency processors if they exist

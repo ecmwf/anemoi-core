@@ -280,11 +280,8 @@ class NativeGridDataset(IterableDataset):
         #     self.sample_comm_group_id,
         #     shuffled_chunk_indices[:10],
         # )
-        fixed_i = self.valid_date_indices[0]
 
         for i in shuffled_chunk_indices:
-          
-            # i = fixed_i
             start = i + self.relative_date_indices[0]
             end = i + self.relative_date_indices[-1] + 1
             
@@ -294,9 +291,6 @@ class NativeGridDataset(IterableDataset):
             timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
             # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
             # data[start...] will be replaced with data[self.relative_date_indices + i]
-            rank_zero_info(f"dates used: { self.data.dates[start:end:timeincrement]}")
-            rank_zero_info(f"t-6h : { self.data.dates[start]}")
-            rank_zero_info(f"date end { self.data.dates[end]}")
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
             if isinstance(grid_shard_indices, slice):
                 # Load only shards into CPU memory
@@ -310,8 +304,8 @@ class NativeGridDataset(IterableDataset):
                 x = x[..., grid_shard_indices]  # select the grid shard
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
-            print("type x :", type(x))
-            np.save("overfit_samples.npy", x)
+            # print("type x :", type(x))
+            # np.save("overfit_samples.npy", x)
             yield torch.from_numpy(x)
 
     def __repr__(self) -> str:
