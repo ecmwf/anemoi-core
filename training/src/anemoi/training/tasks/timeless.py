@@ -25,12 +25,6 @@ class BaseTimelessTask(BaseSingleStepTask):
         self._plot_adapter = AutoencoderPlotAdapter(self)
 
 
-class SpatialDownscalingTask(BaseTimelessTask):
-    """Spatial downscaling task implementation."""
-
-    name: str = "spatial-downscaler"
-
-
 class AutoencodingTask(BaseTimelessTask):
     """Autoencoding task implementation."""
 
