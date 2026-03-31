@@ -11,12 +11,10 @@ from .custom import CustomTask
 from .forecasting import ForecastingTask
 from .temporal_downscaling import TemporalDownscalingTask
 from .timeless import AutoencodingTask
-from .timeless import SpatialDownscalingTask
 
 __all__ = [
     "AutoencodingTask",
     "CustomTask",
     "ForecastingTask",
-    "SpatialDownscalingTask",
     "TemporalDownscalingTask",
 ]
