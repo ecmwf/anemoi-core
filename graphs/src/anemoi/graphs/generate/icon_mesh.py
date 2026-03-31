@@ -297,7 +297,7 @@ class ICONCellDataGrid:
             # generate edges between source grid nodes and multi-mesh nodes:
             edge_vertices = self._get_grid2mesh_edges(self.select_c, multi_mesh=multi_mesh)
             # refill incomplete edges at boundary of the LAM domain with 3 nearest neighbours
-            if np.any(np.any(edge_vertices == -1, axis=1)):
+            if np.any(edge_vertices == -1):
                 nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
                 nearest_neighbour.fit(multi_mesh.nodeset.cc_vertices)
                 adj_matrix = nearest_neighbour.kneighbors_graph(
