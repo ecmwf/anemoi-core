@@ -175,7 +175,7 @@ class SphericalHarmonicTransform(Module):
             LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
 
-        number_of_latitude_bands = 2
+        number_of_latitude_bands = 3
         self.latitude_bands = []
         for band_idx in range(number_of_latitude_bands):
             start_lat = band_idx * self.nlat // number_of_latitude_bands
