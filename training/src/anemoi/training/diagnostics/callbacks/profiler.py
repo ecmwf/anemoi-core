@@ -7,8 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# ruff: noqa: ANN001
-
 
 import logging
 from pathlib import Path
@@ -26,25 +24,33 @@ LOGGER = logging.getLogger(__name__)
 class MemorySnapshotRecorder(Callback):
     """Record memory snapshot using torch.cuda._record_memory_history()."""
 
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.dirpath = Path(self.config.system.output.profiler)
+    def __init__(self, dirpath: str, steps: int, warmup: int = 0):
+        """Initialise MemorySnapshotRecorder.
 
-        self.warmup = self.config.diagnostics.benchmark_profiler.snapshot.warmup
-        if not self.warmup:
-            self.warmup = 0
-        self.num_steps = (
-            self.config.diagnostics.benchmark_profiler.snapshot.steps + self.warmup
-        )  # be consistent with profiler scheduler
+        Parameters
+        ----------
+        dirpath : str
+            Directory to save the memory snapshot pickle file.
+        steps : int
+            Number of training steps to record after warmup.
+        warmup : int, optional
+            Number of warmup steps before recording starts, by default 0.
+        """
+        super().__init__()
+        self.dirpath = Path(dirpath)
+        self.warmup = warmup or 0
+        self.num_steps = steps + self.warmup
         self.status = False
 
-        assert (
-            self.num_steps % self.config.dataloader.batch_size.training == 0
-        ), "Snapshot steps is not a multiple of batch size"
-        assert (
-            self.warmup % self.config.dataloader.batch_size.training == 0
-        ), "Snapshot Warmup steps is not a multiple of batch size"
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        del pl_module
+        # Access batch_size from the dataloader directly
+        train_dataloader = trainer.train_dataloader
+        if isinstance(train_dataloader, list):
+            train_dataloader = train_dataloader[0]
+        batch_size = train_dataloader.batch_size
+        assert self.num_steps % batch_size == 0, "Snapshot steps is not a multiple of batch size"
+        assert self.warmup % batch_size == 0, "Snapshot warmup steps is not a multiple of batch size"
 
     @rank_zero_only
     def _start_snapshot_recording(self) -> None:
