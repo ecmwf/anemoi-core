@@ -22,9 +22,11 @@ from anemoi.training.utils.enums import TensorDim
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
+
+    from anemoi.models.interface import ModelInterface
+    from anemoi.training.config_bundle import TaskConfigBundle
+    from anemoi.training.runtime import TaskRuntimeArtifacts
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,38 +39,30 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
     def __init__(
         self,
         *,
-        config: DictConfig,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: dict,
-        metadata: dict,
-        supporting_arrays: dict,
+        model: ModelInterface,
+        config_bundle: TaskConfigBundle,
+        runtime_artifacts: TaskRuntimeArtifacts,
+        **kwargs,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
-        config : DictConfig
-            Job configuration
-        statistics : dict
-            Statistics of the training data
-        data_indices : dict
-            Indices of the training data,
-        metadata : dict
-            Provenance information
+        model : ModelInterface
+        config_bundle : TaskConfigBundle
+            Parts of the config used by this task.
+        runtime_artifacts : TaskRuntimeArtifacts
+            Data prepared by the trainer for this task.
         """
         super().__init__(
-            config=config,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            model=model,
+            config_bundle=config_bundle,
+            runtime_artifacts=runtime_artifacts,
+            **kwargs,
         )
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
+        config = self.config
         self.model_comm_group_size = config.system.hardware.num_gpus_per_model
         num_gpus_per_model = config.system.hardware.num_gpus_per_model
         num_gpus_per_ensemble = config.system.hardware.num_gpus_per_ensemble

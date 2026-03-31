@@ -77,7 +77,7 @@ class CheckpointContext:
         optimizer state, training metadata, etc.
     model : nn.Module, optional
         PyTorch model being modified by the pipeline. Can be either
-        AnemoiModelInterface (pure PyTorch) or extracted from GraphForecaster
+        ModelInterface (pure PyTorch) or extracted from GraphForecaster
     optimizer : Optimizer, optional
         Optional optimizer to restore state to (for warm starts)
     scheduler : Any, optional

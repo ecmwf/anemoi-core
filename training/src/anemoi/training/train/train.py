@@ -30,10 +30,14 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.training.config_bundle import ModelConfigBundle
+from anemoi.training.config_bundle import TaskConfigBundle
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
+from anemoi.training.runtime import ModelRuntimeArtifacts
+from anemoi.training.runtime import TaskRuntimeArtifacts
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -177,6 +181,7 @@ class AnemoiTrainer(ABC):
     def _validate_transfer_learning_datasets(
         self,
         model: pl.LightningModule,
+        data_indices: dict,
     ) -> None:
         """Validate dataset compatibility between checkpoint and config for transfer learning.
 
@@ -208,11 +213,11 @@ class AnemoiTrainer(ABC):
             return
 
         # Validate each dataset in current config against checkpoint
-        for dataset_name, data_indices in self.data_indices.items():
+        for dataset_name, dataset_indices in data_indices.items():
             if dataset_name in model._ckpt_model_name_to_index:
                 # Dataset found in checkpoint - validate variables match
                 ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
-                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                dataset_indices.compare_variables(ckpt_name_to_index, dataset_indices.name_to_index)
                 loaded_datasets.append(dataset_name)
             else:
                 # Dataset not found in checkpoint - will be randomly initialized
@@ -223,7 +228,7 @@ class AnemoiTrainer(ABC):
                 initialized_datasets.append(dataset_name)
 
         # Check for datasets in checkpoint but not in config
-        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
+        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in data_indices]
         if ignored_datasets:
             for ignored_dataset in ignored_datasets:
                 LOGGER.warning(
@@ -242,34 +247,23 @@ class AnemoiTrainer(ABC):
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        assert (
-            not (
-                "layer_kernels" in self.config.model.processor
-                and "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.processor.target_
-            )
-            and not (
-                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
-            )
-            and not (
-                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
-            )
-        ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
-        "Please use a different activation function."
+        model_task = get_class(self.config.training.model_task)
+        model_runtime_artifacts = self.runtime_artifacts
+        task_runtime_artifacts = self.task_runtime_artifacts
+        model = instantiate(
+            self.config.model_builder,
+            config_bundle=self.model_config_bundle,
+            runtime_artifacts=model_runtime_artifacts,
+        )
+
+        task_runtime_artifacts.metadata["metadata_inference"]["task"] = model_task.task_type
 
         kwargs = {
-            "config": self.config,
-            "data_indices": self.data_indices,
-            "graph_data": self.graph_data,
-            "metadata": self.metadata,
-            "statistics": self.datamodule.statistics,
-            "statistics_tendencies": self.datamodule.statistics_tendencies,
-            "supporting_arrays": self.supporting_arrays,
+            "model": model,
+            "config_bundle": self.task_config_bundle,
+            "runtime_artifacts": task_runtime_artifacts,
         }
 
-        model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 
         # Load the model weights
@@ -280,9 +274,6 @@ class AnemoiTrainer(ABC):
                 model = transfer_learning_loading(model, self.last_checkpoint)
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                # pop data_indices so that the data indices on the checkpoint do not get overwritten
-                # by the data indices from the new config
-                kwargs.pop("data_indices")
                 model = model_task.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
@@ -290,9 +281,9 @@ class AnemoiTrainer(ABC):
                     weights_only=False,  # required for Pytorch Lightning 2.6
                 )
 
-            model.data_indices = self.data_indices
+            model.data_indices = task_runtime_artifacts.data_indices
             # Validate data indices between checkpoint and current config
-            self._validate_transfer_learning_datasets(model)
+            self._validate_transfer_learning_datasets(model, task_runtime_artifacts.data_indices)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -398,7 +389,36 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def supporting_arrays(self) -> dict:
-        return self.datamodule.supporting_arrays
+        from anemoi.training.utils.supporting_arrays import build_combined_supporting_arrays
+
+        return build_combined_supporting_arrays(self.config, self.graph_data, self.datamodule.supporting_arrays)
+
+    @cached_property
+    def runtime_artifacts(self) -> ModelRuntimeArtifacts:
+        """Data prepared by the trainer and passed when creating the model."""
+        return ModelRuntimeArtifacts(
+            graph_data=self.graph_data,
+            statistics=self.datamodule.statistics,
+            statistics_tendencies=self.datamodule.statistics_tendencies,
+            data_indices=self.data_indices,
+            metadata=self.metadata,
+            supporting_arrays=self.supporting_arrays,
+        )
+
+    @cached_property
+    def task_runtime_artifacts(self) -> TaskRuntimeArtifacts:
+        """Data prepared by the trainer and passed to the task."""
+        return self.runtime_artifacts.to_task_runtime_artifacts()
+
+    @cached_property
+    def model_config_bundle(self) -> ModelConfigBundle:
+        """Parts of the config used to create the model."""
+        return ModelConfigBundle.from_root_config(self.config)
+
+    @cached_property
+    def task_config_bundle(self) -> TaskConfigBundle:
+        """Parts of the config used by the training task."""
+        return TaskConfigBundle.from_root_config(self.config)
 
     @cached_property
     def _logger_kwargs(self) -> dict:

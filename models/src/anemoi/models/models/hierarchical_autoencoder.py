@@ -21,6 +21,7 @@ from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelAutoEncoder
+from anemoi.models.models.base import _get_backbone_config
 from anemoi.utils.config import DotDict
 
 
@@ -53,7 +54,8 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.statistics = statistics
 
         model_config = DotDict(model_config)
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        backbone_config = _get_backbone_config(model_config)
+        self._graph_name_hidden = backbone_config.hidden_nodes_name
 
         self.n_step_input = model_config.training.multistep_input
         self.n_step_output = model_config.training.multistep_output

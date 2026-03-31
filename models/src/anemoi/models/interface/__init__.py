@@ -7,197 +7,33 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import uuid
 from typing import Optional
+from typing import Protocol
+from typing import runtime_checkable
 
 import torch
-from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
-
-from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.utils.config import DotDict
 
 
-class AnemoiModelInterface(torch.nn.Module):
-    """An interface for Anemoi models.
+@runtime_checkable
+class ModelInterface(Protocol):
+    """Interface for Anemoi models."""
 
-    This class is a wrapper around the Anemoi model that includes pre-processing and post-processing steps.
-    It inherits from the PyTorch Module class.
+    def pre_process(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Apply pre-processing (e.g. normalisation) to model inputs."""
+        ...
 
-    Attributes
-    ----------
-    config : DotDict
-        Configuration settings for the model.
-    id : str
-        A unique identifier for the model instance.
-    n_step_input : int
-        Number of input timesteps provided to the model.
-    graph_data : HeteroData
-        Graph data for the model.
-    statistics : dict
-        Statistics for the data.
-    metadata : dict
-        Metadata for the model.
-    statistics_tendencies : dict
-        Statistics for the tendencies of the data.
-    supporting_arrays : dict
-        Numpy arraysto store in the checkpoint.
-    data_indices : dict
-        Indices for the data.
-    pre_processors : Processors
-        Pre-processing steps to apply to the data before passing it to the model.
-    post_processors : Processors
-        Post-processing steps to apply to the model's output.
-    model : AnemoiModelEncProcDec
-        The underlying Anemoi model.
-    """
+    def post_process(self, y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Apply post-processing (e.g. denormalisation) to model outputs."""
+        ...
 
-    def __init__(
+    def forward(
         self,
-        *,
-        config: DotDict,
-        graph_data: HeteroData,
-        statistics: dict,
-        data_indices: dict,
-        metadata: dict,
-        statistics_tendencies: dict | None = None,
-        supporting_arrays: dict | None = None,
-    ) -> None:
-        super().__init__()
-        self.config = config
-        self.id = str(uuid.uuid4())
-        self.n_step_input = self.config.training.multistep_input
-        self.graph_data = graph_data
-        self.statistics = statistics
-        self.statistics_tendencies = statistics_tendencies
-        self.metadata = metadata
-        self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
-        self.data_indices = data_indices
-        self._build_model()
-        self._update_metadata()
-
-    def _build_processors_for_dataset(
-        self,
-        processors_configs: dict,
-        statistics: dict,
-        data_indices: dict,
-        statistics_tendencies: dict = None,
-    ):
-        """Build processors for a single dataset.
-
-        Parameters
-        ----------
-        processors_configs : dict
-            Configuration for the processors
-        statistics : dict
-            Statistics for the dataset
-        data_indices : dict
-            Data indices for the dataset
-        statistics_tendencies : dict, optional
-            Tendencies statistics for the dataset
-
-        Returns
-        -------
-        tuple
-            (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies)
-        """
-        pre_processors, post_processors = self._build_processor_pair(
-            processors_configs,
-            data_indices,
-            statistics,
-        )
-        pre_processors_tendencies, post_processors_tendencies = self._build_tendency_processors(
-            processors_configs,
-            data_indices,
-            statistics_tendencies,
-        )
-        return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
-
-    @staticmethod
-    def _build_processor_pair(
-        processors_configs: dict,
-        data_indices: dict,
-        statistics: dict,
-    ) -> tuple[Processors, Processors]:
-        processors = [
-            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
-            for name, processor in processors_configs.items()
-        ]
-        return Processors(processors), Processors(processors, inverse=True)
-
-    def _build_tendency_processors(
-        self,
-        processors_configs: dict,
-        data_indices: dict,
-        statistics_tendencies: dict | None,
-    ) -> tuple[Processors | StepwiseProcessors | None, Processors | StepwiseProcessors | None]:
-        if statistics_tendencies is None:
-            return None, None
-
-        if "lead_times" not in statistics_tendencies:
-            return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
-
-        lead_times = list(statistics_tendencies.get("lead_times") or [])
-        n_step_output = getattr(self.config.training, "multistep_output", None)
-        if n_step_output == 1:
-            step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
-            stats_for_tendencies = step_stats or statistics_tendencies
-            return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)
-
-        pre_processors_tendencies = StepwiseProcessors(lead_times)
-        post_processors_tendencies = StepwiseProcessors(lead_times)
-        for lead_time in lead_times:
-            step_stats = statistics_tendencies.get(lead_time)
-            if step_stats is None:
-                continue
-            pre_step, post_step = self._build_processor_pair(processors_configs, data_indices, step_stats)
-            pre_processors_tendencies.set(lead_time, pre_step)
-            post_processors_tendencies.set(lead_time, post_step)
-        return pre_processors_tendencies, post_processors_tendencies
-
-    def _build_model(self) -> None:
-        """Builds the model and pre- and post-processors."""
-        # Multi-dataset mode: create processors for each dataset
-        self.pre_processors = torch.nn.ModuleDict()
-        self.post_processors = torch.nn.ModuleDict()
-        self.pre_processors_tendencies = torch.nn.ModuleDict()
-        self.post_processors_tendencies = torch.nn.ModuleDict()
-
-        data_config = get_multiple_datasets_config(self.config.data)
-        for dataset_name in self.statistics.keys():
-            # Build processors for each dataset
-            pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
-                data_config[dataset_name].processors,
-                self.statistics[dataset_name],
-                self.data_indices[dataset_name],
-                self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
-            )
-            self.pre_processors[dataset_name] = pre
-            self.post_processors[dataset_name] = post
-            if pre_tend is not None:
-                self.pre_processors_tendencies[dataset_name] = pre_tend
-                self.post_processors_tendencies[dataset_name] = post_tend
-
-        # Instantiate the model
-        # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
-        model_instantiate_config = {
-            "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "all"),
-        }
-        self.model = instantiate(
-            model_instantiate_config,
-            model_config=self.config,
-            data_indices=self.data_indices,
-            statistics=self.statistics,
-            graph_data=self.graph_data,
-            _recursive_=False,  # Disables recursive instantiation by Hydra
-        )
-
-        # Use the forward method of the model directly
-        self.forward = self.model.forward
+        x: dict[str, torch.Tensor],
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Run the model forward pass on pre-processed inputs."""
+        ...
 
     def predict_step(
         self,
@@ -206,39 +42,73 @@ class AnemoiModelInterface(torch.nn.Module):
         gather_out: bool = True,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Prediction step for the model.
+        """Run a full inference step (pre-process → forward → post-process)."""
+        ...
 
-        Parameters
-        ----------
-        batch : dict[str, torch.Tensor]
-            Input batched data.
-        model_comm_group : Optional[ProcessGroup], optional
-            model communication group, specifies which GPUs work together
-        gather_out : bool, optional
-            Whether to gather the output, by default True.
 
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Predicted data.
-        """
-        # Prepare kwargs for model's predict_step
-        predict_kwargs = {
-            "batch": batch,
-            "pre_processors": self.pre_processors,
-            "post_processors": self.post_processors,
-            "n_step_input": self.n_step_input,
-            "model_comm_group": model_comm_group,
-        }
+@runtime_checkable
+class DiffusionModelInterface(ModelInterface, Protocol):
+    """Interface for models that support diffusion tasks."""
 
-        # Add tendency processors if they exist
-        if hasattr(self, "pre_processors_tendencies"):
-            predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
-        if hasattr(self, "post_processors_tendencies"):
-            predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
+    def get_diffusion_parameters(self) -> tuple[float, float, float]:
+        """Return ``(sigma_max, sigma_min, sigma_data)`` for diffusion training."""
+        ...
 
-        # Delegate to the model's predict_step implementation with processors
-        return self.model.predict_step(**predict_kwargs, **kwargs)
+    def forward_with_preconditioning(
+        self,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
+        sigma: dict[str, torch.Tensor],
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Run the diffusion forward pass with model-specific preconditioning."""
+        ...
 
-    def _update_metadata(self) -> None:
-        self.model.fill_metadata(self.metadata)
+    def apply_imputer_inverse(self, dataset_name: str, x: torch.Tensor) -> torch.Tensor:
+        """Map output-space tensors back through any inverse imputation logic."""
+        ...
+
+    def apply_reference_state_truncation(
+        self,
+        x: dict[str, torch.Tensor],
+        grid_shard_shapes,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> dict[str, torch.Tensor]:
+        """Prepare reference states used by diffusion tasks."""
+        ...
+
+
+@runtime_checkable
+class DiffusionTendencyModelInterface(DiffusionModelInterface, Protocol):
+    """Interface for diffusion models that predict tendencies."""
+
+    def get_tendency_processors(self, dataset_name: str) -> tuple[object, object]:
+        """Return the pre/post tendency processors for one dataset."""
+        ...
+
+    def compute_tendency_step(
+        self,
+        dataset_name: str,
+        y_step: torch.Tensor,
+        x_ref_step: torch.Tensor,
+        tendency_pre_processor: object,
+    ) -> torch.Tensor:
+        """Convert one output step into a tendency target."""
+        ...
+
+    def add_tendency_to_state_step(
+        self,
+        dataset_name: str,
+        x_ref_step: torch.Tensor,
+        tendency_step: torch.Tensor,
+        tendency_post_processor: object,
+    ) -> torch.Tensor:
+        """Reconstruct one state step from a tendency prediction."""
+        ...
+
+
+__all__ = [
+    "ModelInterface",
+    "DiffusionModelInterface",
+    "DiffusionTendencyModelInterface",
+]
