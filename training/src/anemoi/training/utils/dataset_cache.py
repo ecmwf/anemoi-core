@@ -3,18 +3,18 @@ import io
 import errno
 import fcntl
 import shutil
+import struct
 import torch
 import torch.distributed as dist
 from pathlib import Path
-import urllib3
 from multiprocessing import Value
 
 from anemoi.datasets import open_dataset
 
 import numpy as np
 import socket
+import socketserver
 import threading
-import http.server
 
 
 import pytorch_lightning as pl
@@ -202,9 +202,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
         LOGGER.info(f"{self.rank=}: Initalised a shared cache under {self.cache_path}")
         self.is_initalised=True
 
-        # Per-node persistent HTTP connection pools for remote cache fetches.
-        # Keyed by node_id; created lazily on first remote hit.
-        self._http_pools: dict[int, urllib3.HTTPConnectionPool] = {}
+        # Persistent TCP connections to remote nodes, keyed by node_id.
+        # Created lazily on first remote hit.
+        self._tcp_conns: dict[int, socket.socket] = {}
     
     def _inject_cache_wrapper(self):
         """Replace the underlying dataset's data accessor with cached version."""
@@ -267,42 +267,48 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
     
     def _start_server(self):
-        """Start a threaded HTTP server to serve the cache directory.
+        """Start a threaded raw TCP server that serves .npy files from the cache.
 
-        Uses http.server.ThreadingHTTPServer so concurrent requests from
-        multiple ranks are handled in parallel threads instead of
-        sequentially (the main bottleneck of the old single-threaded
-        TCPServer approach).  Combined with serving single .npy files
-        (one GET per date) this is comparable to nginx for this workload.
+        Protocol (per request on a persistent connection):
+          Client sends:  4 bytes  – date index as uint32 big-endian
+          Server replies: 4 bytes  – payload length N as uint32 big-endian
+                          N bytes  – raw .npy file contents
+          If the file doesn't exist the server replies with length 0.
         """
-        directory = str(Path(self.cache_root).resolve())
+        cache_path = self.cache_path  # capture for the handler closure
 
-        # Build a handler rooted at cache_root with logging suppressed
-        handler_cls = type(
-            "_QuietHandler",
-            (http.server.SimpleHTTPRequestHandler,),
-            {"log_message": lambda *_args, **_kw: None},
-        )
-        # Python 3.7+ – set the directory the handler serves
-        original_init = handler_cls.__init__
+        class _CacheRequestHandler(socketserver.StreamRequestHandler):
+            """Handle one persistent connection: loop reading 4-byte date requests."""
 
-        def _patched_init(self_h, *args, **kwargs):
-            kwargs["directory"] = directory
-            original_init(self_h, *args, **kwargs)
+            def handle(self):
+                while True:
+                    # Read 4-byte date request
+                    header = self.rfile.read(4)
+                    if not header or len(header) < 4:
+                        break  # client closed connection
+                    date = struct.unpack('!I', header)[0]
+                    npy_path = cache_path / f"{date}.npy"
+                    if npy_path.exists():
+                        payload = npy_path.read_bytes()
+                        self.wfile.write(struct.pack('!I', len(payload)))
+                        self.wfile.write(payload)
+                    else:
+                        self.wfile.write(struct.pack('!I', 0))
+                    self.wfile.flush()
 
-        handler_cls.__init__ = _patched_init
+        class _ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+            allow_reuse_address = True
+            daemon_threads = True
 
-        self.httpd = http.server.ThreadingHTTPServer(("", self.port), handler_cls)
-        # Allow fast restart after crashes
-        self.httpd.allow_reuse_address = True
-        # TCP_NODELAY on the listening socket for lower latency
-        self.httpd.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self._tcp_server = _ThreadedTCPServer(("", self.port), _CacheRequestHandler)
+        # TCP_NODELAY on the listening socket
+        self._tcp_server.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-        self.server_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.server_thread = threading.Thread(target=self._tcp_server.serve_forever, daemon=True)
         self.server_thread.start()
         LOGGER.info(
-            f"Rank {self.rank}: Threaded HTTP server serving {directory} "
-            f"on http://{self._get_hostname(self.rank)}:{self.port}"
+            f"Rank {self.rank}: TCP cache server listening on "
+            f"{self._get_hostname(self.global_rank)}:{self.port}"
         )
         
     def _get_hostname(self, rank):
@@ -331,15 +337,21 @@ class DatasetCache(AnemoiDatasetsDataModule):
         return roots
     
     def _shutdown_server(self):
-        """Stop the threaded HTTP server (only called on node leader)."""
+        """Stop the TCP server and close all client connections."""
         try:
-            if hasattr(self, 'httpd') and self.httpd is not None:
-                LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
-                self.httpd.shutdown()
-                self.httpd.server_close()
-                LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
+            if hasattr(self, '_tcp_server') and self._tcp_server is not None:
+                LOGGER.info(f"Rank {self.rank}: Shutting down TCP server on port {self.port}")
+                self._tcp_server.shutdown()
+                self._tcp_server.server_close()
+                LOGGER.info(f"Rank {self.rank}: TCP server shut down successfully")
         except Exception as e:
-            LOGGER.warning(f"Rank {self.rank}: Error shutting down server: {e}")
+            LOGGER.warning(f"Rank {self.rank}: Error shutting down TCP server: {e}")
+        # Close outgoing persistent connections
+        for nid, sock in getattr(self, '_tcp_conns', {}).items():
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     def __del__(self):
        if getattr(self, 'is_node_leader', False):
@@ -382,29 +394,53 @@ class DatasetCache(AnemoiDatasetsDataModule):
         LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {num_cached} cached items across all nodes")
 
 
-    def _get_http_pool(self, remote_node_id) -> urllib3.HTTPConnectionPool:
-        """Return (or lazily create) a persistent connection pool to a remote node."""
-        if remote_node_id not in self._http_pools:
+    def _get_tcp_conn(self, remote_node_id) -> socket.socket:
+        """Return (or lazily create) a persistent TCP connection to a remote node."""
+        sock = self._tcp_conns.get(remote_node_id)
+        if sock is None:
             remote_global_rank = self._node_leader_rank[remote_node_id]
             remote_host = self._get_hostname(remote_global_rank)
             port = self.root_port + remote_node_id
-            self._http_pools[remote_node_id] = urllib3.HTTPConnectionPool(
-                host=remote_host,
-                port=port,
-                maxsize=4,       # allow a few concurrent connections
-                block=False,
-                retries=1,
-            )
-            LOGGER.info(f"Rank {self.rank}: Opened persistent HTTP pool to node {remote_node_id} ({remote_host}:{port})")
-        return self._http_pools[remote_node_id]
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.connect((remote_host, port))
+            self._tcp_conns[remote_node_id] = sock
+            LOGGER.info(f"Rank {self.rank}: Opened persistent TCP connection to node {remote_node_id} ({remote_host}:{port})")
+        return sock
 
-    def _get_remote_file_url(self, remote_node_id, date):
-        """Build the URL for a single .npy file on a remote node's HTTP server."""
-        # Pick any rank on that node to get the hostname
-        remote_global_rank = self._node_leader_rank[remote_node_id]
-        remote_host = self._get_hostname(remote_global_rank)
-        port = self.root_port + remote_node_id
-        return f"http://{remote_host}:{port}/cache/{date}.npy"
+    @staticmethod
+    def _recvall(sock: socket.socket, n: int) -> bytes:
+        """Receive exactly n bytes from a socket."""
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("Connection closed while receiving data")
+            buf.extend(chunk)
+        return bytes(buf)
+
+    def _fetch_remote_tcp(self, remote_node_id: int, date: int) -> np.ndarray | None:
+        """Fetch a cached .npy from a remote node over the persistent TCP connection.
+
+        Returns the numpy array, or None if the remote doesn't have it.
+        """
+        try:
+            sock = self._get_tcp_conn(remote_node_id)
+            # Send 4-byte date request
+            sock.sendall(struct.pack('!I', date))
+            # Read 4-byte length
+            length_bytes = self._recvall(sock, 4)
+            length = struct.unpack('!I', length_bytes)[0]
+            if length == 0:
+                return None
+            # Read payload
+            payload = self._recvall(sock, length)
+            return np.load(io.BytesIO(payload))
+        except Exception as e:
+            LOGGER.warning(f"Rank {self.rank}: TCP fetch failed for date {date} from node {remote_node_id}: {e}")
+            # Drop the broken connection so it gets recreated next time
+            self._tcp_conns.pop(remote_node_id, None)
+            return None
         
     def check_cache(self, date) -> list[int]:
         """ checks either local or global registry. returns list of node_ids containing file in their SSD"""
@@ -480,21 +516,14 @@ class DatasetCache(AnemoiDatasetsDataModule):
                 LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
                 
         else:
-            #cache hit on remote node SSD – single HTTP GET
+            #cache hit on remote node SSD – raw TCP fetch
             
             self.cache_hits_remote.value += 1
             remote_node_id = cache_hits[0]
-            url = self._get_remote_file_url(remote_node_id, date)
             
-            try:
-                pool = self._get_http_pool(remote_node_id)
-                resp = pool.request("GET", f"/cache/{date}.npy", preload_content=True)
-                if resp.status == 200:
-                    data = np.load(io.BytesIO(resp.data))
-                else:
-                    raise urllib3.exceptions.HTTPError(f"HTTP {resp.status}")
-            except Exception as e:
-                LOGGER.warning(f"Rank {self.rank}: Failed to fetch date {date} from node {remote_node_id}: {e}. Falling back to filesystem.")
+            data = self._fetch_remote_tcp(remote_node_id, date)
+            if data is None:
+                LOGGER.warning(f"Rank {self.rank}: Remote TCP fetch returned None for date {date} from node {remote_node_id}. Falling back to filesystem.")
                 data = primary_data[date]
             
             if verbose or (self.total_fetches.value % 10 == 0):
