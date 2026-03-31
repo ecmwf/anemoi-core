@@ -346,7 +346,7 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
             )
 
         weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
-        rank_zero_info(f"sigmas : {sigma}")
+        # rank_zero_info(f"sigmas : {sigma}")
         return sigma, weight
     
     
