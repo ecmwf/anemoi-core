@@ -8,6 +8,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.0...graphs-0.9.1) (2026-03-26)
+
+
+### Features
+
+* Add rule to avoid anemoi-training imports in anemoi-models ([#997](https://github.com/ecmwf/anemoi-core/issues/997)) ([0bf80bc](https://github.com/ecmwf/anemoi-core/commit/0bf80bc6a20c996060fb7eca0e32ced6f92fc350))
+
+
+### Bug Fixes
+
+* Add max version pining to Torch&lt;2.11 ([#1006](https://github.com/ecmwf/anemoi-core/issues/1006)) ([a23c97c](https://github.com/ecmwf/anemoi-core/commit/a23c97c272c02de18519deebc4e2149105a24be1))
+* **graphs:** Fix area weights math docstring ([#1003](https://github.com/ecmwf/anemoi-core/issues/1003)) ([2dd7110](https://github.com/ecmwf/anemoi-core/commit/2dd7110de0ae2bfb27cfc173587b9ee6601b0a2d))
+
+
+### Documentation
+
+* **graphs:** Fix warning docstring ([#994](https://github.com/ecmwf/anemoi-core/issues/994)) ([30bd8b8](https://github.com/ecmwf/anemoi-core/commit/30bd8b8cb3363f38f883bbef0c10ba4362439ad8))
+
+## [0.9.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.5...graphs-0.9.0) (2026-03-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** expands graph config for multiple datasets ([#895](https://github.com/ecmwf/anemoi-core/issues/895))
+* **training:** remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848))
+
+### Features
+
+* **graphs:** Add custom area weightings ([#926](https://github.com/ecmwf/anemoi-core/issues/926)) ([5c43509](https://github.com/ecmwf/anemoi-core/commit/5c435092dee7f09735d8e958c298b620e7313c33))
+
+
+### Bug Fixes
+
+* **training:** Call correct open_datasets ([#965](https://github.com/ecmwf/anemoi-core/issues/965)) ([470b725](https://github.com/ecmwf/anemoi-core/commit/470b72588f178ddac913c6efd503ffd065dbf60d))
+* **training:** Expands graph config for multiple datasets ([#895](https://github.com/ecmwf/anemoi-core/issues/895)) ([33d7f4e](https://github.com/ecmwf/anemoi-core/commit/33d7f4e11fff8da22243fbb924036bab07f17c65))
+
+
+### Code Refactoring
+
+* **training:** Remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848)) ([dcd69ac](https://github.com/ecmwf/anemoi-core/commit/dcd69ac415894131876c2f19af643896f1605fe6))
+
 ## [0.8.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.4...graphs-0.8.5) (2026-02-09)
 
 
