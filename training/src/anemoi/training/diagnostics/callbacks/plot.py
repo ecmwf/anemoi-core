@@ -64,10 +64,12 @@ class BasePlotCallback(Callback, ABC):
         ----------
         config : OmegaConf
             Config object
-
+        dataset_names : list[str] | None, optional
+            Names of datasets, by default None
         """
         super().__init__()
         self.config = config
+        self.focus_area = None
         self.save_basedir = config.system.output.plots
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
@@ -88,6 +90,35 @@ class BasePlotCallback(Callback, ABC):
             self._executor = ThreadPoolExecutor(max_workers=1)
             self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
             self.loop_thread.start()
+
+    def get_focus_mask(self, pl_module: pl.LightningModule) -> np.ndarray | None:
+        """Get the focus mask based on the focus area configuration."""
+        if self.latlons is None:
+            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
+            self.latlons = np.rad2deg(self.latlons.cpu().numpy())
+
+        # Compute focus mask
+        focus_mask = np.ones(self.latlons.shape[0], dtype=bool)
+        self.tag = None
+
+        if self.focus_area is not None:
+            if self.focus_area["spatial_mask"] is not None:
+                focus_mask = np.zeros(self.latlons.shape[0], dtype=bool)
+                spatial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spatial_mask"]]
+                focus_mask[spatial_mask_idxs.squeeze()] = True
+                self.tag = "_spatial_mask"
+
+            elif self.focus_area["latlon_bounds"] is not None:
+                (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
+                lat, lon = self.latlons[:, 0], self.latlons[:, 1]
+                focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
+                self.tag = "_latlon_bounds"
+
+            else:
+                msg = "focus_area must contain either 'spatial_mask' or 'latlon_bounds'."
+                raise ValueError(msg)
+
+        return focus_mask
 
     def start_event_loop(self) -> None:
         """Start the event loop in a separate thread."""
@@ -389,6 +420,7 @@ class LongRolloutPlots(BasePlotCallback):
         per_sample: int = 6,
         every_n_epochs: int = 1,
         animation_interval: int = 400,
+        focus_area: dict | None = None,
     ) -> None:
         """Initialise LongRolloutPlots callback.
 
@@ -414,6 +446,11 @@ class LongRolloutPlots(BasePlotCallback):
             Epoch frequency to plot at, by default 1
         animation_interval : int, optional
             Delay between frames in the animation in milliseconds, by default 400
+        focus_area : dict | None, optional
+            Area or point indices to focus the plot on.
+            Can be:
+            - {"spatial_mask": str}
+            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
         """
         super().__init__(config)
 
@@ -435,6 +472,7 @@ class LongRolloutPlots(BasePlotCallback):
         self.per_sample = per_sample
         self.parameters = parameters
         self.animation_interval = animation_interval
+        self.focus_area = focus_area
 
         LOGGER.info(
             (
@@ -499,6 +537,8 @@ class LongRolloutPlots(BasePlotCallback):
             # collect min and max values for each variable for the colorbar
             vmin, vmax = (np.inf * np.ones(len(plot_parameters_dict)), -np.inf * np.ones(len(plot_parameters_dict)))
 
+        focus_mask = self.get_focus_mask(pl_module)
+
         # Plot for each rollout step
         with torch.no_grad():
             for rollout_step, (_, _, y_pred) in enumerate(
@@ -520,6 +560,7 @@ class LongRolloutPlots(BasePlotCallback):
                         batch_idx,
                         epoch,
                         logger,
+                        focus_mask,
                     )
 
                 if self.video_rollout and rollout_step < self.video_rollout:
@@ -560,6 +601,7 @@ class LongRolloutPlots(BasePlotCallback):
         batch_idx: int,
         epoch: int,
         logger: pl.loggers.logger.Logger,
+        focus_mask: np.ndarray | None = None,
     ) -> None:
         """Plot the predicted output, input, true target and error plots for a given rollout step."""
         # prepare true output tensor for plotting
@@ -577,10 +619,16 @@ class LongRolloutPlots(BasePlotCallback):
         # predicted output tensor
         output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
 
+        # Apply spatial mask
+        latlons = self.latlons[focus_mask]
+        data_0 = data_0[..., focus_mask, :]
+        data_rollout_step = data_rollout_step[..., focus_mask, :]
+        output_tensor = output_tensor[..., focus_mask, :]
+
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
             self.per_sample,
-            self.latlons,
+            latlons,
             self.accumulation_levels_plot,
             data_0.squeeze(),
             data_rollout_step.squeeze(),
@@ -593,7 +641,8 @@ class LongRolloutPlots(BasePlotCallback):
             logger,
             fig,
             epoch=epoch,
-            tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_rank{pl_module.local_rank:01d}",
+            tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_"
+            f"rank{pl_module.local_rank:01d}{self.tag}",
             exp_log_tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
         )
 
@@ -1194,6 +1243,10 @@ class PlotSample(BasePlotAdditionalMetrics):
             Number of plots per sample, by default 6
         every_n_batches : int, optional
             Batch frequency to plot at, by default None
+        focus_area : dict | None, optional
+            Area or point indices to focus the plot on. Can be:
+            - {"spatial_mask": str}
+            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
         """
         del kwargs
         super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
@@ -1205,6 +1258,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.output_steps = output_steps
         self.per_sample = per_sample
         self.colormaps = colormaps
+        self.focus_area = focus_area
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
@@ -1323,12 +1377,17 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             Max number of output steps to plot per rollout in forecast mode
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
+        focus_area : dict | None, optional
+            Area or point indices to focus the plot on. Can be:
+            - {"spatial_mask": str}
+            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
         """
         super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches, focus_area=focus_area)
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.output_steps = output_steps
         self.min_delta = min_delta
+        self.focus_area = focus_area
 
     @rank_zero_only
     def _plot(
@@ -1357,6 +1416,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+
 
             # Build dictionary of indices and parameters to be plotted
             diagnostics = (

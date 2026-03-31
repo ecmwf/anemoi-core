@@ -93,3 +93,97 @@ class GraphForecaster(BaseRolloutGraphModule):
             x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
 
             yield loss, metrics_next, y_pred
+
+
+class LatentGraphForecaster(GraphForecaster):
+    """Forecaster that performs rollout in latent space.
+
+    Works with models that accept a ``rollout_step`` argument (e.g.
+    ``AnemoiModelDisentangledEncProcDec``) to accumulate encoded states and
+    advance the latent buffer instead of re-encoding at every step.
+
+    Only single-dataset configurations are supported (the underlying disentangled
+    model encodes one domain).
+    """
+
+    task_type = "latent_forecaster"
+
+    def forward(self, x: dict[str, torch.Tensor], rollout_step: int) -> dict[str, torch.Tensor]:
+        """Forward pass, passing rollout_step to the model for latent rollout."""
+        return self.model(
+            x,
+            rollout_step=rollout_step,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
+
+    def _rollout_step(
+        self,
+        batch: dict[str, torch.Tensor],
+        rollout: int | None = None,
+        validation_mode: bool = False,
+    ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
+        """Rollout step for the latent forecaster.
+
+        On the first step (rollout_step=0) the model encodes all input timesteps
+        and stores the latent buffer.  On subsequent steps the model advances the
+        latent buffer without re-encoding, performing rollout entirely in latent
+        space.
+
+        Parameters
+        ----------
+        batch : dict[str, torch.Tensor]
+            Multi-dataset batch (single-key dict expected)
+        rollout : int, optional
+            Number of rollout steps. Defaults to ``self.rollout``.
+        validation_mode : bool, optional
+            Whether to compute validation metrics.
+
+        Yields
+        ------
+        tuple[torch.Tensor | None, dict, list]
+            Loss, metrics, and predictions per rollout step.
+
+        """
+        rollout_steps = rollout or self.rollout
+        required_time_steps = rollout_steps * self.n_step_output + self.n_step_input
+
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            msg = (
+                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {required_time_steps}"
+            )
+            assert dataset_batch.shape[1] >= required_time_steps, msg
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.n_step_input,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, n_step_input, latlon, nvar)
+
+        for rollout_step in range(rollout_steps):
+            # Latent rollout: model accumulates encoded states on step 0 and
+            # advances its latent buffer on subsequent steps.
+            y_pred = self(x, rollout_step)
+
+            y = {}
+            for dataset_name, dataset_batch in batch.items():
+                start = self.n_step_input + rollout_step * self.n_step_output
+                y_time = dataset_batch.narrow(1, start, self.n_step_output)
+                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+                y[dataset_name] = y_time.index_select(-1, var_idx)
+
+            loss, metrics_next, y_pred = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
+                step=rollout_step,
+                validation_mode=validation_mode,
+                use_reentrant=False,
+            )
+
+            # Advance input state for the next rollout step
+            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
+
+            yield loss, metrics_next, y_pred

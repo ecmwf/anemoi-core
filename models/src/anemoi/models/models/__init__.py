@@ -15,6 +15,7 @@ from .interpolator import AnemoiModelEncProcDecMultiOutInterpolator
 
 from .autoencoder import AnemoiModelAutoEncoder  # isort: skip
 from .hierarchical_autoencoder import AnemoiModelHierarchicalAutoEncoder  # isort: skip
+from .disentangled_encprocdec import AnemoiModelDisentangledEncProcDec  # isort: skip
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec  # isort: skip
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec  # isort: skip
 
@@ -29,4 +30,5 @@ __all__ = [
     "AnemoiModelAutoEncoder",
     "AnemoiModelHierarchicalAutoEncoder",
     "AnemoiModelEncProcDecMultiOutInterpolator",
+    "AnemoiModelDisentangledEncProcDec",
 ]

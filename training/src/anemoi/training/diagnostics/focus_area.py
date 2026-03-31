@@ -60,7 +60,7 @@ class NodeAttributeSpatialMask(SpatialMask):
         self.verify_mask(graph_data)
         self.mask_attr_name_idxs = graph_data["data"][self.node_attribute_name]
         self.focus_mask = np.zeros(latlons.shape[0], dtype=bool)
-        self.focus_mask[self.mask_attr_name_idxs.squeeze()] = True
+        self.focus_mask[self.mask_attr_name_idxs] = True
 
 
 class BoundingBoxSpatialMask(SpatialMask):

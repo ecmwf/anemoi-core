@@ -466,6 +466,11 @@ class ForecasterSchema(BaseTrainingSchema):
     "Rollout configuration."
 
 
+class LatentForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.LatentGraphForecaster",] = Field(..., alias="model_task")
+    "Training objective."
+
+
 class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
@@ -484,11 +489,6 @@ class DiffusionTendForecasterSchema(ForecasterSchema):
     "Training objective."
 
 
-class AutoencoderSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
-    "Training objective."
-
-
 class InterpolationMultiSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
     "Training objective."
@@ -500,9 +500,15 @@ class InterpolationMultiSchema(BaseTrainingSchema):
     rollout: Literal[None] = None
 
 
+class AutoencoderSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
+    "Training objective."
+
+
 TrainingSchema = Annotated[
     ForecasterSchema
     | ForecasterEnsSchema
+    | LatentForecasterSchema
     | InterpolationMultiSchema
     | DiffusionForecasterSchema
     | DiffusionTendForecasterSchema

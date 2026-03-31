@@ -148,7 +148,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        config : DictConfig
+        config : BaseSchema
             Job configuration
         graph_data : HeteroData
             Graph objects keyed by dataset name
