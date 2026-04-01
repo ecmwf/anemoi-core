@@ -615,9 +615,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
                 shard_shapes = get_shard_shapes(x_mean, -2, model_comm_group=model_comm_group)
                 x_mean = shard_tensor(x_mean, -2, shard_shapes, model_comm_group)
 
-                shard_shapes_3vars = get_shard_shapes(x_mean_3vars, -2, model_comm_group=model_comm_group)
-                x_mean_3vars = shard_tensor(x_mean_3vars, -2, shard_shapes_3vars, model_comm_group)
-
                 mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean.npy")).to(x_mean.device).to(x_mean.dtype)
                 stdev = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/stdev.npy")).to(x_mean.device).to(x_mean.dtype)
                 
