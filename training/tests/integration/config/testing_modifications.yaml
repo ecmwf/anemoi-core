@@ -44,6 +44,5 @@ model:
 
 training:
   max_epochs: 2
-  lr:
-    warmup: 1
-    rate: 10e-5
+  optimization:
+    lr: 10e-5
