@@ -22,6 +22,18 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
+def _conditional_layer_kernel_config(condition_shape: int):
+    return load_layer_kernels(
+        kernel_config={
+            "LayerNorm": {
+                "_target_": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+                "condition_shape": condition_shape,
+            }
+        },
+        instance=False,
+    )
+
+
 @dataclass
 class MapperConfig:
     in_channels_src: int = 3
@@ -157,6 +169,25 @@ class TestTransformerForwardMapper:
         assert mapper.proc.attention.lin_v.weight.grad is not None
         assert mapper.proc.attention.projection.weight.grad is not None
 
+    def test_forward_accepts_conditioning(self, mapper_init, pair_tensor, device):
+        condition_shape = 6
+        config = asdict(mapper_init)
+        config["layer_kernels"] = _conditional_layer_kernel_config(condition_shape)
+        mapper = TransformerForwardMapper(**config).to(device)
+        mapper.gradient_checkpointing = False
+
+        batch_size = 1
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        cond = (
+            torch.randn(self.NUM_SRC_NODES, condition_shape, device=device),
+            torch.randn(self.NUM_DST_NODES, condition_shape, device=device),
+        )
+
+        x_src, x_dst = mapper.forward(pair_tensor, batch_size, shard_shapes, cond=cond)
+
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src])
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+
 
 class TestTransformerBackwardMapper:
     NUM_SRC_NODES: int = 10
@@ -210,3 +241,30 @@ class TestTransformerBackwardMapper:
         assert mapper.proc.attention.lin_v.weight.grad is not None
         assert mapper.proc.attention.projection.weight.grad is not None
         assert mapper.node_data_extractor[1].weight.grad is not None
+
+    def test_forward_accepts_conditioning(self, mapper_init, device):
+        condition_shape = 6
+        config = asdict(mapper_init)
+        config["layer_kernels"] = _conditional_layer_kernel_config(condition_shape)
+        mapper = TransformerBackwardMapper(
+            **config,
+            out_channels_dst=self.OUT_CHANNELS_DST,
+        ).to(device)
+        mapper.gradient_checkpointing = False
+
+        batch_size = 1
+        x = (
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
+        )
+        shard_shapes = [[self.NUM_SRC_NODES, mapper_init.in_channels_src]], [
+            [self.NUM_DST_NODES, mapper_init.in_channels_dst]
+        ]
+        cond = (
+            torch.randn(self.NUM_SRC_NODES, condition_shape, device=device),
+            torch.randn(self.NUM_DST_NODES, condition_shape, device=device),
+        )
+
+        out = mapper.forward(x, batch_size, shard_shapes, cond=cond)
+
+        assert out.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])
