@@ -291,6 +291,7 @@ class AnemoiTrainer(ABC):
                 )
 
             model.data_indices = self.data_indices
+            model.refresh_dataset_context_static()  # update data_indices in context
             # Validate data indices between checkpoint and current config
             self._validate_transfer_learning_datasets(model)
 
