@@ -37,15 +37,6 @@ class BasePlotAdapter(ABC):
         """Number of rollout/outer steps for plotting."""
         return self._task.num_output_timesteps
 
-    @abstractmethod
-    def get_init_step(self, rollout_step: int) -> int:
-        """Input step index for a given rollout step."""
-        ...
-
-    @property
-    def step_names(self) -> list[str]:
-        return self._task.step_names
-
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         del rollout_step
         return 0
