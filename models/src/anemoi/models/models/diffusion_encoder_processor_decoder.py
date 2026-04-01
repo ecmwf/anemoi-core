@@ -10,6 +10,7 @@
 
 import logging
 import warnings
+from typing import Any
 from typing import Callable
 from typing import Optional
 from typing import Union
@@ -41,7 +42,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: Any,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
@@ -67,7 +68,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self.noise_embedder = instantiate(diffusion_config.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
-    def _build_networks(self, model_config: DotDict) -> None:
+    def _build_networks(self, model_config: Any) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
@@ -771,7 +772,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: Any,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,

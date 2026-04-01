@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Any
 from typing import Optional
 
 import einops
@@ -32,7 +33,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: Any,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
@@ -47,10 +48,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def _build_networks(self, model_config):
         super()._build_networks(model_config)
+
         self.noise_injector = instantiate(
             model_config.model.noise_injector,
             _recursive_=False,
             num_channels=self.num_channels,
+            graph_data=self._graph_data,
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:

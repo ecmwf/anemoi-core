@@ -8,10 +8,12 @@
 #
 
 import logging
+from typing import Any
 from typing import Optional
 
 import einops
 import torch
+from omegaconf import OmegaConf
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
@@ -20,7 +22,6 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: Any,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
@@ -47,9 +48,13 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
         graph_data : HeteroData
             Graph definition
         """
-        model_config = DotDict(model_config)
-        self.input_times = model_config.training.explicit_times.input
-        self.output_times = model_config.training.explicit_times.target
+        if type(model_config) is dict and not OmegaConf.is_config(model_config):
+            model_config_local = OmegaConf.create(model_config)
+        else:
+            model_config_local = model_config
+
+        self.input_times = list(model_config_local.training.explicit_times.input)
+        self.output_times = list(model_config_local.training.explicit_times.target)
 
         super().__init__(
             model_config=model_config,
@@ -57,8 +62,6 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             statistics=statistics,
             graph_data=graph_data,
         )
-
-        self.latent_skip = model_config.model.latent_skip
 
     # Overwrite base class
     def _calculate_input_dim(self, dataset_name: str) -> int:

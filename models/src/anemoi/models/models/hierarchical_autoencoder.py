@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
+from typing import Any
 from typing import Optional
 
 import torch
@@ -28,7 +28,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: Any,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
@@ -37,7 +37,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
         Parameters
         ----------
-        model_config : DotDict
+        model_config : Any
             Model configuration
         data_indices : dict
             Data indices
@@ -52,35 +52,35 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.data_indices = data_indices
         self.statistics = statistics
 
-        model_config = DotDict(model_config)
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        model_config_local = DotDict(model_config)
+        self._graph_name_hidden = model_config_local.model.model.hidden_nodes_name
 
-        self.n_step_input = model_config.training.multistep_input
-        self.n_step_output = model_config.training.multistep_output
+        self.n_step_input = model_config_local.training.multistep_input
+        self.n_step_output = model_config_local.training.multistep_output
 
-        self.num_channels = model_config.model.num_channels
+        self.num_channels = model_config_local.model.num_channels
 
         # hidden_dims is the dimentionality of features at each depth
         self.hidden_dims = {hidden: self.num_channels * (2**i) for i, hidden in enumerate(self._graph_name_hidden)}
 
         # Unpack config for hierarchical graph
-        self.level_process = model_config.model.enable_hierarchical_level_processing
+        self.level_process = model_config_local.model.enable_hierarchical_level_processing
 
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters, self._graph_data)
+        self.node_attributes = NamedNodesAttributes(model_config_local.model.trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
 
         # build networks
-        self._build_networks(model_config)
+        self._build_networks(model_config_local)
 
         # build residual connection
-        self._build_residual(model_config.model.residual)
+        self._build_residual(model_config_local.model.residual)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
-        self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+        self.boundings = build_boundings(model_config_local, self.data_indices, self.statistics)
 
     def _build_networks(self, model_config):
 

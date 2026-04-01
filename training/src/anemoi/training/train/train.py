@@ -37,6 +37,7 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.train.graph_data import TrainerGraphDataFactory
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -143,6 +144,10 @@ class AnemoiTrainer(ABC):
         return initial_seed
 
     @cached_property
+    def graph_data_factory(self) -> TrainerGraphDataFactory:
+        return TrainerGraphDataFactory(self.config)
+
+    @cached_property
     @abstractmethod
     def profiler(self) -> None:
         """Abstract method to be used for AnemoiProfiler."""
@@ -150,29 +155,8 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def graph_data(self) -> HeteroData:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-
-            # TODO(): We could add some functionality to load partial graphs here, and compute the rest from the config.
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        return GraphCreator(config=self.config.graph).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
+        """Graph data built or loaded for the current trainer config."""
+        return self.graph_data_factory.build()
 
     def _validate_transfer_learning_datasets(
         self,
