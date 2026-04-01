@@ -9,6 +9,7 @@
 
 import gc
 import logging
+import time
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
@@ -50,7 +51,6 @@ import sys
 from pathlib import Path
 benchmark_utils_path = Path(__file__).parent.parent / "utils"
 sys.path.insert(0, str(benchmark_utils_path))
-from profiling import benchmark as run_benchmark
 
 LOGGER = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class MapperBenchmarkConfig:
     """Configuration for mapper benchmarks."""
     in_channels_src: int = 1024
     in_channels_dst: int = 1024
-    trainable_size: int = 256 #TODO is this right?
+    trainable_size: int = 256
     hidden_dim: int = 256
     num_chunks: int = 4
     num_heads: int = 16
@@ -94,8 +94,7 @@ class MapperBenchmarkConfig:
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
-    shard_strategy: str = "edges"
-    #shard_strategy: str = "heads"
+    shard_strategy: str = "heads"
     graph_attention_backend: str = "triton" # TODO pick triton by default if running on GPU
     edge_dim: int = None
     edge_pre_mlp: bool = False
@@ -151,7 +150,6 @@ def benchmark_graph(graph_config, device) -> HeteroData:
     return graph
 
 
-@pytest.fixture
 def benchmark_graph_provider(graph_config, mapper_benchmark_config, device):
     """Create graph provider for benchmarking."""
     
@@ -191,6 +189,8 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchma
         reset_peak_memory_stats()
         empty_cache()
     gc.collect()
+
+    torch.cuda.set_stream(torch.cuda.Stream())  # use a separate stream for graph capture to avoid synchronizing with other operations during warmup
     
     # Create mapper
     mapper_config = asdict(config)
@@ -211,32 +211,55 @@ def test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchma
 
 
     #with nsight.annotate("Mapper forward (triton)"):
-    out = mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
+    #out = mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
+    #torch.cuda.cudart().cudaProfilerStart()
+    
+    for use_cuda_graphs in [True, False]:
+        print(f"Using cuda graphs: {use_cuda_graphs}")
+        for i in range(10): # memory leak running more then 10 iterations for some reason, need to investigate
+            x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
+            x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
+            x = (x_src, x_dst)
+            torch.cuda.nvtx.range_push(f"iteration {i} start")
+            start_time= time.time()
 
-    for i in range(100):
-        x_src = torch.rand(graph_config.num_src_nodes, config.in_channels_src, device=device, requires_grad=True)
-        x_dst = torch.rand(graph_config.num_dst_nodes, config.in_channels_dst, device=device, requires_grad=True)
-        x = (x_src, x_dst)
+            if use_cuda_graphs:
+                if i == 0: # warmup
+                    with torch.cuda.stream(torch.cuda.Stream()): # run in a separate stream to avoid synchronizing the graph capture stream during warmup
+                        out = mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
+                        loss = dummy_loss(out)
+                        with torch.autograd.grad_mode.set_multithreading_enabled(False): # dont run bwd pass in a seperarte thread
+                            loss.backward()
+                        del loss
+                        end_time= time.time()
+                        print(f"iteration {i}: {(end_time-start_time)*1000:.2f}ms")
+                        torch.cuda.nvtx.range_pop()
+                    continue
+                if i == 1: #graph capture
+                    x_src_static = torch.empty_like(x_src, device=device)
+                    x_dst_static = torch.empty_like(x_dst, device=device)
+                    x_static = (x_src_static, x_dst_static)
+                    g = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(g, capture_error_mode="thread_local"):  #dont error if a different thread does an unsupported cuda op
+                        out = mapper.forward(x_static, config.batch_size, shard_shapes, edge_attr, edge_index)
+                        loss = dummy_loss(out)
+                        with torch.autograd.grad_mode.set_multithreading_enabled(False): # dont run bwd pass in a seperarte thread
+                            loss.backward()
 
-
-        if i == 0: # warmup
-            with torch.cuda.stream(torch.cuda.Stream()): # run in a separate stream to avoid synchronizing the graph capture stream during warmup
+                #replay graph in subsequent iterations
+                x_src_static.copy_(x_src, non_blocking=True)
+                x_dst_static.copy_(x_dst, non_blocking=True)
+                g.replay()
+            else:
                 out = mapper.forward(x, config.batch_size, shard_shapes, edge_attr, edge_index)
                 loss = dummy_loss(out)
-                loss.backward()
-            continue
-        if i == 1: #graph capture
-            x_static = (torch.empty_like(x_src, device=device, requires_grad=True), torch.empty_like(x_dst, device=device, requires_grad=True))
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g, capture_error_mode="thread_local"):  #dont error if a different thread does an unsupported cuda op
-                out = mapper.forward(x_static, config.batch_size, shard_shapes, edge_attr, edge_index)
-                loss = dummy_loss(out)
-                with torch.autograd.grad_mode.set_mulithreading_enabled(False): # dont run bwd pass in a seperarte thread
+                with torch.autograd.grad_mode.set_multithreading_enabled(False): # dont run bwd pass in a seperarte thread
                     loss.backward()
 
-        #replay graph in subsequent iterations
-        x_static.copy_(x, non_blocking=True)
-        g.replay()
+            end_time= time.time()
+            print(f"iteration {i}: {(end_time-start_time)*1000:.2f}ms")
+            torch.cuda.nvtx.range_pop()
+
 
     #mapper_config["graph_attention_backend"] = 'pyg'
     #mapper_pyg = GraphTransformerForwardMapper(**mapper_config).to(device)
@@ -284,12 +307,12 @@ def test_benchmark_backward_mapper(mapper_benchmark_config, graph_config, benchm
     
     # Run benchmark
     LOGGER.debug(f"Running {mode} benchmark...")
-    run_time, peak_memory = run_benchmark(
-        forward_fn,
-        mode=mode,
-        warmup_iter=config.warmup_iter,
-        run_iter=config.run_iter
-    )
+    #run_time, peak_memory = run_benchmark(
+    #    forward_fn,
+    #    mode=mode,
+    #    warmup_iter=config.warmup_iter,
+    #    run_iter=config.run_iter
+    #)
     
     LOGGER.debug(f"Backward mapper benchmark complete:")
     LOGGER.debug(f"  Time per iteration: {run_time:.2f} ms")
@@ -324,23 +347,23 @@ def test_benchmark_backward_mapper(mapper_benchmark_config, graph_config, benchm
 #    use_cuda_graphs = False
 #    test_benchmark_forward_mapper(mapper_benchmark_config, graph_config, benchmark_graph_provider, mode, device, use_cuda_graphs)
 
-@nsight.analyze.plot(
-    "mapper_fwd_n320_o96.png",
-    plot_type="bar",
-    title="Mapper Forward Pass Performance (n320 to o96)",
-    ylabel="Time (ms)",
-)
-@nsight.analyze.kernel(
-    configs=[512, 1024, 2048],
-    runs=3,
+#@nsight.analyze.plot(
+    #"mapper_fwd_n320_o96.png",
+   # plot_type="bar",
+    #title="Mapper Forward Pass Performance (n320 to o96)",
+#    ylabel="Time (ms)"#,
+#)
+#@nsight.analyze.kernel(
+#    configs=[512, 1024, 2048],
+#    runs=3,
     #metrics=["dram__throughput.avg"],
     #metrics=["sm__cycles_elapsed.avg",],
     #metrics=["gpu__time_duration.sum",],
     #metrics=["smsp__sass_inst_executed_op_shared.sum",],
-    metrics=["dram__cycles_active_read.sum",],
-    #replay_mode='range', # annotation should only have 1 kernel # didnt work for some reason
-    combine_kernel_metrics=lambda x, y: x + y,  # Sum metrics from multiple kernels
-)
+#    metrics=["dram__cycles_active_read.sum",],
+#    #replay_mode='range', # annotation should only have 1 kernel # didnt work for some reason
+#    combine_kernel_metrics=lambda x, y: x + y,  # Sum metrics from multiple kernels
+#)
 def benchmark_forward_mapper(num_channels):
     mapper = MapperBenchmarkConfig(in_channels_src=num_channels, in_channels_dst=num_channels)
     graph=benchmark_graph_provider(GraphConfig_n320_to_o96(), mapper, "cuda:0")
@@ -348,7 +371,7 @@ def benchmark_forward_mapper(num_channels):
 
 def main() -> None:
     graph=benchmark_graph_provider(GraphConfig_n320_to_o96(), MapperBenchmarkConfig(), "cuda:0")
-    result = benchmark_forward_mapper()
+    result = benchmark_forward_mapper(1024)
     #print(result.to_dataframe())
     #print("\nTip: Run 'ncu --query-metrics' to see all available metrics!")
 
