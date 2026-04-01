@@ -114,9 +114,7 @@ class TemporalDownscalingPlotAdapter(BasePlotAdapter):
             x = data[init_step, ...].squeeze()
             y_true = data[output_step, ...].squeeze()
             pred = (
-                output_tensor[output_step, 0]
-                if getattr(output_tensor, "ndim", 0) >= 4
-                else output_tensor[output_step]
+                output_tensor[output_step, 0] if getattr(output_tensor, "ndim", 0) >= 4 else output_tensor[output_step]
             )
             y_pred = pred.squeeze() if hasattr(pred, "squeeze") else pred
             yield x, y_true, y_pred, f"istep{output_step + 1:02d}"
