@@ -146,9 +146,17 @@ class Projection(BaseProjection):
             Pass transform to scatter. Reuse this in all plot functions.
         """
         projection = cls.from_kind(latlons, kind)
-        pc_lon, pc_lat = projection.project(latlons)
         proj = projection.crs_for_axes()
-        return (pc_lon, pc_lat), proj, proj
+        if proj is not None:
+            # Cartopy axes: pass geographic degree coordinates with PlateCarree transform.
+            # Cartopy then reprojects them into the axes CRS internally.
+            import cartopy.crs as ccrs
+
+            latlons = np.asanyarray(latlons)
+            pc_lon, pc_lat = latlons[:, 1], latlons[:, 0]
+            return (pc_lon, pc_lat), proj, ccrs.PlateCarree()
+        pc_lon, pc_lat = projection.project(latlons)
+        return (pc_lon, pc_lat), None, None
 
 
 def equirectangular_projection(latlons: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

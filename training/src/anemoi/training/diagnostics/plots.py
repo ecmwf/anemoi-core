@@ -810,17 +810,10 @@ def single_plot(
     if cmap is None:
         cmap = "viridis"
     if not datashader:
-        psc = ax.scatter(
-            lon,
-            lat,
-            c=data,
-            cmap=cmap,
-            s=1,
-            alpha=1.0,
-            norm=norm,
-            rasterized=False,
-            transform=transform,
-        )
+        scatter_kwargs = {"c": data, "cmap": cmap, "s": 1, "alpha": 1.0, "norm": norm, "rasterized": False}
+        if transform is not None:
+            scatter_kwargs["transform"] = transform
+        psc = ax.scatter(lon, lat, **scatter_kwargs)
 
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
@@ -848,8 +841,8 @@ def single_plot(
         ax.set_xlim((xmin - 0.1, xmax + 0.1))
         ax.set_ylim((ymin - 0.1, ymax + 0.1))
 
-    # Add map features (always equirectangular coastlines/borders)
-    map_features.plot(ax)
+    # Add map features; pass CRS so Cartopy axes get correctly projected lines
+    map_features.plot(ax, crs=transform)
 
     if title is not None:
         ax.set_title(title)
