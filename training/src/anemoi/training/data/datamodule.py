@@ -168,7 +168,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         assert stage in {"training", "validation", "test"}
 
         extra = {}
-        if self.config.dataloader.multiprocessing_context is not None:
+
+        if self.config.dataloader.get("multiprocessing_context", None) is not None:
             import multiprocessing
 
             ctx = self.config.dataloader.multiprocessing_context
