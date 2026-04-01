@@ -101,7 +101,7 @@ hardware:
     graph: /project/home/p200177/DE_371/avritj/multi_scale_res9.pt
   num_gpus_per_node: 4
   num_gpus_per_model: 2
-  num_nodes: 8
+  num_nodes: 1
 training:
   # Set max_epochs or max_steps. Training stops at the first limit reached.
   max_steps: 500000
