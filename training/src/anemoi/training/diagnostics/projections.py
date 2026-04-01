@@ -1,4 +1,8 @@
+import logging
+
 import numpy as np
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseProjection:
@@ -108,6 +112,18 @@ class Projection(BaseProjection):
         if kind == "equirectangular":
             return cls.equirectangular()
         if kind == "lambert_conformal":
+            latlons = np.asanyarray(latlons)
+            lat_span = latlons[:, 0].max() - latlons[:, 0].min()
+            lon_span = latlons[:, 1].max() - latlons[:, 1].min()
+            if lat_span > 60 or lon_span > 180:
+                LOGGER.warning(
+                    "Lambert Conformal is designed for regional domains. "
+                    "The current domain spans %.1f° latitude and %.1f° longitude — "
+                    "falling back to equirectangular.",
+                    lat_span,
+                    lon_span,
+                )
+                return cls.equirectangular()
             return cls.lambert_conformal(latlons)
         raise ValueError(kind)
 
@@ -238,6 +254,13 @@ def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
 
     std_parallel_1 = central_latitude - lat_span * 0.25
     std_parallel_2 = central_latitude + lat_span * 0.25
+
+    # LCC requires |lat_1 + lat_2| > 0 (parallels must not cancel).
+    # When the domain straddles the equator symmetrically, nudge both parallels
+    # slightly northward to satisfy the constraint.
+    if abs(std_parallel_1 + std_parallel_2) < 1e-6:
+        std_parallel_1 += 1e-3
+        std_parallel_2 += 1e-3
 
     return ccrs.LambertConformal(
         central_latitude=central_latitude,

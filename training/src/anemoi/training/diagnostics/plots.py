@@ -697,9 +697,6 @@ def plot_flat_sample(
     else:
         data[2] = pred
         data[4] = pred - input_
-        ax[1].axis("off")
-        ax[3].axis("off")
-        ax[5].axis("off")
     # default titles for 6 plots
     titles = [
         f"{vname} input",
@@ -744,9 +741,9 @@ def plot_flat_sample(
 
     else:
         # diagnostic fields: omit input and increment plots
-        ax[0].axis("off")
-        ax[4].axis("off")
-        ax[5].axis("off")
+        data[0] = None
+        data[4] = None
+        data[5] = None
 
     for ii in range(6):
         if data[ii] is not None:
@@ -762,6 +759,8 @@ def plot_flat_sample(
                 datashader=datashader,
                 transform=transform,
             )
+        else:
+            ax[ii].axis("off")
 
 
 def single_plot(
