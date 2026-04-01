@@ -772,15 +772,12 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         task = pl_module.task
-        total_targets = task.num_output_timesteps
 
         input_tensor = (
-            batch[dataset_name][
-                :,
-                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
-                ...,
-                pl_module.data_indices[dataset_name].data.output.full,
-            ]
+            task.get_inputs(
+                batch={dataset_name: batch[dataset_name]},
+                data_indices=pl_module.data_indices,
+            )[dataset_name]
             .detach()
             .cpu()
         )

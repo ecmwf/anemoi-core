@@ -7,14 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .custom import CustomTask
 from .forecasting import ForecastingTask
 from .temporal_downscaling import TemporalDownscalingTask
 from .timeless import AutoencodingTask
 
 __all__ = [
     "AutoencodingTask",
-    "CustomTask",
     "ForecastingTask",
     "TemporalDownscalingTask",
 ]
