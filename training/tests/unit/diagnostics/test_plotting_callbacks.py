@@ -68,12 +68,10 @@ def test_plot_histogram_instantiation():
         config=config,
         sample_idx=0,
         parameters=["t2m", "tp", "u10"],
-        output_steps=1,
         dataset_names=["data"],
     )
     assert callback.sample_idx == 0
     assert callback.parameters == ["t2m", "tp", "u10"]
-    assert callback.output_steps == 1
     assert callback.log_scale is False
 
 
@@ -84,12 +82,10 @@ def test_plot_spectrum_instantiation():
         config=config,
         sample_idx=0,
         parameters=["t2m", "tp"],
-        output_steps=1,
         dataset_names=["data"],
     )
     assert callback.sample_idx == 0
     assert callback.parameters == ["t2m", "tp"]
-    assert callback.output_steps == 1
     assert callback.min_delta is None
 
 
@@ -370,7 +366,6 @@ def test_process_forecaster_output_shapes():
         sample_idx=0,
         parameters=["a", "b", "c"],
         accumulation_levels_plot=[0.5],
-        output_steps=1,
         dataset_names=["data"],
     )
     batch_size, sample_idx, n_ens, nlatlon, nvar = 2, 10, 1, 50, 3
@@ -413,7 +408,6 @@ def test_process_time_interpolator_output_shapes():
         sample_idx=0,
         parameters=["a", "b"],
         accumulation_levels_plot=[0.5],
-        output_steps=1,
         dataset_names=["data"],
     )
     batch_size, sample_idx, n_ens, nlatlon, nvar = 2, 10, 1, 50, 3
@@ -448,7 +442,6 @@ def test_process_time_interpolator_multi_out_squeeze():
         sample_idx=0,
         parameters=["a"],
         accumulation_levels_plot=[0.5],
-        output_steps=1,
         dataset_names=["data"],
     )
     batch_size, nlatlon, nvar = 2, 50, 3
@@ -715,7 +708,6 @@ def test_plot_spectrum_plot_time_interpolator():
         config=config,
         sample_idx=0,
         parameters=["a", "b"],
-        output_steps=1,
         dataset_names=["data"],
     )
     output_times = 2
@@ -763,7 +755,6 @@ def test_plot_spectrum_plot_forecaster():
         config=config,
         sample_idx=0,
         parameters=["a", "b"],
-        output_steps=2,
         dataset_names=["data"],
     )
     output_times = 2
@@ -818,7 +809,6 @@ def test_plot_histogram_plot_time_interpolator():
         config=config,
         sample_idx=0,
         parameters=["a", "b"],
-        output_steps=1,
         dataset_names=["data"],
     )
     output_times = 2
@@ -866,7 +856,6 @@ def test_plot_histogram_plot_forecaster():
         config=config,
         sample_idx=0,
         parameters=["a", "b"],
-        output_steps=2,
         dataset_names=["data"],
     )
     output_times = 2
