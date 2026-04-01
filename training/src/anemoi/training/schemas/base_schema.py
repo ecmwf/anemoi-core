@@ -72,6 +72,33 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
     return config_system
 
 
+_DEPRECATED_TARGETS: dict[str, str] = {
+    "anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots": (
+        "This callback has been deprecated and removed, update your config to remove any references to it. "
+    ),
+}
+
+
+def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
+    """Recursively search for deprecated _target_ values anywhere in a config."""
+    if isinstance(data, str):
+        return None
+    if hasattr(data, "keys"):  # dict / DictConfig (not ListConfig)
+        target = data.get("_target_")
+        if target in deprecated:
+            return target, deprecated[target]
+        for v in data.values():
+            result = _find_deprecated_target(v, deprecated)
+            if result:
+                return result
+    elif hasattr(data, "__iter__"):  # list / ListConfig
+        for item in data:
+            result = _find_deprecated_target(item, deprecated)
+            if result:
+                return result
+    return None
+
+
 def apply_runtime_postprocessing(config: BaseSchema | UnvalidatedBaseSchema) -> None:
     """Apply shared runtime adjustments after parsing either schema type.
 
@@ -82,12 +109,24 @@ def apply_runtime_postprocessing(config: BaseSchema | UnvalidatedBaseSchema) -> 
 
     if not config.dataloader.read_group_size:
         config.dataloader.read_group_size = config.system.hardware.num_gpus_per_model
-
     if config.diagnostics.log.mlflow.enabled and (
         config.system.output.logs.mlflow != config.diagnostics.log.mlflow.save_dir
     ):
         LOGGER.info("adjusting save_dir path to match output mlflow logs")
         config.diagnostics.log.mlflow.save_dir = str(config.system.output.logs.mlflow)
+
+
+class SchemaCommonMixin:
+    """Shared logic for schema objects."""
+
+    @model_validator(mode="before")
+    def _check_deprecated_targets(cls, values: Any) -> Any:
+        """Raise before validation if any _target_ in the config is deprecated."""
+        result = _find_deprecated_target(values, _DEPRECATED_TARGETS)
+        if result:
+            target, hint = result
+            msg = f"'{target}' is deprecated and has been removed. {hint}"
+            raise ValueError(msg)
 
 
 class BaseSchema(BaseModel):
