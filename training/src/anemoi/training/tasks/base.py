@@ -65,10 +65,6 @@ class BaseTask(ABC):
         self._steps = steps if steps is not None else ({},)
 
     @property
-    def step_names(self) -> list[str]:
-        return ["" for _ in range(len(self._steps))]
-
-    @property
     def inputs_offsets(self) -> list[datetime.timedelta]:
         """Sorted input time offsets."""
         return self._inputs_offsets
@@ -110,6 +106,10 @@ class BaseTask(ABC):
     def num_steps(self) -> int:
         """Number of steps in the task."""
         return len(self._steps)
+
+    def get_metric_name(self, **_step_kwargs) -> str:
+        """Get the metric name for the current step (if any)."""
+        return ""
 
     def get_input_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of input time offsets."""

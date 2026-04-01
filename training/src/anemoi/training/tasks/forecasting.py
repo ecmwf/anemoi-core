@@ -86,13 +86,9 @@ class ForecastingTask(BaseTask):
         super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets, steps=steps)
         self._plot_adapter = ForecasterPlotAdapter(self)
 
-    @property
-    def step_names(self) -> list[str]:
-        """Get human-readable step names for the current rollout configuration.
-
-        These names will be used in plot tags and file names.
-        """
-        return [f"_rstep{d['rollout_step']}" for d in self.steps]
+    def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
+        """Get the metric name for the current step."""
+        return f"_rstep{rollout_step}"
 
     @property
     def _step_shift(self) -> datetime.timedelta:

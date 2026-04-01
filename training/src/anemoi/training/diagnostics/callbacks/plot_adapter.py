@@ -98,12 +98,8 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 class TemporalDownscalingPlotAdapter(BasePlotAdapter):
     """Temporal downscaling: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
 
-    def get_init_step(self, rollout_step: int) -> int:
-        return rollout_step
-
-    def get_loss_plot_batch_start(self, rollout_step: int) -> int:
-        del rollout_step
-        return self._task.num_input_timesteps
+    def get_init_step(self, **_kwargs) -> int:
+        return 0
 
     def iter_plot_samples(
         self,
@@ -113,17 +109,17 @@ class TemporalDownscalingPlotAdapter(BasePlotAdapter):
         max_out_steps: int | None = None,
     ) -> Iterator[tuple[Any, Any, Any, str]]:
         del max_out_steps
-        for rollout_step in range(output_times):
-            init_step = self.get_init_step(rollout_step)
+        for output_step in range(output_times):
+            init_step = self.get_init_step(output_step)
             x = data[init_step, ...].squeeze()
-            y_true = data[rollout_step + 1, ...].squeeze()
+            y_true = data[output_step, ...].squeeze()
             pred = (
-                output_tensor[rollout_step, 0]
+                output_tensor[output_step, 0]
                 if getattr(output_tensor, "ndim", 0) >= 4
-                else output_tensor[rollout_step]
+                else output_tensor[output_step]
             )
             y_pred = pred.squeeze() if hasattr(pred, "squeeze") else pred
-            yield x, y_true, y_pred, f"istep{rollout_step + 1:02d}"
+            yield x, y_true, y_pred, f"istep{output_step + 1:02d}"
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:
@@ -134,8 +130,7 @@ class TemporalDownscalingPlotAdapter(BasePlotAdapter):
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Autoencoder: single (sample, recon, tag) yield."""
 
-    def get_init_step(self, rollout_step: int) -> int:
-        del rollout_step
+    def get_init_step(self, **_kwargs) -> int:
         return 0
 
     def iter_plot_samples(

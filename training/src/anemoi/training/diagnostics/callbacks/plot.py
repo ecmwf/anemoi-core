@@ -649,13 +649,13 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            adapter = pl_module.plot_adapter
-            for i, metric_name in enumerate(adapter.step_names):
+            for i, task_kwargs in enumerate(pl_module.task.steps):
                 y_hat = outputs[1][i][dataset_name]
-                start = adapter.get_loss_plot_batch_start(i)
-                y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
-                var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
-                y_true = y_time.index_select(-1, var_idx)
+                y_true = pl_module.task.get_targets(
+                    batch={dataset_name: batch[dataset_name]},
+                    data_indices=pl_module.data_indices,
+                    **task_kwargs,
+                )[dataset_name]
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
@@ -664,6 +664,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 loss = loss[argsort_indices]
                 fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
 
+                metric_name = pl_module.task.get_metric_name(**task_kwargs)
                 self._output_figure(
                     logger,
                     fig,
@@ -770,7 +771,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = pl_module.plot_adapter.output_times
+        task = pl_module.task
+        total_targets = task.num_output_timesteps
 
         input_tensor = (
             batch[dataset_name][
