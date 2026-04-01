@@ -47,8 +47,8 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     "Number of layers of Graph Transformer processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
-    qk_norm: bool = Field(example=False)
-    "Normalize the query and key vectors. Default to False."
+    qk_norm: Union[str, bool] = Field(examples=["none", "layer_norm", "rms_norm", True, False])
+    "Normalize the query and key vectors. Options are 'none', 'layer_norm', 'rms_norm', True, False. Bools are supported for backward compatibility. If True, 'layer_norm' is used for normalization."
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
