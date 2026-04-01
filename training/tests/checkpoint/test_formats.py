@@ -17,11 +17,13 @@ from typing import TYPE_CHECKING
 import pytest
 import torch
 
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.exceptions import CheckpointValidationError
 from anemoi.training.checkpoint.formats import convert_lightning_to_pytorch
 from anemoi.training.checkpoint.formats import detect_checkpoint_format
+from anemoi.training.checkpoint.formats import detect_format_from_data
 from anemoi.training.checkpoint.formats import extract_state_dict
 from anemoi.training.checkpoint.formats import is_format_available
 from anemoi.training.checkpoint.formats import load_checkpoint
@@ -64,24 +66,24 @@ class TestFormatDetection:
 
     @pytest.mark.unit
     def test_detect_format_unknown_extension(self, temp_checkpoint_dir: Path, lightning_checkpoint: dict) -> None:
-        """Test format detection with unknown file extension."""
+        """Test format detection with unknown file extension raises."""
         unknown_path = temp_checkpoint_dir / "model.unknown"
         torch.save(lightning_checkpoint, unknown_path)
 
-        # Should default to lightning for unknown extensions after inspection
-        assert detect_checkpoint_format(unknown_path) == "lightning"
+        with pytest.raises(CheckpointConfigError, match="Unsupported checkpoint file extension"):
+            detect_checkpoint_format(unknown_path)
 
     @pytest.mark.unit
     def test_detect_format_corrupted_file(self, temp_checkpoint_dir: Path) -> None:
-        """Test format detection with corrupted checkpoint file."""
+        """Test format detection with corrupted checkpoint file raises."""
         corrupted_path = temp_checkpoint_dir / "corrupted.ckpt"
 
         # Write corrupted data
         with corrupted_path.open("wb") as f:
             f.write(b"corrupted data that is not a valid checkpoint")
 
-        # Should default to lightning for corrupted files
-        assert detect_checkpoint_format(corrupted_path) == "lightning"
+        with pytest.raises(CheckpointLoadError):
+            detect_checkpoint_format(corrupted_path)
 
     @pytest.mark.unit
     def test_detect_format_non_dict_checkpoint(self, temp_checkpoint_dir: Path, simple_model: SimpleModel) -> None:
@@ -112,6 +114,35 @@ class TestFormatDetection:
 
         # Should detect as lightning based on content
         assert detect_checkpoint_format(checkpoint_path) == "lightning"
+
+
+class TestFormatFromData:
+    """Test detect_format_from_data with already-loaded checkpoint data."""
+
+    @pytest.mark.unit
+    def test_detect_lightning_from_data(self, lightning_checkpoint: dict) -> None:
+        """Test detection of Lightning format from data keys."""
+        assert detect_format_from_data(lightning_checkpoint) == "lightning"
+
+    @pytest.mark.unit
+    def test_detect_pytorch_from_data(self, pytorch_checkpoint: dict) -> None:
+        """Test detection of PyTorch format from data keys."""
+        assert detect_format_from_data(pytorch_checkpoint) == "pytorch"
+
+    @pytest.mark.unit
+    def test_detect_state_dict_from_data(self, sample_state_dict: dict) -> None:
+        """Test detection of raw state dict from data."""
+        assert detect_format_from_data(sample_state_dict) == "state_dict"
+
+    @pytest.mark.unit
+    def test_detect_non_dict_returns_pytorch(self) -> None:
+        """Test that non-dict input returns pytorch."""
+        assert detect_format_from_data("not a dict") == "pytorch"
+
+    @pytest.mark.unit
+    def test_detect_empty_dict_returns_pytorch(self) -> None:
+        """Test that empty dict returns pytorch (no matching keys)."""
+        assert detect_format_from_data({}) == "pytorch"
 
 
 class TestFormatLoading:
@@ -459,12 +490,12 @@ class TestFormatEdgeCases:
 
     @pytest.mark.unit
     def test_detect_format_empty_file(self, temp_checkpoint_dir: Path) -> None:
-        """Test format detection with empty file."""
+        """Test format detection with empty file raises."""
         empty_path = temp_checkpoint_dir / "empty.ckpt"
         empty_path.touch()
 
-        # Should default to lightning for empty/unreadable files
-        assert detect_checkpoint_format(empty_path) == "lightning"
+        with pytest.raises(CheckpointLoadError):
+            detect_checkpoint_format(empty_path)
 
     @pytest.mark.unit
     def test_load_checkpoint_corrupted_pickle(self, temp_checkpoint_dir: Path) -> None:
