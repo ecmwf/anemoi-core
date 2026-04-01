@@ -50,6 +50,17 @@ class SWA(BaseModel):
     "Learning rate for SWA."
 
 
+class EMA(BaseModel):
+    """Exponential moving average configuration."""
+
+    enabled: bool = Field(example=False)
+    "Enable exponential moving average of model weights."
+    decay: NonNegativeFloat = Field(example=0.999)
+    "Decay factor for EMA updates."
+    update_after_step: NonNegativeInt = Field(example=0)
+    "Number of optimizer steps to skip before EMA updates begin."
+
+
 class Rollout(BaseModel):
     """Rollout configuration."""
 
@@ -335,6 +346,8 @@ class BaseTrainingSchema(BaseModel):
     "Config for gradient clipping."
     strategy: StrategySchemas
     "Strategy to use."
+    ema: EMA = Field(default_factory=EMA)
+    "Config for exponential moving average."
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
     training_loss: LossSchemas

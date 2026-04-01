@@ -379,7 +379,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             model_comm_group=model_comm_group,
         )[:, None, ...]
 
-        for i in range(6):
+        for i in range(min(6, x_in_interp_to_hres_raw.shape[-1])):
             LOGGER.info(
                 "Interpolated tensor statistics for index %d: mean=%f, std=%f",
                 i,
@@ -634,12 +634,17 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
         step_callback = kwargs.get("step_callback")
         capture_init_state = bool(kwargs.get("capture_init_state", False))
-        # seed = 42
-        # torch.manual_seed(seed)
-        # if torch.cuda.is_available():
-        #    torch.cuda.manual_seed_all(seed)
+        seed = kwargs.get("seed")
+        noise_generator = None
+        if seed is not None:
+            noise_generator = torch.Generator(device=x_in_interp_to_hres.device.type)
+            noise_generator.manual_seed(int(seed))
         print("sample, sigmas", sigmas)
-        y_init = torch.randn(shape, device=x_in_interp_to_hres.device) * sigmas[0]  # , dtype=sigmas.dtype)
+        y_init = torch.randn(
+            shape,
+            device=x_in_interp_to_hres.device,
+            generator=noise_generator,
+        ) * sigmas[0]
         print("sample, y val", y_init.mean(dim=-1).std())
         if step_callback is not None and capture_init_state:
             step_callback(-1, y_init)
@@ -705,7 +710,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         """
         denorm_residuals = post_processors_state(residuals, dataset="output", in_place=False)
 
-        for i in range(6):
+        for i in range(min(6, denorm_residuals.shape[-1])):
             LOGGER.info(
                 "Residual tensor statistics for index %d: mean=%f, std=%f",
                 i,
@@ -726,7 +731,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
 
         matching_channel_indices = self._output_input_matching_indices.to(state_inp.device)
         denorm_state_inp = state_inp[..., matching_channel_indices]
-        for i in range(6):
+        for i in range(min(6, denorm_state_inp.shape[-1])):
             LOGGER.info(
                 "Input tensor statistics for index %d: mean=%f, std=%f",
                 i,
@@ -735,7 +740,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             )
 
         denorm_output = denorm_residuals + denorm_state_inp
-        for i in range(6):
+        for i in range(min(6, denorm_output.shape[-1])):
             LOGGER.info(
                 "Output tensor statistics for index %d: mean=%f, std=%f",
                 i,

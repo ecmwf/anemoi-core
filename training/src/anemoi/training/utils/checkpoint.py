@@ -27,13 +27,18 @@ from anemoi.utils.checkpoints import save_metadata
 LOGGER = logging.getLogger(__name__)
 
 
-def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
+def load_and_prepare_model(
+    lightning_checkpoint_path: str,
+    use_ema: bool = False,
+) -> tuple[torch.nn.Module, dict]:
     """Load the lightning checkpoint and extract the pytorch model and its metadata.
 
     Parameters
     ----------
     lightning_checkpoint_path : str
         path to lightning checkpoint
+    use_ema : bool
+        Whether to replace model weights with EMA weights stored in the Lightning checkpoint.
 
     Returns
     -------
@@ -43,6 +48,14 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
     """
     module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path)
     model = module.model
+
+    if use_ema:
+        checkpoint = torch.load(lightning_checkpoint_path, weights_only=False, map_location="cpu")
+        ema_checkpoint = checkpoint.get("ema")
+        if ema_checkpoint is None:
+            msg = f"Checkpoint {lightning_checkpoint_path} does not contain EMA weights."
+            raise ValueError(msg)
+        model.load_state_dict(ema_checkpoint["state_dict"])
 
     metadata = dict(**model.metadata)
     model.metadata = None

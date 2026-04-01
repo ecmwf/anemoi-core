@@ -12,9 +12,10 @@
 import omegaconf
 import yaml
 
+from anemoi.training.diagnostics.callbacks.ema import ExponentialMovingAverage
 from anemoi.training.diagnostics.callbacks import get_callbacks
 
-NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
+NUM_FIXED_CALLBACKS = 2  # ParentUUIDCallback, RegisterMigrations
 
 default_config = """
 diagnostics:
@@ -76,3 +77,12 @@ def test_add_plotting_callback(monkeypatch):
     config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
     callbacks = get_callbacks(config)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
+
+
+def test_add_ema_callback():
+    config = omegaconf.OmegaConf.create(default_config)
+    config.training = {"ema": {"enabled": True, "decay": 0.999, "update_after_step": 0}}
+    callbacks = get_callbacks(config)
+
+    assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
+    assert any(isinstance(callback, ExponentialMovingAverage) for callback in callbacks)

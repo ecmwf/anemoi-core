@@ -46,6 +46,12 @@ swa:
   enabled: False
   lr: 1.e-4
 
+# exponential moving average of model weights
+ema:
+  enabled: False
+  decay: 0.999
+  update_after_step: 0
+
 # use ZeroRedundancyOptimizer ; saves memory for larger models
 zero_optimizer: False
 

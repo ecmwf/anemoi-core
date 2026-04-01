@@ -31,6 +31,11 @@ class Checkpoint(Command):
         )
         inference.add_argument("--input", "-i", required=True, metavar="training.ckpt")
         inference.add_argument("--output", "-o", required=True, metavar="inference.ckpt")
+        inference.add_argument(
+            "--use-ema",
+            action="store_true",
+            help="Export EMA weights when the input training checkpoint contains them.",
+        )
 
     @staticmethod
     def run(args: argparse.Namespace) -> None:
@@ -40,7 +45,7 @@ class Checkpoint(Command):
             from anemoi.training.utils.checkpoint import load_and_prepare_model
             from anemoi.training.utils.checkpoint import save_inference_checkpoint
 
-            module, metadata = load_and_prepare_model(args.input)
+            module, metadata = load_and_prepare_model(args.input, use_ema=args.use_ema)
             path = save_inference_checkpoint(module, metadata, args.output)
 
             LOG.info("Inference checkpoint saved to %s", path)

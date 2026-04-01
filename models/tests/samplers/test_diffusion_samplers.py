@@ -557,3 +557,61 @@ class TestExperimentalSamplerScheduler:
         sigmas = scheduler.get_schedule()
 
         assert sigmas.shape == (41,)
+
+
+def test_downscaler_sample_seeded_init_noise_is_deterministic(monkeypatch):
+    from types import SimpleNamespace
+
+    from anemoi.models.models.downscaler_encoder_processor_decoder import AnemoiDownscalingModelEncProcDec
+    from anemoi.models.samplers import diffusion_samplers
+
+    captured = []
+
+    class _FixedScheduler:
+        def __init__(self, **_kwargs):
+            pass
+
+        def get_schedule(self, device=None, dtype_compute=torch.float64, **_kwargs):
+            return torch.tensor([5.0, 0.0], device=device, dtype=dtype_compute)
+
+    class _CaptureSampler:
+        def __init__(self, dtype, **_kwargs):
+            self.dtype = dtype
+
+        def sample(self, x, y, y_init, sigmas, denoising_fn, **kwargs):
+            captured.append(y_init.detach().cpu().clone())
+            return y_init
+
+    monkeypatch.setitem(diffusion_samplers.NOISE_SCHEDULERS, "karras", _FixedScheduler)
+    monkeypatch.setitem(diffusion_samplers.DIFFUSION_SAMPLERS, "heun", _CaptureSampler)
+
+    model = AnemoiDownscalingModelEncProcDec.__new__(AnemoiDownscalingModelEncProcDec)
+    model.inference_defaults = SimpleNamespace(
+        noise_scheduler={
+            "schedule_type": "karras",
+            "sigma_max": 5.0,
+            "sigma_min": 0.03,
+            "num_steps": 1,
+            "rho": 7.0,
+        },
+        diffusion_sampler={
+            "sampler": "heun",
+            "S_churn": 0.0,
+            "S_min": 0.0,
+            "S_max": 5.0,
+            "S_noise": 1.0,
+        },
+    )
+    model.num_output_channels = 2
+    model.fwd_with_preconditioning = lambda *args, **kwargs: args[1]
+
+    x = torch.ones(1, 1, 1, 3, 2)
+    x_hres = torch.ones(1, 1, 1, 3, 2)
+
+    out1 = model.sample(x, x_hres, seed=42)
+    out2 = model.sample(x, x_hres, seed=42)
+    out3 = model.sample(x, x_hres, seed=7)
+
+    assert out1.shape == out2.shape == out3.shape
+    assert torch.allclose(captured[0], captured[1])
+    assert not torch.allclose(captured[0], captured[2])

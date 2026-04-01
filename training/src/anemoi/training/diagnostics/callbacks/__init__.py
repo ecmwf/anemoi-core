@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from pytorch_lightning.callbacks import Callback
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
+from anemoi.training.diagnostics.callbacks.ema import ExponentialMovingAverage
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
@@ -49,6 +50,7 @@ def nestedget(config: DictConfig, key: str, default: Any) -> Any:
 CONFIG_ENABLED_CALLBACKS: list[
     tuple[list[str] | str | Callable[[DictConfig], bool], type[Callback]]
 ] = [
+    ("training.ema.enabled", ExponentialMovingAverage),
     ("training.swa.enabled", StochasticWeightAveraging),
     (
         lambda config: nestedget(config, "diagnostics.log.wandb.enabled", False)
