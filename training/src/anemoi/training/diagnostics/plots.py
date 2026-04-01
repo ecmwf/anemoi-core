@@ -740,9 +740,9 @@ def plot_flat_sample(
             norms[5] = norm_error
 
     else:
-        # diagnostic fields: omit input and increment plots
+        # diagnostic fields: omit input and persistence error plots
+        # increment (data[4]) is kept if already set by the autoencoder branch
         data[0] = None
-        data[4] = None
         data[5] = None
 
     for ii in range(6):
@@ -1069,7 +1069,7 @@ def plot_rank_histograms(
     if not isinstance(ax, np.ndarray):
         ax = np.array([ax])
 
-    for plot_idx, (_variable_idx, variable_name) in enumerate(parameters.items()):
+    for plot_idx, (_, variable_name) in enumerate(parameters.items()):
         rh_ = rh[:, plot_idx]
         ax[plot_idx].bar(np.arange(0, n_ens + 1), rh_ / rh_.sum(), linewidth=1, color="blue", width=0.7)
         ax[plot_idx].hlines(rh_.mean() / rh_.sum(), xmin=-0.5, xmax=n_ens + 0.5, linestyles="--", colors="red")
