@@ -97,7 +97,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
                 yield x, y_true, y_pred, f"rstep{rollout_step:02d}_out{out_step:02d}"
 
 
-class TemporalDownscalingPlotAdapter(BasePlotAdapter):
+class TemporalDownscalerPlotAdapter(BasePlotAdapter):
     """Temporal downscaling: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
 
     def get_init_step(self) -> int:

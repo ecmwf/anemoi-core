@@ -46,10 +46,10 @@ class ForecastingTaskSchema(BaseModel):
     "Number of rollouts to use for validation."
 
 
-class AutoencodingTaskSchema(BaseModel):
+class AutoencoderTaskSchema(BaseModel):
     """Configuration for autoencoding tasks."""
 
-    target_: Literal["anemoi.training.tasks.AutoencodingTask"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.tasks.Autoencoder"] = Field(..., alias="_target_")
     "Task class path for the autoencoding task."
 
 
@@ -76,6 +76,6 @@ class TimeInterpolationTaskSchema(BaseModel):
 
 
 TaskSchema = Annotated[
-    ForecastingTaskSchema | AutoencodingTaskSchema | DownscalingTaskSchema | TimeInterpolationTaskSchema,
+    ForecastingTaskSchema | AutoencoderTaskSchema | DownscalingTaskSchema | TimeInterpolationTaskSchema,
     Discriminator("target_"),
 ]

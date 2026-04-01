@@ -5,7 +5,7 @@ defaults:
 - system: example
 - graph: limited_area
 - model: graphtransformer
-- task: forecasting
+- task: forecaster
 - training: lam
 - _self_
 

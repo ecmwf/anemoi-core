@@ -13,7 +13,7 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
-from anemoi.training.tasks import AutoencodingTask
+from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import ForecastingTask
 from anemoi.training.tasks import TemporalDownscalingTask
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -724,7 +724,7 @@ _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}}
 
 
 class _InterpolatorStub:
-    """Minimal stub with attributes needed by TemporalDownscalingPlotAdapter."""
+    """Minimal stub with attributes needed by TemporalDownscalerPlotAdapter."""
 
     def __init__(self, n_step_input: int, n_step_output: int, interp_times: list) -> None:
         self.n_step_input = n_step_input
@@ -788,7 +788,7 @@ def test_graphautoencoder_output_times() -> None:
 
 
 def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SingleTraining + AutoencodingTask _step returns (loss, metrics, [y_pred]) for consistent task contract."""
+    """SingleTraining + Autoencoder _step returns (loss, metrics, [y_pred]) for consistent task contract."""
 
     def dummy_forward(x: dict) -> dict:
         b = next(iter(x.values())).shape[0]
@@ -799,7 +799,7 @@ def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> 
         return {dn: torch.randn(b, t, e, g, v, dtype=torch.float32) for dn in x}
 
     data_indices = _data_indices_single()
-    task = AutoencodingTask()
+    task = Autoencoder()
     ae = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(ae)
     _set_base_task_attrs(ae, data_indices=data_indices, config=_CFG_AE, task=task)

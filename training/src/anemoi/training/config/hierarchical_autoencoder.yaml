@@ -6,7 +6,8 @@ defaults:
 - hardware: example
 - graph: hierarchical_2level_encoder_decoder_only
 - model: graphtransformer
-- training: autoencoder
+- task: autoencoder
+- training: single
 - _self_
 
 model:

@@ -5,7 +5,7 @@ defaults:
 - system: example
 - graph: multi_scale
 - model: gnn
-- task: forecasting
+- task: forecaster
 - training: single
 - _self_
 
