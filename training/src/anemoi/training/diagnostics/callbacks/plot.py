@@ -771,16 +771,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        task = pl_module.task
+        feature_indices = pl_module.data_indices[dataset_name].data.output.full
 
-        input_tensor = (
-            task.get_inputs(
-                batch={dataset_name: batch[dataset_name]},
-                data_indices=pl_module.data_indices,
-            )[dataset_name]
-            .detach()
-            .cpu()
-        )
+        input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
+
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
@@ -902,7 +896,6 @@ class PlotSample(BasePlotAdditionalMetrics):
                 data,
                 output_tensor,
                 pl_module.plot_adapter.output_times,
-                max_out_steps=pl_module.task.num_output_timesteps,
             ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item
@@ -1019,7 +1012,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 data,
                 output_tensor,
                 pl_module.plot_adapter.output_times,
-                max_out_steps=pl_module.task.num_output_timesteps,
             ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item
@@ -1138,7 +1130,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 data,
                 output_tensor,
                 pl_module.plot_adapter.output_times,
-                max_out_steps=pl_module.task.num_output_timesteps,
             ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item

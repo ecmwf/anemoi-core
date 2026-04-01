@@ -59,7 +59,6 @@ class BasePlotAdapter(ABC):
         data: Any,
         output_tensor: Any,
         output_times: int,
-        max_out_steps: int | None = None,
     ) -> Iterator[tuple[Any, Any, Any, str] | tuple[Any, Any, str]]:
         """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample."""
         ...
@@ -68,9 +67,8 @@ class BasePlotAdapter(ABC):
 class ForecasterPlotAdapter(BasePlotAdapter):
     """Rollout forecaster: multiple loss plots, n_step_output targets per step, multi-step iter."""
 
-    def get_init_step(self, rollout_step: int) -> int:
-        del rollout_step
-        return 0
+    def get_init_step(self) -> int:
+        return -1
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
@@ -80,16 +78,20 @@ class ForecasterPlotAdapter(BasePlotAdapter):
         data: Any,
         output_tensor: Any,
         output_times: int,
-        max_out_steps: int | None = None,
     ) -> Iterator[tuple[Any, Any, Any, str]]:
-        task = self._task
-        max_out_steps = min(task.num_output_timesteps, max_out_steps or task.num_output_timesteps)
+        input_time_indices = self._task.get_batch_input_indices()
+
+        input_data = data[input_time_indices, ...]
+
+        x = input_data[self.get_init_step(), ...].squeeze()
+
         for rollout_step in range(output_times):
-            init_step = self.get_init_step(rollout_step)
-            x = data[init_step, ...].squeeze()
-            for out_step in range(max_out_steps):
-                truth_idx = rollout_step * task.num_output_timesteps + out_step + 1
-                y_true = data[truth_idx, ...].squeeze()
+            output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
+
+            output_data = data[output_time_indices, ...]
+
+            for out_step in range(self._task.num_output_timesteps):
+                y_true = output_data[out_step, ...].squeeze()
                 y_pred = output_tensor[rollout_step, out_step, ...]
                 y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
                 yield x, y_true, y_pred, f"rstep{rollout_step:02d}_out{out_step:02d}"
@@ -98,7 +100,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 class TemporalDownscalingPlotAdapter(BasePlotAdapter):
     """Temporal downscaling: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
 
-    def get_init_step(self, **_kwargs) -> int:
+    def get_init_step(self) -> int:
         return 0
 
     def iter_plot_samples(
@@ -106,13 +108,17 @@ class TemporalDownscalingPlotAdapter(BasePlotAdapter):
         data: Any,
         output_tensor: Any,
         output_times: int,
-        max_out_steps: int | None = None,
     ) -> Iterator[tuple[Any, Any, Any, str]]:
-        del max_out_steps
-        for output_step in range(output_times):
-            init_step = self.get_init_step(output_step)
-            x = data[init_step, ...].squeeze()
-            y_true = data[output_step, ...].squeeze()
+        del output_times
+        input_time_indices = self._task.get_batch_input_indices()
+        output_time_indices = self._task.get_batch_output_indices()
+
+        input_data = data[input_time_indices, ...]
+        output_data = data[output_time_indices, ...]
+
+        x = input_data[self.get_init_step(), ...].squeeze()
+        for output_step in range(self.task):
+            y_true = output_data[output_step].squeeze()
             pred = (
                 output_tensor[output_step, 0] if getattr(output_tensor, "ndim", 0) >= 4 else output_tensor[output_step]
             )
@@ -128,17 +134,8 @@ class TemporalDownscalingPlotAdapter(BasePlotAdapter):
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Autoencoder: single (sample, recon, tag) yield."""
 
-    def get_init_step(self, **_kwargs) -> int:
-        return 0
-
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-        max_out_steps: int | None = None,
-    ) -> Iterator[tuple[Any, Any, str]]:
-        del output_times, max_out_steps
+    def iter_plot_samples(self, data: Any, output_tensor: Any, output_times: int) -> Iterator[tuple[Any, Any, str]]:
+        del output_times
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
         yield sample, recon, "recon"
