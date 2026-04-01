@@ -341,8 +341,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
         try:
             if hasattr(self, '_tcp_server') and self._tcp_server is not None:
                 LOGGER.info(f"Rank {self.rank}: Shutting down TCP server on port {self.port}")
-                self._tcp_server.shutdown()
-                self._tcp_server.server_close()
+                # commenting these out because otherwise the process just hangs
+                #self._tcp_server.shutdown()
+                #self._tcp_server.server_close()
                 LOGGER.info(f"Rank {self.rank}: TCP server shut down successfully")
         except Exception as e:
             LOGGER.warning(f"Rank {self.rank}: Error shutting down TCP server: {e}")
@@ -522,7 +523,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
             remote_node_id = cache_hits[0]
             
             data = self._fetch_remote_tcp(remote_node_id, date)
-            if data is None:
+            if data is None: 
                 LOGGER.warning(f"Rank {self.rank}: Remote TCP fetch returned None for date {date} from node {remote_node_id}. Falling back to filesystem.")
                 data = primary_data[date]
             
@@ -552,14 +553,3 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # MultiDataset.valid_date_indices contains all valid time indices
         # Use self.ds_train to access our cached property
         return len(self.ds_train.valid_date_indices)
-    
-    #TODO currently does not get called
-    def on_validation_epoch_end(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        **kwargs,
-    ) -> None:
-        if trainer.current_epoch == 0:
-            self.update_global_view()
-        
