@@ -150,7 +150,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check that model's metadata does not contain Pydantic schemas references."""
-        del pl_module
+        super().on_train_start(trainer, pl_module)
 
         if trainer.is_global_zero:
             model = self._torch_drop_down(trainer)
