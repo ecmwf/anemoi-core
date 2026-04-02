@@ -7,7 +7,7 @@ import torch
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 
@@ -60,7 +60,7 @@ class DummyModel(torch.nn.Module):
         self.post_processors_tendencies = torch.nn.ModuleDict({"data": post_tend})
 
 
-class DummyGraphModule(BaseGraphModule):
+class DummyTrainingModule(BaseTrainingModule):
     task_type = "forecaster"
 
     def __init__(self) -> None:
@@ -74,8 +74,8 @@ def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
     return SimpleNamespace(states=states, tendencies=tendencies)
 
 
-def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyGraphModule:
-    module = DummyGraphModule.__new__(DummyGraphModule)
+def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyTrainingModule:
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.model = model
     module._device = torch.device("cpu")
@@ -98,14 +98,14 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
-    module = DummyGraphModule.__new__(DummyGraphModule)
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.model = new_model
     module.config = SimpleNamespace(
         training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, True)),
     )
 
-    BaseGraphModule.on_load_checkpoint(module, checkpoint)
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     state_dict = checkpoint["state_dict"]
     assert not any(
@@ -131,14 +131,14 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
-    module = DummyGraphModule.__new__(DummyGraphModule)
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.model = new_model
     module.config = SimpleNamespace(
         training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
     )
 
-    BaseGraphModule.on_load_checkpoint(module, checkpoint)
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     state_dict = checkpoint["state_dict"]
     assert any(

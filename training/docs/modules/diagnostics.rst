@@ -191,7 +191,6 @@ which is recommended for interactive terminals and
             sample_idx: ${diagnostics.plot.sample_idx}
             per_sample : 6
             parameters: ${diagnostics.plot.parameters}
-            output_steps: ${training.multistep_output}
 
 Below is the documentation for the default callbacks provided, but it is
 also possible for users to add callbacks using the same structure:

@@ -7,7 +7,7 @@ Neural Networks (GNNs), designed for tasks such as forecasting,
 interpolation, and ensemble learning. The training setup is structured
 around three key components:
 
--  ``BaseGraphModule``: The abstract base class for all task-specific
+-  ``BaseTrainingModule``: The abstract base class for all task-specific
    models, encapsulating shared logic for training, evaluation, and
    distributed execution.
 
@@ -18,13 +18,13 @@ around three key components:
    and managing the training and validation loops.
 
 To train a model, users typically subclass one of the pre-implemented
-graph modules or create a new one by extending ``BaseGraphModule``.
+graph modules or create a new one by extending ``BaseTrainingModule``.
 
 *****************
- BaseGraphModule
+ BaseTrainingModule
 *****************
 
-All model tasks subclass :class:`~anemoi.graphmodules.BaseGraphModule`,
+All model tasks subclass :class:`~anemoi.graphmodules.BaseTrainingModule`,
 which itself inherits from PyTorch Lightning's
 :class:`~pytorch_lightning.LightningModule`. This base class defines the
 standard interface for all models in Anemoi and implements the core
@@ -39,7 +39,7 @@ Key responsibilities include:
 -  Input/output masking to support variable or region-specific
    processing
 
-``BaseGraphModule`` is not intended to be instantiated directly.
+``BaseTrainingModule`` is not intended to be instantiated directly.
 Instead, model developers should subclass it to implement specific
 forecasting or interpolation tasks by overriding the :meth:`_step`
 method and optionally customizing the initialization logic in
@@ -67,7 +67,7 @@ Additional features include optional sharding of input batches across
 devices (to reduce communication overhead), dynamic creation of scalers
 from statistics.
 
-.. autoclass:: anemoi.graphmodules.BaseGraphModule
+.. autoclass:: anemoi.graphmodules.BaseTrainingModule
    :members:
    :undoc-members:
    :show-inheritance:
@@ -77,7 +77,7 @@ from statistics.
 *****************
 
 Anemoi supports multiple task-specific models, which are high-level
-subclasses of :class:`~anemoi.graphmodules.BaseGraphModule` and provide
+subclasses of :class:`~anemoi.graphmodules.BaseTrainingModule` and provide
 working implementations for key scientific workflows.
 
 Current supported graphmodules include:

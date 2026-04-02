@@ -26,7 +26,7 @@ NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigra
 
 default_config = """
 training:
-  model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  training_method: anemoi.training.train.tasks.GraphEnsForecaster
   multistep_input : 1
 
 diagnostics:
@@ -158,7 +158,7 @@ def test_rollout_eval_handles_dict_batch():
 # Progress bar callback tests
 progress_bar_config = """
 training:
-  model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  training_method: anemoi.training.train.tasks.GraphEnsForecaster
 
 diagnostics:
   callbacks: []

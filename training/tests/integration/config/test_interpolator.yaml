@@ -1,4 +1,4 @@
-# Modifications for the basic template "interpolator_multiout.yaml"
+# Modifications for the basic template "interpolator.yaml"
 system:
   input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
@@ -6,6 +6,11 @@ system:
 data:
   frequency: 6h
   timestep: 12h
+
+task:
+  input_timestep: 12h
+  output_timestep: 6h
+  output_right_boundary: True
 
 dataloader:
   training:
@@ -16,14 +21,6 @@ dataloader:
     datasets:
       data:
         start: 2017-01-08 18:00:00
-
-training:
-
-# Instead of inferred using multistep and timeincrement, specify time indices explicitly
-  explicit_times:
-    input: [0,3]
-    target: [1, 2]
-  multistep_output: 2
 
 diagnostics:
   plot:
@@ -47,7 +44,6 @@ diagnostics:
         sample_idx: ${diagnostics.plot.sample_idx}
         per_sample : 6
         parameters: ${diagnostics.plot.parameters}
-        output_steps: ${training.multistep_output}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         #Defining the accumulation levels for precipitation related fields and the colormap
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
@@ -56,7 +52,6 @@ diagnostics:
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         sample_idx: ${diagnostics.plot.sample_idx}
-        output_steps: ${training.multistep_output}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
         parameters:
