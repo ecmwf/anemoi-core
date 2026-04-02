@@ -4,8 +4,8 @@ general_variable:
   _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
   weights:
     default: 1
-    q: 2 
-    t: 1 
+    q: 2
+    t: 1
     u: 1.5
     v: 1.5
     w: 2

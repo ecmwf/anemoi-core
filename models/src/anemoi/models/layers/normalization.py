@@ -46,9 +46,7 @@ class ConditionalLayerNorm(nn.Module):
         autocast: bool = True,
     ):
         super().__init__()
-        self.norm = nn.LayerNorm(
-            normalized_shape, elementwise_affine=False
-        )  # no learnable parameters
+        self.norm = nn.LayerNorm(normalized_shape, elementwise_affine=False)  # no learnable parameters
         self.scale = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.bias = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.autocast = autocast

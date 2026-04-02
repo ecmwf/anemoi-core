@@ -8,23 +8,14 @@ from __future__ import annotations
 
 import logging
 import os
-import random
-from functools import cached_property
-from typing import Callable
-from pathlib import Path
-import numpy as np
-import torch
-import time
-from einops import rearrange
-from icecream import ic
-from torch.utils.data import IterableDataset, get_worker_info
+from collections.abc import Callable
 
 # from torch_geometric.nn import radius
-import scipy.spatial
+import torch
+from einops import rearrange
 
-from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.data.dataset.singledataset import NativeGridDataset
-from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.data.grid_indices import BaseGridIndices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +32,7 @@ class DownscalingDataset(NativeGridDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
+        overfit_on_index: int | None = None,
     ) -> None:
 
         super().__init__(
@@ -53,6 +45,7 @@ class DownscalingDataset(NativeGridDataset):
         )
         self.lres_grid_indices = lres_grid_indices
         self.hres_grid_indices = hres_grid_indices
+        self.overfit_on_index = overfit_on_index
 
     def __iter__(self):
         """Return an iterator over the dataset.
@@ -85,19 +78,11 @@ class DownscalingDataset(NativeGridDataset):
             self.model_comm_group_rank,
             shuffled_chunk_indices[:10],
         )
-
         for i in shuffled_chunk_indices:
-
-            import time
-
-            time_start = time.time()
-
-            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
-            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
+            if self.overfit_on_index is not None:
+                i = self.overfit_on_index
+            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(self.reader_group_rank)
+            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(self.reader_group_rank)
 
             # Load full grid in CPU memory, select grid_shard after
             # Note that anemoi-datasets currently doesn't support slicing + indexing
@@ -125,10 +110,5 @@ class DownscalingDataset(NativeGridDataset):
                 "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
             )
             y = torch.from_numpy(y)
-
-            time_end = time.time()
-            from icecream import ic
-
-            # ic("data load time", time_end - time_start)
 
             yield x_in_lres, x_in_hres, y

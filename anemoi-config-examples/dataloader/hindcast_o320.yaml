@@ -48,22 +48,22 @@ training:
   frequency: ${data.frequency}
   dataset:
     zip:
-    - dataset: 
+    - dataset:
       - ${hardware.paths.data}/${hardware.files.dataset_x}
       name: lres
-      fake_hindcasts: 
+      fake_hindcasts:
         end: ${dataloader.training_date}
         steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
       name: hres
-      fake_hindcasts: 
+      fake_hindcasts:
         end:  ${dataloader.training_date}
-        steps: ${dataloader.steps}    
+        steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
       name: out
-      fake_hindcasts: 
+      fake_hindcasts:
         end:  ${dataloader.training_date}
-        steps: ${dataloader.steps} 
+        steps: ${dataloader.steps}
     adjust:
     - dates
 
@@ -73,25 +73,25 @@ validation:
   frequency: ${data.frequency}
   dataset:
     zip:
-    - dataset: 
+    - dataset:
         - ${hardware.paths.data}/${hardware.files.dataset_x}
       name: lres
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
       name: hres
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
       name: out
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}       
+        steps: ${dataloader.steps}
     adjust:
     - dates
 
@@ -101,25 +101,25 @@ test:
   frequency: ${data.frequency}
   dataset:
     zip:
-    - dataset: 
+    - dataset:
         - ${hardware.paths.data}/${hardware.files.dataset_x}
       name: lres
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.test_date}
         end:  ${dataloader.test_date}
-        steps: ${dataloader.steps}             
+        steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
       name: hres
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.test_date}
         end:  ${dataloader.test_date}
-        steps: ${dataloader.steps}         
+        steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
       name: out
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.test_date}
         end:  ${dataloader.test_date}
-        steps: ${dataloader.steps}         
+        steps: ${dataloader.steps}
     adjust:
     - dates
 
@@ -130,25 +130,24 @@ predict:
   frequency: "768h"
   dataset:
     zip:
-    - dataset: 
+    - dataset:
         - ${hardware.paths.data}/${hardware.files.dataset_x_for_predict}
       name: lres
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}         
+        steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y_forcings}
       name: hres
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}          
+        steps: ${dataloader.steps}
     - dataset: ${hardware.paths.data}/${hardware.files.dataset_y}
       name: out
-      fake_hindcasts: 
+      fake_hindcasts:
         start: ${dataloader.valid_date}
         end:  ${dataloader.valid_date}
-        steps: ${dataloader.steps}     
+        steps: ${dataloader.steps}
     adjust:
     - dates
-
