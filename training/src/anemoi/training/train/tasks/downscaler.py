@@ -218,6 +218,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """Add noise to the state."""
         return x + torch.randn_like(x) * sigma
 
+    @torch.compile()
     def _get_noise_level(
         self,
         shape: torch.shape,

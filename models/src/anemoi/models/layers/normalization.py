@@ -14,6 +14,7 @@ from typing import Union
 from torch import Size
 from torch import Tensor
 from torch import nn
+from torch import compile
 
 
 class AutocastLayerNorm(nn.LayerNorm):
@@ -21,7 +22,7 @@ class AutocastLayerNorm(nn.LayerNorm):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-
+    @compile()
     def forward(self, x: Tensor) -> Tensor:
         """Forward with explicit autocast back to the input type.
 
@@ -56,7 +57,7 @@ class ConditionalLayerNorm(nn.Module):
             nn.init.zeros_(self.scale.bias)
             nn.init.zeros_(self.bias.weight)
             nn.init.zeros_(self.bias.bias)
-
+    @compile()
     def forward(self, x: Tensor, cond: Tensor) -> Tensor:
         """Conditional Layer Normalization.
 
@@ -79,3 +80,5 @@ class ConditionalLayerNorm(nn.Module):
 
         out = out * (scale + 1.0) + bias
         return out.type_as(x) if self.autocast else out
+
+

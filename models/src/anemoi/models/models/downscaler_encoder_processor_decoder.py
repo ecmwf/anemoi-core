@@ -223,7 +223,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             torch.tensor(x_in_non_res_indices).to(torch.int32),
             torch.tensor(y_non_res_indices).to(torch.int32),
         )
-
+    @torch.compile()
     def compute_residuals_advanced(
         self,
         y: torch.Tensor,
@@ -258,6 +258,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         norm_target = pre_processors_state(residuals, dataset="output", in_place=False)
         return norm_target
 
+    @torch.compile()
     def compute_residuals(
         self,
         y: torch.Tensor,
@@ -339,7 +340,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         # to deal with residuals or direct prediction, see compute_tendency
         # in diffusion_encoder_processor_decoder.py
         return residuals
-
+    @torch.compile()
     def _interpolate_to_high_res(self, x, grid_shard_shapes=None, model_comm_group=None):
 
         if grid_shard_shapes is not None:
@@ -895,7 +896,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         else:
             raise ValueError("Expected before_sampling_data to contain x_in_interp")
         # Convert tendency to state
-        residuals = out.clone()
+        # residuals = out.clone()
         out = self.add_interp_to_state(
             x_in_interp,
             out,

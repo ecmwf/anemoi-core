@@ -79,6 +79,7 @@ class BaseMapper(nn.Module, ABC):
         if cpu_offload:
             self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
 
+    @torch.compile()
     def pre_process(
         self,
         x,
@@ -131,7 +132,8 @@ class BackwardMapperPostProcessMixin:
 
 class ForwardMapperPreProcessMixin:
     """Pre-processing for Forward Mapper from data -> hidden."""
-
+    
+    @torch.compile()
     def pre_process(
         self,
         x,
