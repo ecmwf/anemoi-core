@@ -13,8 +13,6 @@ import warnings
 from typing import Callable
 from typing import Optional
 from typing import Union
-import time
-
 import einops
 import torch
 from hydra.utils import instantiate
@@ -233,7 +231,6 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
-        start_init = time.time()
         batch_size, ensemble_size = (
             x_in_lres_interp_hres.shape[0],
             x_in_lres_interp_hres.shape[2],

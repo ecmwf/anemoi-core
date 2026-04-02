@@ -167,6 +167,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         #    1, dtype=batch[0].dtype, device=self.device, requires_grad=False
         # )
 
+        from anemoi.models import acceleration as _accel
+        if _accel.TORCH_COMPILE_ENABLED:
+            torch.compiler.cudagraph_mark_step_begin()
+
         x_in, x_in_hres, y = batch
 
         x_in_interp_to_hres = self.model.model.apply_interpolate_to_high_res(
@@ -189,8 +193,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         x_in_hres = self.model.pre_processors(x_in_hres, dataset="input_hres", in_place=False)
         residuals_target = self.model.pre_processors(residuals_target, dataset="output", in_place=False)
 
-        # Scaler update
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
+        # Scaler update — disabled under torch_compile (cudagraph incompatibility)
+        if not _accel.TORCH_COMPILE_ENABLED:
+            self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(

@@ -73,6 +73,13 @@ class AnemoiTrainer:
 
             LOGGER.info("Skipping config validation.")
 
+        from anemoi.models.acceleration import configure as _configure_accel
+        _accel_cfg = getattr(self.config.hardware, "accelerations", None)
+        _triton_gt = getattr(_accel_cfg, "triton_gt", False) if _accel_cfg is not None else False
+        _torch_compile = getattr(_accel_cfg, "torch_compile", False) if _accel_cfg is not None else False
+        _configure_accel(triton_gt=_triton_gt, torch_compile=_torch_compile)
+        LOGGER.info("Accelerations: triton_gt=%s torch_compile=%s", _triton_gt, _torch_compile)
+
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
@@ -554,8 +561,16 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
-        torch._dynamo.config.cache_size_limit = 32
-        torch._dynamo.config.accumulated_cache_size_limit = max(8 * 32, 256)
+        _accel_cfg = getattr(self.config.hardware, "accelerations", None)
+        if getattr(_accel_cfg, "torch_compile", False) if _accel_cfg is not None else False:
+            recompile_limit = 128
+            torch._dynamo.config.cache_size_limit = recompile_limit
+            torch._dynamo.config.accumulated_cache_size_limit = max(8 * recompile_limit, 256)
+            self.model = torch.compile(self.model, mode="reduce-overhead")
+            LOGGER.info("Full model wrapped in torch.compile(mode='reduce-overhead')")
+        else:
+            torch._dynamo.config.cache_size_limit = 32
+            torch._dynamo.config.accumulated_cache_size_limit = max(8 * 32, 256)
 
         trainer.fit(
             self.model,

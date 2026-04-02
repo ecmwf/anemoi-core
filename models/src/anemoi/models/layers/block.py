@@ -470,7 +470,10 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         if self.qk_norm:
             self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
             self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
-        self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+
+        from anemoi.models import acceleration as _accel
+        if not _accel.TRITON_GT_ENABLED:
+            self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
         self.projection = Linear(out_channels, out_channels)
 
@@ -555,6 +558,14 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
     ) -> Tensor:
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
+
+        from anemoi.models import acceleration as _accel
+        if _accel.TRITON_GT_ENABLED:
+            from anemoi.models.triton.gt import GraphTransformerFunction
+            from anemoi.models.triton.utils import edge_index_to_csc
+            csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
+            edges_csc = edges.index_select(0, perm)
+            return GraphTransformerFunction.apply(query, key, value, edges_csc, csc, reverse)
 
         if num_chunks > 1:
             # split 1-hop edges into chunks, compute self.conv chunk-wise

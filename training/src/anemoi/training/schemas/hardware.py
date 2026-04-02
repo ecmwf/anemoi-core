@@ -75,6 +75,13 @@ class PathsSchema(BaseModel):
     "Path to the checkpoint to use for warm starting the training"
 
 
+class AccelerationsSchema(BaseModel):
+    triton_gt: bool = False
+    "Use custom Triton kernel for graph transformer attention (requires triton package)."
+    torch_compile: bool = False
+    "Wrap model and hot-path methods in torch.compile(mode='reduce-overhead')."
+
+
 class HardwareSchema(BaseModel):
     accelerator: Annotated[
         str,
@@ -93,3 +100,5 @@ class HardwareSchema(BaseModel):
     "Files schema."
     paths: PathsSchema
     "Paths schema."
+    accelerations: AccelerationsSchema = Field(default_factory=AccelerationsSchema)
+    "Acceleration flags (all off by default)."

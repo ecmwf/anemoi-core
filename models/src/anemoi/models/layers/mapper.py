@@ -397,10 +397,6 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
     ) -> Tensor:
         x_src, x_dst = x
 
-        import time
-
-        start_time = time.time()
-
         # get subgraph of x_dst_chunk and incoming edges, drop unconnected src nodes
         nodes_src_full = torch.arange(size[0], device=edge_index.device)
         edge_index, edge_attr = bipartite_subgraph(
@@ -422,7 +418,6 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             cond = (cond_src[connected_src_nodes], cond_dst[dst_chunk])
 
         # pre-process chunk, embedding x_src/x_dst if not already done
-        time_preprocess = time.time()
         x_src_chunk, x_dst_chunk, _, _ = self.pre_process(
             (x_src_chunk, x_dst_chunk),
             shapes,
@@ -431,8 +426,6 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             x_dst_is_sharded=True,
         )
         # print("time to preprocess chunk in decoder", time.time() - time_preprocess)
-        time_processor = time.time()
-
         (_, x_dst_out), _ = self.proc(
             (x_src_chunk, x_dst_chunk),
             edge_attr,
