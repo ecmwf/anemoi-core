@@ -593,8 +593,6 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
         # print(f"x mean shape : {x_mean.shape}")
         # rank_zero_info(f'x shape {x.shape}')
 
-
-
         if "condition" in self.model_config["model"]:
             if self.model_config["model"]["condition"] == "zero" :
                 x_zeros = torch.zeros_like(x, dtype= x.dtype, device = x.device)
@@ -608,10 +606,52 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
                     ),
                     dim=-1,  # feature dimension
                 )
+            elif self.model_config["model"]["condition"] == "mean_3vars":
+                rank_zero_info("Condition configuration used : [mean_3vars]")
+                x_mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean_train_vars.npy")).to(x.device).to(x.dtype)[...,:78]
+                x_mean = x_mean.unsqueeze(0).expand(-1, 2, -1, -1, -1)
+                indices = torch.tensor([0,1,3, 7]).to(x_mean.device)
+                x_mean_3vars = torch.index_select(x_mean, dim=-1, index=indices)
+                shard_shapes = get_shard_shapes(x_mean, -2, model_comm_group=model_comm_group)
+                x_mean = shard_tensor(x_mean, -2, shard_shapes, model_comm_group)
+
+                shard_shapes_3vars = get_shard_shapes(x_mean_3vars, -2, model_comm_group=model_comm_group)
+                x_mean_3vars = shard_tensor(x_mean_3vars, -2, shard_shapes_3vars, model_comm_group)
+
+
+                mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean.npy")).to(x_mean.device).to(x_mean.dtype)[:78]
+                stdev = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/stdev.npy")).to(x_mean.device).to(x_mean.dtype)[:78]
+                
+                mean_3vars = torch.index_select(mean,dim=0, index=indices)
+                stdev_3vars = torch.index_select(stdev, dim=0, index=indices)
+
+                x_mean = (x_mean - mean) / stdev
+                x_mean_3vars = (x_mean_3vars - mean_3vars) / stdev_3vars
+                x_data_latent = torch.cat(
+                    (
+                        einops.rearrange(x_mean_3vars, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                        einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                        node_attributes_data,
+                    ),
+                    dim=-1,  # feature dimension
+                )
+            elif self.model_config["model"]["condition"] == "orography_3vars":
+                rank_zero_info("Condition configuration used : [orography_3vars]")
+                x_z_3vars = x[...,3]  # shape: [1, 2, 1, 332840]
+                x_z_3vars = x_z_3vars.unsqueeze(-1).repeat(1, 1, 1, 1, 4) # shape: [1, 2, 1, 332840, 78]
+
+                x_data_latent = torch.cat(
+                    (
+                        einops.rearrange(x_z_3vars, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                        einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                        node_attributes_data,
+                    ),
+                    dim=-1,  # feature dimension
+                )
             elif self.model_config["model"]["condition"] == "mean":
                 rank_zero_info("Condition configuration used : [mean]")
-                x_mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean_train_vars.npy")).to(x.device).to(x.dtype)
-                x_mean = x_mean.unsqueeze(0).expand(-1, 2, -1, -1, -1)
+                x_mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean_train_vars_no_tp.npy")).to(x.device).to(x.dtype)
+                x_mean = x_mean.unsqueeze(0).expand(-1, 1, -1, -1, -1) #TODO : put self.multistep on dim 1
                 shard_shapes = get_shard_shapes(x_mean, -2, model_comm_group=model_comm_group)
                 x_mean = shard_tensor(x_mean, -2, shard_shapes, model_comm_group)
 
@@ -619,7 +659,7 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
                 stdev = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/stdev.npy")).to(x_mean.device).to(x_mean.dtype)
                 
                 x_mean = (x_mean - mean) / stdev
-
+                
                 x_data_latent = torch.cat(
                     (
                         einops.rearrange(x_mean, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
@@ -784,17 +824,17 @@ class AnemoiDiffusionModelEncProcDecUnconditional(AnemoiDiffusionModelEncProcDec
 
 ####################################### DEV #######################################
 
-        # params_inference = kwargs["params_inference"]
+        params_inference = kwargs["params_inference"]
 
-        # num_steps = params_inference["num_steps"]
-        # print("params inference ", params_inference)
-        # noise_scheduler_config = params_inference
+        num_steps = params_inference["num_steps"]
+        print("params inference ", params_inference)
+        noise_scheduler_config = params_inference
 
 ###################################################################################
         print("noise scheduler config : ", noise_scheduler_config)
         scheduler = scheduler_cls(**noise_scheduler_config)
         sigmas = scheduler.get_schedule(x.device, torch.float64)
-        params_inference = noise_scheduler_config
+        # params_inference = noise_scheduler_config
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
         shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
