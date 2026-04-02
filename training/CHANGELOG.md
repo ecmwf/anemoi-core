@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.11.1](https://github.com/ecmwf/anemoi-core/compare/training-0.11.0...training-0.11.1) (2026-04-01)
+
+
+### Features
+
+* Deprecate LongRolloutPlots ([#1020](https://github.com/ecmwf/anemoi-core/issues/1020)) ([42af828](https://github.com/ecmwf/anemoi-core/commit/42af8286da370b2dbefb9e1e12dc71b30288a558))
+* **models:** Point-wise forward/backward mappers ([#990](https://github.com/ecmwf/anemoi-core/issues/990)) ([8f29f92](https://github.com/ecmwf/anemoi-core/commit/8f29f9294739072ac4fa7fdfc9b76864b5a60874))
+
+
+### Bug Fixes
+
+* Allow control of multiprocessing context in the DataLoader ([#1000](https://github.com/ecmwf/anemoi-core/issues/1000)) ([70da85d](https://github.com/ecmwf/anemoi-core/commit/70da85ddf777460210b423542745f1718c186072))
+
 ## [0.11.0](https://github.com/ecmwf/anemoi-core/compare/training-0.10.0...training-0.11.0) (2026-03-26)
 
 

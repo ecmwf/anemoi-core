@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.13.2](https://github.com/ecmwf/anemoi-core/compare/models-0.13.1...models-0.13.2) (2026-04-01)
+
+
+### Features
+
+* **models:** Point-wise forward/backward mappers ([#990](https://github.com/ecmwf/anemoi-core/issues/990)) ([8f29f92](https://github.com/ecmwf/anemoi-core/commit/8f29f9294739072ac4fa7fdfc9b76864b5a60874))
+
+
+### Bug Fixes
+
+* Models_conditioning ([#1002](https://github.com/ecmwf/anemoi-core/issues/1002)) ([700e1b9](https://github.com/ecmwf/anemoi-core/commit/700e1b9af9f5ef3781c9cb6da54dbbb593f6524c))
+* **models:** Kwargs forwarding for mapper/processor checkpoint wiring ([#1018](https://github.com/ecmwf/anemoi-core/issues/1018)) ([79d636e](https://github.com/ecmwf/anemoi-core/commit/79d636eac73cc156d835c1087dd190f72174e8b2))
+* **models:** Noise schedulers ([#1021](https://github.com/ecmwf/anemoi-core/issues/1021)) ([7dbd5c2](https://github.com/ecmwf/anemoi-core/commit/7dbd5c24fe25bfad538283766f0429e5cff63f77))
+
 ## [0.13.1](https://github.com/ecmwf/anemoi-core/compare/models-0.13.0...models-0.13.1) (2026-03-26)
 
 
