@@ -17,7 +17,7 @@ from anemoi.utils.dates import as_timedelta
 LOGGER = logging.getLogger(__name__)
 
 
-class TemporalDownscalingTask(BaseSingleStepTask):
+class TemporalDownscaler(BaseSingleStepTask):
     """Temporal downscaling task implementation."""
 
     name: str = "temporal-downscaler"

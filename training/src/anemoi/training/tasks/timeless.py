@@ -25,7 +25,7 @@ class BaseTimelessTask(BaseSingleStepTask):
         self._plot_adapter = AutoencoderPlotAdapter(self)
 
 
-class Autoencoding(BaseTimelessTask):
+class Autoencoder(BaseTimelessTask):
     """Autoencoding task implementation."""
 
     name: str = "autoencoder"

@@ -42,7 +42,7 @@ class RolloutConfig:
             LOGGER.info("Rollout window length has been increased to %d.", self.step)
 
 
-class ForecastingTask(BaseTask):
+class Forecaster(BaseTask):
     """Forecasting task implementation.
 
     Builds input and output offsets from ``multistep_input``,
