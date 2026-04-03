@@ -11,7 +11,9 @@ defaults:
 config_validation: True
 
 # One-month RRFS verification defaults (May 2024)
-# This variant verifies 1h, 2h, and 3h lead times in one run.
+# This variant verifies 1h, 2h, and 3h lead times in one run for
+# checkpoints trained with multistep_output=3. In that case the three
+# lead times are emitted as out00/out01/out02 at rollout step 0.
 # CLI can still override warm_start/start/end/frequency.
 data:
   resolution: 3p0km
@@ -69,7 +71,7 @@ dataloader:
     training: 1
     validation: null
     test: null
-  validation_rollout: 3
+  validation_rollout: 1
   grid_indices:
     datasets:
       data:
@@ -124,7 +126,7 @@ diagnostics:
         parameters: ${diagnostics.plot.parameters}
         per_sample: 6
         accumulation_levels_plot: [0.01]
-        output_steps: ${training.rollout.max}
+        output_steps: ${training.multistep_output}
         precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
         colormaps: ${diagnostics.plot.colormaps}
         every_n_batches: 1
@@ -146,10 +148,11 @@ diagnostics:
 
 training:
   multistep_input: 2
+  multistep_output: 3
   rollout:
     start: 1
     epoch_increment: 0
-    max: 3
+    max: 1
   load_weights_only: True
   max_epochs: 1
   max_steps: 1
