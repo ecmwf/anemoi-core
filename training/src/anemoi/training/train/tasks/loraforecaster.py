@@ -13,6 +13,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from peft import LoraConfig
+from peft import PeftModel
 from peft import get_peft_model
 
 from anemoi.training.train.tasks import GraphForecaster
@@ -73,6 +74,14 @@ class LoRAGraphForecaster(GraphForecaster):
 
         self.lora_config = LoraConfig(**config.model_dump(by_alias=True).training.lora_config)
 
+    def on_load_checkpoint(self, checkpoint) -> None:
+        if 'LoRAGraphForecaster' in checkpoint['hyper_parameters']['config'].training.model_task:
+            self._inject_lora_adapters()
+    
     def on_checkpoint_loaded(self) -> None:
+        if not isinstance(self.model, PeftModel):
+            self._inject_lora_adapters()
+
+    def _inject_lora_adapters(self) -> None:
         get_peft_model(self.model, self.lora_config)
         LOGGER.info("LoRA adapters injected into the model")
