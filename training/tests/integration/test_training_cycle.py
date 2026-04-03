@@ -215,6 +215,22 @@ def test_training_cycle_lora(lora_config: tuple[DictConfig, list[str]], get_test
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
+    output_dir = Path(cfg.hardware.paths.output + "checkpoint")
+
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+
+    checkpoint_dir = run_dirs[0]
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
+
+    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.max_epochs = cfg.training.max_epochs + 3
+    AnemoiTrainer(cfg).train()
+
 
 def test_config_validation_lora(lora_config: tuple[DictConfig, str]) -> None:
     cfg, _ = lora_config
