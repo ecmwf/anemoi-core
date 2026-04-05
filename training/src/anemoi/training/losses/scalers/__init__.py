@@ -23,6 +23,7 @@ from .variable_level import ReluVariableLevelScaler
 from .variable_masking import VariableMaskingLossScaler
 from .variable_tendency import NoTendencyScaler
 from .variable_tendency import StdevTendencyScaler
+from .value_range import TargetValueRangeScaler
 from .variable_tendency import VarTendencyScaler
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
     "StdevTendencyScaler",
+    "TargetValueRangeScaler",
     "TensorDim",
     "TimeStepScaler",
     "UniformTimeStepScaler",

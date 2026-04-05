@@ -441,11 +441,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         loss_obj: torch.nn.Module,
         metrics_dict: dict,
         dataset_name: str,
+        **kwargs,
     ) -> None:
         """Update a single scaler for loss and metrics objects."""
-        kwargs = {"model": self.model, "dataset_name": dataset_name}
+        callback_kwargs = {"model": self.model, "dataset_name": dataset_name}
+        callback_kwargs.update(kwargs)
 
-        scaler = scaler_builder.update_scaling_values(callback, **kwargs)
+        scaler = scaler_builder.update_scaling_values(callback, **callback_kwargs)
         if scaler is None:  # If scalar is None, no update to be applied
             return
 
@@ -456,7 +458,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             if name in metric.scaler:
                 metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
-    def update_scalers(self, callback: AvailableCallbacks) -> None:
+    def update_scalers(self, callback: AvailableCallbacks, **kwargs) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
         # Multi-dataset case: {'dataset_a': {'nan_mask_weights': scaler, ...}, 'dataset_b': {...}}
         for dataset_name, dataset_scalers in self.updating_scalars.items():
@@ -468,6 +470,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     self.loss[dataset_name],
                     self.metrics[dataset_name],
                     dataset_name=dataset_name,
+                    **kwargs,
                 )
 
     def set_model_comm_group(
@@ -736,7 +739,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         batch = self._normalize_batch(batch)
 
         # Prepare scalers, e.g. init delayed scalers and update scalers
-        self._prepare_loss_scalers()
+        self._prepare_loss_scalers(batch)
 
         return batch
 
@@ -810,13 +813,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
             batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
         return batch
 
-    def _prepare_loss_scalers(self) -> None:
+    def _prepare_loss_scalers(self, batch: dict[str, torch.Tensor]) -> None:
         """Prepare scalers for training and validation before every step."""
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
             self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
             self.is_first_step = False
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START, batch=batch)
         return
 
     @abstractmethod

@@ -124,6 +124,12 @@ training:
             rwmr: 1
             snmr: 1
             grle: 1
+        refc_value_ranges:
+          _target_: anemoi.training.losses.scalers.TargetValueRangeScaler
+          variable: refc
+          normalization: mean-std
+          thresholds: [5.0, 20.0, 40.0]
+          weights: [1.0, 2.0, 4.0, 8.0]
   metrics:
     datasets:
       data:
@@ -135,3 +141,8 @@ training:
         default: sfc
         pl:
           is_pressure_level: True
+
+training_loss:
+  datasets:
+    data:
+      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_value_ranges']
