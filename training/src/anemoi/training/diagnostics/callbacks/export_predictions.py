@@ -216,6 +216,8 @@ class ExportPredictions(pl.Callback):
 
         output_times = self._get_output_times(pl_module)
         rollout = output_times[0]
+        n_step_output = int(getattr(pl_module, "n_step_output", 1))
+        target_horizon = rollout * n_step_output if output_times[1] == "forecast" else rollout
         n_step_input = self._get_n_step_input(pl_module)
         if rollout <= 0:
             LOGGER.warning("No rollout steps available to export.")
@@ -237,7 +239,7 @@ class ExportPredictions(pl.Callback):
                 return
 
             time_len = data_batch.shape[1] if data_batch.ndim >= 2 else 1
-            needed_len = n_step_input + rollout
+            needed_len = n_step_input + target_horizon
             if time_len < needed_len:
                 LOGGER.warning(
                     "Batch time length too short for export (time_len=%s, needed=%s).",
@@ -271,13 +273,15 @@ class ExportPredictions(pl.Callback):
 
             if batch_idx == 0:
                 LOGGER.info(
-                    "ExportPredictions shapes: data_batch=%s input=%s data=%s preds=%s multi_step=%s rollout=%s",
+                    "ExportPredictions shapes: data_batch=%s input=%s data=%s preds=%s n_step_input=%s n_step_output=%s rollout=%s target_horizon=%s",
                     tuple(data_batch.shape),
                     tuple(input_tensor.shape),
                     tuple(data.shape),
                     tuple(preds.shape),
                     n_step_input,
+                    n_step_output,
                     rollout,
+                    target_horizon,
                 )
 
         var_names, var_idx = self._select_variables(pl_module)
@@ -289,13 +293,14 @@ class ExportPredictions(pl.Callback):
 
         data_len = data.shape[0]
         pred_len = preds.shape[0]
-        target_len = min(rollout, data_len - n_step_input, pred_len)
+        target_len = min(target_horizon, data_len - n_step_input, pred_len)
         if target_len <= 0:
             LOGGER.warning(
-                "No target/prediction steps available to export (data_len=%s, pred_len=%s, rollout=%s).",
+                "No target/prediction steps available to export (data_len=%s, pred_len=%s, rollout=%s, target_horizon=%s).",
                 data_len,
                 pred_len,
                 rollout,
+                target_horizon,
             )
             return
 
