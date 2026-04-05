@@ -269,8 +269,11 @@ class PreprocessorSchema(BaseModel, validate_assignment=False):
             raise ValidationError(error_msg)
 
         validated = TypeAdapter(schema_cls).validate_python(self.config)
-        # If it's a RootModel (like ConstantImputerSchema), extract the root dict
+        # If it's a RootModel (like ConstantImputerSchema), extract the root dict;
+        # otherwise store the validated schema so defaults are populated correctly.
         if hasattr(validated, "root"):
             self.config = validated.root
+        else:
+            self.config = validated
 
         return self

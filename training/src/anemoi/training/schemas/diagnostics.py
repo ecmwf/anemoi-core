@@ -275,10 +275,7 @@ class PlotSchema(PydanticBaseModel):
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
-    projection_kind: str = Field(
-        default="equirectangular",
-        examples=["equirectangular", "lambert_conformal"],
-    )
+    projection_kind: Literal["equirectangular", "lambert_conformal"] = "equirectangular"
     "Map projection for diagnostics plots: 'equirectangular' or 'lambert_conformal'."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
@@ -446,7 +443,9 @@ class LoggingSchema(BaseModel):
         # ---- MLflow ----
         mlflow_val = values.get("mlflow")
         if mlflow_val is not None:
-            mlflow_cfg = OmegaConf.to_container(mlflow_val, resolve=True)
+            mlflow_cfg = (
+                OmegaConf.to_container(mlflow_val, resolve=True) if OmegaConf.is_config(mlflow_val) else mlflow_val
+            )
             if isinstance(mlflow_cfg, dict) and "_target_" not in mlflow_cfg:
                 mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
                 values["mlflow"] = mlflow_cfg
@@ -454,7 +453,7 @@ class LoggingSchema(BaseModel):
         # ---- W&B ----
         wandb_val = values.get("wandb")
         if wandb_val is not None:
-            wandb_cfg = OmegaConf.to_container(wandb_val, resolve=True)
+            wandb_cfg = OmegaConf.to_container(wandb_val, resolve=True) if OmegaConf.is_config(wandb_val) else wandb_val
             if isinstance(wandb_cfg, dict) and "_target_" not in wandb_cfg:
                 wandb_cfg["_target_"] = "anemoi.training.diagnostics.wandb.logger.AnemoiWandbLogger"
                 values["wandb"] = wandb_cfg

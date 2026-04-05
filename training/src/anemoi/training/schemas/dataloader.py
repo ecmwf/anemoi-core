@@ -11,7 +11,6 @@
 import datetime
 from pathlib import Path
 from typing import Any
-from typing import ClassVar
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
@@ -22,6 +21,7 @@ from pydantic import RootModel
 from pydantic import computed_field
 
 from anemoi.training.schemas.schema_utils import DatasetDict
+from anemoi.training.schemas.schema_utils import NullDropSchema
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 
@@ -56,18 +56,24 @@ class Frequency(RootModel):
         return int(self.as_timedelta.total_seconds())
 
 
-class DatasetConfigSchema(PydanticBaseModel):
-    """Dictionary-style dataset config passed directly to open_dataset.
+class DatasetConfigSchema(NullDropSchema):
+    """Dictionary-style dataset config passed directly to ``open_dataset(**dataset_config)``.
 
-    The ``_skip_null_defaults`` marker tells ``schema_defaults`` not to inject
-    ``None`` for optional fields that are absent from the user config.  This is
-    required because ``open_dataset`` is called with ``**dataset_config`` and
-    cannot handle explicit ``None`` keyword arguments (e.g. ``select=None``
-    is treated as a list containing ``None`` rather than "no selection").
+    Inherits from :class:`NullDropSchema`, which ensures ``None``-valued fields are
+    omitted from the output on both execution paths:
+
+    * **Lenient** (``apply_schema_defaults``): ``schema_defaults`` detects the
+      ``NullDropSchema`` base class and suppresses ``None`` values automatically.
+    * **Strict** (pydantic validation): the ``_exclude_none`` serializer fires on every
+      ``model_dump`` / ``model_dump_json`` call, including when this schema is nested
+      inside a parent model.
+
+    This is not the default for all schemas — ``None`` is a valid, meaningful value
+    elsewhere (e.g. ``end=None`` means "no end date").  Only schemas whose output is
+    unpacked with ``**`` into a function that cannot accept ``None`` arguments need this.
     """
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
-    _skip_null_defaults: ClassVar[bool] = True
 
     dataset: str | Path | dict | list[dict]
     "Dataset source identifier."
@@ -82,11 +88,6 @@ class DatasetConfigSchema(PydanticBaseModel):
 
     # Note this should be extended in the future to have a full schema for the keys
     # supported by open_dataset and be moved to anemoi-datasets.
-
-    def model_dump(self, **kwargs: Any) -> dict:
-        """Exclude None kwargs — open_dataset does not accept None-valued arguments."""
-        kwargs.setdefault("exclude_none", True)
-        return super().model_dump(**kwargs)
 
 
 class NativeDatasetSchema(BaseModel):

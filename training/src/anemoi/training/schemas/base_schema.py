@@ -12,34 +12,41 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Self
 from typing import Union
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from omegaconf.errors import OmegaConfBaseException
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import ValidationError
 from pydantic import model_validator
 from pydantic_core import PydanticCustomError
 
-from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
-from anemoi.models.schemas.models import ModelSchema
 from anemoi.utils.schemas import BaseModel
+
+from .schema_utils import apply_schema_defaults
+from .schema_utils import resolve_and_prune_undeclared_interpolation_anchors
+from .validation_errors import ConfigValidationError
+from .validation_errors import format_validation_error
 
 # to make these available at runtime for pydantic, bug should be resolved in
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
-from .data import DataSchema
-from .dataloader import DataLoaderSchema
-from .diagnostics import DiagnosticsSchema
-from .schema_utils import apply_schema_defaults
-from .schema_utils import resolve_and_prune_undeclared_interpolation_anchors
-from .system import SystemSchema
-from .training import TrainingSchema
-from .validation_errors import ConfigValidationError
-from .validation_errors import format_validation_error
+
+
+if TYPE_CHECKING:
+    from anemoi.graphs.schemas.base_graph import BaseGraphSchema
+    from anemoi.models.schemas.models import ModelSchema
+
+    from .data import DataSchema
+    from .dataloader import DataLoaderSchema
+    from .diagnostics import DiagnosticsSchema
+    from .system import SystemSchema
+    from .training import TrainingSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -79,24 +86,59 @@ _DEPRECATED_TARGETS: dict[str, str] = {
 }
 
 
+def _find_deprecated_in_mapping(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
+    """Search a dict-like node for deprecated _target_ values."""
+    try:
+        target = data.get("_target_")
+    except OmegaConfBaseException:
+        target = None
+    if target in deprecated:
+        return target, deprecated[target]
+    for key in data:
+        try:
+            v = data[key]
+        except OmegaConfBaseException:
+            continue
+        result = _find_deprecated_target(v, deprecated)
+        if result:
+            return result
+    return None
+
+
+def _find_deprecated_in_sequence(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
+    """Search a list-like node for deprecated _target_ values."""
+    for item in data:
+        try:
+            result = _find_deprecated_target(item, deprecated)
+        except OmegaConfBaseException:
+            continue
+        if result:
+            return result
+    return None
+
+
 def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
-    """Recursively search for deprecated _target_ values anywhere in a config."""
+    """Recursively search for deprecated _target_ values anywhere in a config.
+
+    Skips values that raise OmegaConf errors (unresolved interpolations, mandatory
+    placeholders) so the check is safe to run on partially-resolved configs.
+    """
     if isinstance(data, str):
         return None
     if hasattr(data, "keys"):  # dict / DictConfig (not ListConfig)
-        target = data.get("_target_")
-        if target in deprecated:
-            return target, deprecated[target]
-        for v in data.values():
-            result = _find_deprecated_target(v, deprecated)
-            if result:
-                return result
-    elif hasattr(data, "__iter__"):  # list / ListConfig
-        for item in data:
-            result = _find_deprecated_target(item, deprecated)
-            if result:
-                return result
+        return _find_deprecated_in_mapping(data, deprecated)
+    if hasattr(data, "__iter__"):  # list / ListConfig
+        return _find_deprecated_in_sequence(data, deprecated)
     return None
+
+
+def _check_deprecated_targets(config: Any) -> None:
+    """Raise ConfigValidationError if any _target_ in the config is deprecated."""
+    result = _find_deprecated_target(config, _DEPRECATED_TARGETS)
+    if result:
+        target, hint = result
+        msg = f"'{target}' is deprecated and has been removed. {hint}"
+        raise ConfigValidationError(msg)
 
 
 def apply_runtime_postprocessing(config: BaseSchema | UnvalidatedBaseSchema) -> None:
@@ -114,19 +156,6 @@ def apply_runtime_postprocessing(config: BaseSchema | UnvalidatedBaseSchema) -> 
     ):
         LOGGER.info("adjusting save_dir path to match output mlflow logs")
         config.diagnostics.log.mlflow.save_dir = str(config.system.output.logs.mlflow)
-
-
-class SchemaCommonMixin:
-    """Shared logic for schema objects."""
-
-    @model_validator(mode="before")
-    def _check_deprecated_targets(cls, values: Any) -> Any:
-        """Raise before validation if any _target_ in the config is deprecated."""
-        result = _find_deprecated_target(values, _DEPRECATED_TARGETS)
-        if result:
-            target, hint = result
-            msg = f"'{target}' is deprecated and has been removed. {hint}"
-            raise ValueError(msg)
 
 
 class BaseSchema(BaseModel):
@@ -164,21 +193,6 @@ class BaseSchema(BaseModel):
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
-
-    @model_validator(mode="after")
-    def check_projection_kind(self) -> Self:
-        if not self.config_validation:
-            return self
-
-        allowed_projection_kinds = {"equirectangular", "lambert_conformal"}
-        if self.diagnostics.plot.projection_kind not in allowed_projection_kinds:
-            msg = (
-                "Invalid value for diagnostics.plot.projection_kind. "
-                f"Expected one of {sorted(allowed_projection_kinds)}."
-            )
-            raise ValueError(msg)
-
-        return self
 
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
@@ -236,6 +250,7 @@ def build_schema(config: DictConfig) -> BaseSchema | UnvalidatedBaseSchema:
     if config.get("config_validation", True):
         LOGGER.info("Performing strict config validation.")
         OmegaConf.resolve(config)
+        _check_deprecated_targets(config)
         try:
             parsed_config = BaseSchema(**config)
         except ValidationError as error:
@@ -249,6 +264,7 @@ def build_schema(config: DictConfig) -> BaseSchema | UnvalidatedBaseSchema:
         # schema so lenient output shape matches strict output shape.
         config_with_defaults = apply_schema_defaults(config, BaseSchema)
         resolve_and_prune_undeclared_interpolation_anchors(config_with_defaults, BaseSchema)
+        _check_deprecated_targets(config_with_defaults)
         parsed_config = UnvalidatedBaseSchema(**config_with_defaults)
         apply_runtime_postprocessing(parsed_config)
     return parsed_config
