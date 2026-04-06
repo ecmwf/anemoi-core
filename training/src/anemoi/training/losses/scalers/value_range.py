@@ -112,7 +112,7 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
             return None
 
         n_step_input = int(getattr(model, "n_step_input"))
-        n_step_output = int(getattr(model, "n_step_output"))
+        n_step_output = int(getattr(model.config.training, "multistep_output", 1))
 
         target_slice = dataset_batch[:, n_step_input : n_step_input + n_step_output, 0, :, self.full_var_idx]
         raw_target = self._to_raw_units(target_slice)
