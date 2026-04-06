@@ -10,8 +10,8 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=0
 #SBATCH -t 24:00:00
-#SBATCH -o anemoi-gpu-123hr-train.%j.out
-#SBATCH -e anemoi-gpu-123hr-train.%j.err
+#SBATCH -o anemoi-gpu-123hr_refc_wght1-train.%j.out
+#SBATCH -e anemoi-gpu-123hr_ref_wght1-train.%j.err
 
 set -euo pipefail
 

@@ -100,7 +100,7 @@ training:
     epoch_increment: 0
     max: 1
 
-  max_epochs: 500
+  max_epochs: 1200
   max_steps: 9999999
   accum_grad_batches: 8
   scalers:
@@ -129,7 +129,7 @@ training:
           variable: refc
           normalization: mean-std
           thresholds: [5.0, 20.0, 40.0]
-          weights: [1.0, 2.0, 4.0, 8.0]
+          weights: [110, 20, 40, 80]
   metrics:
     datasets:
       data:
