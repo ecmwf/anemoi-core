@@ -5,14 +5,14 @@ datasets:
     general_variable:
       _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
       weights:
-        default: 1
+        default: 1.0
         q: 0.6 #1
-        t: 6   #1
+        t: 6.0   #1
         u: 0.8 #0.5
         v: 0.5 #0.33
         w: 0.001
-        z: 12  #1
-        sp: 10
+        z: 12.0  #1
+        sp: 10.0
         10u: 0.1
         10v: 0.1
         2d: 0.5

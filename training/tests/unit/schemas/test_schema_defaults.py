@@ -262,13 +262,13 @@ def test_lenient_accepts_invalid_projection_kind(base_cfg: DictConfig) -> None:
     assert lenient.diagnostics.plot.projection_kind == "invalid_projection"
 
 
-def test_lenient_preserves_extra_fields(base_cfg: DictConfig) -> None:
-    """Unknown fields are kept as-is in lenient mode."""
+def test_lenient_drops_extra_fields(base_cfg: DictConfig) -> None:
+    """Unknown fields not declared by the schema are pruned in lenient mode."""
     with open_dict(base_cfg.training):
         base_cfg.training.typo_extra_field = "ignored"
 
     config = build_schema(base_cfg)
-    assert config.training.typo_extra_field == "ignored"
+    assert not hasattr(config.training, "typo_extra_field")
 
 
 def test_strict_reports_invalid_discriminator_clearly(base_cfg: DictConfig) -> None:

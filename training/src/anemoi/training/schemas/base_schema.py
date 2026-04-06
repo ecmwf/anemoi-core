@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 from typing import Any
 from typing import Self
 from typing import Union
@@ -36,17 +35,15 @@ from .validation_errors import format_validation_error
 
 # to make these available at runtime for pydantic, bug should be resolved in
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
+from anemoi.graphs.schemas.base_graph import BaseGraphSchema  # noqa: TCH001
+from anemoi.models.schemas.models import ModelSchema  # noqa: TCH001
 
+from .data import DataSchema  # noqa: TCH001
+from .dataloader import DataLoaderSchema  # noqa: TCH001
+from .diagnostics import DiagnosticsSchema  # noqa: TCH001
+from .system import SystemSchema  # noqa: TCH001
+from .training import TrainingSchema  # noqa: TCH001
 
-if TYPE_CHECKING:
-    from anemoi.graphs.schemas.base_graph import BaseGraphSchema
-    from anemoi.models.schemas.models import ModelSchema
-
-    from .data import DataSchema
-    from .dataloader import DataLoaderSchema
-    from .diagnostics import DiagnosticsSchema
-    from .system import SystemSchema
-    from .training import TrainingSchema
 
 LOGGER = logging.getLogger(__name__)
 

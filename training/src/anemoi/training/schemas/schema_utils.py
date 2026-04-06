@@ -153,16 +153,28 @@ def _resolve_union_model(
     metadata: tuple[Any, ...],
     value: Any,
 ) -> type[PydanticBaseModel] | None:
-    """Pick the right Union branch using a ``Field(discriminator=...)`` string annotation.
+    """Pick the right Union branch using a discriminator annotation.
 
-    Reads the discriminator value from the input data via the field's alias or field name.
+    Handles both string discriminators (``Field(discriminator="field_name")``) and
+    callable discriminators (``Discriminator(fn)`` with ``Tag`` annotations).
     Returns ``None`` when the union cannot be resolved.
     """
-    discriminator = next(
-        (m.discriminator for m in metadata if hasattr(m, "discriminator") and isinstance(m.discriminator, str)),
-        None,
-    )
-    if discriminator is None or not isinstance(value, DictConfig | dict):
+    discriminator = next((m.discriminator for m in metadata if hasattr(m, "discriminator")), None)
+    if discriminator is None:
+        return None
+    if callable(discriminator):
+        try:
+            tag = discriminator(value)
+        except Exception:  # noqa: BLE001
+            return None
+        return next(
+            (ann for arg in get_args(annotation)
+             for ann, meta in [_unwrap_annotated(arg)]
+             if isinstance(ann, type) and issubclass(ann, PydanticBaseModel)
+             and any(getattr(m, "tag", None) == tag for m in meta)),
+            None,
+        )
+    if not isinstance(value, DictConfig | dict):
         return None
 
     matches = []
@@ -336,27 +348,18 @@ def apply_schema_defaults(config: DictConfig, schema: type[PydanticBaseModel]) -
 # ---------------------------------------------------------------------------
 
 
-def _interpolation_refs(config: DictConfig | ListConfig) -> set[tuple[str, ...]]:
-    """Collect all plain ``${a.b.c}`` reference paths from the config tree.
+def _walk_config(
+    config: DictConfig | ListConfig,
+    prefix: tuple[str, ...] = (),
+) -> tuple[set[tuple[str, ...]], set[tuple[str, ...]]]:
+    """Walk *config* and return ``(interpolation_refs, all_paths)``.
 
-    Resolver expressions such as ``${oc.env:HOME}`` are ignored.
-
-    Examples
-    --------
-    Given three components referencing a shared top-level anchor::
-
-        model:
-          layer_kernels:                      # anchor definition
-            Linear: torch.nn.Linear
-          encoder:
-            layer_kernels: ${model.layer_kernels}
-          decoder:
-            layer_kernels: ${model.layer_kernels}
-
-    Returns ``{("model", "layer_kernels")}``.  All three references resolve to
-    the same path, so the set contains it once.
+    ``interpolation_refs`` — plain ``${a.b.c}`` reference targets (resolver
+    expressions like ``${oc.env:HOME}`` are excluded).
+    ``all_paths``          — every key path present in the config tree.
     """
     refs: set[tuple[str, ...]] = set()
+    paths: set[tuple[str, ...]] = set()
     raw = OmegaConf.to_container(config, resolve=False)
 
     if isinstance(config, DictConfig) and isinstance(raw, dict):
@@ -364,14 +367,14 @@ def _interpolation_refs(config: DictConfig | ListConfig) -> set[tuple[str, ...]]
     elif isinstance(config, ListConfig) and isinstance(raw, list):
         pairs = enumerate(raw)
     else:
-        return refs
+        return refs, paths
 
     for key, raw_val in pairs:
+        path = (*prefix, str(key))
+        paths.add(path)
         if OmegaConf.is_interpolation(config, key):
             for match in _INTERP_RE.findall(raw_val if isinstance(raw_val, str) else ""):
-                if ":" not in match and (
-                    parts := tuple(p for p in match.split(".") if p)
-                ):  # skip resolver expressions like ${oc.env:HOME}
+                if ":" not in match and (parts := tuple(p for p in match.split(".") if p)):
                     refs.add(parts)
         else:
             try:
@@ -379,7 +382,14 @@ def _interpolation_refs(config: DictConfig | ListConfig) -> set[tuple[str, ...]]
             except Exception:  # noqa: BLE001, S112
                 continue
             if isinstance(child, DictConfig | ListConfig):
-                refs.update(_interpolation_refs(child))
+                child_refs, child_paths = _walk_config(child, path)
+                refs.update(child_refs)
+                paths.update(child_paths)
+    return refs, paths
+
+
+def _interpolation_refs(config: DictConfig | ListConfig) -> set[tuple[str, ...]]:
+    refs, _ = _walk_config(config)
     return refs
 
 
@@ -456,6 +466,42 @@ def _minimize_paths(paths: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
     return minimized
 
 
+def _schema_root_of_path(path: tuple[str, ...], schema: type[PydanticBaseModel]) -> tuple[str, ...]:
+    """Return the shortest prefix of *path* that is not declared by *schema*.
+
+    When an interpolation reference points deep into an undeclared subtree
+    (e.g. ``${diagnostics.plot.frequency.batch}``), the entire parent key
+    (``diagnostics.plot.frequency``) should be pruned, not just the leaf.
+    Walking up from the full path to the shortest undeclared prefix ensures
+    siblings like ``frequency.epoch`` are pruned as collateral.
+    """
+    for i in range(1, len(path) + 1):
+        if not _path_in_schema(path[:i], schema):
+            return path[:i]
+    return path
+
+
+def _undeclared_anchor_paths(
+    refs: set[tuple[str, ...]],
+    config: DictConfig,
+    schema: type[PydanticBaseModel],
+) -> list[tuple[str, ...]]:
+    """From pre-collected interpolation *refs*, return the prunable anchor paths."""
+    prunable = []
+    for path in sorted(refs):
+        if not path or _path_in_schema(path, schema):
+            continue
+        root = _schema_root_of_path(path, schema)
+        if len(root) == 1:
+            exists = root[0] in config
+        else:
+            parent = OmegaConf.select(config, ".".join(root[:-1]), default=None)
+            exists = isinstance(parent, DictConfig | dict) and root[-1] in parent
+        if exists:
+            prunable.append(root)
+    return _minimize_paths(prunable)
+
+
 def undeclared_interpolation_anchor_paths(
     config: DictConfig,
     schema: type[PydanticBaseModel],
@@ -463,22 +509,15 @@ def undeclared_interpolation_anchor_paths(
     """Return paths that are ``${...}`` interpolation sources but undeclared by *schema*.
 
     A path is prunable when it is referenced by an interpolation, not declared
-    by the schema, and actually exists in the config.
+    by the schema, and actually exists in the config.  The shortest undeclared
+    prefix is used so that sibling keys in the same undeclared subtree are also
+    removed (e.g. ``frequency.epoch`` when only ``frequency.batch`` is referenced).
     """
     if not isinstance(config, DictConfig):
         return []
-    prunable = []
-    for path in sorted(_interpolation_refs(config)):
-        if not path or _path_in_schema(path, schema):
-            continue
-        if len(path) == 1:
-            exists = path[0] in config
-        else:
-            parent = OmegaConf.select(config, ".".join(path[:-1]), default=None)
-            exists = isinstance(parent, DictConfig | dict) and path[-1] in parent
-        if exists:
-            prunable.append(path)
-    return _minimize_paths(prunable)
+    refs, _ = _walk_config(config)
+    return _undeclared_anchor_paths(refs, config, schema)
+
 
 
 def prune_undeclared_interpolation_anchors(config: DictConfig, paths: list[tuple[str, ...]]) -> None:
@@ -498,14 +537,26 @@ def resolve_and_prune_undeclared_interpolation_anchors(
     config: DictConfig,
     schema: type[PydanticBaseModel],
 ) -> None:
-    """Resolve all interpolations then prune anchor keys undeclared by *schema*.
+    """Resolve all interpolations then prune keys undeclared by *schema*.
 
-    Order matters: anchor paths are collected before resolving (interpolations
-    must still be present), then pruned after so values are already copied.
+    Two passes:
+    1. Collect interpolation-anchor paths before resolving (interpolations must
+       still be present to be detectable), then delete them after resolving so
+       their values are already copied to the reference sites.
+    2. Walk the resolved config recursively and remove any remaining keys not
+       declared by the schema (covers non-referenced extras like ``focus_areas``
+       or ``attributes.nodes``).
     """
-    paths = undeclared_interpolation_anchor_paths(config, schema)
+    refs, all_paths = _walk_config(config)
+    anchor_paths = _undeclared_anchor_paths(refs, config, schema)
     OmegaConf.resolve(config)
-    prune_undeclared_interpolation_anchors(config, paths)
+    prune_undeclared_interpolation_anchors(config, anchor_paths)
+    extra = _minimize_paths([
+        _schema_root_of_path(path, schema)
+        for path in all_paths
+        if not _path_in_schema(path, schema)
+    ])
+    prune_undeclared_interpolation_anchors(config, extra)
 
 
 __all__ = [
