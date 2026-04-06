@@ -93,7 +93,6 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
         dataset_name: str | None = None,
         batch: dict[str, torch.Tensor] | torch.Tensor | None = None,
     ) -> torch.Tensor | None:
-        del model
         if batch is None:
             return None
 
