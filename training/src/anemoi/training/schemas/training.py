@@ -129,6 +129,20 @@ class GeneralVariableLossScalerSchema(BaseModel):
     "Weight of each variable."  # Check keys (variables) are read ???
 
 
+class TargetValueRangeScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.TargetValueRangeScaler"] = Field(..., alias="_target_")
+    variable: str = Field(example="refc")
+    "Variable to reweight based on its target-value ranges."
+    thresholds: list[float] = Field(example=[5.0, 20.0, 40.0], min_length=1)
+    "Thresholds in raw variable units used to assign piecewise-constant weights."
+    weights: list[float] = Field(example=[1.0, 2.0, 4.0, 8.0], min_length=2)
+    "Weights for the threshold bins; must have len(thresholds) + 1 entries."
+    normalization: Literal["mean-std", "std", "none"] = Field(default="mean-std", example="mean-std")
+    "Normalization mode used by the variable so thresholds can be applied in raw units."
+    norm: Literal["unit-max", "unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
+    "Optional normalization method for the resulting scaler tensor."
+
+
 class VariableMaskingScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.VariableMaskingLossScaler"] = Field(..., alias="_target_")
     variables: list[str] = Field(defaultexample=["tp"])
@@ -237,6 +251,7 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
 
 ScalerSchema = (
     GeneralVariableLossScalerSchema
+    | TargetValueRangeScalerSchema
     | VariableLevelScalerSchema
     | VariableMaskingScalerSchema
     | TendencyScalerSchema

@@ -103,6 +103,10 @@ training:
   max_epochs: 1200
   max_steps: 9999999
   accum_grad_batches: 8
+  training_loss:
+    datasets:
+      data:
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_value_ranges']
   scalers:
     datasets:
       data:
@@ -141,8 +145,3 @@ training:
         default: sfc
         pl:
           is_pressure_level: True
-
-training_loss:
-  datasets:
-    data:
-      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_value_ranges']
