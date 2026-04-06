@@ -1,7 +1,7 @@
-2026-04-05 17:25:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
-2026-04-05 17:25:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
-2026-04-05 17:25:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
-2026-04-05 17:25:22 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
+2026-04-06 12:29:49 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
+2026-04-06 12:29:49 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
+2026-04-06 12:29:49 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
+2026-04-06 12:29:49 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
   warnings.warn(
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
@@ -18,978 +18,401 @@
   warnings.warn(
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
   warnings.warn(
-2026-04-05 17:28:20 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-04-05 17:28:20 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-04-05 17:28:20 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-04-05 17:28:20 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-04-05 17:28:20 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-04-05 17:28:20 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-04-05 17:28:20 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-04-05 17:28:20 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-04-06 12:31:59 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-04-06 12:31:59 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-04-06 12:31:59 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-04-06 12:31:59 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-04-06 12:31:59 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-04-06 12:31:59 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-04-06 12:31:59 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-04-06 12:31:59 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:77: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
+  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:77: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
+  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:77: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
+  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:77: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
+  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
+[W406 12:36:12.998617440 Utils.hpp:137] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
+[W406 12:36:12.998614350 Utils.hpp:137] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
+[W406 12:36:13.658090225 Utils.hpp:137] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
+[W406 12:36:13.659617968 Utils.hpp:137] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
+[rank0]:[W406 12:36:13.344512994 Utils.hpp:112] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
+[rank1]:[W406 12:36:13.344505064 Utils.hpp:112] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
+[rank2]:[W406 12:36:13.363220264 Utils.hpp:112] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
+[rank3]:[W406 12:36:13.363213244 Utils.hpp:112] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `on_after_batch_transfer` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
+[rank2]:     sys.exit(main())
+[rank2]:              ^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
+[rank2]:     cli_main(__version__, __doc__, COMMANDS)
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+[rank2]:     cmd.run(args, unknown)
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+[rank2]:     main()
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+[rank2]:     anemoi_train()
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+[rank2]:     _run_hydra(
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+[rank2]:     _run_app(
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+[rank2]:     run_and_report(
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+[rank2]:     raise ex
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+[rank2]:     return func()
+[rank2]:            ^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+[rank2]:     lambda: hydra.run(
+[rank2]:             ^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+[rank2]:     _ = ret.return_value
+[rank2]:         ^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+[rank2]:     raise self._return_value
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+[rank2]:     ret.return_value = task_function(task_cfg)
+[rank2]:                        ^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+[rank2]:     AnemoiTrainer(config).train()
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 596, in train
+[rank2]:     trainer.fit(**self.fit_parameters)
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 561, in fit
+[rank2]:     call._call_and_handle_interrupt(
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 47, in _call_and_handle_interrupt
+[rank2]:     return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/launchers/subprocess_script.py", line 105, in launch
+[rank2]:     return function(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 599, in _fit_impl
+[rank2]:     self._run(model, ckpt_path=ckpt_path)
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1012, in _run
+[rank2]:     results = self._run_stage()
+[rank2]:               ^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1054, in _run_stage
+[rank2]:     self._run_sanity_check()
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1083, in _run_sanity_check
+[rank2]:     val_loop.run()
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/utilities.py", line 179, in _decorator
+[rank2]:     return loop_run(self, *args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 145, in run
+[rank2]:     self._evaluation_step(batch, batch_idx, dataloader_idx, dataloader_iter)
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 411, in _evaluation_step
+[rank2]:     batch = call._call_strategy_hook(trainer, "batch_to_device", batch, dataloader_idx=dataloader_idx)
+[rank2]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 328, in _call_strategy_hook
+[rank2]:     output = fn(*args, **kwargs)
+[rank2]:              ^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/strategy.py", line 278, in batch_to_device
+[rank2]:     return model._apply_batch_transfer_handler(batch, device=device, dataloader_idx=dataloader_idx)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 353, in _apply_batch_transfer_handler
+[rank2]:     batch = self._call_batch_hook("on_after_batch_transfer", batch, dataloader_idx)
+[rank2]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 341, in _call_batch_hook
+[rank2]:     return trainer_method(trainer, hook_name, *args)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 176, in _call_lightning_module_hook
+[rank2]:     output = fn(*args, **kwargs)
+[rank2]:              ^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 742, in on_after_batch_transfer
+[rank2]:     self._prepare_loss_scalers(batch)
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 822, in _prepare_loss_scalers
+[rank2]:     self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START, batch=batch)
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 466, in update_scalers
+[rank2]:     self._update_scaler_for_dataset(
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 450, in _update_scaler_for_dataset
+[rank2]:     scaler = scaler_builder.update_scaling_values(callback, **callback_kwargs)
+[rank2]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/base_scaler.py", line 149, in update_scaling_values
+[rank2]:     scalar_values = getattr(self, callback)(**kwargs)
+[rank2]:                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]: TypeError: NaNMaskScaler.on_batch_start() got an unexpected keyword argument 'batch'
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
-Traceback (most recent call last):
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
-    AnemoiTrainer(config).train()
-    ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-pydantic_core._pydantic_core.ValidationError: 67 validation errors for BaseSchema
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.GeneralVariableLossScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.weights
-  Input should be a valid dictionary [type=dict_type, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/dict_type
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.ReluVariableLevelScaler', 'anemoi.training.losses.scalers.LinearVariableLevelScaler', 'anemoi.training.losses.scalers.PolynomialVariableLevelScaler' or 'anemoi.training.losses.scalers.NoVariableLevelScaler' [type=enum, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/enum
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.group
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.slope
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-Traceback (most recent call last):
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.y_intercept
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.VariableMaskingLossScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.variables
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.invert
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.StdevTendencyScaler' or 'anemoi.training.losses.scalers.VarTendencyScaler' [type=enum, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/enum
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.thresholds
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.NaNMaskScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.variable
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.weights
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.GraphNodeAttributeScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.nodes_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
-    AnemoiTrainer(config).train()
-    ^^^^^^^^^^^^^^^^^^^^^
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.nodes_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.norm
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-pydantic_core._pydantic_core.ValidationError: 67 validation errors for BaseSchema
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.GeneralVariableLossScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.weights
-  Input should be a valid dictionary [type=dict_type, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/dict_type
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.variable
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema._target_
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.TimeStepScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.thresholds
-  Input should be 'anemoi.training.losses.scalers.ReluVariableLevelScaler', 'anemoi.training.losses.scalers.LinearVariableLevelScaler', 'anemoi.training.losses.scalers.PolynomialVariableLevelScaler' or 'anemoi.training.losses.scalers.NoVariableLevelScaler' [type=enum, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/enum
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.group
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.slope
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.UniformTimeStepScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.multistep_output
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.y_intercept
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.thresholds
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.VariableMaskingLossScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.LeadTimeDecayScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.output_lead_times
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.decay_factor
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.variables
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.invert
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.max_lead_time
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema._target_
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.StdevTendencyScaler' or 'anemoi.training.losses.scalers.VarTendencyScaler' [type=enum, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/enum
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-  Input should be 'anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.nodes_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.nodes_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.thresholds
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.scaling_mask_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.NaNMaskScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.variable
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.weight_frac_of_total
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.norm
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.weights
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.GraphNodeAttributeScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.nodes_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training_loss
-  Extra inputs are not permitted [type=extra_forbidden, input_value={'datasets': {'data': {'s... 'refc_value_ranges']}}}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.nodes_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.norm
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.TimeStepScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.UniformTimeStepScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.multistep_output
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.LeadTimeDecayScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.output_lead_times
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.decay_factor
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.max_lead_time
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.nodes_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.nodes_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.scaling_mask_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.weight_frac_of_total
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.norm
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training_loss
-  Extra inputs are not permitted [type=extra_forbidden, input_value={'datasets': {'data': {'s... 'refc_value_ranges']}}}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
+[rank1]:     sys.exit(main())
+[rank1]:              ^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
+[rank1]:     cli_main(__version__, __doc__, COMMANDS)
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+[rank1]:     cmd.run(args, unknown)
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+[rank1]:     main()
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+[rank1]:     anemoi_train()
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+[rank1]:     _run_hydra(
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+[rank1]:     _run_app(
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+[rank1]:     run_and_report(
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+[rank1]:     raise ex
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+[rank1]:     return func()
+[rank1]:            ^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+[rank1]:     lambda: hydra.run(
+[rank1]:             ^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+[rank1]:     _ = ret.return_value
+[rank1]:         ^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+[rank1]:     raise self._return_value
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+[rank1]:     ret.return_value = task_function(task_cfg)
+[rank1]:                        ^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+[rank1]:     AnemoiTrainer(config).train()
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 596, in train
+[rank1]:     trainer.fit(**self.fit_parameters)
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 561, in fit
+[rank1]:     call._call_and_handle_interrupt(
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 47, in _call_and_handle_interrupt
+[rank1]:     return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/launchers/subprocess_script.py", line 105, in launch
+[rank1]:     return function(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 599, in _fit_impl
+[rank1]:     self._run(model, ckpt_path=ckpt_path)
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1012, in _run
+[rank1]:     results = self._run_stage()
+[rank1]:               ^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1054, in _run_stage
+[rank1]:     self._run_sanity_check()
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1083, in _run_sanity_check
+[rank1]:     val_loop.run()
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/utilities.py", line 179, in _decorator
+[rank1]:     return loop_run(self, *args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 145, in run
+[rank1]:     self._evaluation_step(batch, batch_idx, dataloader_idx, dataloader_iter)
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 411, in _evaluation_step
+[rank1]:     batch = call._call_strategy_hook(trainer, "batch_to_device", batch, dataloader_idx=dataloader_idx)
+[rank1]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 328, in _call_strategy_hook
+[rank1]:     output = fn(*args, **kwargs)
+[rank1]:              ^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/strategy.py", line 278, in batch_to_device
+[rank1]:     return model._apply_batch_transfer_handler(batch, device=device, dataloader_idx=dataloader_idx)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 353, in _apply_batch_transfer_handler
+[rank1]:     batch = self._call_batch_hook("on_after_batch_transfer", batch, dataloader_idx)
+[rank1]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 341, in _call_batch_hook
+[rank1]:     return trainer_method(trainer, hook_name, *args)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 176, in _call_lightning_module_hook
+[rank1]:     output = fn(*args, **kwargs)
+[rank1]:              ^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 742, in on_after_batch_transfer
+[rank1]:     self._prepare_loss_scalers(batch)
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 822, in _prepare_loss_scalers
+[rank1]:     self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START, batch=batch)
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 466, in update_scalers
+[rank1]:     self._update_scaler_for_dataset(
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 450, in _update_scaler_for_dataset
+[rank1]:     scaler = scaler_builder.update_scaling_values(callback, **callback_kwargs)
+[rank1]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/base_scaler.py", line 149, in update_scaling_values
+[rank1]:     scalar_values = getattr(self, callback)(**kwargs)
+[rank1]:                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]: TypeError: NaNMaskScaler.on_batch_start() got an unexpected keyword argument 'batch'
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
-Traceback (most recent call last):
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
-    AnemoiTrainer(config).train()
-    ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-pydantic_core._pydantic_core.ValidationError: 67 validation errors for BaseSchema
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.GeneralVariableLossScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.weights
-  Input should be a valid dictionary [type=dict_type, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/dict_type
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.ReluVariableLevelScaler', 'anemoi.training.losses.scalers.LinearVariableLevelScaler', 'anemoi.training.losses.scalers.PolynomialVariableLevelScaler' or 'anemoi.training.losses.scalers.NoVariableLevelScaler' [type=enum, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/enum
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.group
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.slope
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.y_intercept
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.VariableMaskingLossScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.variables
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.invert
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.StdevTendencyScaler' or 'anemoi.training.losses.scalers.VarTendencyScaler' [type=enum, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/enum
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.NaNMaskScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.GraphNodeAttributeScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.nodes_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.nodes_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.norm
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.TimeStepScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.UniformTimeStepScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.multistep_output
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.LeadTimeDecayScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.output_lead_times
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.decay_factor
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.max_lead_time
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.nodes_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.nodes_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.scaling_mask_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.weight_frac_of_total
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.norm
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training_loss
-  Extra inputs are not permitted [type=extra_forbidden, input_value={'datasets': {'data': {'s... 'refc_value_ranges']}}}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
+[rank0]:     sys.exit(main())
+[rank0]:              ^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
+[rank0]:     cli_main(__version__, __doc__, COMMANDS)
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+[rank0]:     cmd.run(args, unknown)
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+[rank0]:     main()
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+[rank0]:     anemoi_train()
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+[rank0]:     _run_hydra(
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+[rank0]:     _run_app(
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+[rank0]:     run_and_report(
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+[rank0]:     raise ex
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+[rank0]:     return func()
+[rank0]:            ^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+[rank0]:     lambda: hydra.run(
+[rank0]:             ^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+[rank0]:     _ = ret.return_value
+[rank0]:         ^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+[rank0]:     raise self._return_value
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+[rank0]:     ret.return_value = task_function(task_cfg)
+[rank0]:                        ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+[rank0]:     AnemoiTrainer(config).train()
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 596, in train
+[rank0]:     trainer.fit(**self.fit_parameters)
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 561, in fit
+[rank0]:     call._call_and_handle_interrupt(
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 47, in _call_and_handle_interrupt
+[rank0]:     return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/launchers/subprocess_script.py", line 105, in launch
+[rank0]:     return function(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 599, in _fit_impl
+[rank0]:     self._run(model, ckpt_path=ckpt_path)
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1012, in _run
+[rank0]:     results = self._run_stage()
+[rank0]:               ^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1054, in _run_stage
+[rank0]:     self._run_sanity_check()
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1083, in _run_sanity_check
+[rank0]:     val_loop.run()
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/utilities.py", line 179, in _decorator
+[rank0]:     return loop_run(self, *args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 145, in run
+[rank0]:     self._evaluation_step(batch, batch_idx, dataloader_idx, dataloader_iter)
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 411, in _evaluation_step
+[rank0]:     batch = call._call_strategy_hook(trainer, "batch_to_device", batch, dataloader_idx=dataloader_idx)
+[rank0]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 328, in _call_strategy_hook
+[rank0]:     output = fn(*args, **kwargs)
+[rank0]:              ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/strategy.py", line 278, in batch_to_device
+[rank0]:     return model._apply_batch_transfer_handler(batch, device=device, dataloader_idx=dataloader_idx)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 353, in _apply_batch_transfer_handler
+[rank0]:     batch = self._call_batch_hook("on_after_batch_transfer", batch, dataloader_idx)
+[rank0]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 341, in _call_batch_hook
+[rank0]:     return trainer_method(trainer, hook_name, *args)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 176, in _call_lightning_module_hook
+[rank0]:     output = fn(*args, **kwargs)
+[rank0]:              ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 742, in on_after_batch_transfer
+[rank0]:     self._prepare_loss_scalers(batch)
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 822, in _prepare_loss_scalers
+[rank0]:     self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START, batch=batch)
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 466, in update_scalers
+[rank0]:     self._update_scaler_for_dataset(
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 450, in _update_scaler_for_dataset
+[rank0]:     scaler = scaler_builder.update_scaling_values(callback, **callback_kwargs)
+[rank0]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/base_scaler.py", line 149, in update_scaling_values
+[rank0]:     scalar_values = getattr(self, callback)(**kwargs)
+[rank0]:                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]: TypeError: NaNMaskScaler.on_batch_start() got an unexpected keyword argument 'batch'
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=2', 'system.hardware.num_gpus_per_model=1']
-Traceback (most recent call last):
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-    cmd.run(args, unknown)
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-    main()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-    anemoi_train()
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-    _run_hydra(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-    _run_app(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-    run_and_report(
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-    raise ex
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-    return func()
-           ^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-    lambda: hydra.run(
-            ^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-    _ = ret.return_value
-        ^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-    raise self._return_value
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-    ret.return_value = task_function(task_cfg)
-                       ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
-    AnemoiTrainer(config).train()
-    ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
-    self.config = BaseSchema(**config)
-                  ^^^^^^^^^^^^^^^^^^^^
-  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
-    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-pydantic_core._pydantic_core.ValidationError: 67 validation errors for BaseSchema
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.GeneralVariableLossScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.weights
-  Input should be a valid dictionary [type=dict_type, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/dict_type
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GeneralVariableLossScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.ReluVariableLevelScaler', 'anemoi.training.losses.scalers.LinearVariableLevelScaler', 'anemoi.training.losses.scalers.PolynomialVariableLevelScaler' or 'anemoi.training.losses.scalers.NoVariableLevelScaler' [type=enum, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/enum
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.group
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.slope
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.y_intercept
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableLevelScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.VariableMaskingLossScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.variables
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.invert
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.VariableMaskingScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.StdevTendencyScaler' or 'anemoi.training.losses.scalers.VarTendencyScaler' [type=enum, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/enum
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TendencyScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.NaNMaskScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.NaNMaskScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.GraphNodeAttributeScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.nodes_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.nodes_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.norm
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.GraphNodeAttributeScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.TimeStepScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.TimeStepScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.UniformTimeStepScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.multistep_output
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.UniformTimeStepScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.LeadTimeDecayScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.output_lead_times
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.decay_factor
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.max_lead_time
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.LeadTimeDecayScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema._target_
-  Input should be 'anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler' [type=literal_error, input_value='anemoi.training.losses.s....TargetValueRangeScaler', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.nodes_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.nodes_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.scaling_mask_attribute_name
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.weight_frac_of_total
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.norm
-  Field required [type=missing, input_value={'_target_': 'anemoi.trai...hts': [110, 20, 40, 80]}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.variable
-  Extra inputs are not permitted [type=extra_forbidden, input_value='refc', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.normalization
-  Extra inputs are not permitted [type=extra_forbidden, input_value='mean-std', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.thresholds
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[5.0, 20.0, 40.0], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training.`anemoi.training.train.tasks.GraphForecaster`.scalers.datasets.data.refc_value_ranges.ReweightedGraphNodeAttributeScalerSchema.weights
-  Extra inputs are not permitted [type=extra_forbidden, input_value=[110, 20, 40, 80], input_type=ListConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-training_loss
-  Extra inputs are not permitted [type=extra_forbidden, input_value={'datasets': {'data': {'s... 'refc_value_ranges']}}}, input_type=DictConfig]
-    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
-srun: error: u20g11: tasks 0-1: Exited with exit code 1
-srun: Terminating StepId=10971063.0
-srun: error: u23g11: tasks 2-3: Exited with exit code 1
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
+[rank3]:     sys.exit(main())
+[rank3]:              ^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
+[rank3]:     cli_main(__version__, __doc__, COMMANDS)
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+[rank3]:     cmd.run(args, unknown)
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+[rank3]:     main()
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+[rank3]:     anemoi_train()
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+[rank3]:     _run_hydra(
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+[rank3]:     _run_app(
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+[rank3]:     run_and_report(
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+[rank3]:     raise ex
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+[rank3]:     return func()
+[rank3]:            ^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+[rank3]:     lambda: hydra.run(
+[rank3]:             ^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+[rank3]:     _ = ret.return_value
+[rank3]:         ^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+[rank3]:     raise self._return_value
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+[rank3]:     ret.return_value = task_function(task_cfg)
+[rank3]:                        ^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 606, in main
+[rank3]:     AnemoiTrainer(config).train()
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 596, in train
+[rank3]:     trainer.fit(**self.fit_parameters)
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 561, in fit
+[rank3]:     call._call_and_handle_interrupt(
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 47, in _call_and_handle_interrupt
+[rank3]:     return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/launchers/subprocess_script.py", line 105, in launch
+[rank3]:     return function(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 599, in _fit_impl
+[rank3]:     self._run(model, ckpt_path=ckpt_path)
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1012, in _run
+[rank3]:     results = self._run_stage()
+[rank3]:               ^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1054, in _run_stage
+[rank3]:     self._run_sanity_check()
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1083, in _run_sanity_check
+[rank3]:     val_loop.run()
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/utilities.py", line 179, in _decorator
+[rank3]:     return loop_run(self, *args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 145, in run
+[rank3]:     self._evaluation_step(batch, batch_idx, dataloader_idx, dataloader_iter)
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/evaluation_loop.py", line 411, in _evaluation_step
+[rank3]:     batch = call._call_strategy_hook(trainer, "batch_to_device", batch, dataloader_idx=dataloader_idx)
+[rank3]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 328, in _call_strategy_hook
+[rank3]:     output = fn(*args, **kwargs)
+[rank3]:              ^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/strategy.py", line 278, in batch_to_device
+[rank3]:     return model._apply_batch_transfer_handler(batch, device=device, dataloader_idx=dataloader_idx)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 353, in _apply_batch_transfer_handler
+[rank3]:     batch = self._call_batch_hook("on_after_batch_transfer", batch, dataloader_idx)
+[rank3]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 341, in _call_batch_hook
+[rank3]:     return trainer_method(trainer, hook_name, *args)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 176, in _call_lightning_module_hook
+[rank3]:     output = fn(*args, **kwargs)
+[rank3]:              ^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 742, in on_after_batch_transfer
+[rank3]:     self._prepare_loss_scalers(batch)
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 822, in _prepare_loss_scalers
+[rank3]:     self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START, batch=batch)
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 466, in update_scalers
+[rank3]:     self._update_scaler_for_dataset(
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/tasks/base.py", line 450, in _update_scaler_for_dataset
+[rank3]:     scaler = scaler_builder.update_scaling_values(callback, **callback_kwargs)
+[rank3]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/base_scaler.py", line 149, in update_scaling_values
+[rank3]:     scalar_values = getattr(self, callback)(**kwargs)
+[rank3]:                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]: TypeError: NaNMaskScaler.on_batch_start() got an unexpected keyword argument 'batch'
+srun: error: u20g08: tasks 2-3: Exited with exit code 1
+srun: Terminating StepId=11024578.0
+[2026-04-06T12:36:21.709] error: *** STEP 11024578.0 ON u20g07 CANCELLED AT 2026-04-06T12:36:21 DUE TO TASK FAILURE ***
+srun: error: u20g07: tasks 0-1: Exited with exit code 1
