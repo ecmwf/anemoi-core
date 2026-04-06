@@ -36,7 +36,12 @@ class NaNMaskScaler(BaseUpdatingScaler):
         self.use_processors_tendencies = use_processors_tendencies
         del kwargs
 
-    def on_batch_start(self, model: AnemoiModelInterface, dataset_name: str | None = None) -> torch.Tensor | None:
+    def on_batch_start(
+        self,
+        model: AnemoiModelInterface,
+        dataset_name: str | None = None,
+        **_kwargs,
+    ) -> torch.Tensor | None:
         """Update loss scaling.
 
         Get mask multiplying NaN locations with zero.
