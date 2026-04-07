@@ -15,8 +15,7 @@ keep_batch_sharded: True
 
 backbone:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
-  data_nodes_name: "data"
-  hidden_nodes_name: "hidden"
+  hidden_nodes_name: "data"
   latent_skip: True
 
 layer_kernels:

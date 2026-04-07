@@ -12,6 +12,7 @@ from typing import Union
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
+from pydantic import PositiveInt
 
 from anemoi.utils.schemas import BaseModel
 
@@ -38,6 +39,8 @@ class TransformerModelComponent(PydanticBaseModel):
     "Ratio of mlp hidden dimension to embedding dimension. Default to 4."
     num_heads: NonNegativeInt = Field(example=16)
     "Number of attention heads. Default to 16."
+    attn_channels: Union[PositiveInt, None] = Field(default=None)
+    "Internal attention width used for q/k/v projections. Default to None, which keeps the embedding dimension."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
@@ -72,3 +75,14 @@ class PointWiseModelComponent(BaseModel):
     "Enable gradient checkpointing to reduce memory usage. Default to True."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+
+
+class PointWiseMapperComponent(BaseModel):
+    convert_: str = Field("all", alias="_convert_")
+    "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
+    cpu_offload: bool = Field(example=False)
+    "Offload to CPU. Default to False."
+    gradient_checkpointing: bool = Field(default=True)
+    "Enable gradient checkpointing to reduce memory usage. Default to True."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    "Settings related to custom kernels for encoder and decoder blocks"

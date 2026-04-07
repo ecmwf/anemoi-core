@@ -19,7 +19,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import model_validator
-from pydantic._internal import _model_construction
+from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
@@ -35,8 +35,6 @@ from .dataloader import DataLoaderSchema
 from .diagnostics import DiagnosticsSchema
 from .system import SystemSchema
 from .training import TrainingSchema
-
-_object_setattr = _model_construction.object_setattr
 
 LOGGER = logging.getLogger(__name__)
 
