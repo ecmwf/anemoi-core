@@ -1094,7 +1094,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         scheduler = instantiate(optimization.lr_scheduler, optimizer=optimizer)
         scheduler_config = {"scheduler": scheduler, **(optimization.pl_lr_scheduler or {})}
-        return [optimizer], [scheduler_config]  # type: ignore
+        return [optimizer], [scheduler_config]  # type: ignore[return-value]
 
     @staticmethod
     def log_optimizer(optimizer: torch.optim.Optimizer) -> None:
