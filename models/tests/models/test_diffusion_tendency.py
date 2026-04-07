@@ -275,3 +275,178 @@ def test_after_sampling_reinserts_nans() -> None:
     expected = imputer.inverse_transform(out["data"], in_place=False)
 
     assert torch.allclose(result, expected, equal_nan=True)
+
+
+# ============================================================
+# Helpers: SimpleNamespace-based indices + real InputNormalizer
+# ============================================================
+
+from types import SimpleNamespace
+
+
+def _make_dummy_indices(
+    full: list[int] | None = None,
+    prognostic: list[int] | None = None,
+    diagnostic: list[int] | None = None,
+) -> SimpleNamespace:
+    full = [0, 1, 2] if full is None else full
+    prognostic = full if prognostic is None else prognostic
+    diagnostic = [] if diagnostic is None else diagnostic
+    return SimpleNamespace(
+        data=SimpleNamespace(
+            output=SimpleNamespace(full=full, prognostic=prognostic, diagnostic=diagnostic),
+            input=SimpleNamespace(prognostic=prognostic),
+        ),
+        model=SimpleNamespace(
+            output=SimpleNamespace(prognostic=prognostic, diagnostic=diagnostic),
+            input=SimpleNamespace(prognostic=prognostic),
+        ),
+    )
+
+
+def _make_tendency_model(indices: SimpleNamespace | None = None) -> AnemoiDiffusionTendModelEncProcDec:
+    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+    model.data_indices = {"data": _make_dummy_indices() if indices is None else indices}
+    return model
+
+
+def _make_normalizer_data_indices(nvars: int) -> SimpleNamespace:
+    names = [f"var{i}" for i in range(nvars)]
+    full = torch.arange(nvars, dtype=torch.long)
+    name_to_index = {name: i for i, name in enumerate(names)}
+    return SimpleNamespace(
+        data=SimpleNamespace(
+            input=SimpleNamespace(name_to_index=name_to_index, full=full),
+            output=SimpleNamespace(name_to_index=name_to_index, full=full),
+        ),
+        model=SimpleNamespace(
+            input=SimpleNamespace(name_to_index=name_to_index),
+            output=SimpleNamespace(name_to_index=name_to_index),
+        ),
+    )
+
+
+def _make_input_normalizer(mean: list[float], stdev: list[float]):
+    from anemoi.models.preprocessing.normalizer import InputNormalizer
+
+    mean_arr = np.asarray(mean, dtype=np.float32)
+    stdev_arr = np.asarray(stdev, dtype=np.float32)
+    stats = {
+        "minimum": mean_arr - 100.0,
+        "maximum": mean_arr + 100.0,
+        "mean": mean_arr.copy(),
+        "stdev": stdev_arr.copy(),
+    }
+    return InputNormalizer(
+        config={"default": "mean-std"},
+        data_indices=_make_normalizer_data_indices(nvars=len(mean)),
+        statistics=stats,
+    )
+
+
+# ============================================================
+# Round-trip: compute_tendency -> add_tendency_to_state recovers x_t1
+# ============================================================
+
+
+def test_tendency_roundtrip_identity_processors() -> None:
+    """compute_tendency then add_tendency_to_state with identity processors recovers x_t1."""
+    model = _make_model()
+    identity = IdentityProcessor()
+
+    x_t1 = torch.tensor([[[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]]])  # 2 prog + 1 diag
+    x_t0 = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]])                   # prognostic only
+
+    tendency = model.compute_tendency(
+        {"data": x_t1}, {"data": x_t0},
+        {"data": identity}, {"data": identity}, {"data": None},
+        skip_imputation=True,
+    )["data"]
+
+    x_t1_reconstructed = model.add_tendency_to_state(
+        {"data": x_t0}, {"data": tendency},
+        {"data": identity}, {"data": identity}, {"data": None},
+        skip_imputation=True,
+    )["data"]
+
+    assert torch.allclose(x_t1_reconstructed, x_t1, atol=1e-5)
+
+
+
+
+# ============================================================
+# Cross-validation: tendency vs downscaler residual computation
+# Shows that state stats vs residual stats produce different normalizations,
+# and that matching stats (residual for prog, state for diag) makes them equivalent.
+# ============================================================
+
+
+def test_tendency_vs_downscaler_residual_normalization() -> None:
+    """Tendency and downscaler residual computations agree when using matching stats.
+
+    The downscaler computes: normalize(y - x_interp) for prognostic channels.
+    The tendency model computes: tendency_norm(x_t1_prog - x_t0) for prognostic channels.
+    These are equivalent when:
+      - x_t0 == x_interp (upsampled lres, prognostic channels)
+      - tendency_norm uses residual stats (not state stats)
+    Also asserts that using state stats (wrong) gives a different result.
+    """
+    indices = _make_dummy_indices(full=[0, 1, 2], prognostic=[0, 1], diagnostic=[2])
+    model = _make_tendency_model(indices)
+
+    x_t1 = torch.tensor([[[[8.0, 17.0, 31.0], [10.0, 19.0, 29.0]]]])   # out_hres (raw)
+    x_t0_prog = torch.tensor([[[[5.0, 14.0], [6.0, 13.0]]]])            # x_interp prognostic channels
+
+    state_norm = _make_input_normalizer(mean=[4.0, 10.0, 25.0], stdev=[2.0, 4.0, 5.0])
+    resid_norm = _make_input_normalizer(mean=[1.0, 3.0, 0.0], stdev=[0.5, 1.5, 1.0])
+
+    tendency = model.compute_tendency(
+        {"data": x_t1}, {"data": x_t0_prog},
+        {"data": state_norm}, {"data": resid_norm}, {"data": None},
+        skip_imputation=True,
+    )["data"]
+
+    # Downscaler path: normalize (y - x_interp) with residual stats for prog,
+    # and y with state stats for diagnostic — should match tendency output exactly
+    from anemoi.models.preprocessing.normalizer import InputNormalizer
+    resid_prog = x_t1[..., [0, 1]] - x_t0_prog                          # (y - x_interp) for prog
+    resid_prog_norm = resid_norm(resid_prog, in_place=False,
+                                 data_index=torch.tensor([0, 1]))
+    diag_norm = state_norm(x_t1[..., [2]], in_place=False,
+                           data_index=torch.tensor([2]))
+    downscaler_target = torch.cat([resid_prog_norm, diag_norm], dim=-1)
+
+    torch.testing.assert_close(tendency, downscaler_target, atol=1e-4, rtol=1e-4)
+
+    # Sanity check: using state stats for prog normalization gives a DIFFERENT result
+    tendency_wrong = model.compute_tendency(
+        {"data": x_t1}, {"data": x_t0_prog},
+        {"data": state_norm}, {"data": state_norm}, {"data": None},
+        skip_imputation=True,
+    )["data"]
+    assert not torch.allclose(tendency_wrong[..., [0, 1]], tendency[..., [0, 1]], atol=1e-4), (
+        "Expected state vs residual stats to produce different normalized tendencies"
+    )
+
+
+# ============================================================
+# Edge case: all-prognostic channels
+# ============================================================
+
+
+def test_compute_tendency_all_prognostic() -> None:
+    """When all channels are prognostic, tendency = normalize(x_t1 - x_t0)."""
+    indices = _make_dummy_indices(full=[0, 1, 2], prognostic=[0, 1, 2], diagnostic=[])
+    model = _make_tendency_model(indices)
+    identity = IdentityProcessor()
+
+    x_t1 = torch.tensor([[[10.0, 20.0, 30.0]]])
+    x_t0 = torch.tensor([[[1.0, 2.0, 3.0]]])
+
+    tendency = model.compute_tendency(
+        {"data": x_t1}, {"data": x_t0},
+        {"data": identity}, {"data": identity}, {"data": None},
+        skip_imputation=True,
+    )["data"]
+
+    assert torch.allclose(tendency, x_t1 - x_t0, atol=1e-5)
