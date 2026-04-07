@@ -21,8 +21,6 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
-from pytorch_lightning.utilities.types import OptimizerLRScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -46,6 +44,8 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
+    from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
