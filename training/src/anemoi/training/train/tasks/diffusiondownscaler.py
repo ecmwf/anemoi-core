@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from .base import BaseGraphModule
+from .diffusionforecaster import BaseDiffusionForecaster
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -29,18 +29,20 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphDiffusionDownscaler(BaseGraphModule):
+class GraphDiffusionDownscaler(BaseDiffusionForecaster):
     """Graph neural network downscaler for diffusion.
 
     Follows the same patterns as GraphDiffusionTendForecaster where applicable:
     - Dict-based sigma/weights through the full pipeline
     - Dict-based forward() interface to model
     - Structured residual processor validation
+    - Noise schedule modes via inherited BaseDiffusionForecaster._get_noise_level
 
     Key differences from the forecaster (by design):
-    - Batch is NOT pre-normalized: compute_residuals needs raw y and x_interp
-      to compute y_raw - x_interp_raw before normalizing with residual stats.
-      Input normalization happens explicitly in _step after residual computation.
+    - in_lres and out_hres are NOT pre-normalized in on_after_batch_transfer:
+      compute_residuals needs raw y and x_interp to compute y_raw - x_interp_raw
+      before normalizing with residual stats. Only in_hres (a conditioning input
+      with no residual constraint) is pre-normalized via _normalize_batch.
     - Two separate inputs (in_lres upsampled + in_hres) instead of single input
     - Residual prediction (y - interp(x)) instead of tendency prediction (y_t1 - y_t0)
     """
@@ -71,6 +73,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.rho = config.model.model.diffusion.rho
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
+        # Default to probabilistic_low_noise for downscaling (forecaster defaults to high_noise)
         self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
 
         # Residual pairs: read from the model (single source of truth)
@@ -147,43 +150,54 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             group=self.model_comm_group,
         )
 
-    def _step(
+    def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Normalize only in_hres before the training step.
+
+        in_lres and out_hres must remain raw until _prepare_residual_inputs runs:
+        compute_residuals needs raw y and raw x_interp to compute y_raw - x_interp_raw
+        before normalizing with residual-specific statistics.
+
+        in_hres is a pure conditioning input with no residual constraint, so it
+        can be normalized here like any other forecaster input.
+        """
+        if "in_hres" in batch:
+            batch["in_hres"] = self.model.pre_processors["in_hres"](batch["in_hres"], in_place=False)
+        return batch
+
+    def _prepare_residual_inputs(
         self,
         batch: dict[str, torch.Tensor],
-        validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
-        """Process batch with dimensions [batch_size, dates, ensemble, gridpoints, variables].
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """Upsample in_lres, compute residual target, normalize in_lres.
 
-        Note: Unlike the forecaster, the batch is NOT pre-normalized here.
-        compute_residuals needs raw y and x_interp to compute the raw residual
-        before normalizing with residual-specific statistics. Input normalization
-        happens explicitly after residual computation.
+        Must be called on a batch where in_lres and out_hres are still raw (not
+        normalized). in_hres is already normalized by _normalize_batch.
 
-        Handles mixed residual/direct prediction:
-        - Prognostic output channels (in both source and target): residual prediction
-        - Diagnostic output channels (only in target): direct prediction
+        Returns
+        -------
+        x_dict : dict[str, torch.Tensor]
+            Normalized inputs keyed by dataset name, ready for the model forward pass.
+            Keys: "in_lres" (normalized upsampled), "in_hres" (already normalized).
+        target_dict : dict[str, torch.Tensor]
+            Normalized target in residual space, keyed by target dataset name.
         """
-        x_in_lres = batch["in_lres"]
-        x_in_hres = batch["in_hres"]
-        y = batch["out_hres"]
+        x_in_lres = batch["in_lres"]  # raw
+        x_in_hres = batch["in_hres"]  # already normalized by _normalize_batch
+        y = batch["out_hres"]  # raw
 
         target_ds = self.model.model._decoder_datasets[0]  # e.g. "out_hres"
         source_ds = self._residual_pairs.get(target_ds)  # e.g. "in_lres", or None
 
-        # Interpolate source dataset to target resolution
+        # Upsample in_lres (raw) to target resolution
         x_in_lres_upsampled = self.model.model.residual["in_lres"](
             x_in_lres,
             grid_shard_shapes=None,
             model_comm_group=self.model_comm_group,
         )[
-            :,
-            :,
-            None,
-            :,
-            :,
-        ]  # Add ensemble dim: (batch, time, ensemble=1, grid, features)
+            :, :, None, :, :,
+        ]  # add ensemble dim: (batch, time, ensemble=1, grid, vars)
 
-        # Compute training target on raw data
+        # Compute normalized residual target on raw data
         if source_ds is not None:
             channel_indices = self.model.model.get_matching_channel_indices(target_ds).to(
                 x_in_lres_upsampled.device,
@@ -198,32 +212,43 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         else:
             target = self.model.pre_processors[target_ds](y, in_place=False)
 
-        # Normalize inputs (after residual computation which needs raw data)
+        # Normalize in_lres after residual computation (raw no longer needed)
         x_in_lres_upsampled = self.model.pre_processors["in_lres"](x_in_lres_upsampled, in_place=False)
-        x_in_hres = self.model.pre_processors["in_hres"](x_in_hres, in_place=False)
 
-        # Wrap as dicts for the rest of the pipeline (aligned with forecaster)
-        target_dict = {target_ds: target}
         x_dict = {"in_lres": x_in_lres_upsampled, "in_hres": x_in_hres}
+        target_dict = {target_ds: target}
+        return x_dict, target_dict
 
-        # Get noise level and loss weights (dict-based, like forecaster)
-        shapes = {k: v.shape for k, v in target_dict.items()}
+    def _step(
+        self,
+        batch: dict[str, torch.Tensor],
+        validation_mode: bool = False,
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+        """Training/validation step.
+
+        Batch dimensions: [batch_size, dates, ensemble, gridpoints, variables].
+
+        in_hres arrives pre-normalized (via _normalize_batch). in_lres and out_hres
+        are raw — _prepare_residual_inputs handles upsampling, residual computation,
+        and normalization before handing off to the noise/forward/loss pipeline.
+        """
+        x_dict, target_dict = self._prepare_residual_inputs(batch)
+        target_ds = self.model.model._decoder_datasets[0]
+        source_ds = self._residual_pairs.get(target_ds)
+
+        # Noise level and loss weights (inherited from BaseDiffusionForecaster)
         sigma, noise_weights = self._get_noise_level(
-            shape=shapes,
+            shape={k: v.shape for k, v in target_dict.items()},
             sigma_max=self.model.model.sigma_max,
             sigma_min=self.model.model.sigma_min,
             sigma_data=self.model.model.sigma_data,
             rho=self.rho,
-            device=target.device,
+            device=target_dict[target_ds].device,
         )
 
-        # Add noise to targets (dict-based, like forecaster)
         y_noised = self._noise_target(target_dict, sigma)
+        y_pred = self(x_dict, y_noised, sigma)
 
-        # Forward pass with preconditioning
-        y_pred = self(x_dict, y_noised, sigma)  # dict: {target_ds: (bs, time, ens, latlon, nvar)}
-
-        # Compute loss and metrics
         loss, metrics_next, y_pred_out = checkpoint(
             self.compute_loss_metrics,
             y_pred,
@@ -236,7 +261,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         # Reconstruct full prediction (denorm + add interpolated source)
         if source_ds is not None:
             y_pred_full = self.model.model.add_interp_to_state(
-                state_inp=x_in_lres_upsampled,
+                state_inp=x_dict["in_lres"],
                 model_output=y_pred[target_ds],
                 post_processors_state=self.model.post_processors,
                 post_processors_tendencies=(
@@ -252,76 +277,3 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             y_pred_full = y_pred_out[target_ds]
 
         return loss, metrics_next, [y_pred_full]
-
-    def _noise_target(
-        self,
-        x: dict[str, torch.Tensor],
-        sigma: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
-        """Add noise to the state (dict-based, aligned with forecaster)."""
-        return {name: x[name] + torch.randn_like(x[name]) * sigma[name] for name in x}
-
-    def _get_noise_level(
-        self,
-        shape: dict[str, tuple[int, ...]],
-        sigma_max: float,
-        sigma_min: float,
-        sigma_data: float,
-        rho: float,
-        device: torch.device,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Get noise level for diffusion training.
-
-        Dict-based interface aligned with BaseDiffusionForecaster._get_noise_level.
-        Extends the forecaster with support for multiple noise schedules
-        (probabilistic_low_noise, probabilistic_high_noise, deterministic).
-        """
-        dataset_names = list(shape.keys())
-        ref_shape = shape[dataset_names[0]]
-        assert len(ref_shape) == 5, "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for diffusion noise."
-        batch_size = ref_shape[0]
-        ensemble_size = ref_shape[2]
-
-        base_shape = (batch_size, ensemble_size)
-
-        if self.training_approach == "probabilistic_high_noise":
-            rnd_uniform = torch.rand(base_shape, device=device)
-            sigma_base = (
-                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
-            ) ** rho
-        elif self.training_approach == "probabilistic_low_noise":
-            log_sigma = torch.normal(
-                mean=self.lognormal_mean,
-                std=self.lognormal_std,
-                size=base_shape,
-                device=device,
-            )
-            sigma_base = torch.exp(log_sigma)
-        elif self.training_approach == "deterministic":
-            sigma_base = torch.full(base_shape, fill_value=500000.0, device=device)
-        else:
-            raise ValueError(f"Unknown training_approach: {self.training_approach}")
-
-        weight_base = (sigma_base**2 + sigma_data**2) / (sigma_base * sigma_data) ** 2
-
-        # Reshape to broadcast: (batch, 1_time, ensemble, 1_grid, 1_vars)
-        sigma_base = sigma_base[:, None, :, None, None]
-        weight_base = weight_base[:, None, :, None, None]
-
-        sigma, weight = {}, {}
-        for dataset_name in shape:
-            sigma[dataset_name] = sigma_base
-            weight[dataset_name] = weight_base
-        return sigma, weight
-
-    def on_after_batch_transfer(self, batch: dict[str, torch.Tensor], _: int) -> dict[str, torch.Tensor]:
-        """Prepare batch after GPU transfer.
-
-        Unlike the forecaster, we intentionally skip _normalize_batch here.
-        compute_residuals needs raw y and x_interp to compute y_raw - x_interp_raw
-        before normalizing with residual-specific statistics. Input normalization
-        is done explicitly in _step after residual computation.
-        """
-        batch = self._setup_batch_sharding(batch)
-        self._prepare_loss_scalers()
-        return batch

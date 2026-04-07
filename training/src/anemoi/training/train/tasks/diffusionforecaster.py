@@ -57,6 +57,9 @@ class BaseDiffusionForecaster(BaseGraphModule):
         )
 
         self.rho = config.model.model.diffusion.rho
+        self.lognormal_mean = getattr(config.model.model.diffusion, "log_normal_mean", -1.2)
+        self.lognormal_std = getattr(config.model.model.diffusion, "log_normal_std", 1.2)
+        self.training_approach = getattr(config.training, "training_approach", "probabilistic_high_noise")
 
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
@@ -153,7 +156,18 @@ class BaseDiffusionForecaster(BaseGraphModule):
         rho: float,
         device: torch.device,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        sigma, weight = {}, {}
+        """Sample noise level sigma and compute EDM loss weights.
+
+        Supports three training approaches (set via ``self.training_approach``):
+
+        - ``probabilistic_high_noise`` (default): uniform sampling in rho-space over
+          [sigma_min, sigma_max]. Original EDM schedule.
+        - ``probabilistic_low_noise``: log-normal sampling with mean/std from
+          ``self.lognormal_mean`` / ``self.lognormal_std``. Biases training toward
+          lower noise levels, useful for downscaling / fine-detail tasks.
+        - ``deterministic``: fixed sigma=500000 (effectively noiseless target for
+          deterministic regression pre-training).
+        """
         dataset_names = list(shape.keys())
         ref_shape = shape[dataset_names[0]]
         # Expected shape: (batch, time, ensemble, grid, vars)
@@ -169,14 +183,31 @@ class BaseDiffusionForecaster(BaseGraphModule):
             ), "Batch or ensemble dimension mismatch across datasets when sampling diffusion noise."
 
         base_shape = (batch_size, ensemble_size)
-        rnd_uniform = torch.rand(base_shape, device=device)
-        sigma_base = (
-            sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
-        ) ** rho
+        training_approach = getattr(self, "training_approach", "probabilistic_high_noise")
+
+        if training_approach == "probabilistic_high_noise":
+            rnd_uniform = torch.rand(base_shape, device=device)
+            sigma_base = (
+                sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+            ) ** rho
+        elif training_approach == "probabilistic_low_noise":
+            log_sigma = torch.normal(
+                mean=getattr(self, "lognormal_mean", -1.2),
+                std=getattr(self, "lognormal_std", 1.2),
+                size=base_shape,
+                device=device,
+            )
+            sigma_base = torch.exp(log_sigma)
+        elif training_approach == "deterministic":
+            sigma_base = torch.full(base_shape, fill_value=500000.0, device=device)
+        else:
+            raise ValueError(f"Unknown training_approach: {training_approach!r}")
+
         weight_base = (sigma_base**2 + sigma_data**2) / (sigma_base * sigma_data) ** 2
         sigma_base = sigma_base[:, None, :, None, None]
         weight_base = weight_base[:, None, :, None, None]
 
+        sigma, weight = {}, {}
         for dataset_name in shape:
             sigma[dataset_name] = sigma_base
             weight[dataset_name] = weight_base
