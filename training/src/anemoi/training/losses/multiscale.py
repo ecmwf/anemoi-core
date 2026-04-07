@@ -33,6 +33,7 @@ class MultiscaleLossWrapper(BaseLoss):
     """Apply the same base loss across progressively smoothed target fields."""
 
     name: str = "MultiscaleLossWrapper"
+    needs_graph_data: bool = True
 
     def __init__(
         self,

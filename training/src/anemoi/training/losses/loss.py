@@ -11,6 +11,7 @@
 import logging
 from collections import defaultdict
 
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -22,38 +23,24 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-NESTED_LOSS_CLASS_NAMES = {
-    "MultiscaleLossWrapper",
-}
-GRAPH_DATA_WRAPPER_CLASS_NAMES = {
-    "MultiscaleLossWrapper",
-    "CombinedLoss",
-    "FilteringLossWrapper",
-}
 LOGGER = logging.getLogger(__name__)
 
 
-def _target_class_name(loss_config: dict) -> str | None:
-    """Return the class name from Hydra's `_target_` field."""
-    target = loss_config.get("_target_")
-    if isinstance(target, str):
-        return target.rsplit(".", maxsplit=1)[-1]
-    return None
+def _graph_data_kwargs(target_cls: type, graph_data: object | None, extra_kwargs: dict | None = None) -> dict:
+    """Return runtime kwargs for classes that declare ``needs_graph_data``.
 
-
-def _wrapper_context_kwargs(
-    *,
-    target_class_name: str | None,
-    graph_data: object | None,
-    kwargs: dict,
-) -> dict:
-    if target_class_name not in GRAPH_DATA_WRAPPER_CLASS_NAMES:
+    When ``needs_graph_data`` is True, includes ``graph_data`` and any extra
+    runtime kwargs (e.g. ``multiscale_projection_config``, ``dataset_name``)
+    that the class accepts but are not part of the YAML config.
+    """
+    if not getattr(target_cls, "needs_graph_data", False):
         return {}
-
-    wrapper_kwargs = dict(kwargs)
+    result: dict = {}
     if graph_data is not None:
-        wrapper_kwargs["graph_data"] = graph_data
-    return wrapper_kwargs
+        result["graph_data"] = graph_data
+    if extra_kwargs:
+        result.update(extra_kwargs)
+    return result
 
 
 # Future import breaks other type hints TODO Harrison Cook
@@ -62,6 +49,7 @@ def get_loss_function(
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: dict | None = None,
     graph_data: object | None = None,
+    loss_matrices_graph: list | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -79,6 +67,8 @@ def get_loss_function(
         `variable` will be added to the scaler of the loss function.
     data_indices : dict, optional
         Indices of the training data
+    graph_data : object, optional
+        Graph data passed to loss classes that declare ``needs_graph_data = True``.
     kwargs : Any
         Additional arguments to pass to the loss function
 
@@ -96,10 +86,15 @@ def get_loss_function(
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
+    target_cls = get_class(loss_config["_target_"])
 
-    target_class_name = _target_class_name(loss_config)
+    # When a pre-resolved loss_matrices_graph list is provided it overrides any
+    # loss_matrices_graph: true flag in the YAML config so that MultiscaleLossWrapper
+    # receives the concrete edge references directly rather than deriving them.
+    if loss_matrices_graph is not None:
+        kwargs = {**kwargs, "loss_matrices_graph": loss_matrices_graph}
 
-    if target_class_name in NESTED_LOSS_CLASS_NAMES:
+    if "per_scale_loss" in loss_config:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
         per_scale_loss = get_loss_function(
             OmegaConf.create(per_scale_loss_config),
@@ -111,11 +106,7 @@ def get_loss_function(
         return instantiate(
             loss_config,
             per_scale_loss=per_scale_loss,
-            **_wrapper_context_kwargs(
-                target_class_name=target_class_name,
-                graph_data=graph_data,
-                kwargs=kwargs,
-            ),
+            **_graph_data_kwargs(target_cls, graph_data, kwargs),
         )
 
     if scalers is None:
@@ -126,11 +117,7 @@ def get_loss_function(
 
     loss_function = instantiate(
         loss_config,
-        **_wrapper_context_kwargs(
-            target_class_name=target_class_name,
-            graph_data=graph_data,
-            kwargs=kwargs,
-        ),
+        **_graph_data_kwargs(target_cls, graph_data, kwargs),
         _recursive_=False,
     )
 

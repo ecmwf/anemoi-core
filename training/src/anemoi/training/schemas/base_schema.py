@@ -71,6 +71,36 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
     return config_system
 
 
+def _validate_multiscale_loss(training: Any) -> None:
+    """Validate multiscale loss matrix source config.
+
+    Runs for both validated (BaseSchema) and unvalidated (UnvalidatedBaseSchema)
+    configs so the check is enforced regardless of the ``config_validation`` flag.
+    """
+    training_loss = getattr(training, "training_loss", None) or (
+        training.get("training_loss") if hasattr(training, "get") else None
+    )
+    if training_loss is None:
+        return
+
+    loss_matrices = getattr(training_loss, "loss_matrices", None) or (
+        training_loss.get("loss_matrices") if hasattr(training_loss, "get") else None
+    )
+    loss_matrices_graph = getattr(training_loss, "loss_matrices_graph", False)
+    if loss_matrices_graph is False and hasattr(training_loss, "get"):
+        loss_matrices_graph = training_loss.get("loss_matrices_graph", False)
+
+    file_based = loss_matrices is not None
+    graph_based = loss_matrices_graph is True or isinstance(loss_matrices_graph, list)
+
+    if file_based and graph_based:
+        msg = "Specify either loss_matrices or loss_matrices_graph, not both."
+        raise ValueError(msg)
+    if not file_based and not graph_based:
+        msg = "Specify loss_matrices, loss_matrices_graph=True, or an explicit loss_matrices_graph list."
+        raise ValueError(msg)
+
+
 class SchemaCommonMixin:
     """Shared logic for schema objects."""
 
@@ -80,6 +110,7 @@ class SchemaCommonMixin:
 
     def model_post_init(self, _: Any) -> None:
         expand_paths(self.system)
+        _validate_multiscale_loss(self.training)
         if self.diagnostics.log.mlflow.enabled and (
             self.system.output.logs.mlflow != self.diagnostics.log.mlflow.save_dir
         ):

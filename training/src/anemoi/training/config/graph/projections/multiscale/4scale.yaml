@@ -3,24 +3,10 @@ defaults:
   - _self_
 
 # 4-scale multiscale smoothing (K=16/32/64/128) on the same geometry as the data nodes.
-smoothers:
-  smooth_1x:
-    edge_weight_attribute: gauss_weight
-    gaussian_norm: l1
-    num_nearest_neighbours: 16
-    sigma: 0.00471
-  smooth_2x:
-    edge_weight_attribute: gauss_weight
-    gaussian_norm: l1
-    num_nearest_neighbours: 32
-    sigma: 0.00942
-  smooth_4x:
-    edge_weight_attribute: gauss_weight
-    gaussian_norm: l1
-    num_nearest_neighbours: 64
-    sigma: 0.01884
-  smooth_8x:
-    edge_weight_attribute: gauss_weight
-    gaussian_norm: l1
-    num_nearest_neighbours: 128
-    sigma: 0.03768
+# Sigmas are approximately 1x/2x/4x/8x the grid spacing in radians.
+num_scales: 4
+base_num_nearest_neighbours: 16
+base_sigma: 0.00471
+scale_factor: 2
+edge_weight_attribute: gauss_weight
+gaussian_norm: l1

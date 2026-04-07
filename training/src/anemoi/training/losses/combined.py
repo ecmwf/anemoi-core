@@ -24,6 +24,7 @@ from anemoi.training.losses.scaler_tensor import ScaleTensor
 class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
+    needs_graph_data: bool = True
     _initial_set_scaler: bool = False
 
     def __init__(

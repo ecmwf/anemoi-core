@@ -154,9 +154,19 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
+    def _graph_and_projection_data(self) -> tuple:
+        """Build the graph and projection metadata once, shared by both properties."""
+        return self.graph_data_factory.build()
+
+    @cached_property
     def graph_data(self) -> HeteroData:
         """Graph data built or loaded for the current trainer config."""
-        return self.graph_data_factory.build()
+        return self._graph_and_projection_data[0]
+
+    @cached_property
+    def projection_data(self) -> dict:
+        """Per-dataset projection metadata resolved from the graph."""
+        return self._graph_and_projection_data[1]
 
     def _validate_transfer_learning_datasets(
         self,
@@ -247,6 +257,7 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
+            "projection_data": self.projection_data,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,

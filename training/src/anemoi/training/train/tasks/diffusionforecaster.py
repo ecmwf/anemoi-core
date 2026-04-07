@@ -39,6 +39,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
+        projection_data: dict | None = None,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -49,6 +50,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         super().__init__(
             config=config,
             graph_data=graph_data,
+            projection_data=projection_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
@@ -255,6 +257,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
+        projection_data: dict | None = None,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -264,6 +267,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         super().__init__(
             config=config,
             graph_data=graph_data,
+            projection_data=projection_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,

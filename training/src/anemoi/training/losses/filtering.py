@@ -23,6 +23,8 @@ from anemoi.training.losses.loss import get_loss_function
 class FilteringLossWrapper(BaseLoss):
     """Loss wrapper to filter variables to compute the loss on."""
 
+    needs_graph_data: bool = True
+
     def __init__(
         self,
         loss: dict[str, Any] | Callable | BaseLoss,

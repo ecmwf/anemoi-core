@@ -305,15 +305,8 @@ class MultiScaleLossSchema(BaseModel):
     loss_matrices_graph: bool | list[GraphLossMatrixSchema | None] = False
 
     @model_validator(mode="after")
-    def validate_matrix_source(self) -> Self:
-        file_based = self.loss_matrices is not None
-        graph_based = self.loss_matrices_graph is True or isinstance(self.loss_matrices_graph, list)
-        if file_based and graph_based:
-            msg = "Specify either loss_matrices or loss_matrices_graph, not both."
-            raise ValueError(msg)
-        if not file_based and not graph_based:
-            msg = "Specify loss_matrices, loss_matrices_graph=True, or an explicit loss_matrices_graph list."
-            raise ValueError(msg)
+    def validate_weights_length(self) -> Self:
+        """Validate that weights length matches the number of matrices."""
         if self.loss_matrices is not None and len(self.weights) != len(self.loss_matrices):
             msg = "weights must have same length as loss_matrices"
             raise ValueError(msg)

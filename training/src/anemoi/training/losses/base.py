@@ -30,6 +30,7 @@ class BaseLoss(nn.Module, ABC):
     """Base loss."""
 
     scaler: ScaleTensor
+    needs_graph_data: bool = False
 
     def __init__(self, ignore_nans: bool = False) -> None:
         """Node- and feature_weighted Loss.

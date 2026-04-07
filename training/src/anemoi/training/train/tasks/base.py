@@ -138,6 +138,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
+        projection_data: dict | None = None,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -218,15 +219,26 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
-        graph_projections = getattr(self.config.graph, "projections", None)
-        multiscale_projection_config = None if graph_projections is None else graph_projections.get("multiscale")
-
         for dataset_name in self.dataset_names:
             if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
                 LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
                 continue
 
             self.target_dataset_names.append(dataset_name)
+
+            # Resolve per-dataset projection metadata for loss construction.
+            # Use pre-resolved ProjectionData when available (preferred), otherwise
+            # fall back to passing the raw projection config for in-place resolution.
+            dataset_projection = (projection_data or {}).get(dataset_name)
+            loss_matrices_graph_resolved = (
+                dataset_projection.multiscale_loss_matrices_graph if dataset_projection is not None else None
+            )
+            graph_projections = getattr(self.config.graph, "projections", None)
+            multiscale_projection_config = (
+                None
+                if (dataset_projection is not None or graph_projections is None)
+                else graph_projections.get("multiscale")
+            )
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
@@ -260,6 +272,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 dataset_scalers,
                 data_indices[dataset_name],
                 graph_data=graph_data,
+                # Pass pre-resolved list when available, otherwise fall back to config-based derivation.
+                loss_matrices_graph=loss_matrices_graph_resolved,
                 multiscale_projection_config=multiscale_projection_config,
                 dataset_name=dataset_name,
                 dataset_names=self.dataset_names,
@@ -270,6 +284,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data,
+                loss_matrices_graph=loss_matrices_graph_resolved,
                 multiscale_projection_config=multiscale_projection_config,
                 dataset_name=dataset_name,
             )
@@ -404,6 +419,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scalers: dict,
         data_indices: IndexCollection,
         graph_data: object | None = None,
+        loss_matrices_graph: list | None = None,
         multiscale_projection_config: Any = None,
         dataset_name: str | None = None,
     ) -> torch.nn.ModuleDict:
@@ -414,6 +430,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     scalers=scalers,
                     data_indices=data_indices,
                     graph_data=graph_data,
+                    loss_matrices_graph=loss_matrices_graph,
                     multiscale_projection_config=multiscale_projection_config,
                     dataset_name=dataset_name,
                     dataset_names=self.dataset_names,
