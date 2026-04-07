@@ -146,14 +146,16 @@ def build_anemoi_model(
             return OmegaConf.to_container(v, resolve=True)
         return v
 
-    model_config = OmegaConf.create({
-        "model": {
-            "backbone": _to_container(backbone),
-            "multistep_input": multistep_input,
-            "multistep_output": multistep_output if multistep_output is not None else 1,
-            **{k: _to_container(v) for k, v in model_arch_kwargs.items()},
-        },
-    })
+    model_config = OmegaConf.create(
+        {
+            "model": {
+                "backbone": _to_container(backbone),
+                "multistep_input": multistep_input,
+                "multistep_output": multistep_output if multistep_output is not None else 1,
+                **{k: _to_container(v) for k, v in model_arch_kwargs.items()},
+            },
+        }
+    )
 
     # Build processors
     pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies = _build_processors(

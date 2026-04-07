@@ -29,7 +29,6 @@ class DatasetDataSchema(PydanticBaseModel):
     )
 
 
-
 class DataSchema(PydanticBaseModel):
     """A class used to represent the overall configuration of the dataset(s).
 

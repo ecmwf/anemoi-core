@@ -19,7 +19,6 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import model_validator
-from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
