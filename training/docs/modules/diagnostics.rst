@@ -37,7 +37,8 @@ callback, any other kwarg is passed to the callback's constructor.
 
    callbacks:
       - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
-      rollout: ${dataloader.validation_rollout}
+      rollout:
+      - ${dataloader.validation_rollout}
       frequency: 20
 
 Plotting callbacks are configured in a similar way, but they are
@@ -76,7 +77,7 @@ of dataset-keyed dictionaries.
 
 **Focus Area**
 
-Plotting callbacks (such as ``PlotSample``, ``PlotLoss``, and ``LongRolloutPlots``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
+Plotting callbacks (such as ``PlotSample`` and ``PlotLoss``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
 
 * **Mask Name**: A ``mask_attr_name`` string referencing a boolean mask defined within the graph data.
 * **Lat/Lon Bounds**: A ``latlon_bbox`` list specifying a bounding box: ``[lat_min, lon_min, lat_max, lon_max]``.
