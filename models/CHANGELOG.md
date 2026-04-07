@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.13.1](https://github.com/ecmwf/anemoi-core/compare/models-0.13.0...models-0.13.1) (2026-03-26)
+
+
+### Features
+
+* Add rule to avoid anemoi-training imports in anemoi-models ([#997](https://github.com/ecmwf/anemoi-core/issues/997)) ([0bf80bc](https://github.com/ecmwf/anemoi-core/commit/0bf80bc6a20c996060fb7eca0e32ced6f92fc350))
+* **models:** Add attn_dim to attenton computaton ([#987](https://github.com/ecmwf/anemoi-core/issues/987)) ([7a19648](https://github.com/ecmwf/anemoi-core/commit/7a196483286165d663eedb843493f501db8492b5))
+
+
+### Bug Fixes
+
+* Add max version pining to Torch&lt;2.11 ([#1006](https://github.com/ecmwf/anemoi-core/issues/1006)) ([a23c97c](https://github.com/ecmwf/anemoi-core/commit/a23c97c272c02de18519deebc4e2149105a24be1))
+* **docs:** Clarify attn_channels docstrings ([#996](https://github.com/ecmwf/anemoi-core/issues/996)) ([5a1e999](https://github.com/ecmwf/anemoi-core/commit/5a1e99963d9a3c36b03eb93e7801e1307183db4a))
+* **models:** Remove dataset dependency from input_dim_latent ([#977](https://github.com/ecmwf/anemoi-core/issues/977)) ([e0f5e6a](https://github.com/ecmwf/anemoi-core/commit/e0f5e6a6474aff32c5069910fd29b23582084f31))
+
 ## [0.13.0](https://github.com/ecmwf/anemoi-core/compare/models-0.12.1...models-0.13.0) (2026-03-12)
 
 

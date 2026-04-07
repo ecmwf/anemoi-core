@@ -8,9 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 
-import functools
 from collections import deque
 from typing import Any
+
+from omegaconf import DictConfig
+from omegaconf import ListConfig
 
 
 class FixedLengthSet:
@@ -42,79 +44,68 @@ class FixedLengthSet:
 
 
 def expand_iterables(
-    params: dict[str, Any],
+    params: Any,
     *,
-    size_threshold: int | None = None,
     recursive: bool = True,
-    delimiter: str = ".",
-) -> dict[str, Any]:
-    """Expand any iterable values to the form {key.i: value_i}.
+) -> Any:
+    """Enumerate list-like iterables of non-primitive elements as dicts.
 
-    If expanded will also add {key.all: [value_0, value_1, ...], key.length: len([value_0, value_1, ...])}.
-
-    If `size_threshold` is not None, expand the iterable only if the length of str(value) is
-    greater than `size_threshold`.
+    Converts lists, tuples, and ListConfigs into individual keyed dicts with
+    numeric indices (e.g., 0, 1, ...) and additional summary keys ('all',
+    'length') when the iterable contains nested structures. DictConfigs are
+    converted to dicts. Dicts are copied into new dicts. Inputs of other
+    types are returned without conversion.
 
     Parameters
     ----------
-    params : dict[str, Any]
-        Parameters to be expanded.
-    size_threshold : int | None, optional
-        Threshold of str(value) to expand iterable at.
-        Default is None.
+    params : Any
+        Parameter dictionary (dict | DictConfig) to copy to a new dict,
+        list (list | tuple | ListConfig) to expand, or
+        Any type to be returned as is.
     recursive : bool, optional
         Expand nested dictionaries.
         Default is True.
-    delimiter: str, optional
-        Delimiter to use for keys.
-        Default is ".".
 
     Returns
     -------
-    dict[str, Any]
-        Dictionary with all iterable values expanded.
+    Any
+        Dictionary with all iterable values expanded, list/tuple of primitive
+        types, or the plain `params` if it is neither a list nor a dict.
 
     Examples
     --------
         >>> expand_iterables({'a': ['a', 'b', 'c']})
-        {'a.0': 'a', 'a.1': 'b', 'a.2': 'c', 'a.all': ['a', 'b', 'c'], 'a.length': 3}
-        >>> expand_iterables({'a': {'b': ['a', 'b', 'c']}})
-        {'a': {'b.0': 'a', 'b.1': 'b', 'b.2': 'c', 'b.all': ['a', 'b', 'c'], 'b.length': 3}}
-        >>> expand_iterables({'a': ['a', 'b', 'c']}, size_threshold=100)
         {'a': ['a', 'b', 'c']}
-        >>> expand_iterables({'a': [[0,1,2], 'b', 'c']})
-        {'a.0': {0: 0, 1: 1, 2: 2}, 'a.1': 'b', 'a.2': 'c', 'a.all': [[0, 1, 2], 'b', 'c'], 'a.length': 3}
+        >>> expand_iterables({'a': {'b': {'c': 123}}})
+        {'a': {'b': {'c': 123}}}
+        >>> expand_iterables({'a': [['a1', 'a2']]})
+        {'a': {0: ['a1', 'a2'], 'length': 1, 'all': [['a1', 'a2']]}}
+        >>> expand_iterables({'a': [[0, 1, 2], 'b', 'c']})
+        {'a': {0: [0, 1, 2], 1: 'b', 2: 'c'},
+        'a.length': 3,
+        'a.all': [[0, 1, 2], 'b', 'c']}
     """
+    list_types = list | tuple | ListConfig
+    dict_types = dict | DictConfig
+    expandable_types = dict_types | list_types
 
-    def should_be_expanded(x: Any) -> bool:
-        return size_threshold is None or len(str(x)) > size_threshold
+    def has_expandable_items(value: list_types) -> bool:
+        return any(isinstance(item, expandable_types) for item in value)
 
-    nested_func = functools.partial(expand_iterables, size_threshold=size_threshold, recursive=recursive)
+    additional = {}
+    if isinstance(params, list_types):
+        if not has_expandable_items(params):
+            return params
+        additional["length"] = len(params)
+        additional["all"] = params
+        params = dict(enumerate(params))
 
-    def expand(val: dict | list) -> dict[str, Any]:
-        if not recursive:
-            return val
-        if isinstance(val, dict):
-            return nested_func(val)
-        if isinstance(val, list):
-            return nested_func(dict(enumerate(val)))
-        return val
+    if not isinstance(params, dict_types):
+        return params
 
-    expanded_params = {}
-
-    for key, value in params.items():
-        if isinstance(value, list | tuple):
-            if should_be_expanded(value):
-                for i, v in enumerate(value):
-                    expanded_params[f"{key}{delimiter}{i}"] = expand(v)
-
-                expanded_params[f"{key}{delimiter}all"] = value
-                expanded_params[f"{key}{delimiter}length"] = len(value)
-            else:
-                expanded_params[key] = value
-        else:
-            expanded_params[key] = expand(value)
-    return expanded_params
+    if recursive:
+        return {key: expand_iterables(value) for key, value in params.items()} | additional
+    return dict(params) | additional
 
 
 def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:

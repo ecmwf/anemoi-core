@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.0...graphs-0.9.1) (2026-03-26)
+
+
+### Features
+
+* Add rule to avoid anemoi-training imports in anemoi-models ([#997](https://github.com/ecmwf/anemoi-core/issues/997)) ([0bf80bc](https://github.com/ecmwf/anemoi-core/commit/0bf80bc6a20c996060fb7eca0e32ced6f92fc350))
+
+
+### Bug Fixes
+
+* Add max version pining to Torch&lt;2.11 ([#1006](https://github.com/ecmwf/anemoi-core/issues/1006)) ([a23c97c](https://github.com/ecmwf/anemoi-core/commit/a23c97c272c02de18519deebc4e2149105a24be1))
+* **graphs:** Fix area weights math docstring ([#1003](https://github.com/ecmwf/anemoi-core/issues/1003)) ([2dd7110](https://github.com/ecmwf/anemoi-core/commit/2dd7110de0ae2bfb27cfc173587b9ee6601b0a2d))
+
+
+### Documentation
+
+* **graphs:** Fix warning docstring ([#994](https://github.com/ecmwf/anemoi-core/issues/994)) ([30bd8b8](https://github.com/ecmwf/anemoi-core/commit/30bd8b8cb3363f38f883bbef0c10ba4362439ad8))
+
 ## [0.9.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.8.5...graphs-0.9.0) (2026-03-12)
 
 
